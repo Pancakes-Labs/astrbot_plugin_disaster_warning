@@ -28,6 +28,16 @@ class GlobalQuakeParser(BaseParser):
     def __init__(self, message_logger=None):
         super().__init__("global_quake", message_logger)
 
+    @staticmethod
+    def _is_invalid_zero_coordinate(latitude: Any, longitude: Any) -> bool:
+        """判定经纬度是否同为 0（上游脏数据/空心跳常见形态）。"""
+        try:
+            lat = float(latitude) if latitude is not None else 0.0
+            lon = float(longitude) if longitude is not None else 0.0
+        except (TypeError, ValueError):
+            return False
+        return abs(lat) < 1e-9 and abs(lon) < 1e-9
+
     def decode_message(self, message: str | bytes):
         """解码 Global Quake 原始消息。"""
         # 返回原始载荷，交由下层进一步判断类型
@@ -216,6 +226,14 @@ class GlobalQuakeParser(BaseParser):
         try:
             eq_data = ws_msg.earthquake_data
 
+            # 上游异常时可能持续推送 lat=0/lon=0 的伪事件，直接丢弃避免入库污染。
+            if self._is_invalid_zero_coordinate(eq_data.latitude, eq_data.longitude):
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 忽略经纬度为 0 的脏数据 "
+                    f"(id={getattr(eq_data, 'id', '')})"
+                )
+                return None
+
             # 震源时间优先使用标准时间字符串，缺失时再回退到毫秒时间戳。
             shock_time = None
             if eq_data.origin_time_iso:
@@ -382,6 +400,12 @@ class GlobalQuakeParser(BaseParser):
             intensity = ScaleConverter.convert_roman_intensity(intensity_str)
             latitude = eq_data.get("latitude", 0)
             longitude = eq_data.get("longitude", 0)
+            if self._is_invalid_zero_coordinate(latitude, longitude):
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 忽略经纬度为 0 的 JSON 脏数据 "
+                    f"(id={eq_data.get('id', '')})"
+                )
+                return None
 
             magnitude = safe_float_convert(eq_data.get("magnitude"))
             if magnitude is not None:
