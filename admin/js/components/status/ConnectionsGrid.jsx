@@ -266,7 +266,7 @@ function ConnectionsGrid() {
         const intensityConn = normalizeConnection(
             {
                 id: 'fan_cenc_ir',
-                displayName: 'Fan Studio（烈度速报）',
+                displayName: 'FAN Studio（烈度速报）',
                 connectionType: 'websocket',
             },
             intensityEntries
@@ -349,7 +349,7 @@ function ConnectionsGrid() {
                 china_tsunami_fanstudio: '自然资源部海啸预警中心',
                 jma_fanstudio: '日本气象厅: 紧急地震速报',
             },
-            'Fan Studio（烈度速报）': {
+            'FAN Studio（烈度速报）': {
                 china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
                 cenc_ir_fanstudio: '中国地震台网 (CENC) 烈度速报',
                 cenc_ir: '中国地震台网 (CENC) 烈度速报',
@@ -486,7 +486,12 @@ function ConnectionsGrid() {
     /**
      * 渲染卡片顶栏（标题 / 重试 / 可选翻转按钮 / 状态灯）
      */
-    const renderCardHeader = (conn, { showFlipButton = false, flipTitle = '', onFlip = null } = {}) => (
+    const renderCardHeader = (conn, {
+        showFlipButton = false,
+        flipTitle = '',
+        onFlip = null,
+        flipButtonTabbable = true,
+    } = {}) => (
         <Box className="connection-card-header">
             <Typography className="connection-title">
                 {conn.name}
@@ -514,6 +519,8 @@ function ConnectionsGrid() {
                         }}
                         title={flipTitle}
                         aria-label={flipTitle}
+                        tabIndex={flipButtonTabbable ? 0 : -1}
+                        aria-hidden={flipButtonTabbable ? undefined : true}
                     >
                         ⇋
                     </button>
@@ -550,7 +557,7 @@ function ConnectionsGrid() {
     const renderFanFlipCard = (conn) => {
         const back = conn.flipSide || {
             id: 'fan_cenc_ir',
-            name: 'Fan Studio（烈度速报）',
+            name: 'FAN Studio（烈度速报）',
             status: 'disabled',
             status_label: '未启用',
             retry_count: 0,
@@ -565,7 +572,7 @@ function ConnectionsGrid() {
         const visibleStatus = fanFlipped ? back.status : conn.status;
         const flipTitle = fanFlipped
             ? '返回 FAN Studio 主通道'
-            : '查看 Fan Studio（烈度速报）独立连接';
+            : '查看 FAN Studio（烈度速报）独立连接';
 
         const handleFlip = () => setFanFlipped((prev) => !prev);
 
@@ -581,16 +588,19 @@ function ConnectionsGrid() {
                             showFlipButton: true,
                             flipTitle,
                             onFlip: handleFlip,
+                            // 仅当前可见面的 ⇋ 进入 Tab 序，避免隐藏面焦点“消失”
+                            flipButtonTabbable: !fanFlipped,
                         })}
                     </div>
 
-                    {/* 背面：Fan Studio（烈度速报）独立 WS */}
+                    {/* 背面：FAN Studio（烈度速报）独立 WS */}
                     <div className={`connection-flip-face connection-flip-face--back connection-item-${back.status}`}>
                         {renderCardBody(back, {
                             showFlipButton: true,
                             flipTitle,
                             onFlip: handleFlip,
-                            nameOverride: 'Fan Studio（烈度速报）',
+                            nameOverride: 'FAN Studio（烈度速报）',
+                            flipButtonTabbable: fanFlipped,
                         })}
                     </div>
                 </div>
