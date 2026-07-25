@@ -714,7 +714,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         payload_signatures=(("type",),),
         payload_predicates=("weather_alert",),
     ),
-    # typhoon_fanstudio: 实时活跃台风 - FAN Studio（遗留触发源，上游已停服）
+    # typhoon_fanstudio: 实时活跃台风 - FAN Studio
     "typhoon_fanstudio": SourceEntry(
         source_id="typhoon_fanstudio",
         source_enum="fan_studio_typhoon",
@@ -729,7 +729,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         intensity_mode="none",
         priority=0,
         display_name="中国气象局：实时活跃台风 - Fan",
-        description="实时活跃台风 - FAN Studio WebSocket（遗留触发源，上游除 FSSN 外已停服）",
+        description="实时活跃台风 - FAN Studio WebSocket",
         default_timezone="Asia/Shanghai",
         publish_time_field="update_time",
         fingerprint_prefix="typhoon",

@@ -26,7 +26,7 @@ from .typhoon_query_models import TyphoonQueryItem
 from .typhoon_query_parser import DETAIL_FULL
 
 
-def format_cn_time(value: Any) -> str:
+def format_cn_time(value: Any, with_seconds: bool = False) -> str:
     """将任意时间值格式化为北京时间中文展示。
 
     无时区信息时按 UTC+8 解释，与 EQSC/Fan 业务时区习惯一致。
@@ -38,15 +38,56 @@ def format_cn_time(value: Any) -> str:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=TimeConverter._get_timezone("UTC+8"))
     cn_dt = parsed.astimezone(TimeConverter._get_timezone("UTC+8"))
-    return TimeConverter._safe_strftime(cn_dt, "%Y年%m月%d日 %H时%M分")
+    fmt = (
+        "%Y年%m月%d日 %H时%M分%S秒 (UTC+8)" if with_seconds else "%Y年%m月%d日 %H时%M分"
+    )
+    return TimeConverter._safe_strftime(cn_dt, fmt)
+
+
+def _history_node_time_key(node: dict[str, Any]) -> float | None:
+    """历史节点排序键：按观测时间升序。
+
+    Returns:
+        有效时间戳；无法解析时返回 None（调用方应沉底并避免当作最新观测）。
+    """
+    parsed = TimeConverter.parse_datetime(node.get("time"))
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        # 与 EQSC/Fan 业务习惯一致：无时区按北京时间解释。
+        parsed = parsed.replace(tzinfo=TimeConverter._get_timezone("UTC+8"))
+    return parsed.timestamp()
+
+
+def sort_history_track(history_track: list[Any] | None) -> list[dict[str, Any]]:
+    """将 EQSC historyTrack 规范为按观测时间升序的字典节点列表。
+
+    EQSC 返回顺序不保证，不能直接用数组末项当作最新报。
+    无效时间节点沉底，避免排在正常时间之前。
+    """
+    if not isinstance(history_track, list):
+        return []
+    nodes = [node for node in history_track if isinstance(node, dict)]
+    if not nodes:
+        return []
+    # 有效时间在前按时间升序；无效时间沉底并保持相对稳定。
+    return sorted(
+        nodes,
+        key=lambda node: (
+            1 if _history_node_time_key(node) is None else 0,
+            _history_node_time_key(node) or 0.0,
+        ),
+    )
 
 
 def latest_history_node(history_track: list[Any]) -> dict[str, Any] | None:
-    """取历史轨迹末节点（通常即最新观测）。"""
-    if not isinstance(history_track, list):
-        return None
-    for node in reversed(history_track):
-        if isinstance(node, dict):
+    """取历史轨迹中时间最新的有效观测节点。
+
+    跳过无法解析时间的节点，避免把无效时间误判为最新观测。
+    """
+    nodes = sort_history_track(history_track)
+    for node in reversed(nodes):
+        if _history_node_time_key(node) is not None:
             return node
     return None
 
@@ -63,7 +104,8 @@ def build_track_summary(
     完整路径查询默认不做节点截断（max_history / max_future 为 None）。
     若调用方显式传入正整数，则分别截取历史末段与预报前段。
     """
-    history = [node for node in (history_track or []) if isinstance(node, dict)]
+    # 摘要展示同样按时间排序，避免完整路径列表时间乱序。
+    history = sort_history_track(history_track)
     future = [node for node in (future_track or []) if isinstance(node, dict)]
 
     def _node_line(node: dict[str, Any], *, prefix: str) -> str:
@@ -160,12 +202,15 @@ def normalize_eqsc_typhoon(
     fan_id = to_fan_id(eqsc_id)
     name_cn = clean_text(raw.get("nameCN") or raw.get("name"))
     name_en = clean_text(raw.get("nameEN") or raw.get("name_en"))
-    history_track = raw.get("historyTrack") or raw.get("history_track") or []
+    # EQSC 历史轨迹顺序不保证：先按时间升序，再取最新观测。
+    history_track = sort_history_track(
+        raw.get("historyTrack") or raw.get("history_track") or []
+    )
     future_track = raw.get("futureTrack") or raw.get("future_track") or []
-    if not isinstance(history_track, list):
-        history_track = []
     if not isinstance(future_track, list):
         future_track = []
+    else:
+        future_track = [node for node in future_track if isinstance(node, dict)]
 
     latest = latest_history_node(history_track) or {}
     wind_circle = latest.get("windCircle") or latest.get("wind_circle") or {}
@@ -215,7 +260,7 @@ def normalize_eqsc_typhoon(
         "radius10": radius10,
         "wind_circle": wind_circle or {},
         "updated_at": updated_at,
-        "updated_at_text": format_cn_time(updated_at),
+        "updated_at_text": format_cn_time(updated_at, with_seconds=True),
         "info_type": "eqsc",
         "data_source": data_source,
         "source_label": "EQSC",
@@ -293,7 +338,9 @@ def normalize_local_typhoon(
         "radius10": detail_fields.get("radius10"),
         "wind_circle": {},
         "updated_at": clean_text(raw.get("time") or raw.get("updated_at")),
-        "updated_at_text": format_cn_time(raw.get("time") or raw.get("updated_at")),
+        "updated_at_text": format_cn_time(
+            raw.get("time") or raw.get("updated_at"), with_seconds=True
+        ),
         "info_type": info_type,
         "data_source": "local",
         "source_label": source_label_map.get(mode, "本地数据库"),
@@ -374,5 +421,6 @@ __all__ = [
     "normalize_eqsc_typhoon",
     "normalize_local_typhoon",
     "parse_local_detail_fields",
+    "sort_history_track",
     "sort_items_stable",
 ]

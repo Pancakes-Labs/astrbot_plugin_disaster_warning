@@ -17,6 +17,9 @@
         ['data_sources', 'eqsc', 'base_url'],
         ['data_sources', 'eqsc', 'refresh_token'],
         ['data_sources', 'eqsc', 'cache_ttl'],
+        // FAN Studio 鉴权影响全局 WebSocket 建连，会话模式隐藏且保存时剥离
+        ['data_sources', 'fan_studio', 'app_id'],
+        ['data_sources', 'fan_studio', 'api_key'],
     ];
 
     /**

@@ -6,10 +6,12 @@ FAN Studio 连接配额与优先级策略。
 1. 启动时先建 fan_studio_all（/all），主通道在线后再建次要独立通道
 2. 运行中优先保活 /all；主通道遇配额/策略拒绝时，才释放次要通道让路
 3. 次要通道在主通道离线或命中配额时拉长退避，避免与 /all 抢连接
+4. 建连成功后发送应用层鉴权包：{"type":"auth","appId":"...","key":"sk-..."}
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from astrbot.api import logger
@@ -178,3 +180,78 @@ def resolve_secondary_reconnect_interval(
     if quota_hit:
         return max(base, SECONDARY_QUOTA_RECONNECT_INTERVAL)
     return base
+
+
+def resolve_fan_auth_credentials(
+    connection_info: dict[str, Any] | None,
+) -> tuple[str, str]:
+    """从连接附加信息解析 FAN Studio appId 与 API Key。"""
+    info = connection_info if isinstance(connection_info, dict) else {}
+    app_id = str(
+        info.get("fan_app_id") or info.get("app_id") or info.get("appId") or ""
+    ).strip()
+    api_key = str(
+        info.get("fan_api_key") or info.get("api_key") or info.get("key") or ""
+    ).strip()
+    return app_id, api_key
+
+
+def attach_fan_auth_from_plan(
+    connection_info: dict[str, Any],
+    conn_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """将连接计划中的 FAN 鉴权字段写入 connection_info。
+
+    供 runtime 建连与手动重连共用，避免两处字段拷贝逻辑漂移。
+    """
+    cfg = conn_config if isinstance(conn_config, dict) else {}
+    if cfg.get("fan_app_id"):
+        connection_info["fan_app_id"] = cfg["fan_app_id"]
+    if cfg.get("fan_api_key"):
+        connection_info["fan_api_key"] = cfg["fan_api_key"]
+    return connection_info
+
+
+def build_fan_auth_payload(app_id: str, api_key: str) -> dict[str, str]:
+    """构造 FAN Studio WebSocket 鉴权 JSON 对象。"""
+    return {
+        "type": "auth",
+        "appId": str(app_id or "").strip(),
+        "key": str(api_key or "").strip(),
+    }
+
+
+async def send_fan_studio_auth(
+    websocket: Any,
+    *,
+    connection_name: str,
+    connection_info: dict[str, Any] | None,
+) -> bool:
+    """在 FAN Studio 连接建立后发送鉴权包。
+
+    Returns:
+        True 表示已成功发送；False 表示缺少凭证（配置问题）。
+
+    Raises:
+        网络/传输相关异常会原样向上抛出，由 websocket_manager
+        走标准重试与退避逻辑，避免被误判为永久配置失败。
+    """
+    if not is_fan_studio_connection(connection_name):
+        return True
+
+    app_id, api_key = resolve_fan_auth_credentials(connection_info)
+    if not app_id or not api_key:
+        logger.error(
+            f"[灾害预警] FAN Studio 连接 {connection_name} 缺少 appId/api_key，"
+            "无法发送鉴权包"
+        )
+        return False
+
+    payload = build_fan_auth_payload(app_id, api_key)
+    # 不吞掉 send_str 异常：瞬时网络错误应进入 manager 的重试路径。
+    await websocket.send_str(json.dumps(payload, ensure_ascii=False))
+    logger.debug(
+        f"[灾害预警] 已向 FAN Studio 连接 {connection_name} 发送鉴权包 "
+        f"(appId 为 {app_id[:8]}…)"
+    )
+    return True

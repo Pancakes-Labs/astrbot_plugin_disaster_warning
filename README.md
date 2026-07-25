@@ -507,6 +507,8 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 
 插件中目前最全面、最稳定的综合灾害数据流。
 
+> **鉴权说明**：FAN Studio 现已启用应用鉴权。无鉴权时仅 **FSSN** 服务可用；完整数据源需在配置中填写 `api_key`（用户需到 [开发者平台](https://api.fanstudio.tech/dev-platform/) 选择本应用申请 Key）。
+
 - **启用 (`enabled`)**: 开启后将订阅来自 FAN Studio 的实时推送。
 - **中国地震预警网 (`china_earthquake_warning`)**: 接入国内地震预警系统（国家级），通常能在地震横波到达前数秒至数十秒下发预警。
 - **中国地震预警网（省级）(`china_earthquake_warning_provincial`)**: FAN Studio 提供的省级地震预警通道，预警推送阈值比国家级更低，如果追求高覆盖率只开启省级预警网即可（同时避免重复推送）。

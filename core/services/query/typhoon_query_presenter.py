@@ -73,12 +73,16 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
     """生成单条台风摘要文本，供命令侧与详情卡片复用。"""
     lines: list[str] = []
     display_name = item.get("display_name") or "未知台风"
-    typhoon_type = item.get("typhoon_type") or ""
-    level_emoji = get_typhoon_level_emoji(typhoon_type)
-    title = f"🌀 {display_name}"
-    if typhoon_type:
-        title = f"{title} · {typhoon_type}{level_emoji}"
-    lines.append(title)
+
+    # 状态后缀
+    status_suffix = ""
+    if item.get("is_active") is False:
+        status_suffix = "（已停止编报）"
+    elif item.get("is_active") is True:
+        status_suffix = "（活跃编报中）"
+
+    lines.append(f"{display_name}{status_suffix}")
+    lines.append("")
 
     short_id = _format_typhoon_short_id(
         item.get("eqsc_id"),
@@ -89,10 +93,10 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
     if short_id:
         lines.append(f"📌编号：{short_id}")
 
-    if item.get("is_active") is False:
-        lines.append("✅状态：已停止编报")
-    elif item.get("is_active") is True:
-        lines.append("🔴状态：活跃编报中")
+    typhoon_type = item.get("typhoon_type") or ""
+    level_emoji = get_typhoon_level_emoji(typhoon_type)
+    if typhoon_type:
+        lines.append(f"⚠️等级：{typhoon_type}{level_emoji}")
 
     coords = format_coordinates(item.get("latitude"), item.get("longitude"))
     if coords:
@@ -120,6 +124,7 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
 
     circle_lines = format_wind_circle(item.get("wind_circle") or {})
     if circle_lines:
+        lines.append("")
         lines.append("🌪️风圈半径：")
         lines.extend(circle_lines)
     else:
@@ -129,15 +134,13 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
         if is_valid_radius_value(item.get("radius10")):
             radius_lines.append(f"  • 10级风圈：{item.get('radius10')} km")
         if radius_lines:
+            lines.append("")
             lines.append("🌪️风圈半径：")
             lines.extend(radius_lines)
 
     if item.get("updated_at_text"):
+        lines.append("")
         lines.append(f"🕒更新时间：{item.get('updated_at_text')}")
-
-    source_label = item.get("source_label") or item.get("data_source") or ""
-    if source_label:
-        lines.append(f"📡数据来源：{source_label}")
 
     if detail == DETAIL_FULL:
         track = item.get("track_summary") or {}
