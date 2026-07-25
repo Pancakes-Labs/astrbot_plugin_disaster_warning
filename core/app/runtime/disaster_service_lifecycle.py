@@ -74,6 +74,12 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.start()
+                # 连接健康采样：依赖 statistics_manager 已 initialize
+                health_service = getattr(
+                    self.service, "connection_health_service", None
+                )
+                if health_service is not None:
+                    await health_service.start()
                 if getattr(self.service, "notification_center", None):
                     await (
                         self.service.notification_center.start()
@@ -176,6 +182,13 @@ class DisasterServiceLifecycleService:
                     await (
                         self.service.http_fetcher.close()
                     )  # 关闭 HTTP 客户端 Session 连接池
+
+                # 先停连接健康采样，避免停机过程中继续写库
+                health_service = getattr(
+                    self.service, "connection_health_service", None
+                )
+                if health_service is not None:
+                    await health_service.stop()
 
                 # 先停 EQSC 海啸/台风轮询客户端（共享 token 时不会关闭 token_manager）
                 eqsc_tsunami_poll = getattr(
