@@ -169,7 +169,7 @@ class WebSocketManager:
                 logger.info(f"[灾害预警] WebSocket 连接成功: {name}")
 
                 # FAN Studio：握手成功后立即发送应用层鉴权包。
-                # 缺少凭证或发送失败时主动关闭，避免无鉴权空连接占用配额。
+                # 仅“缺少凭证”返回 False；网络异常会向上抛出并由下方 except 重试。
                 if is_fan_studio_connection(name):
                     auth_ok = await send_fan_studio_auth(
                         websocket,
@@ -177,14 +177,19 @@ class WebSocketManager:
                         connection_info=self.connection_info.get(name),
                     )
                     if not auth_ok:
+                        # 配置缺失：关闭空连接，走统一错误处理以便后续可重连。
                         try:
                             await websocket.close(
                                 code=1008,
-                                message=b"fan studio auth missing or failed",
+                                message=b"fan studio auth credentials missing",
                             )
                         except Exception:
                             pass
-                        raise RuntimeError(f"FAN Studio 鉴权失败或缺少凭证: {name}")
+                        error = RuntimeError(f"FAN Studio 缺少鉴权凭证: {name}")
+                        logger.error(f"[灾害预警] {error}")
+                        await self._apply_fan_quota_policy_on_error(name, error)
+                        self._handle_connection_error(name, uri, headers, error)
+                        return
 
                 # 重置重连相关的状态变量
                 self.connection_retry_counts[name] = 0

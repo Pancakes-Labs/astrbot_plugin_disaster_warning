@@ -11,6 +11,7 @@ import json
 
 from astrbot.api import logger
 
+from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -74,10 +75,7 @@ class DisasterServiceRuntimeService:
                     "backup_url": conn_config.get("backup_url"),
                 }
                 # FAN Studio 鉴权凭证随连接上下文传递，供建连后发送 auth 包。
-                if conn_config.get("fan_app_id"):
-                    connection_info["fan_app_id"] = conn_config["fan_app_id"]
-                if conn_config.get("fan_api_key"):
-                    connection_info["fan_api_key"] = conn_config["fan_api_key"]
+                attach_fan_auth_from_plan(connection_info, conn_config)
 
                 # 异步建连后台任务
                 task = asyncio.create_task(

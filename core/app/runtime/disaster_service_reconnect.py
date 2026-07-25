@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from astrbot.api import logger
 
+from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
+
 
 class DisasterServiceReconnectService:
     """灾害服务手动重连编排服务。
@@ -82,10 +84,7 @@ class DisasterServiceReconnectService:
             "backup_url": conn_config.get("backup_url"),
         }
         # FAN Studio 鉴权字段需一并补齐，否则手动重连后无法发送 auth 包。
-        if conn_config.get("fan_app_id"):
-            connection_info["fan_app_id"] = conn_config["fan_app_id"]
-        if conn_config.get("fan_api_key"):
-            connection_info["fan_api_key"] = conn_config["fan_api_key"]
+        attach_fan_auth_from_plan(connection_info, conn_config)
         # 这里的结构与连接管理器常规建连流程保持一致，
         # 这样手动重连与自动重连在读取附加信息时不会出现字段缺失的问题。
         self.service.ws_manager.connection_info[conn_name] = {
