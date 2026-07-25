@@ -44,11 +44,15 @@ def format_cn_time(value: Any, with_seconds: bool = False) -> str:
     return TimeConverter._safe_strftime(cn_dt, fmt)
 
 
-def _history_node_time_key(node: dict[str, Any]) -> float:
-    """历史节点排序键：按观测时间升序；无效时间沉底。"""
+def _history_node_time_key(node: dict[str, Any]) -> float | None:
+    """历史节点排序键：按观测时间升序。
+
+    Returns:
+        有效时间戳；无法解析时返回 None（调用方应沉底并避免当作最新观测）。
+    """
     parsed = TimeConverter.parse_datetime(node.get("time"))
     if parsed is None:
-        return 0.0
+        return None
     if parsed.tzinfo is None:
         # 与 EQSC/Fan 业务习惯一致：无时区按北京时间解释。
         parsed = parsed.replace(tzinfo=TimeConverter._get_timezone("UTC+8"))
@@ -59,19 +63,33 @@ def sort_history_track(history_track: list[Any] | None) -> list[dict[str, Any]]:
     """将 EQSC historyTrack 规范为按观测时间升序的字典节点列表。
 
     EQSC 返回顺序不保证，不能直接用数组末项当作最新报。
+    无效时间节点沉底，避免排在正常时间之前。
     """
     if not isinstance(history_track, list):
         return []
     nodes = [node for node in history_track if isinstance(node, dict)]
     if not nodes:
         return []
-    return sorted(nodes, key=_history_node_time_key)
+    # 有效时间在前按时间升序；无效时间沉底并保持相对稳定。
+    return sorted(
+        nodes,
+        key=lambda node: (
+            1 if _history_node_time_key(node) is None else 0,
+            _history_node_time_key(node) or 0.0,
+        ),
+    )
 
 
 def latest_history_node(history_track: list[Any]) -> dict[str, Any] | None:
-    """取历史轨迹中时间最新的观测节点。"""
+    """取历史轨迹中时间最新的有效观测节点。
+
+    跳过无法解析时间的节点，避免把无效时间误判为最新观测。
+    """
     nodes = sort_history_track(history_track)
-    return nodes[-1] if nodes else None
+    for node in reversed(nodes):
+        if _history_node_time_key(node) is not None:
+            return node
+    return None
 
 
 def build_track_summary(
