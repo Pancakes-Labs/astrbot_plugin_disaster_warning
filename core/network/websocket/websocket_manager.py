@@ -18,7 +18,9 @@ from .fan_studio_connection_policy import (
     is_connection_limit_signal,
     is_fan_primary_connection,
     is_fan_secondary_connection,
+    is_fan_studio_connection,
     is_primary_fan_connected,
+    send_fan_studio_auth,
     yield_secondary_for_primary,
 )
 from .websocket_dispatch_service import WebSocketDispatchService
@@ -165,6 +167,24 @@ class WebSocketManager:
                 self.connection_info[name].pop("quota_hit", None)
                 self.connection_info[name].pop("quota_deferred", None)
                 logger.info(f"[灾害预警] WebSocket 连接成功: {name}")
+
+                # FAN Studio：握手成功后立即发送应用层鉴权包。
+                # 缺少凭证或发送失败时主动关闭，避免无鉴权空连接占用配额。
+                if is_fan_studio_connection(name):
+                    auth_ok = await send_fan_studio_auth(
+                        websocket,
+                        connection_name=name,
+                        connection_info=self.connection_info.get(name),
+                    )
+                    if not auth_ok:
+                        try:
+                            await websocket.close(
+                                code=1008,
+                                message=b"fan studio auth missing or failed",
+                            )
+                        except Exception:
+                            pass
+                        raise RuntimeError(f"FAN Studio 鉴权失败或缺少凭证: {name}")
 
                 # 重置重连相关的状态变量
                 self.connection_retry_counts[name] = 0

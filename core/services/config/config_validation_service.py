@@ -384,7 +384,7 @@ class ConfigValidator:
                     )
                     cenc_fusion["timeout"] = 60
 
-            # FAN 停服后默认关闭，避免 Wolfx 被融合链路吞推；已有显式 true 配置不强制改写。
+            # 未配置 FAN 鉴权时默认关闭融合；已有显式 true 配置不强制改写。
             if "enabled" not in cenc_fusion:
                 cenc_fusion["enabled"] = False
             ConfigValidator._ensure_bool(cenc_fusion, "enabled", False)
@@ -1229,10 +1229,10 @@ class ConfigValidator:
                 )
                 snet_cfg["poll_interval_seconds"] = 60
 
-        # 校验 FAN Studio 下的扩展开关
+        # 校验 FAN Studio 下的扩展开关与鉴权字段
         fan_studio_cfg = cfg.get("fan_studio")
         if isinstance(fan_studio_cfg, dict):
-            # FAN 台风触发已不可用；缺省关闭，已有显式配置不强制改写。
+            # FAN 台风触发为遗留路径；缺省关闭。
             if "china_typhoon" not in fan_studio_cfg:
                 fan_studio_cfg["china_typhoon"] = False
             ConfigValidator._ensure_bool(fan_studio_cfg, "china_typhoon", False)
@@ -1240,6 +1240,46 @@ class ConfigValidator:
             if "usa_shakealert" not in fan_studio_cfg:
                 fan_studio_cfg["usa_shakealert"] = False
             ConfigValidator._ensure_bool(fan_studio_cfg, "usa_shakealert", False)
+
+            # app_id / api_key：WebSocket 建连后发送 {"type":"auth","appId","key"}
+            app_id = fan_studio_cfg.get("app_id")
+            if app_id is None:
+                fan_studio_cfg["app_id"] = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
+            elif not isinstance(app_id, str):
+                logger.warning(
+                    "[灾害预警] 配置警告: FAN Studio app_id 类型错误，已重置为默认应用 ID。"
+                )
+                fan_studio_cfg["app_id"] = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
+            else:
+                fan_studio_cfg["app_id"] = app_id.strip()
+
+            api_key = fan_studio_cfg.get("api_key")
+            if api_key is None:
+                fan_studio_cfg["api_key"] = ""
+            elif not isinstance(api_key, str):
+                logger.warning(
+                    "[灾害预警] 配置警告: FAN Studio api_key 类型错误，已重置为空。"
+                )
+                fan_studio_cfg["api_key"] = ""
+            else:
+                fan_studio_cfg["api_key"] = api_key.strip()
+
+            if (
+                fan_studio_cfg.get("enabled")
+                and not str(fan_studio_cfg.get("api_key", "")).strip()
+            ):
+                logger.warning(
+                    "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 api_key，"
+                    "WebSocket 鉴权将无法完成，相关连接会被跳过。"
+                )
+            if (
+                fan_studio_cfg.get("enabled")
+                and not str(fan_studio_cfg.get("app_id", "")).strip()
+            ):
+                logger.warning(
+                    "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 app_id，"
+                    "WebSocket 鉴权将无法完成，相关连接会被跳过。"
+                )
 
         # 校验 EQSC 数据源配置（组总闸 + 台风富化 + 海啸轮询子开关）
         eqsc_cfg = cfg.get("eqsc")
