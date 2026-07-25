@@ -7,8 +7,12 @@ MODE_ALIASES: dict[str, str] = {
     "fan+eqsc": "enriched",
     "fan_eqsc": "enriched",
     "eqsc_enriched": "enriched",
+    # 实时 EQSC 轮询
+    "eqsc": "eqsc",
+    "eqsc_live": "eqsc",
+    "eqsc_poll": "eqsc",
+    # 冷启动历史重建
     "eqsc_rebuild": "eqsc_rebuild",
-    "eqsc": "eqsc_rebuild",
     "eqsc_history": "eqsc_rebuild",
     "history_rebuild": "eqsc_rebuild",
     "rebuild": "eqsc_rebuild",

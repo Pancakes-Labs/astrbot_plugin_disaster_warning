@@ -1749,8 +1749,9 @@ class DatabaseManager:
                 norm_key = normalize_event_type(k) or k
                 by_type[norm_key] = by_type.get(norm_key, 0) + int(v or 0)
 
-            # 贡献统计：台风 fan/enriched 合并为 typhoon_fanstudio；
-            # eqsc_rebuild 单独计入 typhoon_eqsc_rebuild。
+            # 贡献统计：台风 fan/enriched → typhoon_fanstudio；
+            # EQSC 实时轮询 → typhoon_eqsc；
+            # eqsc_rebuild → typhoon_eqsc_rebuild。
             # 注意：by_source 仍统计烈度速报，保留来源贡献可见性。
             await cursor.execute(
                 f"""

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .payload_guards import is_shakealert_compatible_payload
 from .source_catalog import (
     SOURCE_CATALOG,
     get_source_ids_by_family,
@@ -85,6 +86,9 @@ def _payload_matches_predicate(payload: dict[str, Any], predicate: str) -> bool:
     if predicate == "usgs_report":
         # USGS 报文通常会附带官方详情地址，可作为辅助识别条件
         return "usgs.gov" in str(payload.get("url", "") or "")
+    if predicate == "shakealert_eew":
+        # ShakeAlert 与 FSSN 字段高度重合；共享守卫排除 FSSN/USGS 特征。
+        return is_shakealert_compatible_payload(payload)
     if predicate == "typhoon_active":
         # 台风数据必须包含移动方向、风速和气压字段，且数据为数组格式
         # FAN Studio 台风推送的 Data 字段是数组，unwrap 后可能仍为数组
@@ -170,7 +174,7 @@ def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
         if (entry := SOURCE_CATALOG[source_id]).provider_source_names
     ]
     # 按优先级从高到低排序，高优先级优先检测，防止通用宽松规则覆盖了精确规则
-    fan_entries.sort(key=lambda entry: (entry.priority, entry.source_id))
+    fan_entries.sort(key=lambda entry: (entry.priority, entry.source_id), reverse=True)
 
     for entry in fan_entries:
         if _matches_payload_rule(payload, entry):
@@ -210,29 +214,34 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
         return routed_messages
 
     if msg_type == "update":
-        # update 消息虽然通常携带显式 source，但像 cea / cea-pr 这类同族来源
-        # 仍可能共用同一个外层 source 值，因此优先结合载荷特征做精确识别
+        # update 消息通常携带显式 source。
+        # 1) 已注册显式来源：直接路由，避免被宽松载荷签名覆盖
+        # 2) 未注册显式来源（如 fssn）：直接丢弃，禁止特征猜测误路由
+        # 3) 无显式来源：才按载荷特征做兼容识别
         source_name = str(data.get("source") or "").strip()
+        if source_name:
+            source_id = get_fan_studio_source_id(source_name)
+            if source_id:
+                return [
+                    RoutedMessage(
+                        source_name=source_name, source_id=source_id, payload=data
+                    )
+                ]
+            # 显式来源存在但未适配：不猜测，避免 FSSN 等被误识别为 SA
+            return []
+
         detected_entry = detect_fan_studio_source_entry(data)
         if detected_entry is not None:
             routed_source_name = (
                 detected_entry.provider_source_names[0]
                 if detected_entry.provider_source_names
-                else source_name or detected_entry.source_id
+                else detected_entry.source_id
             )
             return [
                 RoutedMessage(
                     source_name=routed_source_name,
                     source_id=detected_entry.source_id,
                     payload=data,
-                )
-            ]
-
-        source_id = get_fan_studio_source_id(source_name)
-        if source_name and source_id:
-            return [
-                RoutedMessage(
-                    source_name=source_name, source_id=source_id, payload=data
                 )
             ]
 

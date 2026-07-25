@@ -17,6 +17,7 @@ from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EarthquakeEvent, EventEnvelope
 from ..domain.event_payload import SourcePayload
 from ..services.geo.region_service import region_service
+from ..sources.payload_guards import looks_like_fssn_payload
 from ..sources.source_catalog import get_source_entry
 from .base_parser import BaseParser
 
@@ -696,6 +697,16 @@ class ShakeAlertEewParser(BaseParser):
             if self._get_field(msg_data, "url"):
                 plugin_logger.debug(
                     f"[灾害预警] {self.source_id} 检测到 USGS 特征字段 url，跳过"
+                )
+                return None
+
+            # 与 FSSN 区分：共享守卫（ID 前缀 + 特征字段）
+            if looks_like_fssn_payload(
+                msg_data,
+                get_value=lambda field: self._get_field(msg_data, field),
+            ):
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 检测到 FSSN 特征，跳过"
                 )
                 return None
 

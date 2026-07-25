@@ -111,15 +111,27 @@ def build_typhoon_event_envelope(
     raw: dict[str, Any],
     *,
     source_id: str = "typhoon_fanstudio",
+    data_mode: str = "eqsc_rebuild",
 ) -> EventEnvelope | None:
-    """将单个 EQSC 台风对象转换为历史重建用领域事件。"""
+    """将单个 EQSC 台风对象转换为领域事件。
+
+    Args:
+        raw: EQSC 台风原始字典。
+        source_id: 统一数据源标识。
+        data_mode:
+            - eqsc_rebuild：冷启动历史重建，主字段取峰值节点；
+            - eqsc：实时轮询，主字段取最新观测节点。
+    """
     if not isinstance(raw, dict):
         return None
     eqsc_id = clean_text(raw.get("id"))
     if not eqsc_id:
         return None
 
-    # 对外领域身份继续使用 Fan 6 位编号，source_id 不拆出第二个 EQSC 台风源。
+    mode = str(data_mode or "eqsc_rebuild").strip().lower()
+    is_live = mode in {"eqsc", "eqsc_live", "eqsc_poll"}
+
+    # 对外领域身份继续使用 6 位编号，便于跨源去重与查询。
     fan_id = to_fan_id(eqsc_id)
     name_cn = clean_text(raw.get("nameCN") or raw.get("name"))
     name_en = clean_text(raw.get("nameEN") or raw.get("name_en"))
@@ -130,7 +142,7 @@ def build_typhoon_event_envelope(
     if not isinstance(future_track, list):
         future_track = []
 
-    # 历史重建必须有可排序的有效观测，否则不能可靠写入时间线。
+    # 必须有可排序的有效观测，否则不能可靠写入时间线。
     nodes = _valid_history_nodes(history_track)
     if not nodes:
         return None
@@ -154,16 +166,42 @@ def build_typhoon_event_envelope(
     if latest_time is None:
         return None
 
-    # 风圈使用峰值节点的快照；完整轨迹仍保留在领域事件中供后续展示。
-    wind_circle = peak_node.get("windCircle") or peak_node.get("wind_circle") or {}
+    # 实时轮询：主字段取最新观测；历史重建：主字段取峰值快照。
+    primary_node = latest_node if is_live else peak_node
+    wind_circle = (
+        primary_node.get("windCircle") or primary_node.get("wind_circle") or {}
+    )
     if not isinstance(wind_circle, dict):
         wind_circle = {}
-    level = peak_values["peak_level"] or clean_text(latest_node.get("typeNameCN"))
-    latitude = to_float(peak_node.get("latitude"))
-    longitude = to_float(peak_node.get("longitude"))
-    if latitude is None or longitude is None:
+
+    if is_live:
+        level = clean_text(latest_node.get("typeNameCN")) or peak_values["peak_level"]
         latitude = to_float(latest_node.get("latitude"))
         longitude = to_float(latest_node.get("longitude"))
+        pressure_value = to_float(latest_node.get("pressure"))
+        # 与历史峰值路径一致：气压/风速非正值视为缺失，避免写入 0 或负值。
+        if pressure_value is not None and pressure_value <= 0:
+            pressure_value = None
+        wind_speed_value = to_float(latest_node.get("windSpeed"))
+        if wind_speed_value is not None and wind_speed_value <= 0:
+            wind_speed_value = None
+        move_direction = clean_text(latest_node.get("directionCN"))
+        move_speed = to_float(latest_node.get("speed"))
+        message_type = "typhoon"
+        mode_label = "eqsc"
+    else:
+        level = peak_values["peak_level"] or clean_text(latest_node.get("typeNameCN"))
+        latitude = to_float(peak_node.get("latitude"))
+        longitude = to_float(peak_node.get("longitude"))
+        if latitude is None or longitude is None:
+            latitude = to_float(latest_node.get("latitude"))
+            longitude = to_float(latest_node.get("longitude"))
+        pressure_value = peak_values["min_pressure"]
+        wind_speed_value = peak_values["peak_wind"]
+        move_direction = clean_text(peak_node.get("directionCN"))
+        move_speed = to_float(peak_node.get("speed"))
+        message_type = "typhoon_history"
+        mode_label = "eqsc_rebuild"
 
     # EventEnvelope.metadata 只记录流水线形态，原始 EQSC 字典留在 SourcePayload。
     identity = EventIdentity(
@@ -180,14 +218,13 @@ def build_typhoon_event_envelope(
         latitude=latitude,
         longitude=longitude,
         pressure=(
-            int(peak_values["min_pressure"])
-            if peak_values["min_pressure"] is not None
-            and float(peak_values["min_pressure"]).is_integer()
-            else peak_values["min_pressure"]
+            int(pressure_value)
+            if pressure_value is not None and float(pressure_value).is_integer()
+            else pressure_value
         ),
-        wind_speed=peak_values["peak_wind"],
-        move_direction=clean_text(peak_node.get("directionCN")),
-        move_speed=to_float(peak_node.get("speed")),
+        wind_speed=wind_speed_value,
+        move_direction=move_direction,
+        move_speed=move_speed,
         radius7=(
             int(radius7)
             if (radius7 := extract_max_radius(wind_circle, "30KTS")) is not None
@@ -201,14 +238,13 @@ def build_typhoon_event_envelope(
             else radius10
         ),
         # 历史列表缺少 isActive 时按非活跃处理，避免冷启动历史误进入活跃过滤。
-        is_active=bool(raw.get("isActive", False)),
-        # updated_at 表示最新观测时间；峰值时间只用于峰值指标内部计算。
+        # 实时轮询侧会再按 raw.isActive 覆盖。
+        is_active=bool(raw.get("isActive", False if not is_live else True)),
+        # updated_at 表示最新观测时间。
         updated_at=latest_time,
         history_track=history_track,
         future_track=future_track,
         wind_circle=wind_circle,
-        # mode 标签只写入 envelope.metadata（流水线元数据），
-        # TyphoonEvent.metadata 不承载流水线标记，保持业务状态真源纯净。
         metadata={},
     )
     return EventEnvelope(
@@ -217,12 +253,13 @@ def build_typhoon_event_envelope(
         payload=SourcePayload(
             source_id=source_id,
             provider_family="eqsc",
-            message_type="typhoon_history",
+            message_type=message_type,
             raw=dict(raw),
         ),
         metadata={
-            "typhoon_data_mode": "eqsc_rebuild",
-            "info_type": "eqsc_rebuild",
+            "data_source": mode_label,
+            "typhoon_data_mode": mode_label,
+            "info_type": mode_label,
         },
     )
 

@@ -742,8 +742,8 @@ class EventRecordFactory:
         # 台风记录补齐中心位置、强度参数与更新时间，便于历史查询与展示。
         # 注意：magnitude 字段在数据库语义上专属于地震震级，台风不复用该列，
         # 为了避免前端震级筛选器误命中台风事件；全部强度参数统一存入 weather_detail。
-        # info_type 复用为台风数据形态标签（fan / enriched / eqsc_rebuild），
-        # source_id 仍统一为 typhoon_fanstudio，避免拆成并列双源。
+        # info_type 复用为台风数据形态标签（fan / enriched / eqsc / eqsc_rebuild）。
+        # source_id 保留事件自身来源（typhoon_fanstudio / typhoon_eqsc 等）。
         #
         # 关键：level / wind_speed 列必须保存历史峰值，而不是当前瞬时强度。
         # 否则台风减弱后（如巴威从强台风回落到热带风暴）会把风王榜与

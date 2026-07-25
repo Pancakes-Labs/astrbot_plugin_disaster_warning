@@ -68,6 +68,12 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_tsunami_poll is not None:
                     await eqsc_tsunami_poll.start()
+                # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
+                eqsc_typhoon_poll = getattr(
+                    self.service, "eqsc_typhoon_poll_service", None
+                )
+                if eqsc_typhoon_poll is not None:
+                    await eqsc_typhoon_poll.start()
                 if getattr(self.service, "notification_center", None):
                     await (
                         self.service.notification_center.start()
@@ -171,12 +177,17 @@ class DisasterServiceLifecycleService:
                         self.service.http_fetcher.close()
                     )  # 关闭 HTTP 客户端 Session 连接池
 
-                # 先停 EQSC 海啸轮询客户端（共享 token 时不会关闭 token_manager）
+                # 先停 EQSC 海啸/台风轮询客户端（共享 token 时不会关闭 token_manager）
                 eqsc_tsunami_poll = getattr(
                     self.service, "eqsc_tsunami_poll_service", None
                 )
                 if eqsc_tsunami_poll is not None:
                     await eqsc_tsunami_poll.stop()
+                eqsc_typhoon_poll = getattr(
+                    self.service, "eqsc_typhoon_poll_service", None
+                )
+                if eqsc_typhoon_poll is not None:
+                    await eqsc_typhoon_poll.stop()
 
                 # 关闭台风 EQSC 富化服务的 HTTP 会话与令牌管理器资源
                 typhoon_enrichment = getattr(

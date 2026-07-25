@@ -935,6 +935,52 @@ WebSocket API 将在服务端收到新消息后自动向所有客户端推送相
 
 ---
 
+## FSSN 地震信息 /fssn
+
+**数据来源：** FAN Studio Seismic Network
+
+**更新规则：** 收到新信息后立即推送
+
+**示例返回：**
+
+```json
+{
+  "Data": {
+    "id": "FSSN2025waoy",
+    "shockTime": "2025-11-10 17:20:47",
+    "createTime": "2025-11-10 17:34:00",
+    "latitude": 29.3528,
+    "longitude": 101.9758,
+    "depth": 10,
+    "magnitude": 3.26,
+    "placeName": "Sichuan,China",
+    "placeName_zh": "中国四川",
+    "infoTypeName": "正式(已核实)"
+  },
+  "md5": "8ad45f73a99fe1113ca16fc186e33f53"
+}
+```
+
+## 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 地震事件唯一标识符。 |
+| `shockTime` | string | 地震发生时间（UTC+8，格式：YYYY-MM-DD HH:mm:ss）。 |
+| `latitude` | number | 震中纬度。 |
+| `longitude` | number | 震中经度。 |
+| `depth` | integer | 震源深度（单位：千米）。 |
+| `magnitude` | number | 地震震级。 |
+| `placeName` | string | 地震发生地地名。 |
+| `infoTypeName` | string | 速报类型，例如："已确认、正式(已核实)"。 |
+
+## 注意事项
+
+- 该数据源由 FSSN 测报部报告，仅供学术研究。
+- 该数据源包含全球范围内的地震信息。
+
+---
+
 ## FSSN 矩心矩张量解 (CMT) /fssn-cmt
 
 **数据来源：** FAN Studio Seismic Network (CMT Project)  

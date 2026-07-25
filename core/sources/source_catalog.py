@@ -582,9 +582,15 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         provider_source_names=("sa",),
         provider_aliases=("fan_studio_sa", "sa", "shakealert", "usa_shakealert"),
         routing_tags=("fan_studio", "usa", "report", "shakealert"),
-        # 与 USGS 区分：ShakeAlert 无 url，且无 infoTypeName
+        # 与 USGS / FSSN 区分：ShakeAlert 无 url、infoTypeName、createTime、placeName_zh
         payload_signatures=(("placeName", "shockTime", "magnitude", "id"),),
-        payload_exclusions=(("url",),),
+        payload_exclusions=(
+            ("url",),
+            ("infoTypeName",),
+            ("createTime",),
+            ("placeName_zh",),
+        ),
+        payload_predicates=("shakealert_eew",),
     ),
     # china_tsunami_fanstudio: 自然资源部海啸预警中心的海啸警报推送
     "china_tsunami_fanstudio": SourceEntry(
@@ -708,8 +714,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         payload_signatures=(("type",),),
         payload_predicates=("weather_alert",),
     ),
-    # typhoon_fanstudio: 实时活跃台风 - 来自 FAN Studio
-    # 作为台风实时触发器，收到推送后由富化服务向 EQSC 拉取详细轨迹数据
+    # typhoon_fanstudio: 实时活跃台风 - FAN Studio（遗留触发源，上游已停服）
     "typhoon_fanstudio": SourceEntry(
         source_id="typhoon_fanstudio",
         source_enum="fan_studio_typhoon",
@@ -722,9 +727,9 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         text_presenter_key="typhoon",
         report_policy="none",
         intensity_mode="none",
-        priority=1,
+        priority=0,
         display_name="中国气象局：实时活跃台风 - Fan",
-        description="实时活跃台风 - FAN Studio WebSocket（触发器）+ EQSC 富化",
+        description="实时活跃台风 - FAN Studio WebSocket（遗留触发源，上游除 FSSN 外已停服）",
         default_timezone="Asia/Shanghai",
         publish_time_field="update_time",
         fingerprint_prefix="typhoon",
@@ -735,10 +740,38 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         connection_backup_url="wss://ws.fanstudio.hk/all",
         dispatch_family="fan_studio_typhoon",
         provider_source_names=("typhoon",),
-        provider_aliases=("fan_studio_typhoon", "typhoon"),
+        provider_aliases=("fan_studio_typhoon",),
         routing_tags=("fan_studio", "china", "typhoon"),
         payload_signatures=(("moveDirection", "windSpeed", "pressure"),),
         payload_predicates=("typhoon_active",),
+    ),
+    # typhoon_eqsc: 实时活跃台风 - EQSC HTTP 独立轮询
+    # 不挂 WebSocket 连接计划：connection_url 留空，由 EqscTyphoonPollService 独立轮询。
+    "typhoon_eqsc": SourceEntry(
+        source_id="typhoon_eqsc",
+        source_enum="eqsc_typhoon",
+        source_type=SourceType.TYPHOON,
+        provider_family=ProviderFamily.EQSC,
+        config_group="eqsc",
+        config_key="typhoon_enrichment",
+        parser_name="typhoon_parser",
+        presentation_type="typhoon",
+        text_presenter_key="typhoon",
+        report_policy="none",
+        intensity_mode="none",
+        priority=2,
+        display_name="中国气象局：实时活跃台风 - EQSC",
+        description="实时活跃台风 - EQSC HTTP 轮询（含轨迹与风圈，不依赖 FAN 触发）",
+        default_timezone="Asia/Shanghai",
+        publish_time_field="update_time",
+        fingerprint_prefix="typhoon",
+        connection_group="eqsc",
+        connection_handler="",
+        connection_data_source="typhoon_eqsc",
+        connection_url="",
+        dispatch_family="eqsc_typhoon",
+        provider_aliases=("eqsc_typhoon", "typhoon_eqsc"),
+        routing_tags=("eqsc", "china", "typhoon", "http"),
     ),
     # snet_msil: NIED S-Net 海底测站震度（MSIL 瓦片直连轮询）
     "snet_msil": SourceEntry(

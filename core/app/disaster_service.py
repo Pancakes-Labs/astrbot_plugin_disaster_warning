@@ -38,6 +38,7 @@ from ..parsers.parser_registry import (
 from ..services.config.config_service import ConfigAccessor
 from ..services.config.connection_plan_builder import ConnectionPlanBuilder
 from ..services.eqsc.eqsc_tsunami_poll_service import EqscTsunamiPollService
+from ..services.eqsc.eqsc_typhoon_poll_service import EqscTyphoonPollService
 from ..services.geo.cn_seis_int_loc_loader import get_district_points
 from ..services.geo.jma_seis_int_loc_loader import get_sect_map
 from ..services.geo.region_service import region_service
@@ -178,6 +179,8 @@ class DisasterWarningService:
         self.snet_poll_service = SnetPollService(self)
         # EQSC JMA 海啸 HTTP 轮询（复用 EQSC 令牌，作为 P2P 高优先级补充）
         self.eqsc_tsunami_poll_service = EqscTsunamiPollService(self)
+        # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
+        self.eqsc_typhoon_poll_service = EqscTyphoonPollService(self)
         self._setup_runtime_services()
 
     def _setup_runtime_services(self) -> None:
@@ -292,19 +295,19 @@ class DisasterWarningService:
             self.http_fetcher = HTTPDataFetcher(self.config)  # 初始化 HTTP 轮询拉取组件
             self._register_handlers()
             self._configure_connections()
-            # EQSC 通道 / 台风富化就绪日志（组总闸与子开关已解耦）
+            # 就绪日志以真实轮询服务为准（catalog 组总闸 + typhoon_enrichment）
+            typhoon_poll = getattr(self, "eqsc_typhoon_poll_service", None)
+            poll_enabled = bool(typhoon_poll is not None and typhoon_poll.is_enabled())
             enrichment = self.typhoon_enrichment_service
-            if enrichment.is_enabled:
-                logger.info("[灾害预警] EQSC 台风富化服务已就绪")
+            if poll_enabled:
+                logger.info("[灾害预警] EQSC 台风轮询服务已就绪")
             elif getattr(enrichment, "is_channel_enabled", False):
                 logger.info(
-                    "[灾害预警] EQSC 通道已启用，但台风富化子开关关闭；"
-                    "台风将使用 FAN Studio 基础数据"
+                    "[灾害预警] EQSC 通道已启用，但台风轮询子开关关闭；"
+                    "实时台风推送将不可用"
                 )
             else:
-                logger.info(
-                    "[灾害预警] EQSC 数据源未启用，台风将使用 FAN Studio 基础数据"
-                )
+                logger.debug("[灾害预警] EQSC 数据源未启用，相关数据源将不可用")
             logger.info("[灾害预警] 灾害预警服务初始化完成")
 
             # 注意：EQSC 历史台风重建不得在 initialize() 中同步/阻塞执行。
@@ -434,22 +437,24 @@ class DisasterWarningService:
             return
 
         try:
-            # 台风事件：多台风共舞时 FAN 会整包重推数组。
-            # 必须在 EQSC 富化前按“单台风核心参数指纹”做只读去重，
-            # 否则无变化台风会因数组中其他台风更新而被连带推送，并白白消耗 EQSC 查询。
+            # 台风事件：
+            # 1) FAN 遗留触发：多台风共舞时会整包重推，富化前先只读去重；
+            # 2) EQSC 独立轮询：事件已含完整轨迹，跳过二次富化。
             if event.event_type == "typhoon":
-                deduplicator = getattr(
-                    getattr(self, "message_manager", None), "deduplicator", None
-                )
-                peek = getattr(deduplicator, "peek_typhoon_should_push", None)
-                if callable(peek) and not peek(event):
-                    logger.debug(
-                        f"[灾害预警] 台风事件在富化前被去重过滤，跳过后续推送: {event.id}"
+                source_id = str(getattr(event, "source_id", "") or "").strip()
+                if source_id != "typhoon_eqsc":
+                    deduplicator = getattr(
+                        getattr(self, "message_manager", None), "deduplicator", None
                     )
-                    return
+                    peek = getattr(deduplicator, "peek_typhoon_should_push", None)
+                    if callable(peek) and not peek(event):
+                        logger.debug(
+                            f"[灾害预警] 台风事件在富化前被去重过滤，跳过后续推送: {event.id}"
+                        )
+                        return
 
-                # 仅对确认有变化（或首次出现）的台风执行 EQSC 富化
-                event = await self.typhoon_enrichment_service.enrich(event)
+                    # 仅对 FAN 触发路径执行 EQSC 富化（遗留兼容）
+                    event = await self.typhoon_enrichment_service.enrich(event)
 
             # 真正的日志记录、推送、统计与 Web 管理端通知由事件流水线统一处理。
             await self.event_pipeline.handle(event)

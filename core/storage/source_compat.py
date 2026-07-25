@@ -33,6 +33,8 @@ _ALIAS_MAP: dict[str, str] = {
     "p2p_earthquake": "jma_p2p_info",
     "p2p_tsunami": "jma_tsunami_p2p",
     "eqsc_tsunami": "jma_tsunami_eqsc",
+    "eqsc_typhoon": "typhoon_eqsc",
+    "fan_studio_typhoon": "typhoon_fanstudio",
     "wolfx_jma_eew": "jma_wolfx",
     "wolfx_cenc_eew": "cea_wolfx",
     "wolfx_cwa_eew": "cwa_wolfx",
@@ -104,8 +106,9 @@ _DISPLAY_MAP: dict[str, str] = {
     "jma_fanstudio": "日本气象厅: 紧急地震速报 - Fan",
     "china_weather_fanstudio": "中国气象局: 气象预警",
     "china_tsunami_fanstudio": "自然资源部海啸预警中心",
-    # 贡献榜默认中性名：实时通道（含 Fan 与 Fan+EQSC 富化）不强制带 - Fan
+    # 贡献榜默认中性名：实时通道不强制带后缀
     "typhoon_fanstudio": "中国气象局：实时活跃台风",
+    "typhoon_eqsc": "中国气象局：实时活跃台风 - EQSC",
     # 仅 EQSC 历史重建在贡献统计中单独成源
     "typhoon_eqsc_rebuild": "中国气象局：台风历史 - EQSC",
     "jma_p2p": "日本气象厅: 紧急地震速报 - P2P",
@@ -212,22 +215,27 @@ def build_source_stats_key(
 ) -> str:
     """构建数据源贡献统计键。
 
-    策略（方案 A + B）：
+    策略：
     - 普通源：规范 source_id
-    - 台风实时（fan / enriched）：统一 typhoon_fanstudio
-    - 台风 EQSC 历史重建：单独 typhoon_eqsc_rebuild
+    - 台风 FAN 实时 / Fan+EQSC 富化：typhoon_fanstudio
+    - 台风 EQSC 实时轮询：typhoon_eqsc
+    - 台风 EQSC 历史重建：typhoon_eqsc_rebuild
     """
     normalized = normalize_source_name(source or "")
     type_key = str(event_type or "").strip().lower()
-    is_typhoon = normalized in {"typhoon_fanstudio", "typhoon_eqsc_rebuild"} or (
-        type_key == "typhoon"
-    )
+    is_typhoon = normalized in {
+        "typhoon_fanstudio",
+        "typhoon_eqsc",
+        "typhoon_eqsc_rebuild",
+    } or (type_key == "typhoon")
     if not is_typhoon:
         return normalized or "unknown"
 
     mode = resolve_data_mode(info_type, default="")
     if mode == "eqsc_rebuild" or normalized == "typhoon_eqsc_rebuild":
         return "typhoon_eqsc_rebuild"
+    if mode == "eqsc" or normalized == "typhoon_eqsc":
+        return "typhoon_eqsc"
     return "typhoon_fanstudio"
 
 
@@ -238,15 +246,18 @@ def format_typhoon_source_name(
 ) -> str:
     """台风来源展示名：事件详情按数据形态追加后缀。
 
-    注意：贡献榜仅用 format_source_name，保持中性「实时活跃台风」；
-    本函数用于事件列表/详情，可显示 Fan / Fan+EQSC / EQSC 历史。
+    注意：贡献榜仅用 format_source_name；
+    本函数用于事件列表/详情，可显示 Fan / Fan+EQSC / EQSC 实时 / EQSC 历史。
     """
     normalized = normalize_source_name(source or "typhoon_fanstudio")
     mode = resolve_data_mode(info_type, default="")
     if mode == "enriched":
         return "中国气象局：实时活跃台风 - Fan+EQSC"
+    # 与 build_source_stats_key 一致：先判历史重建，再判实时 EQSC。
     if mode == "eqsc_rebuild" or normalized == "typhoon_eqsc_rebuild":
         return "中国气象局：台风历史 - EQSC"
+    if mode == "eqsc" or normalized == "typhoon_eqsc":
+        return "中国气象局：实时活跃台风 - EQSC"
     # fan 或缺省：事件详情仍标明 Fan 触发
     return "中国气象局：实时活跃台风 - Fan"
 
@@ -261,7 +272,7 @@ def format_event_source_name(
     normalized = normalize_source_name(source or "")
     type_key = str(event_type or "").strip().lower()
     if (
-        normalized in {"typhoon_fanstudio", "typhoon_eqsc_rebuild"}
+        normalized in {"typhoon_fanstudio", "typhoon_eqsc", "typhoon_eqsc_rebuild"}
         or type_key == "typhoon"
     ):
         return format_typhoon_source_name(source, info_type=info_type)

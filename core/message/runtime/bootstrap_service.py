@@ -92,9 +92,12 @@ class MessageManagerBootstrapService:
         snet_cfg = (
             data_sources.get("snet", {}) if isinstance(data_sources, dict) else {}
         )
-        # 台风源实际配置路径：data_sources.fan_studio.china_typhoon（bool）
+        # 台风源：FAN 遗留开关 + EQSC 独立轮询开关
         fan_studio_cfg = (
             data_sources.get("fan_studio", {}) if isinstance(data_sources, dict) else {}
+        )
+        eqsc_cfg = (
+            data_sources.get("eqsc", {}) if isinstance(data_sources, dict) else {}
         )
         need_browser = (
             msg_config.get("include_map", False)
@@ -104,6 +107,11 @@ class MessageManagerBootstrapService:
             or bool(
                 isinstance(fan_studio_cfg, dict)
                 and fan_studio_cfg.get("china_typhoon", False)
+            )
+            or bool(
+                isinstance(eqsc_cfg, dict)
+                and eqsc_cfg.get("enabled", False)
+                and eqsc_cfg.get("typhoon_enrichment", False)
             )
         )
         if playwright_mode == "local" and need_browser:

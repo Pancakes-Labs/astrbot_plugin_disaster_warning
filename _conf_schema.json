@@ -40,9 +40,9 @@
         "hint": "FAN Studio数据源总开关",
         "items": {
           "enabled": {
-            "description": "启用FAN Studio 数据源",
+            "description": "启用 FAN Studio 数据源（除 FSSN 外已不可用）",
             "type": "bool",
-            "default": true
+            "default": false
           },
           "china_earthquake_warning": {
             "description": "中国地震网地震预警",
@@ -113,8 +113,8 @@
           "china_typhoon": {
             "description": "中国气象局：实时活跃台风",
             "type": "bool",
-            "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收实时活跃台风信息，并自动从EQSC拉取详细数据富化展示"
+            "default": false,
+            "hint": "原通过 FAN Studio WebSocket 触发台风推送。FAN 除 FSSN 外已停服，实时台风请改用 EQSC「启用台风轮询」。"
           }
         }
       },
@@ -167,7 +167,7 @@
           "china_cenc_eew": {
             "description": "中国地震台网（CENC）：地震预警",
             "type": "bool",
-            "default": false,
+            "default": true,
             "hint": "通过 Wolfx API 接收中国地震台网地震预警"
           },
           "taiwan_cwa_eew": {
@@ -228,10 +228,21 @@
             "hidden": true
           },
           "typhoon_enrichment": {
-            "description": "启用台风富化",
+            "description": "启用台风轮询",
             "type": "bool",
             "default": true,
-            "hint": "启用后，收到 FAN Studio 台风推送时将自动向 EQSC 拉取详细轨迹与风圈。未启用时台风仅使用 FAN Studio 基础数据展示。"
+            "hint": "启用后由 EQSC HTTP 独立轮询活跃台风并推送"
+          },
+          "typhoon_poll_interval_seconds": {
+            "description": "台风轮询间隔（秒）",
+            "type": "int",
+            "default": 120,
+            "hint": "单位：秒。EQSC 台风列表轮询间隔。",
+            "slider": {
+              "min": 30,
+              "max": 600,
+              "step": 10
+            }
           },
           "cache_ttl": {
             "description": "台风数据缓存时间",
@@ -376,7 +387,8 @@
           "enabled": {
             "description": "启用融合策略",
             "type": "bool",
-            "default": true
+            "default": false,
+            "hint": "开启后 Wolfx 仅作补充、不独立推送。FAN 不可用时请保持关闭。"
           },
           "timeout": {
             "description": "等待超时时间",
@@ -399,7 +411,8 @@
           "enabled": {
             "description": "启用融合策略",
             "type": "bool",
-            "default": true
+            "default": false,
+            "hint": "开启后 Wolfx 仅作补充、不独立推送。FAN 不可用时请保持关闭。"
           },
           "timeout": {
             "description": "等待超时时间",
