@@ -19,9 +19,13 @@
         getStatus: () => client.request('/status'),
         getStatistics: () => client.request('/statistics'),
         getConnections: () => client.request('/connections'),
-        /** 连接健康 Statuspage：90 天条带 + 事故 */
-        getConnectionHealth: (days = 90) => client.request('/connection-health', {
-            query: { days },
+        /**
+         * 连接健康 Statuspage
+         * @param {number} days 历史窗口天数
+         * @param {'full'|'live'} mode full=条带+事故；live=仅实时态
+         */
+        getConnectionHealth: (days = 90, mode = 'full') => client.request('/connection-health', {
+            query: { days, mode },
         }),
         getConfig: () => client.request('/config'),
         sendSimulation: (data) => client.request('/simulate', {

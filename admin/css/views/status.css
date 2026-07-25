@@ -1323,18 +1323,17 @@ html.theme-dark .connection-health-bar.is-maintenance {
 .connection-health-bar {
     flex: 1 1 0;
     min-width: 0;
+    display: block;
     border: none;
     padding: 0;
     margin: 0;
     border-radius: 1px;
     cursor: pointer;
-    appearance: none;
     background: #dfe3e8;
     transition: filter 0.12s ease-out, transform 0.12s ease-out;
 }
 
-.connection-health-bar:hover,
-.connection-health-bar:focus-visible {
+.connection-health-bar:hover {
     filter: brightness(0.92);
     outline: none;
     transform: scaleY(1.08);

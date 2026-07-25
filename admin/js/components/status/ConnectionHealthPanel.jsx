@@ -1,11 +1,16 @@
 const { Box, Typography } = MaterialUI;
-const { useCallback, useEffect, useMemo, useRef, useState } = React;
+const { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } = React;
 
 /**
  * 连接健康 Statuspage 面板
  * - 总横幅（全部通道正常 / 部分异常 / 核心中断）
  * - 各连接组 90 天可用性条带
  * - Past Incidents（通道事故，非地震事件）
+ *
+ * 轮询策略：
+ * - 首屏 full 拉一次（实时 + 历史）
+ * - 可见时 live 每 15s 刷新实时态
+ * - full 历史每 5 分钟刷新；document.hidden 时暂停
  */
 function ConnectionHealthPanel() {
     const statusApi = window.DisasterStatusApi;
@@ -14,34 +19,192 @@ function ConnectionHealthPanel() {
     const [error, setError] = useState('');
     const [hoverTip, setHoverTip] = useState(null);
     const tipRef = useRef(null);
+    const dataRef = useRef(null);
+    const lastFullAtRef = useRef(0);
 
-    const load = useCallback(async () => {
+    const LIVE_INTERVAL_MS = 15000;
+    const FULL_INTERVAL_MS = 5 * 60 * 1000;
+
+    const mergeLiveIntoData = useCallback((prev, livePayload) => {
+        if (!livePayload) return prev;
+        if (!prev) {
+            return {
+                ...livePayload,
+                components: Array.isArray(livePayload.components)
+                    ? livePayload.components.map((c) => ({
+                        ...c,
+                        days: Array.isArray(c.days) ? c.days : [],
+                        uptime_ratio: c.uptime_ratio ?? null,
+                        uptime_percent: c.uptime_percent ?? null,
+                    }))
+                    : [],
+                incidents: Array.isArray(livePayload.incidents) ? livePayload.incidents : [],
+                incidents_by_day: Array.isArray(livePayload.incidents_by_day)
+                    ? livePayload.incidents_by_day
+                    : [],
+            };
+        }
+
+        const liveByKey = {};
+        (Array.isArray(livePayload.components) ? livePayload.components : []).forEach((c) => {
+            if (c && c.group_key) liveByKey[c.group_key] = c;
+        });
+
+        const prevComponents = Array.isArray(prev.components) ? prev.components : [];
+        const mergedComponents = prevComponents.map((comp) => {
+            const live = liveByKey[comp.group_key];
+            if (!live) return comp;
+            return {
+                ...comp,
+                name: live.name || comp.name,
+                current_state: live.current_state,
+                current_label: live.current_label,
+                enabled: live.enabled,
+                connected: live.connected,
+                latency_ms: live.latency_ms,
+                retry_count: live.retry_count,
+                circuit_open: live.circuit_open,
+            };
+        });
+
+        // 若 live 出现 prev 没有的组件，追加（通常不会）
+        Object.keys(liveByKey).forEach((key) => {
+            if (!mergedComponents.some((c) => c.group_key === key)) {
+                const live = liveByKey[key];
+                mergedComponents.push({
+                    ...live,
+                    days: [],
+                    uptime_ratio: null,
+                    uptime_percent: null,
+                });
+            }
+        });
+
+        return {
+            ...prev,
+            overall: livePayload.overall || prev.overall,
+            legend: livePayload.legend || prev.legend,
+            meta: {
+                ...(prev.meta || {}),
+                ...(livePayload.meta || {}),
+                // 保留历史窗口元信息
+                days: (prev.meta && prev.meta.days) || (livePayload.meta && livePayload.meta.days) || 90,
+                mode: 'full',
+            },
+            components: mergedComponents,
+        };
+    }, []);
+
+    const loadFull = useCallback(async ({ silent = false } = {}) => {
         if (!statusApi || typeof statusApi.getConnectionHealth !== 'function') {
             setError('连接健康接口不可用');
             setLoading(false);
             return;
         }
         try {
-            setError('');
-            const payload = await statusApi.getConnectionHealth(90);
+            if (!silent) setError('');
+            const payload = await statusApi.getConnectionHealth(90, 'full');
             setData(payload || null);
+            dataRef.current = payload || null;
+            lastFullAtRef.current = Date.now();
         } catch (e) {
-            console.error('[ConnectionHealthPanel] load failed:', e);
-            setError(e?.message || '加载连接健康数据失败');
+            console.error('[ConnectionHealthPanel] full load failed:', e);
+            if (!dataRef.current) {
+                setError(e?.message || '加载连接健康数据失败');
+            }
         } finally {
             setLoading(false);
         }
     }, [statusApi]);
 
+    const loadLive = useCallback(async () => {
+        if (!statusApi || typeof statusApi.getConnectionHealth !== 'function') {
+            return;
+        }
+        try {
+            const payload = await statusApi.getConnectionHealth(90, 'live');
+            setData((prev) => {
+                const next = mergeLiveIntoData(prev, payload);
+                dataRef.current = next;
+                return next;
+            });
+        } catch (e) {
+            // live 失败不打断历史展示
+            console.warn('[ConnectionHealthPanel] live load failed:', e);
+        }
+    }, [statusApi, mergeLiveIntoData]);
+
     useEffect(() => {
-        load();
-        // 实时态来自每次 API 拉取；10s 轮询以跟上 ConnectionsGrid 建连变化
-        const timer = setInterval(load, 10000);
-        return () => clearInterval(timer);
-    }, [load]);
+        let cancelled = false;
+        let liveTimer = null;
+        let fullTimer = null;
+
+        const clearTimers = () => {
+            if (liveTimer) {
+                clearInterval(liveTimer);
+                liveTimer = null;
+            }
+            if (fullTimer) {
+                clearInterval(fullTimer);
+                fullTimer = null;
+            }
+        };
+
+        const tickLive = () => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.hidden) return;
+            loadLive();
+        };
+
+        const tickFull = () => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.hidden) return;
+            loadFull({ silent: true });
+        };
+
+        const startTimers = () => {
+            clearTimers();
+            if (typeof document !== 'undefined' && document.hidden) return;
+            liveTimer = setInterval(tickLive, LIVE_INTERVAL_MS);
+            fullTimer = setInterval(tickFull, FULL_INTERVAL_MS);
+        };
+
+        const onVisibility = () => {
+            if (typeof document === 'undefined') return;
+            if (document.hidden) {
+                clearTimers();
+                return;
+            }
+            // 回到前台：立即补一次 live；若 full 过旧则补 full
+            loadLive();
+            if (Date.now() - lastFullAtRef.current >= FULL_INTERVAL_MS) {
+                loadFull({ silent: true });
+            }
+            startTimers();
+        };
+
+        // 首屏 full
+        loadFull({ silent: false }).then(() => {
+            if (cancelled) return;
+            startTimers();
+        });
+
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', onVisibility);
+        }
+
+        return () => {
+            cancelled = true;
+            clearTimers();
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', onVisibility);
+            }
+        };
+    }, [loadFull, loadLive]);
 
     // tooltip：left/top 为浮层左上角（禁止 translate 居中），贴边不裁切
-    useEffect(() => {
+    // 使用 useLayoutEffect，避免 paint 后才定位导致首帧闪左上角
+    useLayoutEffect(() => {
         if (!hoverTip || !tipRef.current) return;
         const el = tipRef.current;
         el.style.transform = 'none';
@@ -106,8 +269,7 @@ function ConnectionHealthPanel() {
             return data.overall.updated_at_display;
         }
         try {
-            const normalized = text.endsWith('Z') ? text : text;
-            const dt = new Date(normalized);
+            const dt = new Date(text);
             if (Number.isNaN(dt.getTime())) {
                 return text.replace('T', ' ').slice(0, 19);
             }
@@ -271,19 +433,17 @@ function ConnectionHealthPanel() {
 
                             <div
                                 className="connection-health-bars"
-                                role="img"
                                 aria-label={`${comp.name} 近 ${days.length} 天可用性`}
                             >
                                 {days.map((day) => (
-                                    <button
+                                    <span
                                         key={`${comp.group_key}-${day.day}`}
-                                        type="button"
                                         className={`connection-health-bar is-${day.state || 'not_monitored'}`}
+                                        role="img"
                                         aria-label={`${comp.name} ${day.day} ${stateLabel(day.state)}`}
+                                        tabIndex={-1}
                                         onMouseEnter={(e) => openTip(e, comp, day)}
                                         onMouseLeave={() => setHoverTip(null)}
-                                        onFocus={(e) => openTip(e, comp, day)}
-                                        onBlur={() => setHoverTip(null)}
                                     />
                                 ))}
                             </div>
