@@ -61,6 +61,9 @@ class SessionConfigManager:
         ("data_sources", "eqsc", "cache_ttl"),
         ("data_sources", "eqsc", "tsunami_cache_ttl"),
         ("data_sources", "eqsc", "jma_tsunami_poll_interval_seconds"),
+        # FAN Studio 鉴权影响全局 WebSocket 建连，不允许会话级覆写。
+        ("data_sources", "fan_studio", "app_id"),
+        ("data_sources", "fan_studio", "api_key"),
     )
 
     def __init__(self, default_config_ref: dict[str, Any]):

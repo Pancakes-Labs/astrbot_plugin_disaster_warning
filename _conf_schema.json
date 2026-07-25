@@ -37,12 +37,25 @@
       "fan_studio": {
         "description": "FAN Studio WebSocket 数据源",
         "type": "object",
-        "hint": "FAN Studio数据源总开关",
+        "hint": "FAN Studio 数据源总开关。启用前请先配置 appId 与 API Key；用户需到开发者平台选择本应用申请自己的 Key。",
         "items": {
           "enabled": {
-            "description": "启用 FAN Studio 数据源（除 FSSN 外已不可用）",
+            "description": "启用 FAN Studio 数据源",
             "type": "bool",
-            "default": false
+            "default": false,
+            "hint": "启用后将连接 FAN Studio WebSocket。需配置下方 appId 与 API Key，否则会跳过建连。"
+          },
+          "app_id": {
+            "description": "FAN Studio 应用 ID",
+            "type": "string",
+            "default": "97b68b51-ec96-42c3-80d7-83d2bff70d99",
+            "hint": "一般情况下保持默认配置即可，请勿修改。"
+          },
+          "api_key": {
+            "description": "FAN Studio API Key",
+            "type": "string",
+            "default": "",
+            "hint": "到 https://api.fanstudio.tech/dev-platform/ 选择本应用申请。格式通常为 sk- 开头。每个部署实例使用自己的 Key，请勿把 Key 提交到公开仓库或发给他人。"
           },
           "china_earthquake_warning": {
             "description": "中国地震网地震预警",
@@ -114,7 +127,7 @@
             "description": "中国气象局：实时活跃台风",
             "type": "bool",
             "default": false,
-            "hint": "原通过 FAN Studio WebSocket 触发台风推送。FAN 除 FSSN 外已停服，实时台风请改用 EQSC「启用台风轮询」。"
+            "hint": "通过 FAN Studio WebSocket 接收中国气象局台风信息。"
           }
         }
       },
@@ -388,7 +401,7 @@
             "description": "启用融合策略",
             "type": "bool",
             "default": false,
-            "hint": "开启后 Wolfx 仅作补充、不独立推送。FAN 不可用时请保持关闭。"
+            "hint": "开启后 Wolfx 仅作补充、不独立推送。未配置 FAN 鉴权时请保持关闭。"
           },
           "timeout": {
             "description": "等待超时时间",
@@ -412,7 +425,7 @@
             "description": "启用融合策略",
             "type": "bool",
             "default": false,
-            "hint": "开启后 Wolfx 仅作补充、不独立推送。FAN 不可用时请保持关闭。"
+            "hint": "开启后 Wolfx 仅作补充、不独立推送。未配置 FAN 鉴权时请保持关闭。"
           },
           "timeout": {
             "description": "等待超时时间",
