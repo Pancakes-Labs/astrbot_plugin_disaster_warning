@@ -24,7 +24,7 @@ _CONNECTION_GROUP_ALIAS: dict[str, str] = {
 # 物理连接的友好展示名称，供管理后台和 API 使用
 _CONNECTION_DISPLAY_NAME: dict[str, str] = {
     "fan_studio_all": "FAN Studio",
-    "fan_studio_cenc_ir": "FAN Studio 烈度速报",
+    "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
     "p2p_main": "P2P地震情報",
     "wolfx_all": "Wolfx",
     "global_quake": "Global Quake",
@@ -182,12 +182,15 @@ class SourceRuntimeQueryService:
             conn_info["source_ids"] = list(group_source_map.get(group_key, []))
             connections[display_name] = conn_info
 
+        # 总连接数按 catalog 期望的物理通道口径统计（含已停用但应展示的通道），
+        # 避免数据源被临时关闭后从分母消失，出现 6/6 而非 6/7。
+        # expected_groups 已包含 WS（FAN/P2P/Wolfx/GQ）与 HTTP（EQSC/S-Net）。
         return {
             "running": running,
             "uptime": uptime,
             "active_websocket_connections": active_websocket_connections,
             "global_quake_connected": global_quake_connected,
-            "total_connections": len(actual_connections),
+            "total_connections": len(expected_groups),
             "connection_details": actual_connections,
             "connections": connections,
             "sub_source_status": self.build_sub_source_status(),
