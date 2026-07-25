@@ -20,7 +20,7 @@ class SourceHealthMonitor:
         "fan_studio_cenc_ir": "ws.fanstudio.tech",
         "p2p_main": "api.p2pquake.net",
         "wolfx_all": "ws-api.wolfx.jp",
-        "global_quake": "gqm.aloys23.link",
+        "global_quake": "api.aloys23.link",
         # EQSC 为 HTTP 辅助通道，默认探测官方主机；可被 host_overrides 覆盖
         "eqsc": "equake.top",
         # S-Net：MSIL 瓦片源（TCP 443 探测连通性）
