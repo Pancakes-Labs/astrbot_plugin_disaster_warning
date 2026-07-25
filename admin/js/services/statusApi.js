@@ -19,6 +19,10 @@
         getStatus: () => client.request('/status'),
         getStatistics: () => client.request('/statistics'),
         getConnections: () => client.request('/connections'),
+        /** 连接健康 Statuspage：90 天条带 + 事故 */
+        getConnectionHealth: (days = 90) => client.request('/connection-health', {
+            query: { days },
+        }),
         getConfig: () => client.request('/config'),
         sendSimulation: (data) => client.request('/simulate', {
             method: 'POST',
