@@ -21,6 +21,8 @@ function ConnectionHealthPanel() {
     const tipRef = useRef(null);
     const dataRef = useRef(null);
     const lastFullAtRef = useRef(0);
+    // 条带 hover：记录当前命中的 day key，避免间隙抖动重复 setState
+    const hoverKeyRef = useRef('');
 
     const LIVE_INTERVAL_MS = 15000;
     const FULL_INTERVAL_MS = 5 * 60 * 1000;
@@ -292,16 +294,68 @@ function ConnectionHealthPanel() {
         return map[state] || state || '未知';
     };
 
-    const openTip = (event, comp, day) => {
-        const rect = event.currentTarget.getBoundingClientRect();
+    /**
+     * 在整条 bars 容器上做命中测试：按 x 比例映射到 day，
+     * 彻底避开 flex gap / 条间 1px 死区导致的 enter/leave 闪烁。
+     */
+    const handleBarsPointer = useCallback((event, comp, days) => {
+        const list = Array.isArray(days) ? days : [];
+        if (!list.length) return;
+        const container = event.currentTarget;
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 0) return;
+
+        const ratio = (event.clientX - rect.left) / rect.width;
+        const idx = Math.min(
+            list.length - 1,
+            Math.max(0, Math.floor(ratio * list.length)),
+        );
+        const day = list[idx];
+        if (!day) return;
+
+        const key = `${comp.group_key}:${day.day}`;
+        if (hoverKeyRef.current === key) {
+            setHoverTip((prev) => {
+                if (!prev) {
+                    return {
+                        component: comp,
+                        day,
+                        x: event.clientX,
+                        y: rect.top,
+                        barHeight: rect.height,
+                        barKey: key,
+                    };
+                }
+                // 同条内跟随鼠标 x，避免 tip 钉死在条中心；坐标变化很小时跳过
+                if (Math.abs((prev.x || 0) - event.clientX) < 2
+                    && Math.abs((prev.y || 0) - rect.top) < 1) {
+                    return prev;
+                }
+                return {
+                    ...prev,
+                    x: event.clientX,
+                    y: rect.top,
+                    barHeight: rect.height,
+                };
+            });
+            return;
+        }
+
+        hoverKeyRef.current = key;
         setHoverTip({
             component: comp,
             day,
-            x: rect.left + rect.width / 2,
+            x: event.clientX,
             y: rect.top,
             barHeight: rect.height,
+            barKey: key,
         });
-    };
+    }, []);
+
+    const clearBarsPointer = useCallback(() => {
+        hoverKeyRef.current = '';
+        setHoverTip(null);
+    }, []);
 
     const renderBarTooltip = (component, day) => {
         if (!day) return null;
@@ -434,18 +488,21 @@ function ConnectionHealthPanel() {
                             <div
                                 className="connection-health-bars"
                                 aria-label={`${comp.name} 近 ${days.length} 天可用性`}
+                                onMouseMove={(e) => handleBarsPointer(e, comp, days)}
+                                onMouseLeave={clearBarsPointer}
                             >
-                                {days.map((day) => (
-                                    <span
-                                        key={`${comp.group_key}-${day.day}`}
-                                        className={`connection-health-bar is-${day.state || 'not_monitored'}`}
-                                        role="img"
-                                        aria-label={`${comp.name} ${day.day} ${stateLabel(day.state)}`}
-                                        tabIndex={-1}
-                                        onMouseEnter={(e) => openTip(e, comp, day)}
-                                        onMouseLeave={() => setHoverTip(null)}
-                                    />
-                                ))}
+                                {days.map((day) => {
+                                    const barKey = `${comp.group_key}:${day.day}`;
+                                    const isHot = hoverTip?.barKey === barKey;
+                                    return (
+                                        <span
+                                            key={`${comp.group_key}-${day.day}`}
+                                            className={`connection-health-bar is-${day.state || 'not_monitored'}${isHot ? ' is-hot' : ''}`}
+                                            role="img"
+                                            aria-label={`${comp.name} ${day.day} ${stateLabel(day.state)}`}
+                                        />
+                                    );
+                                })}
                             </div>
 
                             <div className="connection-health-row__footer">

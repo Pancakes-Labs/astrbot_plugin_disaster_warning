@@ -1311,13 +1311,17 @@ html.theme-dark .connection-health-bar.is-maintenance {
 .connection-health-row__state.is-not_monitored,
 .connection-health-row__state.is-maintenance { color: #a0aec0; }
 
-/* 条带：经典竖条 */
+/* 条带：经典竖条
+   - 不用 flex gap：间隙是 pointer 死区，会触发 enter/leave 高频闪烁
+   - 分隔用 inset box-shadow，命中区域连续
+   - hover 仅调亮度，禁止 scale（会改命中盒导致抖动） */
 .connection-health-bars {
     display: flex;
-    gap: 1.5px;
+    gap: 0;
     align-items: stretch;
     height: 36px;
     width: 100%;
+    cursor: pointer;
 }
 
 .connection-health-bar {
@@ -1327,17 +1331,21 @@ html.theme-dark .connection-health-bar.is-maintenance {
     border: none;
     padding: 0;
     margin: 0;
-    border-radius: 1px;
-    cursor: pointer;
+    border-radius: 0;
+    cursor: inherit;
     background: #dfe3e8;
-    transition: filter 0.12s ease-out, transform 0.12s ease-out;
+    /* 右侧 1px 视觉分隔，不占用布局间隙 */
+    box-shadow: inset -1px 0 0 color-mix(in srgb, var(--md-sys-color-surface) 88%, transparent);
+    transition: filter 0.12s ease-out;
+    pointer-events: none; /* 事件由父容器统一处理，避免条间死区 */
 }
 
-.connection-health-bar:hover {
+.connection-health-bar:last-child {
+    box-shadow: none;
+}
+
+.connection-health-bar.is-hot {
     filter: brightness(0.92);
-    outline: none;
-    transform: scaleY(1.08);
-    transform-origin: center bottom;
 }
 
 .connection-health-row__footer {
@@ -1547,7 +1555,7 @@ body.dark-theme .connection-health-tooltip {
 @media (max-width: 768px) {
     .connection-health-bars {
         height: 28px;
-        gap: 1px;
+        gap: 0;
     }
 
     .connection-health-row {
