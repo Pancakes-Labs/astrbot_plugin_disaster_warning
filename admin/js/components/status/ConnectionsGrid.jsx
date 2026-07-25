@@ -1,5 +1,5 @@
 const { Box, Typography } = MaterialUI;
-const { useMemo } = React;
+const { useMemo, useState, useCallback } = React;
 
 /**
  * 连接状态网格组件 (ConnectionsGrid)
@@ -7,7 +7,7 @@ const { useMemo } = React;
  * EQSC、NIED S-Net 的实时连接情况、TCP 延迟、重试次数以及启用的子数据源明细。
  *
  * 布局：
- * - 第 1 列：FAN Studio
+ * - 第 1 列：FAN Studio（可翻转：正面主通道 / 背面 CENC 烈度速报独立 WS）
  * - 第 2 列：P2P + NIED S-Net 上下堆叠（connection-stack）
  * - 第 3 列：Wolfx
  * - 第 4 列：Global Quake + EQSC API 上下堆叠
@@ -20,6 +20,36 @@ const { useMemo } = React;
 function ConnectionsGrid() {
     const { state } = useAppContext();
     const { connections, dataLoaded } = state;
+    // FAN 卡片翻转：仅点击触发，默认正面展示主通道子源
+    const [fanFlipped, setFanFlipped] = useState(false);
+
+    /**
+     * 烈度速报相关子源 / 连接键识别集合。
+     * 烈度速报走独立 WS（fan_studio_cenc_ir），不应混入 FAN 主通道正面列表。
+     */
+    const INTENSITY_SUB_SOURCE_KEYS = useMemo(() => new Set([
+        'china_cenc_intensity_report',
+        'cenc_ir_fanstudio',
+        'cenc_ir',
+        'cenc-ir',
+        'fan_studio_cenc_ir',
+    ]), []);
+
+    const isFanIntensityConnectionKey = useCallback((key) => {
+        const k = String(key || '').toLowerCase().trim();
+        if (!k) return false;
+        if (k.includes('烈度')) return true;
+        if (k.includes('cenc_ir') || k.includes('cenc-ir')) return true;
+        if (k.includes('intensity') && k.includes('fan')) return true;
+        return false;
+    }, []);
+
+    const isFanPrimaryConnectionKey = useCallback((key) => {
+        const k = String(key || '').toLowerCase().trim();
+        if (!k) return false;
+        if (!k.includes('fan') || k.includes('eqsc')) return false;
+        return !isFanIntensityConnectionKey(k);
+    }, [isFanIntensityConnectionKey]);
 
     /**
      * 将后端连接条目规范为前端展示模型。
@@ -113,6 +143,22 @@ function ConnectionsGrid() {
             });
         }
 
+        // FAN 主通道正面：剔除烈度速报子源（其属于独立 WS，展示在卡片背面）
+        if (target.id === 'fan') {
+            Object.keys(allSubSources).forEach((key) => {
+                const normalized = String(key || '').trim().toLowerCase();
+                if (
+                    INTENSITY_SUB_SOURCE_KEYS.has(normalized)
+                    || INTENSITY_SUB_SOURCE_KEYS.has(key)
+                    || normalized.includes('intensity')
+                    || normalized.includes('cenc_ir')
+                    || String(key || '').includes('烈度')
+                ) {
+                    delete allSubSources[key];
+                }
+            });
+        }
+
         const rawLatency = matchedEntries.length > 0
             ? (matchedEntries[0][1].latency
                 ?? matchedEntries[0][1].latency_ms
@@ -157,10 +203,8 @@ function ConnectionsGrid() {
             {
                 id: 'fan',
                 displayName: 'FAN Studio',
-                matcher: (key) => {
-                    const k = String(key || '').toLowerCase();
-                    return k.includes('fan') && !k.includes('eqsc');
-                },
+                // 仅匹配主通道；烈度速报独立连接单独解析为 flipSide
+                matcher: isFanPrimaryConnectionKey,
             },
             {
                 id: 'p2p',
@@ -215,6 +259,43 @@ function ConnectionsGrid() {
             return normalizeConnection(target, matchedEntries);
         });
 
+        // 解析 CENC 烈度速报独立连接，挂到 FAN 卡片背面
+        const intensityEntries = Object.entries(connections || {}).filter(([key]) =>
+            isFanIntensityConnectionKey(key)
+        );
+        const intensityConn = normalizeConnection(
+            {
+                id: 'fan_cenc_ir',
+                displayName: 'Fan Studio（烈度速报）',
+                connectionType: 'websocket',
+            },
+            intensityEntries
+        );
+
+        // 背面若无任何 sub_sources，补一条展示项，避免空白
+        if (
+            (!intensityConn.sub_sources || Object.keys(intensityConn.sub_sources).length === 0)
+            && intensityConn.status !== 'disabled'
+        ) {
+            intensityConn.sub_sources = {
+                cenc_ir_fanstudio: intensityConn.status === 'online' || intensityConn.status === 'offline',
+            };
+        } else if (
+            (!intensityConn.sub_sources || Object.keys(intensityConn.sub_sources).length === 0)
+            && intensityEntries.length === 0
+        ) {
+            // 配置侧可能仍有开关，但连接尚未出现在 payload：给禁用占位
+            intensityConn.sub_sources = {
+                cenc_ir_fanstudio: false,
+            };
+        }
+
+        normalized[0] = {
+            ...normalized[0],
+            flippable: true,
+            flipSide: intensityConn,
+        };
+
         // 第 2 列：P2P 上 + S-Net 下；第 4 列：GQ 上 + EQSC 下
         return [
             { type: 'single', items: [normalized[0]] },
@@ -222,7 +303,7 @@ function ConnectionsGrid() {
             { type: 'single', items: [normalized[3]] },
             { type: 'stack', items: [normalized[4], normalized[5]] },
         ];
-    }, [connections]);
+    }, [connections, isFanPrimaryConnectionKey, isFanIntensityConnectionKey, INTENSITY_SUB_SOURCE_KEYS]);
 
     /**
      * 网络延迟区间着色器类映射
@@ -256,6 +337,23 @@ function ConnectionsGrid() {
                 china_typhoon: '中国气象局：实时活跃台风',
                 typhoon_fanstudio: '中国气象局：实时活跃台风',
                 japan_jma_eew: '日本气象厅: 紧急地震速报',
+                // source_id 形态（后端 connection group status 使用）
+                cea_fanstudio: '中国地震预警网 (CEA)',
+                cea_pr_fanstudio: '中国地震预警网 (省级)',
+                cwa_fanstudio: '台湾中央气象署: 强震即时警报',
+                cwa_fanstudio_report: '台湾中央气象署: 地震报告',
+                cenc_fanstudio: '中国地震台网 (CENC)',
+                usgs_fanstudio: '美国地质调查局 (USGS)',
+                sa_fanstudio: '美国 ShakeAlert 地震预警',
+                china_weather_fanstudio: '中国气象局: 气象预警',
+                china_tsunami_fanstudio: '自然资源部海啸预警中心',
+                jma_fanstudio: '日本气象厅: 紧急地震速报',
+            },
+            'Fan Studio（烈度速报）': {
+                china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
+                cenc_ir_fanstudio: '中国地震台网 (CENC) 烈度速报',
+                cenc_ir: '中国地震台网 (CENC) 烈度速报',
+                'cenc-ir': '中国地震台网 (CENC) 烈度速报',
             },
             'P2P地震情報': {
                 japan_jma_eew: '日本气象厅: 紧急地震速报',
@@ -296,116 +394,225 @@ function ConnectionsGrid() {
     };
 
     /**
+     * 渲染延迟行
+     */
+    const renderLatencyLine = (conn) => {
+        if (conn.status === 'disabled') return null;
+        return (
+            <Typography className={`connection-latency-line ${conn.latency === undefined || conn.latency === null ? 'is-pending' : ''}`}>
+                <span className="connection-latency-icon">⏱</span>
+                延迟:
+                {conn.latency !== undefined && conn.latency !== null ? (
+                    <span className={`connection-latency-value connection-latency-value--${getLatencyTone(conn.latency)}`}>
+                        {conn.latency.toFixed(0)}ms
+                    </span>
+                ) : conn.latency === null ? (
+                    <span>无法测量</span>
+                ) : (
+                    <span>测量中...</span>
+                )}
+            </Typography>
+        );
+    };
+
+    /**
+     * 渲染子数据源列表
+     */
+    const renderSubSources = (conn, nameOverride) => {
+        const displayName = nameOverride || conn.name;
+        if (conn.sub_sources && Object.keys(conn.sub_sources).length > 0) {
+            return (
+                <Box className="connection-sub-source-section">
+                    <Box className="connection-sub-source-header">
+                        <Typography variant="caption" className="connection-sub-source-title">
+                            启用的子数据源详情
+                        </Typography>
+                        <Typography variant="caption" className="connection-sub-source-count">
+                            {Object.values(conn.sub_sources).filter(Boolean).length} / {Object.keys(conn.sub_sources).length}
+                        </Typography>
+                    </Box>
+                    <Box className="connection-sub-source-list">
+                        {Object.entries(conn.sub_sources)
+                            .sort(([keyA, enabledA], [keyB, enabledB]) => {
+                                // EQSC：台风在上、海啸在下；其余仍优先展示已启用项
+                                if (conn.name === 'EQSC API' || displayName === 'EQSC API') {
+                                    const eqscOrder = {
+                                        china_typhoon: 0,
+                                        jma_tsunami: 1,
+                                        japan_jma_tsunami: 1,
+                                    };
+                                    const orderA = eqscOrder[keyA];
+                                    const orderB = eqscOrder[keyB];
+                                    if (orderA !== undefined || orderB !== undefined) {
+                                        return (orderA ?? 99) - (orderB ?? 99);
+                                    }
+                                }
+                                return enabledA === enabledB ? 0 : enabledA ? -1 : 1;
+                            })
+                            .map(([key, enabled]) => {
+                                const friendlyName = getScopedSourceName(key, displayName);
+                                return (
+                                    <Box
+                                        key={key}
+                                        className={`connection-sub-source-item ${enabled ? '' : 'is-disabled'}`}
+                                    >
+                                        <Box className="connection-sub-source-dot" />
+                                        <Typography className="connection-sub-source-name">
+                                            {friendlyName}
+                                        </Typography>
+                                        {!enabled && (
+                                            <Typography className="connection-sub-source-off-badge">
+                                                OFF
+                                            </Typography>
+                                        )}
+                                    </Box>
+                                );
+                            })}
+                    </Box>
+                </Box>
+            );
+        }
+
+        if (conn.status !== 'disabled') {
+            return (
+                <Typography variant="caption" className="connection-empty-detail">
+                    无详细子数据源信息
+                </Typography>
+            );
+        }
+        return null;
+    };
+
+    /**
+     * 渲染卡片顶栏（标题 / 重试 / 可选翻转按钮 / 状态灯）
+     */
+    const renderCardHeader = (conn, { showFlipButton = false, flipTitle = '', onFlip = null } = {}) => (
+        <Box className="connection-card-header">
+            <Typography className="connection-title">
+                {conn.name}
+            </Typography>
+
+            <Box className="connection-status-cluster">
+                {conn.retry_count > 0 && conn.status !== 'disabled' && conn.connection_type !== 'http' && (
+                    <Typography variant="caption" className="connection-retry-count">
+                        重试: {conn.retry_count}
+                    </Typography>
+                )}
+                {conn.circuit_open && conn.status !== 'disabled' && (
+                    <Typography variant="caption" className="connection-retry-count">
+                        熔断
+                    </Typography>
+                )}
+                {showFlipButton && (
+                    <button
+                        type="button"
+                        className="connection-flip-toggle"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (typeof onFlip === 'function') onFlip();
+                        }}
+                        title={flipTitle}
+                        aria-label={flipTitle}
+                    >
+                        ⇋
+                    </button>
+                )}
+                <div className="connection-indicator"></div>
+            </Box>
+        </Box>
+    );
+
+    /**
+     * 渲染单面内容（不含外层 connection-item 壳）
+     */
+    const renderCardBody = (conn, options = {}) => (
+        <>
+            {renderCardHeader(conn, options)}
+            <Box className="connection-summary">
+                <Typography className="connection-status-label">
+                    {conn.status_label}
+                </Typography>
+                {renderLatencyLine(conn)}
+            </Box>
+            {options.extraNote ? (
+                <Typography variant="caption" className="connection-flip-note">
+                    {options.extraNote}
+                </Typography>
+            ) : null}
+            {renderSubSources(conn, options.nameOverride)}
+        </>
+    );
+
+    /**
+     * FAN Studio 可翻转卡片：正面主通道，背面 CENC 烈度速报独立连接
+     */
+    const renderFanFlipCard = (conn) => {
+        const back = conn.flipSide || {
+            id: 'fan_cenc_ir',
+            name: 'Fan Studio（烈度速报）',
+            status: 'disabled',
+            status_label: '未启用',
+            retry_count: 0,
+            sub_sources: { cenc_ir_fanstudio: false },
+            latency: undefined,
+            connection_type: 'websocket',
+            circuit_open: false,
+        };
+
+        // 外壳状态色跟随当前可见面，避免翻转后色调与内容不一致。
+        // 正/背面各自独立 normalize：主通道只看 fan_studio_all，烈度速报只看 fan_studio_cenc_ir。
+        const visibleStatus = fanFlipped ? back.status : conn.status;
+        const flipTitle = fanFlipped
+            ? '返回 FAN Studio 主通道'
+            : '查看 Fan Studio（烈度速报）独立连接';
+
+        const handleFlip = () => setFanFlipped((prev) => !prev);
+
+        return (
+            <Box
+                key={conn.id || conn.name}
+                className={`connection-item connection-item-${visibleStatus} connection-item--flippable`}
+            >
+                <div className={`connection-flip-inner${fanFlipped ? ' is-flipped' : ''}`}>
+                    {/* 正面：FAN 主通道 */}
+                    <div className={`connection-flip-face connection-flip-face--front connection-item-${conn.status}`}>
+                        {renderCardBody(conn, {
+                            showFlipButton: true,
+                            flipTitle,
+                            onFlip: handleFlip,
+                        })}
+                    </div>
+
+                    {/* 背面：Fan Studio（烈度速报）独立 WS */}
+                    <div className={`connection-flip-face connection-flip-face--back connection-item-${back.status}`}>
+                        {renderCardBody(back, {
+                            showFlipButton: true,
+                            flipTitle,
+                            onFlip: handleFlip,
+                            nameOverride: 'Fan Studio（烈度速报）',
+                        })}
+                    </div>
+                </div>
+            </Box>
+        );
+    };
+
+    /**
      * 渲染单张连接卡片
      */
     const renderConnectionCard = (conn) => {
+        if (conn.flippable && conn.flipSide) {
+            return renderFanFlipCard(conn);
+        }
+
         const compactClass = conn.compact ? ' connection-item--compact' : '';
         return (
             <Box
                 key={conn.id || conn.name}
                 className={`connection-item connection-item-${conn.status}${compactClass}`}
             >
-                {/* 顶栏：服务名与重连次数、状态指示灯 */}
-                <Box className="connection-card-header">
-                    <Typography className="connection-title">
-                        {conn.name}
-                    </Typography>
-
-                    <Box className="connection-status-cluster">
-                        {conn.retry_count > 0 && conn.status !== 'disabled' && conn.connection_type !== 'http' && (
-                            <Typography variant="caption" className="connection-retry-count">
-                                重试: {conn.retry_count}
-                            </Typography>
-                        )}
-                        {conn.circuit_open && conn.status !== 'disabled' && (
-                            <Typography variant="caption" className="connection-retry-count">
-                                熔断
-                            </Typography>
-                        )}
-                        <div className="connection-indicator"></div>
-                    </Box>
-                </Box>
-
-                {/* 中部：状态文本与网络延迟 */}
-                <Box className="connection-summary">
-                    <Typography className="connection-status-label">
-                        {conn.status_label}
-                    </Typography>
-
-                    {conn.status !== 'disabled' && (
-                        <Typography className={`connection-latency-line ${conn.latency === undefined || conn.latency === null ? 'is-pending' : ''}`}>
-                            <span className="connection-latency-icon">⏱</span>
-                            延迟:
-                            {conn.latency !== undefined && conn.latency !== null ? (
-                                <span className={`connection-latency-value connection-latency-value--${getLatencyTone(conn.latency)}`}>
-                                    {conn.latency.toFixed(0)}ms
-                                </span>
-                            ) : conn.latency === null ? (
-                                <span>无法测量</span>
-                            ) : (
-                                <span>测量中...</span>
-                            )}
-                        </Typography>
-                    )}
-                </Box>
-
-                {/* 尾部：子数据源清单 */}
-                {conn.sub_sources && Object.keys(conn.sub_sources).length > 0 ? (
-                    <Box className="connection-sub-source-section">
-                        <Box className="connection-sub-source-header">
-                            <Typography variant="caption" className="connection-sub-source-title">
-                                启用的子数据源详情
-                            </Typography>
-                            <Typography variant="caption" className="connection-sub-source-count">
-                                {Object.values(conn.sub_sources).filter(Boolean).length} / {Object.keys(conn.sub_sources).length}
-                            </Typography>
-                        </Box>
-                        <Box className="connection-sub-source-list">
-                            {Object.entries(conn.sub_sources)
-                                .sort(([keyA, enabledA], [keyB, enabledB]) => {
-                                    // EQSC：台风在上、海啸在下；其余仍优先展示已启用项
-                                    if (conn.name === 'EQSC API') {
-                                        const eqscOrder = {
-                                            china_typhoon: 0,
-                                            jma_tsunami: 1,
-                                            japan_jma_tsunami: 1,
-                                        };
-                                        const orderA = eqscOrder[keyA];
-                                        const orderB = eqscOrder[keyB];
-                                        if (orderA !== undefined || orderB !== undefined) {
-                                            return (orderA ?? 99) - (orderB ?? 99);
-                                        }
-                                    }
-                                    return enabledA === enabledB ? 0 : enabledA ? -1 : 1;
-                                })
-                                .map(([key, enabled]) => {
-                                    const friendlyName = getScopedSourceName(key, conn.name);
-                                    return (
-                                        <Box
-                                            key={key}
-                                            className={`connection-sub-source-item ${enabled ? '' : 'is-disabled'}`}
-                                        >
-                                            <Box className="connection-sub-source-dot" />
-                                            <Typography className="connection-sub-source-name">
-                                                {friendlyName}
-                                            </Typography>
-                                            {!enabled && (
-                                                <Typography className="connection-sub-source-off-badge">
-                                                    OFF
-                                                </Typography>
-                                            )}
-                                        </Box>
-                                    );
-                                })}
-                        </Box>
-                    </Box>
-                ) : (
-                    conn.status !== 'disabled' && (
-                        <Typography variant="caption" className="connection-empty-detail">
-                            无详细子数据源信息
-                        </Typography>
-                    )
-                )}
+                {renderCardBody(conn)}
             </Box>
         );
     };
