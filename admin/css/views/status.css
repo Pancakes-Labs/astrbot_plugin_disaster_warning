@@ -668,6 +668,7 @@ body.dark-theme .connection-sub-source-off-badge {
     --card-shadow: none;
     --card-hover-border-color: transparent;
     --card-hover-shadow: none;
+
     background: transparent;
     /*
      * 防糊关键：不要对「带 perspective 的 3D 容器」再叠 translate transform。
