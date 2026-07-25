@@ -30,7 +30,7 @@ class SourceHealthMonitor:
     # 静态映射：数据源标识 -> 在管理后台展示的可读中文名称
     DISPLAY_MAP: dict[str, str] = {
         "fan_studio_all": "FAN Studio",
-        "fan_studio_cenc_ir": "FAN Studio 烈度速报",
+        "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
         "p2p_main": "P2P地震情報",
         "wolfx_all": "Wolfx",
         "global_quake": "Global Quake",

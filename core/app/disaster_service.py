@@ -181,6 +181,11 @@ class DisasterWarningService:
         self.eqsc_tsunami_poll_service = EqscTsunamiPollService(self)
         # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
         self.eqsc_typhoon_poll_service = EqscTyphoonPollService(self)
+        # 连接健康采样 / 90 天条带 / 自动事故（Statuspage 风格）
+        # 延迟导入，避免 health ↔ app 包级循环依赖。
+        from ..services.health.connection_health_service import ConnectionHealthService
+
+        self.connection_health_service = ConnectionHealthService(self)
         self._setup_runtime_services()
 
     def _setup_runtime_services(self) -> None:

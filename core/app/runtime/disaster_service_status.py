@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
-from ..services.typhoon_enrichment_service import TyphoonEnrichmentService
 
 
 class DisasterServiceStatusService:
@@ -34,35 +33,11 @@ class DisasterServiceStatusService:
         connection_status = (
             self.service.ws_manager.get_all_connections_status()
         )  # 物理 WebSocket 连接活跃表
-        # 该值反映的是“当前已连上的 WebSocket 连接数量”，
-        # 与配置中声明了多少连接、启动过多少任务并不完全等价。
-        active_websocket_connections = sum(
-            1 for status in connection_status.values() if status["connected"]
-        )
-        # EQSC 为 HTTP 辅助通道，不在 ws_manager 连接表中；
-        # AccessToken 有效时计入活跃连接，配置启用时计入总连接。
-        eqsc_active, eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
-            self.service
-        )
-        active_websocket_connections += eqsc_active
-        # S-Net HTTP 轮询：任务在跑计入活跃，配置启用计入总连接
-        snet_poll = getattr(self.service, "snet_poll_service", None)
-        snet_total = 0
-        try:
-            snet_enabled = bool(
-                self._source_runtime_query.is_source_enabled("snet_msil")
-            )
-        except Exception:
-            snet_enabled = False
-        if snet_enabled:
-            snet_total = 1
-            if snet_poll is not None and getattr(snet_poll, "running", False):
-                active_websocket_connections += 1
-        # global_quake 连接存在一定特殊性，管理端会单独关心它是否在线，
-        # 这里通过任务名快速整理出一个独立布尔状态。
-        global_quake_connected = any(
-            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
-            for task in self.service.connection_tasks
+        # 活跃连接 / Global Quake 标记统一由 SourceRuntimeQueryService 计算，
+        # 避免与 RealtimePayloadBuilder 口径漂移。
+        metrics = self._source_runtime_query.resolve_active_connection_metrics(
+            self.service,
+            connection_status,
         )
 
         snapshot = self._source_runtime_query.build_runtime_snapshot(
@@ -72,16 +47,16 @@ class DisasterServiceStatusService:
             if hasattr(self.service, "start_time")
             else None,
             uptime=self.get_uptime(),
-            active_websocket_connections=active_websocket_connections,
+            active_websocket_connections=int(
+                metrics.get("active_websocket_connections", 0) or 0
+            ),
             message_logger_enabled=self.service.message_logger.enabled
             if self.service.message_logger
             else False,
-            global_quake_connected=global_quake_connected,
+            global_quake_connected=bool(metrics.get("global_quake_connected")),
         )
-        # total_connections 默认只统计 WS；补上 EQSC / S-Net 后与活跃连接口径一致
-        snapshot["total_connections"] = (
-            int(snapshot.get("total_connections", 0) or 0) + eqsc_total + snet_total
-        )
+        # total_connections 已由 runtime snapshot 按 catalog 期望通道统计
+        # （含 EQSC / S-Net / 已停用通道），此处不再二次累加。
         return {
             **snapshot,
             # 统计摘要直接挂在顶层，便于管理端一次请求同时拿到运行状态与统计概览。

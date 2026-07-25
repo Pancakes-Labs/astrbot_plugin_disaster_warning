@@ -74,6 +74,12 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.start()
+                # 连接健康采样：依赖 statistics_manager 已 initialize
+                health_service = getattr(
+                    self.service, "connection_health_service", None
+                )
+                if health_service is not None:
+                    await health_service.start()
                 if getattr(self.service, "notification_center", None):
                     await (
                         self.service.notification_center.start()
@@ -137,6 +143,14 @@ class DisasterServiceLifecycleService:
                 was_running = self.service.running
                 # 提前将运行标记切为 False，阻止新任务继续按“服务运行中”路径工作。
                 self.service.running = False
+
+                # 立刻停连接健康采样：避免 running=False 后仍采样，把通道误记为
+                # major_outage 并触发错误事故开单。
+                health_service = getattr(
+                    self.service, "connection_health_service", None
+                )
+                if health_service is not None:
+                    await health_service.stop()
 
                 # 只有服务曾实际运行过，缓存状态才有落盘意义；
                 # 若初始化后从未成功启动，则无需写出这些状态文件。

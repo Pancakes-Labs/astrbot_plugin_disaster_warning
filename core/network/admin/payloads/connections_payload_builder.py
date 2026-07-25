@@ -151,6 +151,8 @@ class ConnectionsPayloadBuilder:
             connected = False
 
         return {
+            "group_key": "eqsc",
+            "display_name": self.EQSC_DISPLAY_NAME,
             "enabled": enabled,
             "connected": connected,
             "retry_count": 0,
@@ -241,6 +243,8 @@ class ConnectionsPayloadBuilder:
         }
 
         return {
+            "group_key": self.SNET_GROUP_KEY,
+            "display_name": self.SNET_DISPLAY_NAME,
             "enabled": enabled,
             "connected": connected,
             "retry_count": 0,

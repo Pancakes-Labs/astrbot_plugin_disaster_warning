@@ -223,6 +223,11 @@ function StatusView({ onOpenSimulation }) {
                     <ConnectionsGrid />
                 </div>
 
+                {/* 通道健康：90 天条带 + 历史事故 */}
+                <div className="span-12">
+                    <ConnectionHealthPanel />
+                </div>
+
                 {/* 地震预警（EEW）状态卡片 */}
                 <div className="span-12">
                     <EewStatusCard />

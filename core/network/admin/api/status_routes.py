@@ -38,6 +38,43 @@ def register_status_routes(
             logger.error(f"[灾害预警] 获取状态失败: {e}")
             return ApiResponse.error(str(e), status_code=500)
 
+    @app.get("/api/connection-health")
+    async def get_connection_health(days: int = 90, mode: str = "full"):
+        """获取连接健康 Statuspage 载荷。
+
+        mode=full: 实时态 + 90 天条带 + 事故
+        mode=live: 仅实时态（供前端高频轮询）
+        """
+        try:
+            guard_result = ApiResponse.guard_service_ready(disaster_service)
+            if guard_result is not None:
+                return guard_result
+
+            health_service = getattr(
+                disaster_service, "connection_health_service", None
+            )
+            if health_service is None:
+                return ApiResponse.error("连接健康服务未就绪", status_code=503)
+
+            # 允许 1–180；默认 90
+            try:
+                day_count = int(days or 90)
+            except (TypeError, ValueError):
+                day_count = 90
+            day_count = max(1, min(day_count, 180))
+            mode_norm = str(mode or "full").strip().lower()
+            if mode_norm not in {"full", "live"}:
+                mode_norm = "full"
+
+            payload = await health_service.build_statuspage_payload(
+                days=day_count,
+                mode=mode_norm,
+            )
+            return ApiResponse.success(payload)
+        except Exception as e:
+            logger.error(f"[灾害预警] 获取连接健康状态失败: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+
     @app.get("/api/statistics")
     async def get_statistics():
         """获取统计数据。"""
