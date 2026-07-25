@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Any
 
 from .....utils.version import get_plugin_version
-from ....app.services.typhoon_enrichment_service import TyphoonEnrichmentService
 from ....services.display import build_admin_statistics_projection
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
 from .connections_payload_builder import ConnectionsPayloadBuilder
@@ -67,36 +66,10 @@ class RealtimePayloadBuilder:
                 self.disaster_service.ws_manager.get_all_connections_status()
             )
 
-        # 这里统计的是网络接入层的活动连接数，而不是管理端前端页面连接数。
-        active_websocket_connections = sum(
-            1
-            for status in actual_connections.values()
-            if isinstance(status, dict) and status.get("connected")
-        )
-        # EQSC HTTP 通道：AccessToken 有效计入活跃连接。
-        # 总连接数由 snapshot 按 catalog 期望通道统计（含已停用通道）。
-        eqsc_active, _eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
-            self.disaster_service
-        )
-        active_websocket_connections += eqsc_active
-        # S-Net HTTP 轮询：任务在跑计入活跃
-        snet_poll = getattr(self.disaster_service, "snet_poll_service", None)
-        snet_enabled = False
-        try:
-            snet_enabled = bool(
-                self.source_runtime_query.is_source_enabled("snet_msil")
-            )
-        except Exception:
-            snet_enabled = False
-        if (
-            snet_enabled
-            and snet_poll is not None
-            and getattr(snet_poll, "running", False)
-        ):
-            active_websocket_connections += 1
-        global_quake_connected = any(
-            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
-            for task in getattr(self.disaster_service, "connection_tasks", [])
+        # 活跃连接 / Global Quake 标记统一由 SourceRuntimeQueryService 计算。
+        metrics = self.source_runtime_query.resolve_active_connection_metrics(
+            self.disaster_service,
+            actual_connections,
         )
         snapshot = self.source_runtime_query.build_runtime_snapshot(
             actual_connections=actual_connections,
@@ -108,11 +81,13 @@ class RealtimePayloadBuilder:
             uptime=self.disaster_service.get_uptime()
             if hasattr(self.disaster_service, "get_uptime")
             else "未运行",
-            active_websocket_connections=active_websocket_connections,
+            active_websocket_connections=int(
+                metrics.get("active_websocket_connections", 0) or 0
+            ),
             message_logger_enabled=self.disaster_service.message_logger.enabled
             if getattr(self.disaster_service, "message_logger", None)
             else False,
-            global_quake_connected=global_quake_connected,
+            global_quake_connected=bool(metrics.get("global_quake_connected")),
         )
         # total_connections 已在 snapshot 内按期望通道统计，避免 EQSC/S-Net 重复累加。
         return snapshot

@@ -138,6 +138,58 @@ class SourceRuntimeQueryService:
             grouped[group_key][source_id] = self.is_source_enabled(source_id)
         return dict(grouped)
 
+    def resolve_active_connection_metrics(
+        self,
+        service: Any | None,
+        actual_connections: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """统一计算活跃连接数与 Global Quake 在线标记。
+
+        口径：
+        - WebSocket：ws_manager 连接表中 connected=True
+        - EQSC HTTP：AccessToken 有效计入活跃
+        - S-Net HTTP：配置启用且轮询任务 running 计入活跃
+        - total_connections 不在此计算，由 build_runtime_snapshot 按 expected_groups 统计
+        """
+        actual_connections = actual_connections or {}
+        active = sum(
+            1
+            for status in actual_connections.values()
+            if isinstance(status, dict) and bool(status.get("connected"))
+        )
+
+        # 延迟导入，避免 query 层与 app 层形成硬循环依赖。
+        from ...app.services.typhoon_enrichment_service import TyphoonEnrichmentService
+
+        eqsc_active, _eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
+            service
+        )
+        active += int(eqsc_active or 0)
+
+        snet_poll = getattr(service, "snet_poll_service", None) if service else None
+        try:
+            snet_enabled = bool(self.is_source_enabled("snet_msil"))
+        except Exception:
+            snet_enabled = False
+        if (
+            snet_enabled
+            and snet_poll is not None
+            and getattr(snet_poll, "running", False)
+        ):
+            active += 1
+
+        connection_tasks = (
+            getattr(service, "connection_tasks", []) if service is not None else []
+        )
+        global_quake_connected = any(
+            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
+            for task in connection_tasks
+        )
+        return {
+            "active_websocket_connections": int(active),
+            "global_quake_connected": bool(global_quake_connected),
+        }
+
     def build_runtime_snapshot(
         self,
         *,
@@ -174,6 +226,9 @@ class SourceRuntimeQueryService:
                     },
                 )
             )
+            # 稳定主键：健康采样 / 前端映射优先读 group_key，避免展示名微调后失配。
+            conn_info["group_key"] = group_key
+            conn_info["display_name"] = display_name
             # 计算该物理连接链路下是否有任何一个子数据源开关被开启
             conn_info["enabled"] = any(group_status_map.get(group_key, {}).values())
             # 写入当前链路的探测网络延时
