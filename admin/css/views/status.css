@@ -346,32 +346,15 @@
     transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* 堆叠列内的精简卡片（GQ / EQSC） */
+/* 堆叠列内的精简卡片（P2P / S-Net / GQ / EQSC）
+ * 彻底移除头部、摘要及分割线的覆盖，继承基类所有属性，确保全维度精准一致
+ */
 .connection-item--compact {
     min-height: 0;
-    padding: 14px 16px;
-}
-
-.connection-item--compact .connection-card-header {
-    margin-bottom: 10px;
-}
-
-.connection-item--compact .connection-title {
-    font-size: 1rem !important;
-}
-
-.connection-item--compact .connection-summary {
-    margin-bottom: 10px;
-}
-
-.connection-item--compact .connection-sub-source-section {
-    margin-top: 4px;
-    padding-top: 6px;
 }
 
 .status-connection-skeleton-card--compact {
     min-height: 110px;
-    padding: 14px 16px;
 }
 
 .connection-item:hover::before,
@@ -412,13 +395,15 @@ body.dark-theme .connection-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
+    min-height: 24px;
+    margin-bottom: 12px;
 }
 
 /* 接口服务提供商名字 */
 .connection-title {
     font-weight: 700 !important;
     font-size: 1.1rem !important;
+    line-height: 1.3 !important;
     color: var(--md-sys-color-on-surface);
 }
 
@@ -426,6 +411,7 @@ body.dark-theme .connection-item {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: 24px;
 }
 
 /* 通道当前异常重新建立连接次数标志 */
@@ -457,6 +443,11 @@ body.dark-theme .connection-item {
 }
 
 .connection-summary {
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
     margin-bottom: 16px;
 }
 
@@ -678,6 +669,14 @@ body.dark-theme .connection-sub-source-off-badge {
     --card-hover-border-color: transparent;
     --card-hover-shadow: none;
     background: transparent;
+    /*
+     * 防糊关键：不要对「带 perspective 的 3D 容器」再叠 translate transform。
+     * 上浮改用 top 整像素位移，避免 3D 子树二次投影导致文字发糊。
+     */
+    top: 0;
+    transition:
+        top 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        color 0.2s ease-out;
 }
 
 .connection-item--flippable::before {
@@ -685,9 +684,29 @@ body.dark-theme .connection-sub-source-off-badge {
     display: none;
 }
 
-.connection-item--flippable:hover::before,
-.connection-item--flippable:hover > * {
+/*
+ * hover 上浮策略（防糊 + 不破坏翻转）：
+ * 1) 外壳用 top 上浮，禁止 transform（perspective + translate 会糊字）
+ * 2) 禁止 .connection-item:hover > * 把 transform 叠到 flip-inner
+ * 3) 翻转态必须显式保留 rotateY，避免 hover 规则覆盖 is-flipped
+ */
+.connection-item--flippable:hover {
+    top: calc(-1 * var(--hover-lift));
+    /* 覆盖可能继承的 transform 上浮，保持 3D 文字清晰 */
     transform: none;
+}
+
+.connection-item--flippable:hover::before {
+    transform: none;
+}
+
+.connection-item--flippable:hover > .connection-flip-inner {
+    /* 覆盖通用 .connection-item:hover > * 的上浮，避免覆盖 3D 翻转 */
+    transform: none;
+}
+
+.connection-item--flippable:hover > .connection-flip-inner.is-flipped {
+    transform: rotateY(180deg);
 }
 
 .connection-flip-inner {
@@ -720,8 +739,11 @@ body.dark-theme .connection-sub-source-off-badge {
     box-shadow: var(--card-shadow, none);
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    /* 禁止子树在 3D 翻转时被错误透视裁切 */
-    transform: rotateY(0deg);
+    /*
+     * translateZ(0) 把可见面钉在整像素合成层，减轻 perspective 下文字发糊。
+     * 不要对内容子节点再挂 transform/will-change。
+     */
+    transform: rotateY(0deg) translateZ(0);
     transition:
         border-color 0.2s ease-out,
         box-shadow 0.22s ease-out,
@@ -734,7 +756,7 @@ body.dark-theme .connection-sub-source-off-badge {
 }
 
 .connection-flip-face--back {
-    transform: rotateY(180deg);
+    transform: rotateY(180deg) translateZ(0);
     z-index: 1;
 }
 
@@ -843,6 +865,15 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .connection-item--flippable {
+        transition: none;
+    }
+
+    .connection-item--flippable:hover {
+        top: 0;
+        transform: none;
+    }
+
     .connection-flip-inner {
         transition: none;
     }
