@@ -276,16 +276,17 @@ class DatabaseManager:
             """
         )
 
-        # 连接健康日聚合：Asia/Shanghai 日界，驱动 status 条带
+        # 连接健康日聚合：Asia/Shanghai 日界，驱动 status 条带。
+        # minutes_* 使用 REAL，支持亚分钟采样间隔累加（如 15s=0.25min）。
         await cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS connection_health_days (
                 group_key            TEXT NOT NULL,
                 day                  TEXT NOT NULL,
-                minutes_monitored    INTEGER NOT NULL DEFAULT 0,
-                minutes_major        INTEGER NOT NULL DEFAULT 0,
-                minutes_partial      INTEGER NOT NULL DEFAULT 0,
-                minutes_degraded     INTEGER NOT NULL DEFAULT 0,
+                minutes_monitored    REAL NOT NULL DEFAULT 0,
+                minutes_major        REAL NOT NULL DEFAULT 0,
+                minutes_partial      REAL NOT NULL DEFAULT 0,
+                minutes_degraded     REAL NOT NULL DEFAULT 0,
                 worst_state          TEXT NOT NULL DEFAULT 'not_monitored',
                 uptime_ratio         REAL,
                 sample_count         INTEGER NOT NULL DEFAULT 0,

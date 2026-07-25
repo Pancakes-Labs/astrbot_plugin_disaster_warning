@@ -101,96 +101,126 @@ class ConnectionHealthRepository:
         return len(rows)
 
     async def upsert_day_aggregate(self, day_row: dict[str, Any]) -> None:
-        """按 (group_key, day) 累加日聚合分钟数。"""
+        """按 (group_key, day) 原子累加日聚合分钟数。
+
+        minutes_* 使用 REAL，支持亚分钟采样；冲突更新在 SQL 端完成，
+        避免 SELECT + 写回的竞态丢更新。
+        """
         connection = await self._connection()
         group_key = str(day_row.get("group_key") or "").strip()
         day = str(day_row.get("day") or "").strip()
         if not group_key or not day:
             return
 
-        add_monitored = int(day_row.get("minutes_monitored") or 0)
-        add_major = int(day_row.get("minutes_major") or 0)
-        add_partial = int(day_row.get("minutes_partial") or 0)
-        add_degraded = int(day_row.get("minutes_degraded") or 0)
+        def _as_float(value: Any) -> float:
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        add_monitored = _as_float(day_row.get("minutes_monitored"))
+        add_major = _as_float(day_row.get("minutes_major"))
+        add_partial = _as_float(day_row.get("minutes_partial"))
+        add_degraded = _as_float(day_row.get("minutes_degraded"))
         add_samples = int(day_row.get("sample_count") or 1)
         candidate_worst = str(day_row.get("worst_state") or "not_monitored")
         updated_at = str(day_row.get("updated_at") or "").strip() or None
 
+        # worst_state 用 CASE 比较严重度，避免 Python 侧二次读写。
+        # degraded 不扣 uptime；partial/major 按 100% 计入中断。
         cursor = await connection.cursor()
-        await cursor.execute(
-            """
-            SELECT minutes_monitored, minutes_major, minutes_partial,
-                   minutes_degraded, worst_state, sample_count
-            FROM connection_health_days
-            WHERE group_key = ? AND day = ?
-            LIMIT 1
-            """,
-            (group_key, day),
-        )
-        existing = await cursor.fetchone()
-
-        rank = {
-            "not_monitored": 0,
-            "operational": 1,
-            "degraded": 2,
-            "partial_outage": 3,
-            "major_outage": 4,
-            "maintenance": 2,
-        }
-
-        if existing is None:
-            monitored = add_monitored
-            major = add_major
-            partial = add_partial
-            degraded = add_degraded
-            worst = candidate_worst
-            samples = add_samples
-        else:
-            monitored = int(existing["minutes_monitored"] or 0) + add_monitored
-            major = int(existing["minutes_major"] or 0) + add_major
-            partial = int(existing["minutes_partial"] or 0) + add_partial
-            degraded = int(existing["minutes_degraded"] or 0) + add_degraded
-            samples = int(existing["sample_count"] or 0) + add_samples
-            prev_worst = str(existing["worst_state"] or "not_monitored")
-            worst = (
-                candidate_worst
-                if rank.get(candidate_worst, 0) >= rank.get(prev_worst, 0)
-                else prev_worst
-            )
-
-        # degraded 不扣 uptime；partial/major 按 100% 计入中断
-        if monitored > 0:
-            outage = min(monitored, major + partial)
-            uptime_ratio = max(0.0, min(1.0, 1.0 - (outage / float(monitored))))
-        else:
-            uptime_ratio = None
-
         await cursor.execute(
             """
             INSERT INTO connection_health_days (
                 group_key, day, minutes_monitored, minutes_major, minutes_partial,
                 minutes_degraded, worst_state, uptime_ratio, sample_count, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                CASE
+                    WHEN ? > 0 THEN MAX(
+                        0.0,
+                        MIN(
+                            1.0,
+                            1.0 - (MIN(?, ? + ?) / ?)
+                        )
+                    )
+                    ELSE NULL
+                END,
+                ?,
+                COALESCE(?, CURRENT_TIMESTAMP)
+            )
             ON CONFLICT(group_key, day) DO UPDATE SET
-                minutes_monitored = excluded.minutes_monitored,
-                minutes_major = excluded.minutes_major,
-                minutes_partial = excluded.minutes_partial,
-                minutes_degraded = excluded.minutes_degraded,
-                worst_state = excluded.worst_state,
-                uptime_ratio = excluded.uptime_ratio,
-                sample_count = excluded.sample_count,
+                minutes_monitored = connection_health_days.minutes_monitored
+                    + excluded.minutes_monitored,
+                minutes_major = connection_health_days.minutes_major
+                    + excluded.minutes_major,
+                minutes_partial = connection_health_days.minutes_partial
+                    + excluded.minutes_partial,
+                minutes_degraded = connection_health_days.minutes_degraded
+                    + excluded.minutes_degraded,
+                sample_count = connection_health_days.sample_count
+                    + excluded.sample_count,
+                worst_state = CASE
+                    WHEN CASE excluded.worst_state
+                        WHEN 'major_outage' THEN 4
+                        WHEN 'partial_outage' THEN 3
+                        WHEN 'degraded' THEN 2
+                        WHEN 'maintenance' THEN 2
+                        WHEN 'operational' THEN 1
+                        ELSE 0
+                    END >= CASE connection_health_days.worst_state
+                        WHEN 'major_outage' THEN 4
+                        WHEN 'partial_outage' THEN 3
+                        WHEN 'degraded' THEN 2
+                        WHEN 'maintenance' THEN 2
+                        WHEN 'operational' THEN 1
+                        ELSE 0
+                    END THEN excluded.worst_state
+                    ELSE connection_health_days.worst_state
+                END,
+                uptime_ratio = CASE
+                    WHEN (
+                        connection_health_days.minutes_monitored
+                        + excluded.minutes_monitored
+                    ) > 0 THEN MAX(
+                        0.0,
+                        MIN(
+                            1.0,
+                            1.0 - (
+                                MIN(
+                                    connection_health_days.minutes_monitored
+                                    + excluded.minutes_monitored,
+                                    connection_health_days.minutes_major
+                                    + excluded.minutes_major
+                                    + connection_health_days.minutes_partial
+                                    + excluded.minutes_partial
+                                )
+                                / (
+                                    connection_health_days.minutes_monitored
+                                    + excluded.minutes_monitored
+                                )
+                            )
+                        )
+                    )
+                    ELSE NULL
+                END,
                 updated_at = excluded.updated_at
             """,
             (
                 group_key,
                 day,
-                monitored,
-                major,
-                partial,
-                degraded,
-                worst,
-                uptime_ratio,
-                samples,
+                add_monitored,
+                add_major,
+                add_partial,
+                add_degraded,
+                candidate_worst,
+                # INSERT 时 uptime_ratio 计算参数
+                add_monitored,
+                add_monitored,
+                add_major,
+                add_partial,
+                add_monitored if add_monitored > 0 else 1.0,
+                add_samples,
                 updated_at,
             ),
         )
@@ -261,36 +291,53 @@ class ConnectionHealthRepository:
         return int(cursor.lastrowid or 0)
 
     async def update_incident(self, incident_id: int, fields: dict[str, Any]) -> None:
-        """更新事故字段。"""
+        """更新事故字段（固定列白名单，避免动态拼 SQL）。"""
         if not fields:
             return
         connection = await self._connection()
-        allowed = {
-            "severity",
-            "status",
-            "title",
-            "started_at",
-            "ended_at",
-            "timeline_json",
-            "timeline",
-        }
-        sets: list[str] = []
-        params: list[Any] = []
+
+        # 仅允许这些列；timeline 统一落到 timeline_json。
+        column_values: dict[str, Any] = {}
         for key, value in fields.items():
-            if key not in allowed and key != "timeline":
-                continue
-            col = "timeline_json" if key in {"timeline", "timeline_json"} else key
-            if key == "timeline" and not isinstance(value, str):
-                value = json.dumps(value, ensure_ascii=False)
-            sets.append(f"{col} = ?")
-            params.append(value)
-        if not sets:
+            if key == "timeline":
+                column_values["timeline_json"] = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False)
+                )
+            elif key == "timeline_json":
+                column_values["timeline_json"] = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False)
+                )
+            elif key in {"severity", "status", "title", "started_at", "ended_at"}:
+                column_values[key] = value
+
+        if not column_values:
             return
-        sets.append("updated_at = CURRENT_TIMESTAMP")
+
+        # 固定列顺序，SQL 文本由白名单列名拼接（非用户输入）。
+        ordered_cols = [
+            col
+            for col in (
+                "severity",
+                "status",
+                "title",
+                "started_at",
+                "ended_at",
+                "timeline_json",
+            )
+            if col in column_values
+        ]
+        set_sql = ", ".join(f"{col} = ?" for col in ordered_cols)
+        set_sql = f"{set_sql}, updated_at = CURRENT_TIMESTAMP"
+        params = [column_values[col] for col in ordered_cols]
         params.append(int(incident_id))
+
         cursor = await connection.cursor()
         await cursor.execute(
-            f"UPDATE connection_incidents SET {', '.join(sets)} WHERE id = ?",
+            f"UPDATE connection_incidents SET {set_sql} WHERE id = ?",
             params,
         )
         await connection.commit()

@@ -113,6 +113,11 @@ class ConnectionHealthService:
         self._trackers: dict[str, dict[str, Any]] = {}
         self._last_purge_at: float = 0.0
         self._display_tz = "UTC+8"
+        # 完整 Statuspage 历史载荷短 TTL 缓存，降低管理端轮询对 DB 的压力
+        self._history_cache: dict[str, Any] | None = None
+        self._history_cache_key: str = ""
+        self._history_cache_at: float = 0.0
+        self._history_cache_ttl_seconds: float = 45.0
 
     # ──────────────────────────── 生命周期 ────────────────────────────
 
@@ -132,6 +137,11 @@ class ConnectionHealthService:
         if self._running:
             return
         self._running = True
+        # 启动时从 DB 回填未关闭事故，避免进程重启后 tracker 丢失导致重复开单。
+        try:
+            await self._hydrate_open_incidents()
+        except Exception as exc:
+            logger.warning(f"[灾害预警] 连接健康事故状态回填失败: {exc}")
         self._task = asyncio.create_task(self._loop())
         logger.info("[灾害预警] 连接健康采样服务已启动")
 
@@ -146,9 +156,33 @@ class ConnectionHealthService:
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"[灾害预警] 连接健康采样停止时异常: {exc}")
         logger.info("[灾害预警] 连接健康采样服务已停止")
+
+    async def _hydrate_open_incidents(self) -> None:
+        """从数据库恢复各连接组未关闭事故到内存 tracker。"""
+        repo = self._ensure_repo()
+        if repo is None:
+            return
+        for group_key in COMPONENT_ORDER:
+            open_inc = await repo.get_open_incident(group_key)
+            if open_inc is None:
+                continue
+            tracker = self._trackers.setdefault(
+                group_key,
+                {
+                    "bad_since": None,
+                    "good_since": None,
+                    "last_state": "not_monitored",
+                    "open_incident_id": None,
+                },
+            )
+            tracker["open_incident_id"] = int(open_inc.get("id") or 0) or None
+            started = self._parse_iso(open_inc.get("started_at"))
+            if started is not None:
+                tracker["bad_since"] = started
+            tracker["good_since"] = None
 
     async def _loop(self) -> None:
         # 启动后多等一会，让 WS/HTTP 通道先完成首轮建连与鉴权
@@ -221,13 +255,19 @@ class ConnectionHealthService:
         )
         connections = builder.build()
 
-        # display_name -> info；同时按别名映射到 group_key，避免文案微调后匹配失败
+        # 优先使用 payload 内稳定 group_key；展示名仅作兼容回退。
         by_display = connections if isinstance(connections, dict) else {}
         by_group: dict[str, dict[str, Any]] = {}
         for disp_name, info in by_display.items():
+            if not isinstance(info, dict):
+                continue
+            explicit_key = str(info.get("group_key") or "").strip()
+            if explicit_key:
+                by_group[explicit_key] = info
+                continue
             key = str(disp_name or "").strip()
             mapped = DISPLAY_NAME_ALIASES.get(key)
-            if mapped and isinstance(info, dict):
+            if mapped:
                 by_group[mapped] = info
 
         # 也读 raw WS status，补 retry / last_active
@@ -387,8 +427,9 @@ class ConnectionHealthService:
         now = self._now_utc()
         ts = self._iso(now)
         day = self._day_key(now)
-        # 每样本代表的监控分钟（按采样间隔折算，上限 5 分钟防长暂停）
-        minutes = max(0.25, min(self.sample_interval / 60.0, 5.0))
+        # 每样本代表的监控分钟（按采样间隔折算，上限 5 分钟防长暂停）。
+        # 使用浮点分钟写入 REAL 列，避免 int(0.25)=0 导致日聚合永不累加。
+        minutes = float(max(0.25, min(self.sample_interval / 60.0, 5.0)))
 
         components = self._build_live_components()
         samples: list[dict[str, Any]] = []
@@ -485,18 +526,23 @@ class ConnectionHealthService:
         is_bad = enabled and state in {"major_outage", "partial_outage"}
         is_good = enabled and state in {"operational", "degraded"}
 
+        # 始终按 group_key 查库恢复未关闭事故，避免仅依赖内存 id（进程重启后会丢）。
+        open_inc = await repo.get_open_incident(group_key)
+        if open_inc is not None:
+            tracker["open_incident_id"] = int(open_inc.get("id") or 0) or None
+            if tracker.get("bad_since") is None:
+                started = self._parse_iso(open_inc.get("started_at"))
+                if started is not None:
+                    tracker["bad_since"] = started
+        else:
+            tracker["open_incident_id"] = None
+
         if is_bad:
             tracker["good_since"] = None
             if tracker["bad_since"] is None:
                 tracker["bad_since"] = now
             bad_for = (now - tracker["bad_since"]).total_seconds()
             severity = "major_outage" if state == "major_outage" else "partial_outage"
-
-            open_inc = None
-            if tracker.get("open_incident_id"):
-                open_inc = await repo.get_open_incident(group_key)
-                if open_inc is None:
-                    tracker["open_incident_id"] = None
 
             if open_inc is None and bad_for >= OPEN_INCIDENT_SECONDS:
                 # 忽略极短闪断：若 bad_since 距今虽够，但中间曾恢复过由 good_since 重置
@@ -551,12 +597,6 @@ class ConnectionHealthService:
                 tracker["good_since"] = now
             good_for = (now - tracker["good_since"]).total_seconds()
 
-            open_inc = None
-            if tracker.get("open_incident_id"):
-                open_inc = await repo.get_open_incident(group_key)
-                if open_inc is None:
-                    tracker["open_incident_id"] = None
-
             if open_inc is not None and good_for >= RESOLVE_INCIDENT_SECONDS:
                 # 若事故总时长极短，仍关闭但 timeline 标注闪断恢复
                 timeline = list(open_inc.get("timeline") or [])
@@ -583,57 +623,170 @@ class ConnectionHealthService:
             # not_monitored：关闭进行中事故（用户关闭通道）
             tracker["bad_since"] = None
             tracker["good_since"] = None
-            if tracker.get("open_incident_id"):
-                open_inc = await repo.get_open_incident(group_key)
-                if open_inc is not None:
-                    timeline = list(open_inc.get("timeline") or [])
-                    timeline.append(
-                        {
-                            "at": self._iso(now),
-                            "status": "resolved",
-                            "message": f"{display_name} 已停用监控",
-                        }
-                    )
-                    await repo.update_incident(
-                        int(open_inc["id"]),
-                        {
-                            "status": "resolved",
-                            "ended_at": self._iso(now),
-                            "timeline": timeline,
-                        },
-                    )
-                tracker["open_incident_id"] = None
+            if open_inc is not None:
+                timeline = list(open_inc.get("timeline") or [])
+                timeline.append(
+                    {
+                        "at": self._iso(now),
+                        "status": "resolved",
+                        "message": f"{display_name} 已停用监控",
+                    }
+                )
+                await repo.update_incident(
+                    int(open_inc["id"]),
+                    {
+                        "status": "resolved",
+                        "ended_at": self._iso(now),
+                        "timeline": timeline,
+                    },
+                )
+            tracker["open_incident_id"] = None
 
         tracker["last_state"] = state
 
     # ──────────────────────────── 查询 API 载荷 ────────────────────────────
 
-    async def build_statuspage_payload(self, *, days: int = 90) -> dict[str, Any]:
-        """构建管理端 Statuspage 风格完整载荷。"""
+    def _build_overall_block(
+        self,
+        *,
+        monitored_states: list[str],
+        now: datetime,
+    ) -> dict[str, Any]:
+        running = bool(getattr(self.service, "running", False))
+        in_grace = self._startup_grace_active()
+        overall = self._overall_state(monitored_states, running=running)
+        if not running:
+            overall_label = "服务未运行"
+        elif in_grace and overall in {"degraded", "operational", "not_monitored"}:
+            # 建连宽限期内：即使多路仍在握手，也不用「核心中断」吓人
+            overall_label = (
+                "通道建连中" if overall == "degraded" else self._overall_label(overall)
+            )
+        else:
+            overall_label = self._overall_label(overall)
+        return {
+            "state": overall if running else "major_outage",
+            "label": overall_label,
+            "updated_at": self._iso(now),
+            "updated_at_display": self._format_display_datetime(now),
+            "running": running,
+        }
+
+    def _legend(self) -> list[dict[str, str]]:
+        return [
+            {"state": "operational", "label": "正常", "color": "green"},
+            {"state": "degraded", "label": "降级", "color": "yellow"},
+            {"state": "partial_outage", "label": "部分中断", "color": "orange"},
+            {"state": "major_outage", "label": "中断", "color": "red"},
+            {"state": "not_monitored", "label": "未启用", "color": "gray"},
+        ]
+
+    @staticmethod
+    def _uptime_percent(uptime_ratio: float | None) -> float | None:
+        if uptime_ratio is None:
+            return None
+        # 保留两位小数，与前端 toFixed(2) 对齐，避免假精度。
+        return round(float(uptime_ratio) * 10000) / 100.0
+
+    def build_live_status_payload(self) -> dict[str, Any]:
+        """仅构建实时态（不读历史日聚合/事故），供高频轮询。"""
+        now = self._now_utc()
+        live_components = self._build_live_components()
+        monitored_states: list[str] = []
+        components_out: list[dict[str, Any]] = []
+        for comp in live_components:
+            state = str(comp.get("state") or "not_monitored")
+            if state != "not_monitored":
+                monitored_states.append(state)
+            group_key = str(comp.get("group_key") or "")
+            components_out.append(
+                {
+                    "group_key": group_key,
+                    "name": comp.get("display_name")
+                    or COMPONENT_DISPLAY_NAMES.get(group_key, group_key),
+                    "current_state": state,
+                    "current_label": comp.get("status_label")
+                    or STATE_LABELS_ZH.get(state, state),
+                    "enabled": bool(comp.get("enabled")),
+                    "connected": bool(comp.get("connected")),
+                    "latency_ms": comp.get("latency_ms"),
+                    "retry_count": int(comp.get("retry_count") or 0),
+                    "circuit_open": bool(comp.get("circuit_open")),
+                }
+            )
+        return {
+            "overall": self._build_overall_block(
+                monitored_states=monitored_states, now=now
+            ),
+            "legend": self._legend(),
+            "meta": {
+                "mode": "live",
+                "timezone": self._display_tz,
+                "sample_interval_seconds": self.sample_interval,
+            },
+            "components": components_out,
+        }
+
+    async def build_statuspage_payload(
+        self, *, days: int = 90, mode: str = "full"
+    ) -> dict[str, Any]:
+        """构建管理端 Statuspage 风格载荷。
+
+        mode:
+        - full: 实时态 + 90 天条带 + 事故（历史部分短 TTL 缓存）
+        - live: 仅实时态，不读库
+        """
+        mode_norm = str(mode or "full").strip().lower()
+        if mode_norm == "live":
+            return self.build_live_status_payload()
+
         days = max(1, min(int(days or 90), 180))
         now = self._now_utc()
         local_today = self._to_display(now).date()
         start_day = (local_today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        cache_key = f"full:{days}:{start_day}"
 
         live_components = self._build_live_components()
         live_by_key = {c["group_key"]: c for c in live_components}
 
-        repo = self._ensure_repo()
         day_rows: list[dict[str, Any]] = []
         incidents: list[dict[str, Any]] = []
-        if repo is not None:
-            try:
-                day_rows = await repo.list_day_aggregates(
-                    days=days,
-                    group_keys=list(COMPONENT_ORDER),
-                    since_day=start_day,
-                )
-            except Exception as exc:
-                logger.warning(f"[灾害预警] 读取健康日聚合失败: {exc}")
-            try:
-                incidents = await repo.list_incidents(days=max(days, 14), limit=200)
-            except Exception as exc:
-                logger.warning(f"[灾害预警] 读取通道事故失败: {exc}")
+        use_history_cache = False
+        try:
+            mono = asyncio.get_running_loop().time()
+        except RuntimeError:
+            mono = 0.0
+        if (
+            self._history_cache is not None
+            and self._history_cache_key == cache_key
+            and mono
+            and (mono - self._history_cache_at) < self._history_cache_ttl_seconds
+        ):
+            use_history_cache = True
+            day_rows = list(self._history_cache.get("day_rows") or [])
+            incidents = list(self._history_cache.get("incidents") or [])
+
+        if not use_history_cache:
+            repo = self._ensure_repo()
+            if repo is not None:
+                try:
+                    day_rows = await repo.list_day_aggregates(
+                        days=days,
+                        group_keys=list(COMPONENT_ORDER),
+                        since_day=start_day,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[灾害预警] 读取健康日聚合失败: {exc}")
+                try:
+                    incidents = await repo.list_incidents(days=max(days, 14), limit=200)
+                except Exception as exc:
+                    logger.warning(f"[灾害预警] 读取通道事故失败: {exc}")
+            self._history_cache = {
+                "day_rows": day_rows,
+                "incidents": incidents,
+            }
+            self._history_cache_key = cache_key
+            self._history_cache_at = mono
 
         # group -> day -> row
         day_map: dict[str, dict[str, dict[str, Any]]] = {}
@@ -690,8 +843,8 @@ class ConnectionHealthService:
                     day_str, row, live if offset == days - 1 else None
                 )
                 bars.append(bar)
-                if row and int(row.get("minutes_monitored") or 0) > 0:
-                    mon = float(row.get("minutes_monitored") or 0)
+                mon = float((row or {}).get("minutes_monitored") or 0)
+                if row is not None and mon > 0:
                     major = float(row.get("minutes_major") or 0)
                     partial = float(row.get("minutes_partial") or 0)
                     uptime_den += mon
@@ -720,27 +873,12 @@ class ConnectionHealthService:
                     "retry_count": int(live.get("retry_count") or 0),
                     "circuit_open": bool(live.get("circuit_open")),
                     "uptime_ratio": uptime_ratio,
-                    "uptime_percent": (
-                        round(uptime_ratio * 1000) / 10.0
-                        if uptime_ratio is not None
-                        else None
-                    ),
+                    "uptime_percent": self._uptime_percent(uptime_ratio),
                     "days": bars,
                 }
             )
 
-        running = bool(getattr(self.service, "running", False))
-        in_grace = self._startup_grace_active()
-        overall = self._overall_state(monitored_states, running=running)
-        if not running:
-            overall_label = "服务未运行"
-        elif in_grace and overall in {"degraded", "operational", "not_monitored"}:
-            # 建连宽限期内：即使多路仍在握手，也不用「核心中断」吓人
-            overall_label = (
-                "通道建连中" if overall == "degraded" else self._overall_label(overall)
-            )
-        else:
-            overall_label = self._overall_label(overall)
+        overall = self._build_overall_block(monitored_states=monitored_states, now=now)
 
         # Past incidents 按日分组
         incidents_by_day = self._group_incidents_by_day(
@@ -748,25 +886,15 @@ class ConnectionHealthService:
         )
 
         return {
-            "overall": {
-                "state": overall if running else "major_outage",
-                "label": overall_label,
-                "updated_at": self._iso(now),
-                "updated_at_display": self._format_display_datetime(now),
-                "running": running,
-            },
-            "legend": [
-                {"state": "operational", "label": "正常", "color": "green"},
-                {"state": "degraded", "label": "降级", "color": "yellow"},
-                {"state": "partial_outage", "label": "部分中断", "color": "orange"},
-                {"state": "major_outage", "label": "中断", "color": "red"},
-                {"state": "not_monitored", "label": "未启用", "color": "gray"},
-            ],
+            "overall": overall,
+            "legend": self._legend(),
             "meta": {
+                "mode": "full",
                 "days": days,
                 "timezone": self._display_tz,
                 "uptime_note": f"近 {days} 天可用性",
                 "sample_interval_seconds": self.sample_interval,
+                "history_cache_ttl_seconds": self._history_cache_ttl_seconds,
             },
             "components": components_out,
             "incidents": filtered_incidents[:100],
@@ -795,10 +923,11 @@ class ConnectionHealthService:
                 "uptime_ratio": None,
             }
 
-        monitored = int(row.get("minutes_monitored") or 0)
-        major = int(row.get("minutes_major") or 0)
-        partial = int(row.get("minutes_partial") or 0)
-        degraded = int(row.get("minutes_degraded") or 0)
+        # 分钟字段为 REAL，读取时用 float，避免截断亚分钟样本。
+        monitored = float(row.get("minutes_monitored") or 0)
+        major = float(row.get("minutes_major") or 0)
+        partial = float(row.get("minutes_partial") or 0)
+        degraded = float(row.get("minutes_degraded") or 0)
 
         if monitored <= 0:
             state = "not_monitored"
