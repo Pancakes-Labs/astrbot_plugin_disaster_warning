@@ -57,6 +57,8 @@ class EqscTyphoonClient(EqscHttpClient):
         self,
         typhoon_id: str,
         access_token: str | None = None,
+        *,
+        use_cache: bool = True,
     ) -> dict[str, Any] | None:
         """按台风 ID 查询台风详细数据。
 
@@ -67,15 +69,17 @@ class EqscTyphoonClient(EqscHttpClient):
         Args:
             typhoon_id: EQSC 格式的台风 ID（4位）。
             access_token: 可复用的 AccessToken；若未提供则内部自行获取。
+            use_cache: 为 False 时强制绕过详情缓存（查询指令侧使用）。
 
         Returns:
             台风数据字典，或 None 表示查询失败/未找到。
         """
         # 检查缓存
-        cached = self._cache.get(typhoon_id)
-        if cached and self._is_cache_valid(cached[1]):
-            logger.debug(f"[灾害预警] EQSC 台风 {typhoon_id} 命中缓存")
-            return cached[0]
+        if use_cache:
+            cached = self._cache.get(typhoon_id)
+            if cached and self._is_cache_valid(cached[1]):
+                logger.debug(f"[灾害预警] EQSC 台风 {typhoon_id} 命中缓存")
+                return cached[0]
 
         # 获取 AccessToken
         access_token = await self._resolve_access_token(access_token)

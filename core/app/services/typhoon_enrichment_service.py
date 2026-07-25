@@ -481,12 +481,17 @@ class TyphoonEnrichmentService:
         typhoon_id: str,
         name: str = "",
         name_en: str = "",
+        *,
+        use_cache: bool = True,
     ) -> dict[str, Any] | None:
         """尝试从 EQSC 获取台风数据（单次尝试，含 ID 查询 + 名称匹配兜底）。
 
         先统一获取一次 AccessToken，再复用到 ID 查询和名称兜底查询中，
         避免单次重试内重复鉴权导致日志刷两遍。
         缓存命中时 fetch 方法内部会跳过 token 使用，无需额外处理。
+
+        Args:
+            use_cache: 查询指令应传 False，避免短缓存挡住最新编报。
         """
         # 统一获取一次 AccessToken，复用到后续所有查询
         access_token = await self._token_manager.get_access_token()
@@ -497,7 +502,9 @@ class TyphoonEnrichmentService:
         eqsc_id = to_eqsc_id(typhoon_id)
         if eqsc_id:
             result = await self._typhoon_client.fetch_typhoon_by_id(
-                eqsc_id, access_token=access_token
+                eqsc_id,
+                access_token=access_token,
+                use_cache=use_cache,
             )
             if result:
                 return result
@@ -505,7 +512,8 @@ class TyphoonEnrichmentService:
         # ID 查询无结果，回退到无参查询 + 名称匹配
         if name or name_en:
             typhoon_list = await self._typhoon_client.fetch_typhoon_list(
-                access_token=access_token
+                access_token=access_token,
+                use_cache=use_cache,
             )
             if typhoon_list:
                 matched = self._typhoon_client.find_typhoon_by_name(
@@ -612,11 +620,15 @@ class TyphoonEnrichmentService:
         *,
         name: str = "",
         name_en: str = "",
+        use_cache: bool = False,
     ) -> dict[str, Any] | None:
         """按 ID/名称查询单条 EQSC 台风详情，供查询指令与管理端复用。
 
         优先按台风编号精确查询；编号缺失或未命中时，可按中英文名在列表中匹配。
         未启用、熔断或鉴权失败时返回 None，由上层决定是否回退本地数据库。
+
+        默认 use_cache=False：用户主动查询应尽量拿到最新编报，
+        避免与轮询侧短缓存互相污染。
         """
         if not self.is_enabled:
             return None
@@ -629,6 +641,7 @@ class TyphoonEnrichmentService:
                 str(typhoon_id or "").strip(),
                 str(name or "").strip(),
                 str(name_en or "").strip(),
+                use_cache=use_cache,
             )
             if result:
                 self._record_success()
@@ -640,11 +653,17 @@ class TyphoonEnrichmentService:
             logger.error(f"[灾害预警] EQSC 台风详情查询异常: {e}")
             return None
 
-    async def fetch_history_typhoons(self) -> list[dict[str, Any]]:
+    async def fetch_history_typhoons(
+        self,
+        *,
+        use_cache: bool = False,
+    ) -> list[dict[str, Any]]:
         """获取 EQSC 台风列表（至多 20 个最新台风，含历史）。
 
         无参查询 /typhoonNMC.json 时 EQSC 返回至多 20 个最新台风数据，
         包含已消亡的历史台风，可用于数据库冷启动重建。
+
+        默认 use_cache=False：查询/重建场景优先新鲜数据。
         """
         if not self.is_enabled:
             return []
@@ -662,7 +681,8 @@ class TyphoonEnrichmentService:
                 return []
 
             typhoon_list = await self._typhoon_client.fetch_typhoon_list(
-                access_token=access_token
+                access_token=access_token,
+                use_cache=use_cache,
             )
             if typhoon_list:
                 self._record_success()
