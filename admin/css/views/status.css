@@ -346,32 +346,15 @@
     transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* 堆叠列内的精简卡片（GQ / EQSC） */
+/* 堆叠列内的精简卡片（P2P / S-Net / GQ / EQSC）
+ * 彻底移除头部、摘要及分割线的覆盖，继承基类所有属性，确保全维度精准一致
+ */
 .connection-item--compact {
     min-height: 0;
-    padding: 14px 16px;
-}
-
-.connection-item--compact .connection-card-header {
-    margin-bottom: 10px;
-}
-
-.connection-item--compact .connection-title {
-    font-size: 1rem !important;
-}
-
-.connection-item--compact .connection-summary {
-    margin-bottom: 10px;
-}
-
-.connection-item--compact .connection-sub-source-section {
-    margin-top: 4px;
-    padding-top: 6px;
 }
 
 .status-connection-skeleton-card--compact {
     min-height: 110px;
-    padding: 14px 16px;
 }
 
 .connection-item:hover::before,
@@ -412,13 +395,15 @@ body.dark-theme .connection-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
+    min-height: 24px;
+    margin-bottom: 12px;
 }
 
 /* 接口服务提供商名字 */
 .connection-title {
     font-weight: 700 !important;
     font-size: 1.1rem !important;
+    line-height: 1.3 !important;
     color: var(--md-sys-color-on-surface);
 }
 
@@ -426,6 +411,7 @@ body.dark-theme .connection-item {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: 24px;
 }
 
 /* 通道当前异常重新建立连接次数标志 */
@@ -457,6 +443,11 @@ body.dark-theme .connection-item {
 }
 
 .connection-summary {
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
     margin-bottom: 16px;
 }
 
@@ -663,7 +654,238 @@ body.dark-theme .connection-sub-source-off-badge {
 }
 
 /* ==========================================================================
-   6. 顶部实报横滚动条 (EEW & Earthquake News Ticker)
+   6 FAN Studio 翻转卡片 (Front: 主通道 / Back: CENC 烈度速报独立 WS)
+   ========================================================================== */
+.connection-item--flippable {
+    /* 翻转壳：保留原 connection-item 命中区域，内部做 3D 翻面 */
+    padding: 0;
+    min-height: 140px;
+    cursor: default;
+    perspective: 1400px;
+    /* 外壳本身不再画底色，改由当前可见面承担，避免双层边框 */
+    --card-bg: transparent;
+    --card-border-color: transparent;
+    --card-shadow: none;
+    --card-hover-border-color: transparent;
+    --card-hover-shadow: none;
+
+    background: transparent;
+    /*
+     * 防糊关键：不要对「带 perspective 的 3D 容器」再叠 translate transform。
+     * 上浮改用 top 整像素位移，避免 3D 子树二次投影导致文字发糊。
+     */
+    top: 0;
+    transition:
+        top 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        color 0.2s ease-out;
+}
+
+.connection-item--flippable::before {
+    /* 外壳不绘制视觉面，避免与 flip face 叠边 */
+    display: none;
+}
+
+/*
+ * hover 上浮策略（防糊 + 不破坏翻转）：
+ * 1) 外壳用 top 上浮，禁止 transform（perspective + translate 会糊字）
+ * 2) 禁止 .connection-item:hover > * 把 transform 叠到 flip-inner
+ * 3) 翻转态必须显式保留 rotateY，避免 hover 规则覆盖 is-flipped
+ */
+.connection-item--flippable:hover {
+    top: calc(-1 * var(--hover-lift));
+    /* 覆盖可能继承的 transform 上浮，保持 3D 文字清晰 */
+    transform: none;
+}
+
+.connection-item--flippable:hover::before {
+    transform: none;
+}
+
+.connection-item--flippable:hover > .connection-flip-inner {
+    /* 覆盖通用 .connection-item:hover > * 的上浮，避免覆盖 3D 翻转 */
+    transform: none;
+}
+
+.connection-item--flippable:hover > .connection-flip-inner.is-flipped {
+    transform: rotateY(180deg);
+}
+
+.connection-flip-inner {
+    position: relative;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    transform-style: preserve-3d;
+    transform-origin: center center;
+    transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.connection-flip-inner.is-flipped {
+    transform: rotateY(180deg);
+}
+
+.connection-flip-face {
+    /* 两面叠在同一网格单元，高度取较高一面，避免翻转时塌陷 */
+    grid-area: 1 / 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 140px;
+    height: 100%;
+    padding: 20px;
+    border-radius: 16px;
+    border: 1px solid var(--card-border-color, var(--glass-border));
+    background: var(--card-bg, var(--md-sys-color-surface));
+    box-shadow: var(--card-shadow, none);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    /*
+     * translateZ(0) 把可见面钉在整像素合成层，减轻 perspective 下文字发糊。
+     * 不要对内容子节点再挂 transform/will-change。
+     */
+    transform: rotateY(0deg) translateZ(0);
+    transition:
+        border-color 0.2s ease-out,
+        box-shadow 0.22s ease-out,
+        background 0.2s ease-out;
+}
+
+.connection-flip-face--front {
+    /* 正面默认在上层，保证未翻转时可点 */
+    z-index: 2;
+}
+
+.connection-flip-face--back {
+    transform: rotateY(180deg) translateZ(0);
+    z-index: 1;
+}
+
+/* 隐藏面禁用命中，避免叠层挡住可见面的 ⇋ 按钮 */
+.connection-flip-inner:not(.is-flipped) .connection-flip-face--back,
+.connection-flip-inner.is-flipped .connection-flip-face--front {
+    pointer-events: none;
+}
+
+/* 翻转面沿用 online/offline/disabled 色板变量 */
+.connection-flip-face.connection-item-online {
+    --card-bg: var(--status-tone-online-soft);
+    --card-border-color: var(--status-tone-online-border);
+}
+
+.connection-flip-face.connection-item-offline {
+    --card-bg: var(--status-tone-offline-soft);
+    --card-border-color: var(--status-tone-offline-border);
+}
+
+.connection-flip-face.connection-item-disabled {
+    --card-bg: var(--status-tone-disabled-soft);
+    --card-border-color: var(--status-tone-disabled-border);
+}
+
+.connection-item--flippable:hover .connection-flip-face {
+    border-color: var(--md-sys-color-primary);
+    box-shadow: var(--glass-shadow), 0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
+}
+
+html.theme-dark .connection-item--flippable:hover .connection-flip-face,
+body.dark-theme .connection-item--flippable:hover .connection-flip-face {
+    box-shadow: var(--glass-shadow), 0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent);
+}
+
+/* 右上角翻转入口：状态灯左侧的 ⇋ 按钮，仅点击触发 */
+.connection-flip-toggle {
+    appearance: none;
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 70%, transparent);
+    background: color-mix(in srgb, var(--md-sys-color-surface) 82%, var(--md-sys-color-primary) 18%);
+    color: var(--md-sys-color-primary);
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    transition:
+        background-color 0.18s ease-out,
+        border-color 0.18s ease-out,
+        color 0.18s ease-out,
+        transform 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.connection-flip-toggle:hover {
+    background: color-mix(in srgb, var(--md-sys-color-primary-container) 70%, var(--md-sys-color-surface) 30%);
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 45%, transparent);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent);
+    transform: scale(1.06);
+}
+
+.connection-flip-toggle:active {
+    transform: scale(0.94);
+}
+
+.connection-flip-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
+    outline-offset: 2px;
+}
+
+/* 背面状态灯/文案色跟随背面自身 status class */
+.connection-flip-face.connection-item-online .connection-indicator {
+    background: #4CAF50;
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+}
+
+.connection-flip-face.connection-item-offline .connection-indicator {
+    background: #F44336;
+    box-shadow: 0 0 8px rgba(244, 67, 54, 0.6);
+}
+
+.connection-flip-face.connection-item-disabled .connection-indicator {
+    background: #9E9E9E;
+    box-shadow: none;
+}
+
+.connection-flip-face.connection-item-online .connection-status-label {
+    color: #4CAF50;
+}
+
+.connection-flip-face.connection-item-offline .connection-status-label {
+    color: #F44336;
+}
+
+.connection-flip-face.connection-item-disabled .connection-status-label {
+    color: #9E9E9E;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .connection-item--flippable {
+        transition: none;
+    }
+
+    .connection-item--flippable:hover {
+        top: 0;
+        transform: none;
+    }
+
+    .connection-flip-inner {
+        transition: none;
+    }
+
+    .connection-flip-toggle {
+        transition: none;
+    }
+}
+
+/* ==========================================================================
+   7. 顶部实报横滚动条 (EEW & Earthquake News Ticker)
    ========================================================================== */
 .news-ticker-card {
     --hover-lift: 0px;
@@ -878,7 +1100,7 @@ body.dark-theme .connection-sub-source-off-badge {
 }
 
 /* ==========================================================================
-   7. 快速操作控制卡片 (Status Quick Actions Card)
+   8. 快速操作控制卡片 (Status Quick Actions Card)
    ========================================================================== */
 .status-quick-actions-card {
     height: 100%;

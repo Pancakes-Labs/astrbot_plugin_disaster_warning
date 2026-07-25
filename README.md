@@ -2094,7 +2094,7 @@ graph TB
 🕐 日志写入时间: 2026-02-27 14:28:19
 📡 来源: websocket_global_quake
 📋 类型: websocket_message
-🔗 连接: URL: wss://gqm.aloys23.link/ws
+🔗 连接: URL: wss://api.aloys23.link/gq
 
 📊 原始数据:
     📋 消息类型: earthquake
