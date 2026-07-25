@@ -73,25 +73,27 @@ class RealtimePayloadBuilder:
             for status in actual_connections.values()
             if isinstance(status, dict) and status.get("connected")
         )
-        # EQSC HTTP 通道：AccessToken 有效计入活跃连接，配置启用计入总连接
-        eqsc_active, eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
+        # EQSC HTTP 通道：AccessToken 有效计入活跃连接。
+        # 总连接数由 snapshot 按 catalog 期望通道统计（含已停用通道）。
+        eqsc_active, _eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
             self.disaster_service
         )
         active_websocket_connections += eqsc_active
-        # S-Net HTTP 轮询：任务在跑计入活跃，配置启用计入总连接
+        # S-Net HTTP 轮询：任务在跑计入活跃
         snet_poll = getattr(self.disaster_service, "snet_poll_service", None)
         snet_enabled = False
-        snet_total = 0
         try:
             snet_enabled = bool(
                 self.source_runtime_query.is_source_enabled("snet_msil")
             )
         except Exception:
             snet_enabled = False
-        if snet_enabled:
-            snet_total = 1
-            if snet_poll is not None and getattr(snet_poll, "running", False):
-                active_websocket_connections += 1
+        if (
+            snet_enabled
+            and snet_poll is not None
+            and getattr(snet_poll, "running", False)
+        ):
+            active_websocket_connections += 1
         global_quake_connected = any(
             "global_quake" in task.get_name() if hasattr(task, "get_name") else False
             for task in getattr(self.disaster_service, "connection_tasks", [])
@@ -112,10 +114,7 @@ class RealtimePayloadBuilder:
             else False,
             global_quake_connected=global_quake_connected,
         )
-        # 补上 EQSC / S-Net 后，活跃/总连接口径与状态卡片一致
-        snapshot["total_connections"] = (
-            int(snapshot.get("total_connections", 0) or 0) + eqsc_total + snet_total
-        )
+        # total_connections 已在 snapshot 内按期望通道统计，避免 EQSC/S-Net 重复累加。
         return snapshot
 
     def build_status_payload(self) -> dict[str, Any]:
