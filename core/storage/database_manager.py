@@ -257,6 +257,62 @@ class DatabaseManager:
             """
         )
 
+        # 连接健康采样：按连接组记录瞬时健康态，供 90 天条带与事故回溯
+        await cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS connection_health_samples (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_key       TEXT NOT NULL,
+                ts              TEXT NOT NULL,
+                state           TEXT NOT NULL,
+                enabled         INTEGER NOT NULL DEFAULT 0,
+                connected       INTEGER NOT NULL DEFAULT 0,
+                latency_ms      REAL,
+                retry_count     INTEGER NOT NULL DEFAULT 0,
+                circuit_open    INTEGER NOT NULL DEFAULT 0,
+                detail_json     TEXT,
+                created_at      TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        # 连接健康日聚合：Asia/Shanghai 日界，驱动 status 条带
+        await cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS connection_health_days (
+                group_key            TEXT NOT NULL,
+                day                  TEXT NOT NULL,
+                minutes_monitored    INTEGER NOT NULL DEFAULT 0,
+                minutes_major        INTEGER NOT NULL DEFAULT 0,
+                minutes_partial      INTEGER NOT NULL DEFAULT 0,
+                minutes_degraded     INTEGER NOT NULL DEFAULT 0,
+                worst_state          TEXT NOT NULL DEFAULT 'not_monitored',
+                uptime_ratio         REAL,
+                sample_count         INTEGER NOT NULL DEFAULT 0,
+                updated_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (group_key, day)
+            )
+            """
+        )
+
+        # 连接事故：自动开单的通道中断/部分中断记录
+        await cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS connection_incidents (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_key       TEXT NOT NULL,
+                severity        TEXT NOT NULL,
+                status          TEXT NOT NULL,
+                title           TEXT NOT NULL,
+                started_at      TEXT NOT NULL,
+                ended_at        TEXT,
+                timeline_json   TEXT,
+                created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
         # 索引集中覆盖事件标识、来源、类型、时间等高频检索维度，加速分页与汇总查询
         for sql in (
             "CREATE INDEX IF NOT EXISTS idx_ev_real_id   ON events(real_event_id)",
@@ -270,6 +326,11 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_upd_event_id ON event_updates(event_id)",
             "CREATE INDEX IF NOT EXISTS idx_snet_peaks_shindo ON snet_station_peaks(max_shindo DESC)",
             "CREATE INDEX IF NOT EXISTS idx_snet_peaks_time ON snet_station_peaks(max_shindo_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ch_samples_group_ts ON connection_health_samples(group_key, ts DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ch_samples_ts ON connection_health_samples(ts DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ch_days_day ON connection_health_days(day DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ch_incidents_group ON connection_incidents(group_key, started_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ch_incidents_status ON connection_incidents(status, started_at DESC)",
         ):
             await cursor.execute(sql)
 
