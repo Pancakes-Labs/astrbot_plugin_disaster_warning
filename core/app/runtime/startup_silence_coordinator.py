@@ -60,6 +60,9 @@ class StartupSilenceCoordinator:
     - ARMING：start() 后进入，等待注册门闩
     - PRIMING：建连/首轮轮询中，吸收事件并播种
     - READY：门闩满足 + settle，或硬超时
+
+    时长判定统一使用单调时钟（event loop time），避免系统墙钟回拨
+    导致硬超时失效；started_at / ready_at 仅用于展示。
     """
 
     # 时序参数（秒）
@@ -67,18 +70,21 @@ class StartupSilenceCoordinator:
     settle_seconds: float = 2.0
     hard_timeout_seconds: float = 60.0
     first_payload_timeout_seconds: float = 5.0
+    # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
+    first_poll_timeout_seconds: float = 15.0
 
     state: SilenceState = SilenceState.DISABLED
     enabled: bool = False
     started_at: datetime | None = None
     ready_at: datetime | None = None
+    # 单调时钟起点，专用于超时/最小静默等时长计算
+    started_mono: float | None = None
     ready_reason: str = ""
     absorbed_events: int = 0
     last_bootstrap_at: float | None = None
 
     gates: dict[str, GateState] = field(default_factory=dict)
     _watchdog_task: asyncio.Task | None = field(default=None, repr=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _service: Any = field(default=None, repr=False)
 
     def bind_service(self, service: Any) -> None:
@@ -99,9 +105,9 @@ class StartupSilenceCoordinator:
             return False
         if self.state in {SilenceState.DISABLED, SilenceState.READY}:
             return False
-        # 硬超时兜底：即使 watchdog 未跑，查询时也强制退出
-        if self.started_at is not None:
-            age = (self._now() - self.started_at).total_seconds()
+        # 硬超时兜底：即使 watchdog 未跑，查询时也强制退出（单调钟）
+        if self.started_mono is not None:
+            age = self._try_mono() - self.started_mono
             if age >= self.hard_timeout_seconds:
                 self._force_ready("hard_timeout_on_query")
                 return False
@@ -135,6 +141,7 @@ class StartupSilenceCoordinator:
         """服务 start() 时武装静默期并注册门闩。"""
         self.enabled = bool(enabled)
         self.started_at = self._now()
+        self.started_mono = self._try_mono()
         self.ready_at = None
         self.ready_reason = ""
         self.absorbed_events = 0
@@ -189,6 +196,7 @@ class StartupSilenceCoordinator:
         self.enabled = False
         self.gates.clear()
         self.ready_reason = "disarmed"
+        self.started_mono = None
 
     def note_connection_established(self, connection_name: str) -> None:
         """WebSocket 建连成功。"""
@@ -256,7 +264,7 @@ class StartupSilenceCoordinator:
             gate = GateState(gate_id=gate_id, kind="poll")
             self.gates[gate_id] = gate
         if not success:
-            # 失败不直接 primed；watchdog/超时会兜底。连续失败由超时处理。
+            # 失败不直接 primed；watchdog 的 first_poll_timeout / 硬超时会兜底。
             return
         self._mark_primed(gate, bootstrap_kind="poll_first_fetch")
 
@@ -322,8 +330,8 @@ class StartupSilenceCoordinator:
             g.gate_id for g in self.gates.values() if g.required and not g.satisfied
         ]
         age = None
-        if self.started_at is not None:
-            age = (self._now() - self.started_at).total_seconds()
+        if self.started_mono is not None:
+            age = self._try_mono() - self.started_mono
         return {
             "enabled": self.enabled,
             "state": self.state.value,
@@ -350,6 +358,8 @@ class StartupSilenceCoordinator:
             "min_silence_seconds": self.min_silence_seconds,
             "settle_seconds": self.settle_seconds,
             "hard_timeout_seconds": self.hard_timeout_seconds,
+            "first_payload_timeout_seconds": self.first_payload_timeout_seconds,
+            "first_poll_timeout_seconds": self.first_poll_timeout_seconds,
         }
 
     # ── 内部 ──────────────────────────────────────────────
@@ -358,7 +368,7 @@ class StartupSilenceCoordinator:
         try:
             return self._mono()
         except RuntimeError:
-            # 无运行中的事件循环时退回 wall clock 相对值
+            # 无运行中的事件循环时退回 wall clock 相对值（仅兜底）
             return self._now().timestamp()
 
     def _ensure_ws_gate(self, connection_name: str) -> GateState | None:
@@ -392,11 +402,9 @@ class StartupSilenceCoordinator:
         return all(g.satisfied for g in self.gates.values() if g.required)
 
     def _min_silence_elapsed(self) -> bool:
-        if self.started_at is None:
+        if self.started_mono is None:
             return True
-        return (
-            self._now() - self.started_at
-        ).total_seconds() >= self.min_silence_seconds
+        return (self._try_mono() - self.started_mono) >= self.min_silence_seconds
 
     def _settle_elapsed(self) -> bool:
         if self.last_bootstrap_at is None:
@@ -495,9 +503,22 @@ class StartupSilenceCoordinator:
                             self._mark_primed(
                                 gate, bootstrap_kind="first_payload_timeout"
                             )
-                    # 硬超时
-                    if self.started_at is not None:
-                        age = (self._now() - self.started_at).total_seconds()
+                        # 轮询门闩：武装后长时间无成功首轮 → 超时放行，避免拖满硬超时
+                        if (
+                            gate.kind == "poll"
+                            and gate.required
+                            and not gate.skipped
+                            and not gate.primed
+                            and self.started_mono is not None
+                            and (now - self.started_mono)
+                            >= self.first_poll_timeout_seconds
+                        ):
+                            self._mark_primed(
+                                gate, bootstrap_kind="poll_first_fetch_timeout"
+                            )
+                    # 硬超时（单调钟）
+                    if self.started_mono is not None:
+                        age = now - self.started_mono
                         if age >= self.hard_timeout_seconds:
                             self._force_ready("hard_timeout")
                             break

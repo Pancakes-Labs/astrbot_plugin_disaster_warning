@@ -135,15 +135,17 @@ class DisasterServiceLifecycleService:
                 debug_config = raw_debug
         enabled = coordinator.resolve_enabled(debug_config)
 
+        # connections 由 ConnectionPlanBuilder 产出，本身即为 WebSocket 连接计划，
+        # 无需再按 handler 名称白名单过滤，以免遗漏新增数据源。
         expected_ws: list[str] = []
         connections = getattr(self.service, "connections", None) or {}
         if isinstance(connections, dict):
             for name, plan in connections.items():
                 if not isinstance(plan, dict):
                     continue
-                handler = str(plan.get("handler") or "").strip()
-                if handler in {"fan_studio", "p2p", "wolfx", "global_quake"}:
-                    expected_ws.append(str(name))
+                conn_name = str(name or "").strip()
+                if conn_name:
+                    expected_ws.append(conn_name)
 
         expected_polls: list[str] = []
         snet_poll = getattr(self.service, "snet_poll_service", None)
