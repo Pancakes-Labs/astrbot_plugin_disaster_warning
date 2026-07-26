@@ -85,6 +85,7 @@ class StatsRecordService:
                     # 避免海啸/台风等被反复 insert 成多行。
                     existing = await self._find_existing_db_record(push_record, event)
                     if existing:
+                        # 实际是否抬升由 DatabaseManager 按内容指纹决定
                         next_count = int(existing.get("update_count", 1) or 1) + 1
                         push_record["update_count"] = next_count
                         # 以数据库已有行的定位键为准，避免 source/unique_id 别名导致 update 未命中。

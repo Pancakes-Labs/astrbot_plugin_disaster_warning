@@ -495,10 +495,88 @@ class DatabaseManager:
             "_snapshot_pressure": snapshot_pressure,
         }
 
+    @staticmethod
+    def _normalize_snapshot_value(value: Any) -> str:
+        """把快照字段规范成可比较字符串，避免 3 / 3.0 / '3.0' 误判为变化。"""
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, (int, float)):
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return str(value).strip()
+            if abs(number - round(number)) < 1e-9:
+                return str(int(round(number)))
+            return f"{number:.6f}".rstrip("0").rstrip(".")
+        return str(value).strip()
+
+    @classmethod
+    def _build_update_content_fingerprint(
+        cls,
+        *,
+        report_num: Any = None,
+        magnitude: Any = None,
+        depth: Any = None,
+        description: Any = None,
+        level: Any = None,
+        wind_speed: Any = None,
+        pressure: Any = None,
+        latitude: Any = None,
+        longitude: Any = None,
+        time_value: Any = None,
+    ) -> str:
+        """构建 event_updates 内容指纹，用于识别同内容重复写入。"""
+        return "|".join(
+            [
+                cls._normalize_snapshot_value(report_num),
+                cls._normalize_snapshot_value(magnitude),
+                cls._normalize_snapshot_value(depth),
+                cls._normalize_snapshot_value(description),
+                cls._normalize_snapshot_value(level),
+                cls._normalize_snapshot_value(wind_speed),
+                cls._normalize_snapshot_value(pressure),
+                cls._normalize_snapshot_value(latitude),
+                cls._normalize_snapshot_value(longitude),
+                cls._normalize_snapshot_value(time_value),
+            ]
+        )
+
+    # Wolfx HTTP 列表补偿源：同一测定结果会被定时重复拉取。
+    # 仅对这些源启用“内容未变不追加 updates”，避免误伤其他数据源。
+    _LIST_POLL_DEDUPE_SOURCES = frozenset(
+        {
+            "cenc_wolfx",
+            "jma_wolfx_info",
+            "wolfx_cenc_eq",
+            "wolfx_jma_eq",
+        }
+    )
+
+    @classmethod
+    def _should_dedupe_list_poll_update(
+        cls, source: str, event_data: dict[str, Any]
+    ) -> bool:
+        """判断本次 update 是否属于 Wolfx 列表轮询去重范围。"""
+        candidates = (
+            source,
+            event_data.get("source"),
+            event_data.get("source_id"),
+        )
+        for raw in candidates:
+            key = str(raw or "").strip().lower()
+            if key in cls._LIST_POLL_DEDUPE_SOURCES:
+                return True
+        return False
+
     async def update_event(self, source: str, event_data: dict[str, Any]) -> bool:
         """
         更新已有事件（以 real_event_id+source 或 unique_id+source 查找），
         同时在 event_updates 追加一条更新记录。
+
+        对 Wolfx 列表补偿源：若与最近一条 event_updates 内容完全一致，
+        则只刷新主表必要字段，不再追加 updates / 抬升 update_count。
         """
         try:
             # 更新前确保将历史遗留的 'weather' 类型归一化为标准的 'weather_alarm' 存储
@@ -527,10 +605,11 @@ class DatabaseManager:
             existing_level = None
             existing_wind_speed = None
             existing_pressure = None
+            existing_update_count = 1
             if real_event_id:
                 await cursor.execute(
                     """
-                    SELECT id, level, wind_speed, pressure
+                    SELECT id, level, wind_speed, pressure, update_count
                     FROM events
                     WHERE real_event_id=? AND source=?
                     LIMIT 1
@@ -543,10 +622,11 @@ class DatabaseManager:
                     existing_level = r[1]
                     existing_wind_speed = r[2]
                     existing_pressure = r[3]
+                    existing_update_count = int(r[4] or 1)
             if db_id is None and unique_id:
                 await cursor.execute(
                     """
-                    SELECT id, level, wind_speed, pressure
+                    SELECT id, level, wind_speed, pressure, update_count
                     FROM events
                     WHERE unique_id=? AND source=?
                     LIMIT 1
@@ -559,6 +639,7 @@ class DatabaseManager:
                     existing_level = r[1]
                     existing_wind_speed = r[2]
                     existing_pressure = r[3]
+                    existing_update_count = int(r[4] or 1)
 
             if db_id is None:
                 return False
@@ -590,6 +671,58 @@ class DatabaseManager:
                 update_snapshot_level = event_data["_snapshot_level"]
                 update_snapshot_wind = event_data["_snapshot_wind_speed"]
                 update_snapshot_pressure = event_data["_snapshot_pressure"]
+
+            # Wolfx 列表轮询：与最近一条 updates 内容完全一致时不追加、不抬升 update_count
+            content_unchanged = False
+            if self._should_dedupe_list_poll_update(source, event_data):
+                incoming_fp = self._build_update_content_fingerprint(
+                    report_num=event_data.get("report_num"),
+                    magnitude=event_data.get("magnitude"),
+                    depth=event_data.get("depth"),
+                    description=event_data.get("description"),
+                    level=update_snapshot_level,
+                    wind_speed=update_snapshot_wind,
+                    pressure=update_snapshot_pressure,
+                    latitude=event_data.get("latitude"),
+                    longitude=event_data.get("longitude"),
+                    time_value=event_data.get("time"),
+                )
+                await cursor.execute(
+                    """
+                    SELECT report_num, magnitude, depth, description, level, wind_speed,
+                           pressure, latitude, longitude, time
+                    FROM event_updates
+                    WHERE event_id=?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (db_id,),
+                )
+                last_update = await cursor.fetchone()
+                if last_update is not None:
+                    last_fp = self._build_update_content_fingerprint(
+                        report_num=last_update[0],
+                        magnitude=last_update[1],
+                        depth=last_update[2],
+                        description=last_update[3],
+                        level=last_update[4],
+                        wind_speed=last_update[5],
+                        pressure=last_update[6],
+                        latitude=last_update[7],
+                        longitude=last_update[8],
+                        time_value=last_update[9],
+                    )
+                    content_unchanged = last_fp == incoming_fp
+
+            if content_unchanged:
+                next_update_count = existing_update_count
+            else:
+                requested = int(
+                    event_data.get("update_count", existing_update_count)
+                    or existing_update_count
+                    or 1
+                )
+                next_update_count = max(requested, existing_update_count + 1)
 
             # 更新主表中的事件字段
             await cursor.execute(
@@ -636,7 +769,7 @@ class DatabaseManager:
                     event_data.get("depth"),
                     event_data.get("report_num"),
                     event_data.get("time"),
-                    event_data.get("update_count", 1),
+                    next_update_count,
                     event_data.get("weather_type_code"),
                     level_to_store,
                     wind_speed_to_store,
@@ -651,29 +784,30 @@ class DatabaseManager:
                 ),
             )
 
-            # 主事件表字段更新后，再追加一条报次快照记录，保留每次演进轨迹。
+            # 主事件表字段更新后，仅在内容变化时追加报次快照。
             # 台风快照写入本次观测值，避免把“已抬升的峰值”误记成当前观测。
-            await cursor.execute(
-                """
-                INSERT INTO event_updates
-                    (event_id, source_event_id, report_num, magnitude, depth, description, level, wind_speed, pressure, latitude, longitude, time)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    db_id,
-                    event_data.get("event_id"),
-                    event_data.get("report_num"),
-                    event_data.get("magnitude"),
-                    event_data.get("depth"),
-                    event_data.get("description"),
-                    update_snapshot_level,
-                    update_snapshot_wind,
-                    update_snapshot_pressure,
-                    event_data.get("latitude"),
-                    event_data.get("longitude"),
-                    event_data.get("time"),
-                ),
-            )
+            if not content_unchanged:
+                await cursor.execute(
+                    """
+                    INSERT INTO event_updates
+                        (event_id, source_event_id, report_num, magnitude, depth, description, level, wind_speed, pressure, latitude, longitude, time)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        db_id,
+                        event_data.get("event_id"),
+                        event_data.get("report_num"),
+                        event_data.get("magnitude"),
+                        event_data.get("depth"),
+                        event_data.get("description"),
+                        update_snapshot_level,
+                        update_snapshot_wind,
+                        update_snapshot_pressure,
+                        event_data.get("latitude"),
+                        event_data.get("longitude"),
+                        event_data.get("time"),
+                    ),
+                )
 
             await self.connection.commit()
 
@@ -830,13 +964,28 @@ class DatabaseManager:
             updates = updates_by_event.get(event["id"], [])
             if len(updates) > 1:
                 event_type = str(event.get("type") or "").strip()
+                parent_source = str(event.get("source") or "").strip()
+                parent_source_id = str(event.get("source_id") or parent_source).strip()
+                parent_type = str(event.get("type") or "").strip()
+                # event_updates 表无 source 列；注入父事件来源，避免前端 history 显示「未知来源」
+                enriched_updates: list[dict] = []
+                for item in updates:
+                    snapshot = dict(item)
+                    if not snapshot.get("source"):
+                        snapshot["source"] = parent_source
+                    if not snapshot.get("source_id"):
+                        snapshot["source_id"] = parent_source_id
+                    if not snapshot.get("type"):
+                        snapshot["type"] = parent_type
+                    enriched_updates.append(snapshot)
+
                 if event_type == "typhoon":
                     # 台风主表 level 存峰值，最新观测等级在 event_updates 最后一条。
                     # 保留全部 updates（含最新），前端从 history[0] 取当前观测等级。
-                    event["history"] = list(reversed(updates))
+                    event["history"] = list(reversed(enriched_updates))
                 else:
                     # 其他事件类型：历史链条中去掉当前最新报本身，只保存以前的变更快照
-                    event["history"] = list(reversed(updates[:-1]))
+                    event["history"] = list(reversed(enriched_updates[:-1]))
 
         return events
 
