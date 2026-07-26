@@ -55,6 +55,16 @@
             log("[Map Ready] " + reason);
         }
 
+        function isTileLayerLoading() {
+            // Leaflet TileLayer 提供 isLoading()；用于覆盖“监听挂上前已加载完”
+            // 与“尚未观测到 tile 事件但层仍在加载”两类竞态。
+            try {
+                return typeof tileLayer.isLoading === "function" && tileLayer.isLoading();
+            } catch (_err) {
+                return false;
+            }
+        }
+
         function scheduleSettle(reason) {
             if (readyMarked) {
                 return;
@@ -67,7 +77,10 @@
                 // 台风等模板会在 setupStableTileRender 之前 addTo(map)，
                 // 瓦片可能在监听器挂上前就已加载完；若仍要求 sawTileRequest，
                 // 会一直拖到 readyFallbackMs 才打 map-ready，导致 Playwright 10s 等待误报超时。
-                if (pendingTiles > 0) {
+                //
+                // 同时用 tileLayer.isLoading() 兜底：慢网环境下首批 tileloadstart
+                // 尚未被观测到时，避免仅凭 pendingTiles===0 过早 markReady。
+                if (pendingTiles > 0 || isTileLayerLoading()) {
                     return;
                 }
                 map.invalidateSize({ pan: false, debounceMoveend: true });

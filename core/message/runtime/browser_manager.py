@@ -766,6 +766,7 @@ class BrowserManager:
                             const selectors = [
                                 '.map-ready',
                                 '#map',
+                                '#map-area',
                                 '.map-container',
                                 '#map-container',
                                 '.leaflet-container'

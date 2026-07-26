@@ -47,18 +47,23 @@ class GlobalQuakeParser(BaseParser):
         """提取 OpenQuakeAPI RealtimeEvent 的业务载荷。
 
         新协议优先使用 payload；兼容历史 data/Data 包装与无包装扁平结构。
+        某个包装键存在但不是 dict 时继续尝试后续候选键，避免误丢合法载荷。
         """
         if not isinstance(data, dict):
             return {}
 
         for key in ("payload", "data", "Data"):
-            if key in data:
-                value = data.get(key)
-                if isinstance(value, dict):
-                    return value
-                return {}
+            if key not in data:
+                continue
+            value = data.get(key)
+            if isinstance(value, dict):
+                return value
+            plugin_logger.debug(
+                f"[灾害预警] global_quake RealtimeEvent 字段 {key} 存在但类型为 "
+                f"{type(value).__name__}，继续尝试后续载荷键"
+            )
 
-        # 无包装时，直接视整个载荷为数据体
+        # 无有效包装时，直接视整个载荷为数据体
         return data
 
     def decode_message(self, message: str | bytes):
@@ -433,7 +438,7 @@ class GlobalQuakeParser(BaseParser):
                         shock_time = datetime.fromtimestamp(
                             float(origin_time_ms) / 1000, tz=timezone.utc
                         )
-                    except (TypeError, ValueError, OSError):
+                    except (TypeError, ValueError, OSError, OverflowError):
                         shock_time = None
 
             intensity_str = str(eq_data.get("intensity") or "").strip()
