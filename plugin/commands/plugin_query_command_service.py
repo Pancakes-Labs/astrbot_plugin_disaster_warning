@@ -21,6 +21,7 @@ from ...core.app.services import format_earthquake_list_text, quoted_plain_resul
 from ...core.domain.event_context import EarthquakeDisplayContext
 from ...core.message.presenters.earthquake_presenter import SnetPresenter
 from ...core.message.push.message_build_service import MessageBuildService
+from ...core.message.render.beachball_renderer import BeachballRenderer
 from ...core.message.render.jma_hypo_renderer import JmaHypoRenderer
 from ...core.services.query.jma_hypo_query_presenter import (
     build_jma_hypo_list_text,
@@ -48,6 +49,183 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
     def __init__(self, plugin):
         self.plugin = plugin
+
+    async def handle_generate_beachball(
+        self,
+        event,
+        strike: str,
+        dip: str,
+        rake: str,
+        size_str: str | None = None,
+        line_width_str: str | None = None,
+    ):
+        """处理生成沙滩球图片命令。"""
+
+        def _quoted_plain_result(text: str):
+            return quoted_plain_result(self.plugin, event, text)
+
+        try:
+            # 参数解析与校验
+            try:
+                strike_val = float(strike)
+                dip_val = float(dip)
+                rake_val = float(rake)
+            except ValueError:
+                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为数值。")
+                return
+
+            size = 360
+            if size_str:
+                try:
+                    size = int(size_str)
+                    if size < 100 or size > 2000:
+                        yield _quoted_plain_result(
+                            "⚠️ 提示：图片大小限制在 100 到 2000 像素之间，已自动修正。"
+                        )
+                        size = max(100, min(2000, size))
+                except ValueError:
+                    pass
+
+            line_width = 6
+            if line_width_str:
+                try:
+                    line_width = int(line_width_str)
+                    if line_width < 1 or line_width > 20:
+                        line_width = max(1, min(20, line_width))
+                except ValueError:
+                    pass
+
+            renderer = BeachballRenderer(size=size, line_width=line_width)
+            service = getattr(self.plugin, "disaster_service", None)
+            message_manager = (
+                getattr(service, "message_manager", None) if service else None
+            )
+            temp_dir = getattr(message_manager, "temp_dir", None)
+            if temp_dir is None:
+                plugin_root = os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+                temp_dir = os.path.join(plugin_root, "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+
+            img_filename = f"beachball_{int(time.time())}_{int(strike_val)}_{int(dip_val)}_{int(rake_val)}.png"
+            img_path = os.path.join(str(temp_dir), img_filename)
+
+            # 调用 Pillow 渲染器（线宽经构造参数与 render 参数双重生效）
+            render_started = time.perf_counter()
+            out = await asyncio.to_thread(
+                renderer.render,
+                strike=strike_val,
+                dip=dip_val,
+                rake=rake_val,
+                output_path=img_path,
+                line_width=line_width,
+            )
+            elapsed = time.perf_counter() - render_started
+
+            if not out or not os.path.exists(out):
+                yield _quoted_plain_result("❌ 生成沙滩球失败。")
+                return
+
+            with open(out, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode()
+
+            try:
+                os.unlink(out)
+            except Exception:
+                pass
+
+            logger.info(f"[灾害预警] 沙滩球渲染成功，耗时 {elapsed:.3f}秒")
+
+            await self._track_command_feature(
+                "command_generate_beachball",
+                {
+                    "success": True,
+                    "strike": strike_val,
+                    "dip": dip_val,
+                    "rake": rake_val,
+                    "size": size,
+                    "line_width": line_width,
+                },
+            )
+
+            yield event.chain_result(
+                self.plugin._with_quote_reply(
+                    event,
+                    [Comp.Image.fromBase64(b64_data)],
+                )
+            )
+
+        except Exception as e:
+            logger.error(f"[灾害预警] 生成沙滩球失败: {e}", exc_info=True)
+            yield _quoted_plain_result(f"❌ 生成沙滩球失败: {e}")
+
+    async def handle_parse_nodal_plane(
+        self,
+        event,
+        strike: str,
+        dip: str,
+        rake: str,
+    ):
+        """处理节面解析命令。"""
+
+        def _quoted_plain_result(text: str):
+            return quoted_plain_result(self.plugin, event, text)
+
+        try:
+            try:
+                strike_val = float(strike)
+                dip_val = float(dip)
+                rake_val = float(rake)
+            except ValueError:
+                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为数值。")
+                return
+
+            from ...core.domain.earthquake.cmt_normalize import (
+                classify_fault_mechanism,
+                format_fault_type_label,
+            )
+
+            plane = {
+                "strike": strike_val,
+                "dip": dip_val,
+                "rake": rake_val,
+                "raw": f"{strike}/{dip}/{rake}",
+            }
+            mechanism = classify_fault_mechanism(rake_val)
+            plane.update(mechanism)
+
+            label = format_fault_type_label(plane)
+
+            # 解析逆断层/正断层以及占比成分信息
+            dip_slip_name = plane.get("dip_slip_name") or ""
+            strike_slip_name = plane.get("strike_slip_name") or ""
+            dip_slip_pct = plane.get("dip_slip_pct")
+            strike_slip_pct = plane.get("strike_slip_pct")
+
+            lines = [
+                "🔮 节面成分解析结果：",
+                f"🧭 节面参数：走向 {strike_val}° / 倾角 {dip_val}° / 滑动角 {rake_val}°",
+                f"⚙️ 破裂机制：{label}",
+                "📊 运动分量：",
+                f"  • 倾滑分量: {dip_slip_name} ({dip_slip_pct}%)",
+                f"  • 走滑分量: {strike_slip_name} ({strike_slip_pct}%)",
+            ]
+
+            await self._track_command_feature(
+                "command_parse_nodal_plane",
+                {
+                    "success": True,
+                    "strike": strike_val,
+                    "dip": dip_val,
+                    "rake": rake_val,
+                },
+            )
+
+            yield _quoted_plain_result("\n".join(lines))
+        except Exception as e:
+            logger.error(f"[灾害预警] 节面解析失败: {e}", exc_info=True)
+            yield _quoted_plain_result(f"❌ 节面解析失败: {e}")
 
     async def handle_query_weather_alarm(
         self,
