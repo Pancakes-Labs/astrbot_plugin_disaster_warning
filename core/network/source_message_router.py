@@ -320,8 +320,10 @@ class SourceMessageRouter:
                                 connection_name=connection_name,
                                 kind="fan_initial_all",
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            plugin_logger.debug(
+                                f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
+                            )
                 processed_count = 0
 
                 # 遍历被分配出来的数据源及负载，分别尝试分发

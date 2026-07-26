@@ -313,8 +313,8 @@ class EqscTyphoonPollService:
         if coordinator is not None:
             try:
                 coordinator.note_poll_fetch_completed("eqsc_typhoon", success=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[灾害预警] EQSC 台风轮询通知静默协调器失败: {exc}")
 
         if not emit_event:
             return active_items

@@ -191,8 +191,8 @@ class SnetPollService:
         if coordinator is not None:
             try:
                 coordinator.note_poll_fetch_completed("snet_msil", success=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[灾害预警] S-Net 轮询通知静默协调器失败: {exc}")
 
         threshold = (
             self._resolve_min_shindo()

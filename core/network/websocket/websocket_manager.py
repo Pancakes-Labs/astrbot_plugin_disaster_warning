@@ -171,8 +171,10 @@ class WebSocketManager:
                 if callable(on_established):
                     try:
                         on_established(name)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(
+                            f"[灾害预警] WebSocket 建连回调通知静默协调器失败: {exc}"
+                        )
 
                 # FAN Studio：握手成功后立即发送应用层鉴权包。
                 # 仅“缺少凭证”返回 False；网络异常会向上抛出并由下方 except 重试。
