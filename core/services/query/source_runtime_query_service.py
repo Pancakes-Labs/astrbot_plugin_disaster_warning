@@ -27,7 +27,7 @@ _CONNECTION_DISPLAY_NAME: dict[str, str] = {
     "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
     "p2p_main": "P2P地震情報",
     "wolfx_all": "Wolfx",
-    "global_quake": "Global Quake",
+    "global_quake": "OpenQuakeAPI",
     "snet_msil": "NIED S-Net",
     # EQSC 为 HTTP 通道；展示名必须与 ConnectionsPayloadBuilder.EQSC_DISPLAY_NAME
     # 完全一致，否则 catalog 占位会以原始键 "eqsc" 残留，前端误显示“未连接”。
@@ -143,7 +143,7 @@ class SourceRuntimeQueryService:
         service: Any | None,
         actual_connections: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """统一计算活跃连接数与 Global Quake 在线标记。
+        """统一计算活跃连接数与 OpenQuakeAPI 在线标记。
 
         口径：
         - WebSocket：ws_manager 连接表中 connected=True

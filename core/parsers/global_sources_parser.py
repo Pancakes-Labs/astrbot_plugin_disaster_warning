@@ -1,6 +1,6 @@
 """
 全球地震源解析器。
-负责解析 Global Quake、美国地质调查局与美国 ShakeAlert 来源的全球地震数据，
+负责解析 OpenQuakeAPI (Global Quake)、美国地质调查局与美国 ShakeAlert 来源的全球地震数据，
 并统一为领域事件。
 """
 
@@ -23,7 +23,11 @@ from .base_parser import BaseParser
 
 
 class GlobalQuakeParser(BaseParser):
-    """Global Quake 解析器，同时支持二进制与 JSON 两种消息格式。"""
+    """OpenQuakeAPI / Global Quake 解析器。
+
+    上游当前以 JSON RealtimeEvent 为主（source/type/action/timestampMs/payload），
+    同时保留对历史 protobuf 二进制帧的兼容解析。
+    """
 
     def __init__(self, message_logger=None):
         super().__init__("global_quake", message_logger)
@@ -37,6 +41,30 @@ class GlobalQuakeParser(BaseParser):
         except (TypeError, ValueError):
             return False
         return abs(lat) < 1e-9 and abs(lon) < 1e-9
+
+    @staticmethod
+    def _extract_realtime_payload(data: dict[str, Any]) -> dict[str, Any]:
+        """提取 OpenQuakeAPI RealtimeEvent 的业务载荷。
+
+        新协议优先使用 payload；兼容历史 data/Data 包装与无包装扁平结构。
+        某个包装键存在但不是 dict 时继续尝试后续候选键，避免误丢合法载荷。
+        """
+        if not isinstance(data, dict):
+            return {}
+
+        for key in ("payload", "data", "Data"):
+            if key not in data:
+                continue
+            value = data.get(key)
+            if isinstance(value, dict):
+                return value
+            plugin_logger.debug(
+                f"[灾害预警] global_quake RealtimeEvent 字段 {key} 存在但类型为 "
+                f"{type(value).__name__}，继续尝试后续载荷键"
+            )
+
+        # 无有效包装时，直接视整个载荷为数据体
+        return data
 
     def decode_message(self, message: str | bytes):
         """解码 Global Quake 原始消息。"""
@@ -54,7 +82,7 @@ class GlobalQuakeParser(BaseParser):
         return None
 
     def _parse_protobuf_message(self, message: bytes) -> EventEnvelope | None:
-        """解析二进制格式消息。"""
+        """解析二进制格式消息（历史兼容）。"""
         try:
             ws_msg = WsMessage()
             ws_msg.ParseFromString(message)
@@ -82,24 +110,36 @@ class GlobalQuakeParser(BaseParser):
             return None
 
     def _parse_json_message(self, message: str) -> EventEnvelope | None:
-        """解析 JSON 格式消息。"""
+        """解析 OpenQuakeAPI JSON 实时事件。"""
         try:
             data = json.loads(message)
-            msg_type = data.get("type")
-            action = data.get("action")
+            if not isinstance(data, dict):
+                plugin_logger.debug(f"[灾害预警] {self.source_id} 忽略非对象 JSON 消息")
+                return None
+
+            msg_type = str(data.get("type") or "").strip().lower()
+            action = str(data.get("action") or "").strip().lower()
+            source = str(data.get("source") or "").strip().lower()
+
+            # 仅处理 Global Quake 路径事件；source 缺失时按历史兼容继续解析。
+            if source and source not in {"gq", "global_quake", "globalquake"}:
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 已忽略数据源 {source} 的消息"
+                )
+                return None
 
             # JSON 通道当前主要关心地震消息，其余类型直接忽略。
             if msg_type == "earthquake":
                 plugin_logger.debug(
                     f"[灾害预警] {self.source_id} 收到 JSON 地震消息，动作为 {action}"
                 )
-                # 适配新 API 中的 cancelled (取消报) 动作
                 if action == "cancelled":
                     return self._parse_earthquake_removal_json(data)
+                # update / archived 均进入统一地震解析；archived 在内部标记最终报
                 return self._parse_earthquake_data(data)
 
             plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 已忽略类型为 {msg_type} 的消息"
+                f"[灾害预警] {self.source_id} 已忽略类型为 {msg_type or 'unknown'} 的消息"
             )
             return None
         except json.JSONDecodeError as exc:
@@ -200,7 +240,7 @@ class GlobalQuakeParser(BaseParser):
     ) -> EventEnvelope | None:
         """解析 JSON 格式取消地震消息。"""
         try:
-            eq_data = data.get("data") or {}
+            eq_data = self._extract_realtime_payload(data)
             event_id = str(eq_data.get("id", "") or "")
             if not event_id:
                 return None
@@ -379,9 +419,9 @@ class GlobalQuakeParser(BaseParser):
             return None
 
     def _parse_earthquake_data(self, data: dict[str, Any]) -> EventEnvelope | None:
-        """解析 Global Quake 监测端 JSON 地震数据。"""
+        """解析 OpenQuakeAPI / Global Quake JSON 地震数据。"""
         try:
-            eq_data = self._extract_data(data)
+            eq_data = self._extract_realtime_payload(data)
             if not eq_data:
                 plugin_logger.warning(f"[灾害预警] {self.source_id} 消息中没有有效数据")
                 return None
@@ -391,12 +431,17 @@ class GlobalQuakeParser(BaseParser):
             origin_time_iso = eq_data.get("originTimeIso")
             if origin_time_iso:
                 shock_time = self._parse_datetime(origin_time_iso)
-            elif eq_data.get("originTimeMs"):
-                shock_time = datetime.fromtimestamp(
-                    eq_data["originTimeMs"] / 1000, tz=timezone.utc
-                )
+            else:
+                origin_time_ms = eq_data.get("originTimeMs")
+                if origin_time_ms is not None:
+                    try:
+                        shock_time = datetime.fromtimestamp(
+                            float(origin_time_ms) / 1000, tz=timezone.utc
+                        )
+                    except (TypeError, ValueError, OSError, OverflowError):
+                        shock_time = None
 
-            intensity_str = eq_data.get("intensity", "")
+            intensity_str = str(eq_data.get("intensity") or "").strip()
             intensity = ScaleConverter.convert_roman_intensity(intensity_str)
             latitude = eq_data.get("latitude", 0)
             longitude = eq_data.get("longitude", 0)
@@ -433,8 +478,19 @@ class GlobalQuakeParser(BaseParser):
             raw_payload = dict(data)
 
             # 判断是否为归档报/结束报
-            action = data.get("action", "")
+            action = str(data.get("action") or "").strip().lower()
             is_archived = action == "archived"
+
+            # 规范化 stationCount / quality，便于下游展示与过滤复用
+            station_count = eq_data.get("stationCount")
+            if not isinstance(station_count, dict):
+                station_count = None
+
+            quality_data = eq_data.get("quality")
+            if not isinstance(quality_data, dict):
+                quality_data = None
+
+            max_pga = safe_float_convert(eq_data.get("maxPGA"))
 
             metadata = {
                 "source_family": "global_quake",
@@ -442,10 +498,16 @@ class GlobalQuakeParser(BaseParser):
                 "source_type": source_entry.source_type.value
                 if source_entry
                 else "earthquake_warning",
-                "max_pga": eq_data.get("maxPGA"),
-                "stations": eq_data.get("stationCount"),
+                "max_pga": max_pga,
+                "stations": station_count,
+                "quality": quality_data,
                 "report_num": report_num,
                 "is_final": is_archived,  # 归档报视为最终报
+                "fixed_depth": bool(eq_data.get("fixedDepth"))
+                if eq_data.get("fixedDepth") is not None
+                else None,
+                "last_update_ms": eq_data.get("lastUpdateMs"),
+                "timestamp_ms": data.get("timestampMs"),
             }
             event_id = str(eq_data.get("id", "") or "")
 

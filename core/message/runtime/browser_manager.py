@@ -422,7 +422,7 @@ class BrowserManager:
             diagnostics = await page.evaluate(
                 """
                 () => {
-                    const mapEl = document.querySelector('#map-container');
+                    const mapEl = document.querySelector('#map-container') || document.querySelector('#map-area') || document.querySelector('#map');
                     const cardEl = document.querySelector('#card-wrapper') || document.querySelector('.quake-card');
                     const html = document.documentElement;
                     const body = document.body;
@@ -430,7 +430,7 @@ class BrowserManager:
                         title: document.title || '',
                         readyState: document.readyState,
                         bodyClasses: body ? body.className || '' : '',
-                        mapReady: !!document.querySelector('.map-ready'),
+                        mapReady: !!document.querySelector('.map-ready') || (body && body.classList.contains('map-ready')),
                         mapContainerExists: !!mapEl,
                         mapContainerSize: mapEl ? {
                             width: mapEl.clientWidth,
@@ -766,6 +766,7 @@ class BrowserManager:
                             const selectors = [
                                 '.map-ready',
                                 '#map',
+                                '#map-area',
                                 '.map-container',
                                 '#map-container',
                                 '.leaflet-container'

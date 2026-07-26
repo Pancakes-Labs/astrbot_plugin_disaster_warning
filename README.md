@@ -117,7 +117,7 @@
 - **日本气象厅地震情报** (P2P / Wolfx) - 详细地震情报。
 - **USGS地震测定** (FAN Studio) - 美国地质调查局地震信息。
 - **美国 ShakeAlert 地震预警** (FAN Studio) - 美国西海岸 ShakeAlert 实时地震预警。
-- **Global Quake服务器** - 全球地震测站实时计算推送，精度有限。
+- **Global Quake** (OpenQuakeAPI) - 全球地震测站实时计算推送，精度有限。
 - **中国气象局气象预警** (FAN Studio) - 气象灾害预警。
 - **自然资源部海啸预警中心** (FAN Studio) - 海啸预警信息。
 - **日本气象厅海啸预报** (P2P) - 日本海啸预报信息。
@@ -413,7 +413,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 | 日本气象厅紧急地震速报 | P2P | EEW | ✅ |
 | 日本气象厅紧急地震速报 | Wolfx | EEW | ✅ |
 | 日本气象厅紧急地震速报 | FAN Studio | EEW | ✅ |
-| Global Quake | Global Quake | EEW | ✅ |
+| Global Quake | OpenQuakeAPI | EEW | ✅ |
 | 中国地震台网 | FAN Studio | Info | ✅ |
 | 中国地震台网 | Wolfx | Info | ✅ |
 | 日本气象厅地震情报 | P2P | Info | ✅ |
@@ -543,7 +543,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 
 #### 🔹 Global Quake (实时测算)
 
-- **原理**: 连接到 Global Quake 服务器。这些数据是由全球数千个测站通过算法实时计算得出的。
+- **原理**: 连接到 OpenQuakeAPI 的 Global Quake 子源。这些数据是由全球数千个测站通过算法实时计算得出的。
 - **特点**: 在偏远地区或国际海域，由于官方机构反应时间较长，GQ 往往能最先提供初步数据，但震级和位置可能随报数更新而有较大波动。
 
 ---
@@ -1692,7 +1692,7 @@ graph TB
         direction TB
         U1["宿主系统（AstrBot）"]
         U2["用户命令与管理员命令"]
-        U3["多源 WebSocket 数据流<br/>FAN Studio / P2P / Wolfx / Global Quake"]
+        U3["多源 WebSocket 数据流<br/>FAN Studio / P2P / Wolfx / OpenQuakeAPI"]
         U4["HTTP 接口与列表数据<br/>Wolfx 列表 / 其他接口数据"]
         U5["Web 控制台浏览器"]
     end
@@ -1949,7 +1949,7 @@ graph TB
 在数据接入与标准化方面，当前架构最核心的改进，是把“**接入协议**”与“**事件主链**”做了清晰分离：
 
 - **连接计划外置**：[`ConnectionPlanBuilder.build()`](core/services/config/connection_plan_builder.py) 基于统一 [`SOURCE_CATALOG`](core/sources/source_catalog.py) 生成当前启用数据源的连接拓扑，而不是在主服务中硬编码连接列表。
-- **路由入口统一**：[`SourceMessageRouter`](core/network/source_message_router.py) 根据 provider family 把 FAN Studio、P2P、Wolfx、Global Quake 等消息路由到正确解析路径。
+- **路由入口统一**：[`SourceMessageRouter`](core/network/source_message_router.py) 根据 provider family 把 FAN Studio、P2P、Wolfx、OpenQuakeAPI 等消息路由到正确解析路径。
 - **旁路副作用拆分**：[`SourceIngressSideEffectService.process_message()`](core/network/source_ingress_side_effect_service.py) 在主事件处理前就能独立完成列表缓存刷新、摘要日志等旁路工作，避免污染业务主链。
 - **标准事件输出**：所有解析器最终都输出统一的 [`EventEnvelope`](core/domain/event_models.py)，使后续推送、统计、管理端广播不必感知上游协议差异。
 

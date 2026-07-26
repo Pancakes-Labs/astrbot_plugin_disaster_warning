@@ -120,7 +120,7 @@ class TsunamiParser(BaseParser):
         org_unit = (
             warning_info.get("orgUnit")
             or tsunami_data.get("publishInfo", {}).get("unitName")
-            or "中国自然资源部海啸预警中心"
+            or "自然资源部海啸预警中心"
         )
 
         normalized_level = level.replace("级", "") if level else ""

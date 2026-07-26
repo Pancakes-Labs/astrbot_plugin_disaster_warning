@@ -389,7 +389,6 @@ function formatSourceName(source) {
         'kma_earthquake': '韩国气象厅 (KMA)',
         'emsc_earthquake': '欧洲地中海地震中心 (EMSC)',
         'gfz_earthquake': '德国地学研究中心 (GFZ)',
-        'enabled': '实时数据流',
         'unknown': '未知来源'
     };
     return sourceMap[normalizedSource] || String(source || '').trim() || '未知来源';

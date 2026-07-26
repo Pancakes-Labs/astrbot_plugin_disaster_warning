@@ -33,7 +33,7 @@ class DisasterServiceStatusService:
         connection_status = (
             self.service.ws_manager.get_all_connections_status()
         )  # 物理 WebSocket 连接活跃表
-        # 活跃连接 / Global Quake 标记统一由 SourceRuntimeQueryService 计算，
+        # 活跃连接 / 标记统一由 SourceRuntimeQueryService 计算，
         # 避免与 RealtimePayloadBuilder 口径漂移。
         metrics = self._source_runtime_query.resolve_active_connection_metrics(
             self.service,

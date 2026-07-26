@@ -3,14 +3,14 @@ const { useMemo, useState, useCallback } = React;
 
 /**
  * 连接状态网格组件 (ConnectionsGrid)
- * 显示主流数据源（FAN Studio / P2P / Wolfx / Global Quake）与 HTTP 辅助通道
+ * 显示主流数据源（FAN Studio / P2P / Wolfx / OpenQuakeAPI）与 HTTP 辅助通道
  * EQSC、NIED S-Net 的实时连接情况、TCP 延迟、重试次数以及启用的子数据源明细。
  *
  * 布局：
  * - 第 1 列：FAN Studio（可翻转：正面主通道 / 背面 CENC 烈度速报独立 WS）
  * - 第 2 列：P2P + NIED S-Net 上下堆叠（connection-stack）
  * - 第 3 列：Wolfx
- * - 第 4 列：Global Quake + EQSC API 上下堆叠
+ * - 第 4 列：OpenQuakeAPI + EQSC API 上下堆叠
  *
  * 延迟评级：
  * - < 150ms  fast (绿色)
@@ -232,10 +232,14 @@ function ConnectionsGrid() {
             },
             {
                 id: 'gq',
-                displayName: 'Global Quake',
+                displayName: 'OpenQuakeAPI',
                 matcher: (key) => {
                     const k = String(key || '').toLowerCase();
-                    return k.includes('global') && !k.includes('eqsc');
+                    return (
+                        k.includes('global')
+                        || k.includes('openquake')
+                        || k === 'gq'
+                    ) && !k.includes('eqsc');
                 },
                 compact: true,
             },
@@ -370,8 +374,8 @@ function ConnectionsGrid() {
                 japan_jma_earthquake: '日本气象厅地震情报',
                 china_cenc_earthquake: '中国地震台网地震测定',
             },
-            'Global Quake': {
-                enabled: '实时数据流',
+            OpenQuakeAPI: {
+                global_quake: 'Global Quake',
             },
             'EQSC API': {
                 china_typhoon: '中国气象局：实时活跃台风',
