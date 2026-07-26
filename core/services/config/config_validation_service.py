@@ -1234,6 +1234,15 @@ class ConfigValidator:
                     # 仅确保 enabled 为 bool，其他字段保持原样以支持扩展（如 API Key 等字符串配置）
                     ConfigValidator._ensure_bool(cfg[key], "enabled", True)
 
+        # OpenQuakeAPI：组总闸 + Global Quake 子源开关
+        # 旧配置仅有 enabled 时，将子源开关回填为 enabled 的值，避免升级后静默关闭。
+        gq_cfg = cfg.get("global_quake")
+        if isinstance(gq_cfg, dict):
+            ConfigValidator._ensure_bool(gq_cfg, "enabled", True)
+            if "global_quake" not in gq_cfg:
+                gq_cfg["global_quake"] = bool(gq_cfg.get("enabled", True))
+            ConfigValidator._ensure_bool(gq_cfg, "global_quake", True)
+
         # S-Net 轮询间隔校验
         snet_cfg = cfg.get("snet")
         if isinstance(snet_cfg, dict):

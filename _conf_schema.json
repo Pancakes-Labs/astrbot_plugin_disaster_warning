@@ -204,15 +204,21 @@
         }
       },
       "global_quake": {
-        "description": "Global Quake 服务器推送",
+        "description": "OpenQuakeAPI 数据源",
         "type": "object",
-        "hint": "通过全球测站实时测算，精度有限",
+        "hint": "OpenQuakeAPI 连接组数据源总开关。",
         "items": {
           "enabled": {
-            "description": "启用 Global Quake 数据源",
+            "description": "启用 OpenQuakeAPI 数据源",
             "type": "bool",
-            "hint": "连接到 GlobalQuake Monitor 服务器获取全球地震实时数据",
-            "default": true
+            "default": true,
+            "hint": "控制 OpenQuakeAPI 通道是否启用。关闭后所有 OpenQuakeAPI 子源均不可用。"
+          },
+          "global_quake": {
+            "description": "Global Quake",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 OpenQuakeAPI 获取 Global Quake 全球地震实时数据（由全球测站实时测算，精度有限）。"
           }
         }
       },
