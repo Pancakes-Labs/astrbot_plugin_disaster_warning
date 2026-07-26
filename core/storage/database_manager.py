@@ -25,7 +25,7 @@ from ..services.identity.event_classifier import (
     is_major_record,
 )
 from .source_compat import (
-    build_cenc_intensity_report_sql_predicate,
+    build_earthquake_supplement_sql_predicate,
     build_source_stats_key,
     expand_source_aliases,
     format_source_name,
@@ -1897,14 +1897,14 @@ class DatabaseManager:
         )
 
     @staticmethod
-    def _cenc_intensity_report_sql_predicate(
+    def _earthquake_supplement_sql_predicate(
         *,
         source_expr: str = "source",
         source_id_expr: str = "source_id",
         info_type_expr: str = "info_type",
     ) -> str:
-        """SQL 侧烈度速报判定表达式（静态别名，无用户输入拼接）。"""
-        return build_cenc_intensity_report_sql_predicate(
+        """SQL 侧地震补充产品判定表达式（烈度速报 + CMT）。"""
+        return build_earthquake_supplement_sql_predicate(
             source_expr=source_expr,
             source_id_expr=source_id_expr,
             info_type_expr=info_type_expr,
@@ -1917,10 +1917,10 @@ class DatabaseManager:
             cursor = await connection.cursor()
 
             dedup_group_expr = "COALESCE(NULLIF(unique_id, ''), NULLIF(real_event_id, ''), CAST(id AS TEXT))"
-            intensity_pred = self._cenc_intensity_report_sql_predicate()
+            intensity_pred = self._earthquake_supplement_sql_predicate()
 
-            # 去重时优先保留非烈度速报行；聚合在 SQL 完成，避免全量拉回 Python。
-            # 烈度速报不计入 total_events / by_type，与运行时聚合口径一致。
+            # 去重时优先保留非补充产品行（如正式测定）；聚合在 SQL 完成，避免全量拉回 Python。
+            # 补充产品不计入 total_events / by_type，与运行时聚合口径一致。
             await cursor.execute(
                 f"""
                 WITH ranked AS (
@@ -2054,9 +2054,9 @@ class DatabaseManager:
 
             dedup_group_expr = "COALESCE(NULLIF(unique_id, ''), NULLIF(real_event_id, ''), CAST(id AS TEXT))"
             normalized_time_expr = "COALESCE(NULLIF(time, ''), NULLIF(updated_at, ''), NULLIF(created_at, ''))"
-            intensity_pred = self._cenc_intensity_report_sql_predicate()
+            intensity_pred = self._earthquake_supplement_sql_predicate()
 
-            # 去重优先非烈度速报，并在 SQL 侧直接排除烈度速报，减少 Python 过滤开销。
+            # 去重优先非补充产品，并在 SQL 侧直接排除补充产品（烈度速报/CMT），减少 Python 过滤开销。
             await cursor.execute(
                 f"""
                 WITH ranked AS (

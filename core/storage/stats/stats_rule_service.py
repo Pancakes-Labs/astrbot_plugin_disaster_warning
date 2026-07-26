@@ -23,7 +23,7 @@ from ...message.presenters.weather_constants import (
     SORTED_WEATHER_TYPES,
 )
 from ...services.identity.event_classifier import is_major_event
-from ..source_compat import is_cenc_intensity_report
+from ..source_compat import is_earthquake_supplement_product
 from .typhoon_stats_accumulator import record_typhoon_observation
 
 
@@ -58,8 +58,10 @@ class StatsRuleService:
             or envelope_metadata.get("info_type")
             or ""
         )
-        # 烈度速报是同一物理地震的补充产品，不参与震级分布 / 最大震级 / 地区统计。
-        if is_cenc_intensity_report(envelope.source_id or "", info_type=info_type):
+        # 补充产品（烈度速报 / CMT 等）不参与震级分布 / 最大震级 / 地区统计。
+        if is_earthquake_supplement_product(
+            envelope.source_id or "", info_type=info_type
+        ):
             return
 
         mag = data.magnitude
@@ -98,6 +100,10 @@ class StatsRuleService:
                     is_reliable = True
                 elif "震源" in info_type or "各地" in info_type:
                     is_reliable = True
+                elif envelope.source_id == "fssn_cmt_fanstudio" and info_type == "CMT":
+                    # CMT 虽是补充产品，但在 record_earthquake_stats 外层已被 is_earthquake_supplement_product 过滤掉。
+                    # 这里保持逻辑一致即可。
+                    is_reliable = False
 
             if is_reliable:
                 # 最大地震摘要只接受可信事件，避免临时报文把峰值统计刷乱。

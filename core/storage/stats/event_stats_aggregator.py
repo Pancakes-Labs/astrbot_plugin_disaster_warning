@@ -14,7 +14,7 @@ from ...domain.event_models import (
     TyphoonEvent,
     WeatherEvent,
 )
-from ..source_compat import build_source_stats_key, is_cenc_intensity_report
+from ..source_compat import build_source_stats_key, is_earthquake_supplement_product
 
 
 class EventStatsAggregator:
@@ -40,7 +40,8 @@ class EventStatsAggregator:
         # 贡献统计键：台风 fan/enriched 合并；eqsc_rebuild 单独计数
         source_stats_key = self._resolve_source_stats_key(envelope)
         source_for_display = source_stats_key
-        intensity_report = self._is_intensity_report(envelope)
+        # 兼容补充去重逻辑，将 CENC 烈度速报和 CMT 均视为补充产品
+        intensity_report = self._is_supplement_product(envelope)
 
         event_unique_id = self.manager.get_unique_event_id(event)
         # 源内唯一键用于统计同一来源下是否重复收到同一事件。
@@ -69,7 +70,7 @@ class EventStatsAggregator:
             if len(stats["recent_event_ids"]) > 500:
                 stats["recent_event_ids"] = stats["recent_event_ids"][-500:]
 
-            # 烈度速报是同一物理地震的补充产品：保留 by_source / 事件列表，
+            # 烈度速报与 CMT 等是同一物理地震的补充产品：保留 by_source / 事件列表，
             # 但不计入 total_events、by_type、震级分布与时间序列，避免与正式测定双计。
             if not intensity_report:
                 stats["total_events"] += 1
@@ -124,9 +125,9 @@ class EventStatsAggregator:
         return ""
 
     @classmethod
-    def _is_intensity_report(cls, envelope: EventEnvelope) -> bool:
-        """判断当前事件是否为 CENC 烈度速报。"""
-        return is_cenc_intensity_report(
+    def _is_supplement_product(cls, envelope: EventEnvelope) -> bool:
+        """判断当前事件是否为补充产品（CENC 烈度速报或 FSSN CMT）。"""
+        return is_earthquake_supplement_product(
             envelope.source_id or "",
             info_type=cls._resolve_info_type(envelope),
         )
