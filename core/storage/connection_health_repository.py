@@ -100,6 +100,24 @@ class ConnectionHealthRepository:
         await connection.commit()
         return len(rows)
 
+    @staticmethod
+    def _compute_uptime_ratio(
+        minutes_monitored: float,
+        minutes_major: float,
+        minutes_partial: float,
+    ) -> float | None:
+        """按监控分钟重算可用性。
+
+        degraded 不扣 uptime；partial/major 按 100% 计入中断。
+        强制浮点除法，避免 SQLite 整型存储时 4/107 被截成 0。
+        """
+        monitored = float(minutes_monitored or 0.0)
+        if monitored <= 0:
+            return None
+        outage = float(minutes_major or 0.0) + float(minutes_partial or 0.0)
+        ratio = 1.0 - (min(monitored, max(0.0, outage)) / monitored)
+        return max(0.0, min(1.0, ratio))
+
     async def upsert_day_aggregate(self, day_row: dict[str, Any]) -> None:
         """按 (group_key, day) 原子累加日聚合分钟数。
 
@@ -118,16 +136,20 @@ class ConnectionHealthRepository:
             except (TypeError, ValueError):
                 return 0.0
 
-        add_monitored = _as_float(day_row.get("minutes_monitored"))
-        add_major = _as_float(day_row.get("minutes_major"))
-        add_partial = _as_float(day_row.get("minutes_partial"))
-        add_degraded = _as_float(day_row.get("minutes_degraded"))
+        # 显式 float，避免 aiosqlite/SQLite 把 1.0 存成 INTEGER 后触发整除。
+        add_monitored = float(_as_float(day_row.get("minutes_monitored")))
+        add_major = float(_as_float(day_row.get("minutes_major")))
+        add_partial = float(_as_float(day_row.get("minutes_partial")))
+        add_degraded = float(_as_float(day_row.get("minutes_degraded")))
         add_samples = int(day_row.get("sample_count") or 1)
         candidate_worst = str(day_row.get("worst_state") or "not_monitored")
         updated_at = str(day_row.get("updated_at") or "").strip() or None
+        insert_uptime = self._compute_uptime_ratio(
+            add_monitored, add_major, add_partial
+        )
 
         # worst_state 用 CASE 比较严重度，避免 Python 侧二次读写。
-        # degraded 不扣 uptime；partial/major 按 100% 计入中断。
+        # uptime_ratio 强制 * 1.0，防止 INTEGER 存储类触发整除把中断分钟算成 0。
         cursor = await connection.cursor()
         await cursor.execute(
             """
@@ -135,18 +157,7 @@ class ConnectionHealthRepository:
                 group_key, day, minutes_monitored, minutes_major, minutes_partial,
                 minutes_degraded, worst_state, uptime_ratio, sample_count, updated_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?,
-                CASE
-                    WHEN ? > 0 THEN MAX(
-                        0.0,
-                        MIN(
-                            1.0,
-                            1.0 - (MIN(?, ? + ?) / ?)
-                        )
-                    )
-                    ELSE NULL
-                END,
-                ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 COALESCE(?, CURRENT_TIMESTAMP)
             )
             ON CONFLICT(group_key, day) DO UPDATE SET
@@ -194,10 +205,12 @@ class ConnectionHealthRepository:
                                     + excluded.minutes_major
                                     + connection_health_days.minutes_partial
                                     + excluded.minutes_partial
-                                )
+                                ) * 1.0
                                 / (
-                                    connection_health_days.minutes_monitored
-                                    + excluded.minutes_monitored
+                                    (
+                                        connection_health_days.minutes_monitored
+                                        + excluded.minutes_monitored
+                                    ) * 1.0
                                 )
                             )
                         )
@@ -214,17 +227,40 @@ class ConnectionHealthRepository:
                 add_partial,
                 add_degraded,
                 candidate_worst,
-                # INSERT 时 uptime_ratio 计算参数
-                add_monitored,
-                add_monitored,
-                add_major,
-                add_partial,
-                add_monitored if add_monitored > 0 else 1.0,
+                insert_uptime,
                 add_samples,
                 updated_at,
             ),
         )
         await connection.commit()
+
+    async def recompute_all_uptime_ratios(self) -> int:
+        """用分钟字段重算全部日聚合 uptime_ratio，修复历史整除错误。"""
+        connection = await self._connection()
+        cursor = await connection.cursor()
+        await cursor.execute(
+            """
+            UPDATE connection_health_days
+            SET uptime_ratio = CASE
+                WHEN minutes_monitored > 0 THEN MAX(
+                    0.0,
+                    MIN(
+                        1.0,
+                        1.0 - (
+                            MIN(
+                                minutes_monitored,
+                                COALESCE(minutes_major, 0) + COALESCE(minutes_partial, 0)
+                            ) * 1.0
+                            / (minutes_monitored * 1.0)
+                        )
+                    )
+                )
+                ELSE NULL
+            END
+            """
+        )
+        await connection.commit()
+        return int(cursor.rowcount or 0)
 
     async def list_day_aggregates(
         self,
