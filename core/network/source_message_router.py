@@ -512,25 +512,25 @@ class SourceMessageRouter:
         return wolfx_handler
 
     def _create_global_quake_handler(self):
-        """创建 Global Quake WebSocket 连接的消息处理器。"""
+        """创建 OpenQuakeAPI (Global Quake) WebSocket 连接的消息处理器。"""
 
         async def global_quake_handler(
             message, connection_name=None, connection_info=None
         ):
             self._log_received_message(
-                "Global Quake",
+                "OpenQuakeAPI",
                 message,
                 connection_name=connection_name,
                 connection_info=connection_info,
             )
 
-            # 校验是否配备了 global_quake 对应专有 protobuf 解析模块
+            # 校验是否配备了 global_quake 对应解析模块
             if not self._has_parser("global_quake"):
                 plugin_logger.warning("[灾害预警] 未找到 Global Quake 解析器")
                 return
 
             try:
-                # 这里的 message 为 bytes 二进制序列，不走 json.loads
+                # 上游当前以 JSON 文本为主，同时兼容历史 protobuf 二进制帧
                 await self._parse_and_dispatch(
                     source_id="global_quake",
                     source_label="global_quake",

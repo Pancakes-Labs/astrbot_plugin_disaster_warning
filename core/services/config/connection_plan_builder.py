@@ -101,7 +101,7 @@ class ConnectionPlanBuilder:
             elif group_key == "wolfx_all":
                 logger.info("[灾害预警] 已配置 Wolfx 全量数据连接")
             elif group_key == "global_quake":
-                logger.info("[灾害预警] Global Quake 数据源已启用")
+                logger.info("[灾害预警] 已配置 OpenQuakeAPI 数据连接")
             else:
                 logger.info(f"[灾害预警] 已配置数据连接，连接分组为 {group_key}")
 
