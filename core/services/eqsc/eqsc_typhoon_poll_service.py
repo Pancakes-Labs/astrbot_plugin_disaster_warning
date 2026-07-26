@@ -266,8 +266,8 @@ class EqscTyphoonPollService:
             if self._last_fingerprints.get(typhoon_id) == fingerprint:
                 continue
 
-            # 启动静默期：不进入推送链路，但仍提交指纹，避免静默结束后整批误报“推送”。
-            is_silence = getattr(self.service, "is_in_silence_period", None)
+            # 启动静默期：不进入推送链路，但仍提交指纹，避免静默结束后整批误报。
+            is_silence = getattr(self.service, "is_silencing", None)
             if callable(is_silence) and is_silence():
                 self._last_fingerprints[typhoon_id] = fingerprint
                 continue
@@ -309,6 +309,12 @@ class EqscTyphoonPollService:
         # 这里仅在拿到可解析对象时记成功。
         self._consecutive_failures = 0
         self._last_success_at = time.time()
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_completed("eqsc_typhoon", success=True)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] EQSC 台风轮询通知静默协调器失败: {exc}")
 
         if not emit_event:
             return active_items

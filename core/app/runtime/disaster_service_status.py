@@ -57,10 +57,19 @@ class DisasterServiceStatusService:
         )
         # total_connections 已由 runtime snapshot 按 catalog 期望通道统计
         # （含 EQSC / S-Net / 已停用通道），此处不再二次累加。
+        silence_status = None
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None and hasattr(coordinator, "get_status"):
+            try:
+                silence_status = coordinator.get_status()
+            except Exception:
+                silence_status = None
+
         return {
             **snapshot,
             # 统计摘要直接挂在顶层，便于管理端一次请求同时拿到运行状态与统计概览。
             "statistics_summary": self.service.statistics_manager.get_summary(),
+            "startup_silence": silence_status,
         }
 
     def get_sub_source_status(self) -> dict[str, dict[str, bool]]:

@@ -1412,16 +1412,11 @@
           "step": 1
         }
       },
-      "startup_silence_duration": {
-        "description": "启动后静默时间",
-        "type": "int",
-        "hint": "单位：秒。插件启动后在此时间内自动忽略所有事件，不进行推送、日志记录和统计。适用于频繁重启的开发环境或不稳定的生产环境。0表示禁用",
-        "default": 0,
-        "slider": {
-          "min": 0,
-          "max": 3600,
-          "step": 10
-        }
+      "silent_startup": {
+        "description": "是否静默启动插件",
+        "type": "bool",
+        "hint": "开启后，插件在建连与首轮数据同步完成前自动忽略事件推送、原始日志与统计，用于过滤启动噪音。关闭后事件立即进入正常推送链路。",
+        "default": true
       }
     }
   },

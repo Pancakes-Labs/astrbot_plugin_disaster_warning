@@ -11,7 +11,6 @@
 import asyncio
 import os
 import traceback
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from astrbot.api import logger
@@ -59,6 +58,7 @@ from .runtime.disaster_service_notice import DisasterServiceNoticeService
 from .runtime.disaster_service_reconnect import DisasterServiceReconnectService
 from .runtime.disaster_service_runtime import DisasterServiceRuntimeService
 from .runtime.disaster_service_status import DisasterServiceStatusService
+from .runtime.startup_silence_coordinator import StartupSilenceCoordinator
 from .services.typhoon_enrichment_service import TyphoonEnrichmentService
 from .services.typhoon_history_rebuild_service import TyphoonHistoryRebuildService
 
@@ -186,6 +186,10 @@ class DisasterWarningService:
         from ..services.health.connection_health_service import ConnectionHealthService
 
         self.connection_health_service = ConnectionHealthService(self)
+        # 启动静默协调器：建连/首包完成前抑制推送并播种去重指纹
+        self.startup_silence = StartupSilenceCoordinator()
+        self.startup_silence.bind_service(self)
+        self.message_logger.set_silence_checker(self.is_silencing)
         self._setup_runtime_services()
 
     def _setup_runtime_services(self) -> None:
@@ -373,6 +377,13 @@ class DisasterWarningService:
         registry.register_all(self.ws_manager)
         self.ws_manager.set_offline_notify_callback(self._handle_offline_notification)
 
+        def _on_ws_established(name: str) -> None:
+            coordinator = getattr(self, "startup_silence", None)
+            if coordinator is not None:
+                coordinator.note_connection_established(name)
+
+        self.ws_manager.on_connection_established = _on_ws_established
+
     def _configure_connections(self):
         """根据数据源配置生成连接计划。"""
         self.connections = ConnectionPlanBuilder.build(self.config)
@@ -409,19 +420,40 @@ class DisasterWarningService:
         """启动清理任务。"""
         await self.runtime_service.start_cleanup_task()
 
+    def is_silencing(self) -> bool:
+        """是否处于启动静默（建连/首轮同步阶段）。"""
+        coordinator = getattr(self, "startup_silence", None)
+        if coordinator is None:
+            return False
+        return bool(coordinator.is_silencing())
+
     def is_in_silence_period(self) -> bool:
-        """检查是否处于启动后的静默期。"""
-        if not hasattr(self, "start_time"):
-            return False
+        """兼容旧接口：等价于 is_silencing()。"""
+        return self.is_silencing()
 
-        debug_config = self.config.get("debug_config", {})
-        silence_duration = debug_config.get("startup_silence_duration", 0)
-
-        if silence_duration <= 0:
-            return False
-
-        elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
-        return elapsed < silence_duration
+    def _seed_event_for_silence(self, event: EventEnvelope) -> None:
+        """静默期播种去重指纹（推送管理器 + 统计侧，若存在）。"""
+        managers = []
+        message_manager = getattr(self, "message_manager", None)
+        if message_manager is not None:
+            managers.append(getattr(message_manager, "deduplicator", None))
+        stats_manager = getattr(self, "statistics_manager", None)
+        if stats_manager is not None:
+            managers.append(getattr(stats_manager, "deduplicator", None))
+        seen: set[int] = set()
+        for deduplicator in managers:
+            if deduplicator is None:
+                continue
+            ident = id(deduplicator)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            seed = getattr(deduplicator, "seed_event", None)
+            if callable(seed):
+                try:
+                    seed(event)
+                except Exception as exc:
+                    logger.debug(f"[灾害预警] 静默播种去重指纹失败（已忽略）: {exc}")
 
     async def _handle_disaster_event(self, event: EventEnvelope):
         """处理灾害事件。主链路仅接收解析器产出的统一事件。"""
@@ -431,14 +463,13 @@ class DisasterWarningService:
         except Exception as e:
             logger.debug(f"[灾害预警] 更新 EEW 查询状态失败（已忽略）: {e}")
 
-        # 启动静默期过滤逻辑，防止插件重载后反复造成消息推送
-        if self.is_in_silence_period():
-            debug_config = self.config.get("debug_config", {})
-            silence_duration = debug_config.get("startup_silence_duration", 0)
-            elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
-            logger.debug(
-                f"[灾害预警] 处于启动静默期 (剩余 {silence_duration - elapsed:.1f}s)，忽略事件: {event.id}"
-            )
+        # 启动静默：不推送/不统计，但播种指纹并推进门闩
+        if self.is_silencing():
+            self._seed_event_for_silence(event)
+            coordinator = getattr(self, "startup_silence", None)
+            if coordinator is not None:
+                coordinator.note_event_absorbed(event)
+            logger.debug(f"[灾害预警] 静默启动中，已吸收并播种事件: {event.id}")
             return
 
         try:

@@ -37,6 +37,9 @@ class DisasterServiceLifecycleService:
                 )  # 服务启动UTC时间戳
                 logger.info("[灾害预警] 正在启动灾害预警服务...")
 
+                # 武装启动静默：在真正建连/轮询前注册门闩
+                self._arm_startup_silence()
+
                 # 启动顺序刻意遵循“先恢复状态，再开放接入”的原则：
                 # 1. 初始化统计存储；
                 # 2. 恢复地震列表缓存；
@@ -110,11 +113,62 @@ class DisasterServiceLifecycleService:
                 # 启动失败时必须回滚运行标记，避免外部误判服务已可用。
                 logger.error(f"[灾害预警] 启动服务失败: {e}")
                 self.service.running = False
+                coordinator = getattr(self.service, "startup_silence", None)
+                if coordinator is not None:
+                    coordinator.disarm()
                 if self.service._telemetry and self.service._telemetry.enabled:
                     await self.service._telemetry.track_error(
                         e, module="core.disaster_service.start"
                     )
                 raise
+
+    def _arm_startup_silence(self) -> None:
+        """根据配置与连接计划武装启动静默协调器。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        debug_config: dict = {}
+        config = getattr(self.service, "config", {}) or {}
+        if isinstance(config, dict):
+            raw_debug = config.get("debug_config", {})
+            if isinstance(raw_debug, dict):
+                debug_config = raw_debug
+        enabled = coordinator.resolve_enabled(debug_config)
+
+        # connections 由 ConnectionPlanBuilder 产出，本身即为 WebSocket 连接计划，
+        # 无需再按 handler 名称白名单过滤，以免遗漏新增数据源。
+        expected_ws: list[str] = []
+        connections = getattr(self.service, "connections", None) or {}
+        if isinstance(connections, dict):
+            for name, plan in connections.items():
+                if not isinstance(plan, dict):
+                    continue
+                conn_name = str(name or "").strip()
+                if conn_name:
+                    expected_ws.append(conn_name)
+
+        expected_polls: list[str] = []
+        snet_poll = getattr(self.service, "snet_poll_service", None)
+        if snet_poll is not None and getattr(snet_poll, "is_enabled", lambda: False)():
+            expected_polls.append("snet_msil")
+        eqsc_tsunami = getattr(self.service, "eqsc_tsunami_poll_service", None)
+        if (
+            eqsc_tsunami is not None
+            and getattr(eqsc_tsunami, "is_enabled", lambda: False)()
+        ):
+            expected_polls.append("eqsc_tsunami")
+        eqsc_typhoon = getattr(self.service, "eqsc_typhoon_poll_service", None)
+        if (
+            eqsc_typhoon is not None
+            and getattr(eqsc_typhoon, "is_enabled", lambda: False)()
+        ):
+            expected_polls.append("eqsc_typhoon")
+
+        coordinator.arm(
+            enabled=enabled,
+            expected_ws=expected_ws,
+            expected_polls=expected_polls,
+        )
 
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """
@@ -143,6 +197,9 @@ class DisasterServiceLifecycleService:
                 was_running = self.service.running
                 # 提前将运行标记切为 False，阻止新任务继续按“服务运行中”路径工作。
                 self.service.running = False
+                coordinator = getattr(self.service, "startup_silence", None)
+                if coordinator is not None:
+                    coordinator.disarm()
 
                 # 立刻停连接健康采样：避免 running=False 后仍采样，把通道误记为
                 # major_outage 并触发错误事故开单。

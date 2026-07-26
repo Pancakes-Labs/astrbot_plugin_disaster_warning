@@ -207,6 +207,12 @@ class EqscTsunamiPollService:
 
         self._consecutive_failures = 0
         self._last_success_at = time.time()
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_completed("eqsc_tsunami", success=True)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] EQSC 海啸轮询通知静默协调器失败: {exc}")
 
         fingerprint = self._build_snapshot_fingerprint(raw)
 

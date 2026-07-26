@@ -83,10 +83,21 @@ class RawMessageLoggingService:
 
     def _in_startup_silence(self) -> bool:
         """判断是否仍处于启动静默期。"""
-        if self.logger.startup_silence_duration <= 0:
+        checker = getattr(self.logger, "is_in_startup_silence", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        # 兼容旧字段：仅当仍配置了正数秒数时按墙钟判断
+        duration = float(getattr(self.logger, "startup_silence_duration", 0) or 0)
+        if duration <= 0:
             return False
-        elapsed = (datetime.now(timezone.utc) - self.logger.start_time).total_seconds()
-        return elapsed < self.logger.startup_silence_duration
+        start = getattr(self.logger, "start_time", None)
+        if start is None:
+            return False
+        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        return elapsed < duration
 
     def _try_parse_structured_payload(self, payload_data: Any) -> dict[str, Any] | None:
         """尽量把原始载荷解析为结构化字典。"""

@@ -907,7 +907,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
   - `log_max_files`：轮转文件最大保留数量。
 - **过滤机制**: 可过滤心跳包、P2P 节点状态、重复事件、连接状态等日志噪音。
 - **Wolfx 列表日志上限 (`wolfx_list_log_max_items`)**: 记录 Wolfx 列表时的最大条目数。
-- **启动静默期 (`startup_silence_duration`)**: 插件启动后在此时间内自动忽略所有事件。
+- **是否静默启动插件 (`silent_startup`)**: 开启后，插件在建连与首轮数据同步完成前自动忽略事件推送、原始日志与统计，并播种去重指纹，用于过滤启动噪音。
 
 ```json
 "debug_config": {
@@ -921,7 +921,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
   "filter_duplicate_events": true,                   // 是否过滤重复事件日志
   "filter_connection_status": true,                  // 是否过滤连接状态日志
   "wolfx_list_log_max_items": 5,                     // Wolfx 列表日志最大记录条数
-  "startup_silence_duration": 0                      // 启动静默期（秒），0 表示禁用
+  "silent_startup": true                             // 是否静默启动（建连/首轮同步完成前不推送）
 }
 ```
 
@@ -2173,7 +2173,7 @@ graph TB
 >    - 最简单的配置方法：在目标群聊/私聊中发送 `/sid` 指令，直接复制返回的完整会话 ID 填入即可。
 > 3. **连接状态**：使用命令 `/灾害预警状态` 确认 WebSocket 连接是否正常 (🟢)。如果显示 🔴，请尝试使用 `/灾害预警重连` 指令重连数据源。也可以重载插件并检查网络或确认上游服务是否宕机。
 > 4. **过滤器拦截**：检查 **地震/气象过滤器** 或 **本地监控** 的阈值设置是否过高。
-> 5. **启动静默期**：确认当前不在插件启动后的 **静默期** 内。
+> 5. **静默启动**：确认 `debug_config.silent_startup` 未处于建连/首轮同步静默阶段（或已关闭该开关）。
 > 6. **数据源开关**：确保在 `data_sources` 中启用了具体的子数据源。
 
 **Q: 为什么收到了地震消息，但没有地图卡片/图片？**

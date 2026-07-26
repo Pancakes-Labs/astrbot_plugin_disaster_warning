@@ -162,6 +162,11 @@ class SourceMessageRouter:
                 connection_info=connection_info,
                 source_channel=source_channel,
             )
+            if getattr(self.service, "is_silencing", lambda: False)():
+                if hasattr(event, "metadata") and isinstance(event.metadata, dict):
+                    event.metadata.setdefault("bootstrap", True)
+                    if connection_name and not event.metadata.get("bootstrap_kind"):
+                        event.metadata["bootstrap_kind"] = "conn_first_wave"
             log_label = parser_log_label or source_label or source_id
             plugin_logger.debug(f"[灾害预警] {log_label} 解析成功: {event.id}")
 
@@ -307,6 +312,18 @@ class SourceMessageRouter:
                     for item in routed_messages
                 ]
                 msg_type = data.get("type")
+                if msg_type == "initial_all":
+                    coordinator = getattr(self.service, "startup_silence", None)
+                    if coordinator is not None:
+                        try:
+                            coordinator.note_bootstrap_payload(
+                                connection_name=connection_name,
+                                kind="fan_initial_all",
+                            )
+                        except Exception as exc:
+                            plugin_logger.debug(
+                                f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
+                            )
                 processed_count = 0
 
                 # 遍历被分配出来的数据源及负载，分别尝试分发
