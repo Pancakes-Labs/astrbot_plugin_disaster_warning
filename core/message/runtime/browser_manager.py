@@ -125,7 +125,6 @@ class BrowserManager:
         Playwright 常以 net::ERR_ABORTED 上报；出图成功时这些属于噪声。
         """
         failure = str(failure_text or "").lower()
-        resource = str(resource_type or "").lower()
         is_aborted = (
             "err_aborted" in failure
             or "net::err_aborted" in failure
@@ -133,8 +132,6 @@ class BrowserManager:
         )
         if not is_aborted:
             return False
-        if resource in {"image", "imageset", "media"}:
-            return True
         return cls._is_map_tile_url(url)
 
     def _truncate_debug_text(self, value, limit: int = 240) -> str:
