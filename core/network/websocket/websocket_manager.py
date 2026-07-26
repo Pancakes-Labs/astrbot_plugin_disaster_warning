@@ -167,6 +167,12 @@ class WebSocketManager:
                 self.connection_info[name].pop("quota_hit", None)
                 self.connection_info[name].pop("quota_deferred", None)
                 logger.info(f"[灾害预警] WebSocket 连接成功: {name}")
+                on_established = getattr(self, "on_connection_established", None)
+                if callable(on_established):
+                    try:
+                        on_established(name)
+                    except Exception:
+                        pass
 
                 # FAN Studio：握手成功后立即发送应用层鉴权包。
                 # 仅“缺少凭证”返回 False；网络异常会向上抛出并由下方 except 重试。

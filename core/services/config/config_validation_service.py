@@ -879,16 +879,42 @@ class ConfigValidator:
                 )
                 cfg["wolfx_list_log_max_items"] = 50
 
-        # 启动静默期
-        silence = cfg.get("startup_silence_duration")
-        if isinstance(silence, int):
-            if silence < 0:
-                cfg["startup_silence_duration"] = 0
-            elif silence > 3600:
-                logger.warning(
-                    f"[灾害预警] 配置警告: 启动静默期 {silence} 秒 过长，已修正为 3600 秒。"
-                )
-                cfg["startup_silence_duration"] = 3600
+        # 静默启动开关（bool）；兼容旧 startup_silence_duration 秒数配置
+        if "silent_startup" in cfg:
+            raw_silent = cfg.get("silent_startup")
+            if isinstance(raw_silent, bool):
+                cfg["silent_startup"] = raw_silent
+            elif isinstance(raw_silent, (int, float)):
+                cfg["silent_startup"] = bool(raw_silent)
+            elif isinstance(raw_silent, str):
+                cfg["silent_startup"] = raw_silent.strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                    "是",
+                }
+            else:
+                cfg["silent_startup"] = True
+        elif "startup_silence_duration" in cfg:
+            legacy = cfg.get("startup_silence_duration")
+            if isinstance(legacy, bool):
+                cfg["silent_startup"] = legacy
+            elif isinstance(legacy, (int, float)):
+                cfg["silent_startup"] = float(legacy) > 0
+            else:
+                cfg["silent_startup"] = True
+            cfg.pop("startup_silence_duration", None)
+            logger.info(
+                f"[灾害预警] 已将旧配置 startup_silence_duration 迁移为 "
+                f"silent_startup={cfg['silent_startup']}"
+            )
+        else:
+            cfg["silent_startup"] = True
+
+        # 已存在 silent_startup 时清理残留旧秒数字段
+        if "startup_silence_duration" in cfg:
+            cfg.pop("startup_silence_duration", None)
 
         # 过滤消息类型列表校验
         if "filtered_message_types" in cfg:
