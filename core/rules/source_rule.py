@@ -41,8 +41,8 @@ class SourceEnabledRule(BaseRule):
             return False, f"已禁用数据源分组 {source_entry.config_group}"
 
         # 组内子源开关：缺省 False。
-        # 单源组（S-Net / Global Quake）的 config_key 就是 "enabled"，
-        # 与分组开关同一字段；多源组（Fan/Wolfx/P2P）则检查独立子键。
+        # 单源组（S-Net）的 config_key 可能与分组开关同为 "enabled"；
+        # OpenQuakeAPI / Fan / Wolfx / P2P / EQSC 等则检查独立子键。
         if not bool(group_cfg.get(source_entry.config_key, False)):
             return False, f"已禁用数据源 {source_id}"
 

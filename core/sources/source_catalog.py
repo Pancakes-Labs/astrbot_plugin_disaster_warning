@@ -321,14 +321,14 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         provider_aliases=("wolfx_jma_eew", "jma_eew"),
         routing_tags=("wolfx", "japan", "eew"),
     ),
-    # global_quake: 全球地震监测模拟系统客户端推送源 (自建或官方 WebSocket 地址)
+    # global_quake: OpenQuakeAPI 连接组下的 Global Quake 子源 (wss://api.aloys23.link/gq)
     "global_quake": SourceEntry(
         source_id="global_quake",
         source_enum="global_quake",
         source_type=SourceType.EARTHQUAKE_WARNING,
         provider_family=ProviderFamily.GLOBAL_QUAKE,
         config_group="global_quake",
-        config_key="enabled",
+        config_key="global_quake",
         parser_name="global_quake_parser",
         presentation_type="global_quake",
         text_presenter_key="global_quake",
@@ -336,7 +336,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         intensity_mode="intensity",
         priority=3,
         display_name="Global Quake",
-        description="Global Quake 服务器推送 - WebSocket连接",
+        description="OpenQuakeAPI / Global Quake 服务器推送 - WebSocket连接",
         default_timezone="UTC",
         publish_time_field="update_time",
         report_num_field="report_num",
