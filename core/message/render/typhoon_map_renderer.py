@@ -513,12 +513,9 @@ class TyphoonMapRenderer:
                 selector="#card-wrapper",
                 wait_until="domcontentloaded",
                 viewport=TYPHOON_VIEWPORT,
+                render_label="台风路径图",
             )
             if result and os.path.exists(output_path):
-                logger.info(
-                    f"[灾害预警] 台风路径图已生成 "
-                    f"({os.path.getsize(output_path)} bytes): {output_path}"
-                )
                 return output_path
             logger.warning("[灾害预警] 台风路径图渲染未生成文件")
             return None

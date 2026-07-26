@@ -64,7 +64,10 @@ class CardMessageBuilder:
             image_filename = f"eq_list_{int(time.time())}.png"
             image_path = os.path.join(self.temp_dir, image_filename)
             return await self.browser_manager.render_card(
-                html_content, image_path, selector="#card-wrapper"
+                html_content,
+                image_path,
+                selector="#card-wrapper",
+                render_label="地震列表卡片",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 渲染地震列表卡片失败: {e}")
