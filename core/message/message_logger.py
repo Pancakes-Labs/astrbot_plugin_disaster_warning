@@ -69,7 +69,10 @@ class MessageLogger:
             "filter_connection_status", True
         )
         self.wolfx_list_log_max_items = debug_config.get("wolfx_list_log_max_items", 5)
-        self.startup_silence_duration = debug_config.get("startup_silence_duration", 0)
+        # 静默启动由主服务 StartupSilenceCoordinator 统一判定；
+        # 实际日志静默走 silence_checker 回调。
+        self.startup_silence_duration = 0
+        self._silence_checker = None
 
         self.start_time = datetime.now(timezone.utc)
         # 这些内存缓存分别服务于事件级去重与最近日志内容比对。
@@ -138,6 +141,20 @@ class MessageLogger:
             logger.debug(f"[灾害预警] - P2P节点状态过滤: {self.filter_p2p_areas}")
             logger.debug(f"[灾害预警] - 重复事件过滤: {self.filter_duplicate_events}")
             logger.debug(f"[灾害预警] - 连接状态过滤: {self.filter_connection_status}")
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调（通常绑定主服务 is_silencing）。"""
+        self._silence_checker = checker
+
+    def is_in_startup_silence(self) -> bool:
+        """是否处于启动静默期（委托主服务协调器）。"""
+        checker = self._silence_checker
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
 
     def _should_filter_message(self, payload_data: Any, source_id: str = "") -> str:
         """判断是否应该过滤该消息，返回过滤原因，空字符串表示不过滤。"""
