@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ..domain.earthquake.cmt_normalize import looks_like_fssn_cmt_payload
+
 # FSSN 常见特征字段（不含 url；url 更偏向 USGS）
 FSSN_MARKER_FIELDS: tuple[str, ...] = (
     "infoTypeName",
@@ -16,12 +18,19 @@ FSSN_MARKER_FIELDS: tuple[str, ...] = (
     "placeName_zh",
 )
 
-# ShakeAlert 路由排除字段：FSSN 特征 + USGS 详情页
+# ShakeAlert 路由排除字段：FSSN 特征 + USGS 详情页 + CMT 特征
 SHAKEALERT_EXCLUSION_FIELDS: tuple[str, ...] = (
     "url",
     "infoTypeName",
     "createTime",
     "placeName_zh",
+    "nodalPlane1",
+    "nodalPlane2",
+    "allMagnitudes",
+    "centroidDepth",
+    "mnn",
+    "mee",
+    "mdd",
 )
 
 
@@ -70,10 +79,14 @@ def looks_like_fssn_payload(
 
 
 def is_shakealert_compatible_payload(payload: dict[str, Any]) -> bool:
-    """ShakeAlert 路由谓词：排除 FSSN / USGS 特征后视为兼容。"""
+    """ShakeAlert 路由谓词：排除 FSSN / USGS / CMT 特征后视为兼容。"""
     if not isinstance(payload, dict):
         return False
     if is_fssn_event_id(payload.get("id")):
+        return False
+    if is_fssn_event_id(payload.get("eventId")):
+        return False
+    if looks_like_fssn_cmt_payload(payload):
         return False
     if any(key in payload for key in SHAKEALERT_EXCLUSION_FIELDS):
         return False
@@ -86,5 +99,6 @@ __all__ = [
     "has_fssn_marker_fields",
     "is_fssn_event_id",
     "is_shakealert_compatible_payload",
+    "looks_like_fssn_cmt_payload",
     "looks_like_fssn_payload",
 ]
