@@ -4,13 +4,13 @@
 """
 
 from .database_manager import DatabaseManager
+from .history_dirty_data_cleanup_service import HistoryDirtyDataCleanupService
 from .session_config_manager import SessionConfigManager
 from .statistics_manager import StatisticsManager
-from .tsunami_history_cleanup_service import TsunamiHistoryCleanupService
 
 __all__ = [
     "DatabaseManager",
+    "HistoryDirtyDataCleanupService",
     "SessionConfigManager",
     "StatisticsManager",
-    "TsunamiHistoryCleanupService",
 ]

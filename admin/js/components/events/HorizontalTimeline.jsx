@@ -460,10 +460,21 @@ function HorizontalTimeline({ style }) {
      * 台风会按 info_type 细分为 Fan / Fan+EQSC / EQSC
      */
     const getSourceLabel = (event) => {
+        const payload = event && typeof event === 'object'
+            ? {
+                ...event,
+                source: event.source || event.source_id || event._groupSource || '',
+                source_id: event.source_id || event.source || event._groupSource || '',
+            }
+            : event;
         if (typeof formatEventSourceName === 'function') {
-            return formatEventSourceName(event || 'unknown');
+            return formatEventSourceName(payload || 'unknown');
         }
-        return formatSourceName(event?.source_id || event?.source || 'unknown');
+        return formatSourceName(
+            (payload && typeof payload === 'object'
+                ? (payload.source_id || payload.source)
+                : payload) || 'unknown'
+        );
     };
 
     return (

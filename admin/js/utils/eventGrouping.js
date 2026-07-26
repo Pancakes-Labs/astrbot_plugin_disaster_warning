@@ -181,12 +181,26 @@
             // 合并历史事件备份
             if (group.latestEvent.history && Array.isArray(group.latestEvent.history)) {
                 const existingKeys = new Set(group.events.map((event) => buildDedupKey(event)));
-                const historyEvents = group.latestEvent.history.filter((historyEvent) => {
-                    const key = buildDedupKey(historyEvent);
-                    if (existingKeys.has(key)) return false;
-                    existingKeys.add(key);
-                    return true;
-                });
+                const parentSource = group.latestEvent.source || group.latestEvent.source_id || '';
+                const parentSourceId = group.latestEvent.source_id || group.latestEvent.source || '';
+                const parentType = group.latestEvent.type || group.latestEvent._groupType || '';
+                const historyEvents = group.latestEvent.history
+                    .map((historyEvent) => {
+                        if (!historyEvent || typeof historyEvent !== 'object') return null;
+                        // event_updates 快照可能缺 source；继承主事件来源，避免「未知来源」
+                        const enriched = { ...historyEvent };
+                        if (!enriched.source) enriched.source = parentSource;
+                        if (!enriched.source_id) enriched.source_id = parentSourceId;
+                        if (!enriched.type) enriched.type = parentType;
+                        return enriched;
+                    })
+                    .filter((historyEvent) => {
+                        if (!historyEvent) return false;
+                        const key = buildDedupKey(historyEvent);
+                        if (existingKeys.has(key)) return false;
+                        existingKeys.add(key);
+                        return true;
+                    });
                 if (historyEvents.length > 0) {
                     group.events.push(...historyEvents);
                     if (groupType === 'typhoon') {

@@ -484,7 +484,23 @@ class EventDeduplicationService:
             if fingerprint_prefix:
                 return f"{fingerprint_prefix}_{stable_event_id}"
         if domain_eq.latitude is None or domain_eq.longitude is None:
-            return "unknown_location"
+            # 禁止退化为全局常量 "unknown_location"：
+            # 否则多场「震源参数调查中」会撞成同一 unique_id 并错误合并。
+            place = (
+                str(getattr(domain_eq, "place_name", "") or "").strip()
+                or "unknown_place"
+            )
+            # _to_utc 在 dt 为空时会回退到 now()；指纹路径必须用稳定占位，
+            # 避免缺发震时间时因墙钟分钟变化/轮询同分钟而错误撞键。
+            if domain_eq.occurred_at is None:
+                time_key = "unknown_time"
+            else:
+                utc_time = self._to_utc(domain_eq.occurred_at, source_id)
+                time_key = utc_time.strftime("%Y%m%d%H%M")
+            mag = getattr(domain_eq, "magnitude", None)
+            mag_key = f"{float(mag):.1f}" if isinstance(mag, (int, float)) else "na"
+            source_key = str(source_id or "unknown_source").strip() or "unknown_source"
+            return f"{source_key}|unknown_loc|{time_key}|{mag_key}|{place}"
 
         # 降级方案：计算基于网格空间容差及时间微调的模糊聚类物理指纹
         lat_grid = round(domain_eq.latitude * (111.0 / self.location_tolerance)) / (
