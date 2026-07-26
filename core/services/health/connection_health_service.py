@@ -39,7 +39,7 @@ COMPONENT_DISPLAY_NAMES: dict[str, str] = {
     "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
     "p2p_main": "P2P地震情報",
     "wolfx_all": "Wolfx",
-    "global_quake": "Global Quake",
+    "global_quake": "OpenQuakeAPI",
     "snet_msil": "NIED S-Net",
     "eqsc": "EQSC API",
 }
@@ -52,7 +52,7 @@ DISPLAY_NAME_ALIASES: dict[str, str] = {
     "Fan Studio（烈度速报）": "fan_studio_cenc_ir",
     "P2P地震情報": "p2p_main",
     "Wolfx": "wolfx_all",
-    "Global Quake": "global_quake",
+    "OpenQuakeAPI": "global_quake",
     "NIED S-Net": "snet_msil",
     "EQSC API": "eqsc",
 }

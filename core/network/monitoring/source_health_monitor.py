@@ -33,7 +33,7 @@ class SourceHealthMonitor:
         "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
         "p2p_main": "P2P地震情報",
         "wolfx_all": "Wolfx",
-        "global_quake": "Global Quake",
+        "global_quake": "OpenQuakeAPI",
         "eqsc": "EQSC API",
         "snet_msil": "NIED S-Net",
     }

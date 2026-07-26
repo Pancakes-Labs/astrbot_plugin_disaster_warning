@@ -66,7 +66,7 @@ class RealtimePayloadBuilder:
                 self.disaster_service.ws_manager.get_all_connections_status()
             )
 
-        # 活跃连接 / Global Quake 标记统一由 SourceRuntimeQueryService 计算。
+        # 活跃连接 / 标记统一由 SourceRuntimeQueryService 计算。
         metrics = self.source_runtime_query.resolve_active_connection_metrics(
             self.disaster_service,
             actual_connections,
