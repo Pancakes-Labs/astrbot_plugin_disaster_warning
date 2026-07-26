@@ -307,7 +307,7 @@ function EventCard({
                         <span className="event-meta-separator">•</span>
                         📡 {(typeof formatEventSourceName === 'function'
                             ? formatEventSourceName(evt)
-                            : formatSourceName(evt.source_id || evt.source))}
+                            : formatSourceName(evt.source_id || evt.source || evt._groupSource || 'unknown'))}
                     </span>
                 </div>
                 {typhoonMeta && (
