@@ -353,6 +353,105 @@ class EventDeduplicationService:
         )
         return True
 
+    def seed_event(self, event: EventEnvelope) -> bool:
+        """静默启动播种：写入去重指纹，不表示允许推送。
+
+        供建连/首轮快照阶段学习当前世界状态，避免静默结束后整批误报。
+        """
+        envelope = event
+        if isinstance(envelope.event, TyphoonEvent):
+            return self._seed_typhoon(envelope)
+        if isinstance(envelope.event, TsunamiEvent):
+            return self._seed_tsunami(envelope)
+        domain_eq = self._get_domain_earthquake(event)
+        if domain_eq is None:
+            return True
+        return self._seed_earthquake(envelope, domain_eq)
+
+    def _seed_typhoon(self, event: EventEnvelope) -> bool:
+        """播种台风核心参数指纹。"""
+        typhoon = event.event
+        if not isinstance(typhoon, TyphoonEvent):
+            return False
+        typhoon_id = normalize_typhoon_id(typhoon.typhoon_id)
+        if not typhoon_id:
+            return False
+        fingerprint = self._generate_typhoon_fingerprint(typhoon)
+        self._typhoon_cache[typhoon_id] = fingerprint
+        plugin_logger.debug(
+            f"[灾害预警] 静默播种台风指纹: {typhoon_id} ({fingerprint})"
+        )
+        return True
+
+    def _seed_tsunami(self, event: EventEnvelope) -> bool:
+        """播种海啸内容指纹。"""
+        if not isinstance(event.event, TsunamiEvent):
+            return False
+        source_id = self._get_source_id(event)
+        fingerprint = self._extract_tsunami_fingerprint(event)
+        if not fingerprint:
+            return False
+        priority = self._resolve_source_priority(source_id)
+        existing = self._tsunami_cache.get(fingerprint)
+        if existing is None or priority >= int(existing.get("priority") or 0):
+            self._remember_tsunami_fingerprint(
+                fingerprint,
+                source_id=source_id,
+                priority=priority,
+                event_id=str(event.id or ""),
+            )
+        plugin_logger.debug(
+            f"[灾害预警] 静默播种海啸指纹: {source_id} 事件 ID {event.id}"
+        )
+        return True
+
+    def _seed_earthquake(
+        self, event: EventEnvelope, domain_eq: EarthquakeEvent
+    ) -> bool:
+        """播种地震滑动窗口指纹。"""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        source_id = self._get_source_id(event)
+        event_fingerprint = self.generate_event_fingerprint(event, domain_eq, source_id)
+        current_time = self._to_utc(domain_eq.occurred_at, source_id)
+        current_report = self._resolve_report_num(event, metadata)
+        issue_type = self._extract_issue_type_from_earthquake(domain_eq, metadata)
+        record = {
+            "timestamp": current_time,
+            "source": source_id,
+            "latitude": domain_eq.latitude or 0,
+            "longitude": domain_eq.longitude or 0,
+            "magnitude": domain_eq.magnitude or 0,
+            "info_type": metadata.get("info_type")
+            or self._extract_issue_type_from_earthquake(domain_eq, metadata)
+            or "",
+            "issue_type": issue_type,
+            "processed_reports": {current_report},
+            "is_final": bool(metadata.get("is_final", False)),
+        }
+        if event_fingerprint in self.recent_events:
+            source_events = self.recent_events[event_fingerprint]
+            if source_id in source_events:
+                existing = source_events[source_id]
+                processed = existing.get("processed_reports", set())
+                if not isinstance(processed, set):
+                    processed = {existing.get("updates", 1)}
+                processed.add(current_report)
+                existing["processed_reports"] = processed
+                existing["timestamp"] = current_time
+                existing["is_final"] = existing.get("is_final", False) or bool(
+                    metadata.get("is_final", False)
+                )
+                if issue_type:
+                    existing["issue_type"] = issue_type
+            else:
+                source_events[source_id] = record
+        else:
+            self.recent_events[event_fingerprint] = {source_id: record}
+        plugin_logger.debug(
+            f"[灾害预警] 静默播种地震指纹: {source_id} 事件指纹：{event_fingerprint}"
+        )
+        return True
+
     def should_push_event(self, event: EventEnvelope) -> bool:
         """判断是否应该推送事件。
 
