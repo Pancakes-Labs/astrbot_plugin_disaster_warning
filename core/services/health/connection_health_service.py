@@ -6,6 +6,9 @@
 - degraded 不扣 uptime；partial_outage / major_outage 按 100% 计入中断
 - 未启用 (not_monitored) 不进 uptime 分母、不进总横幅
 - 闪断 < OPEN_INCIDENT_SECONDS 只记采样，不开 Past Incidents
+- soft-degraded 需连续 DEGRADED_CONFIRM_SECONDS 才记入日聚合降级分钟
+- 日格颜色严格按分钟阈值：不足阈值不染红/橙/黄（tooltip 仍展示实际分钟）
+- 「通道建连中」仅在宽限期内且仍有未连通通道时展示；全员连通后立即退出
 """
 
 from __future__ import annotations
@@ -75,7 +78,8 @@ STATE_RANK: dict[str, int] = {
     "major_outage": 4,
 }
 
-# 日格 worst 判定阈值（分钟）
+# 日格着色阈值（分钟）：不足阈值保持绿色，tooltip 仍展示实际分钟。
+# 1 分钟闪断/短时降级不应把整天染红/黄。
 DAY_MAJOR_THRESHOLD_MIN = 5
 DAY_PARTIAL_THRESHOLD_MIN = 5
 DAY_DEGRADED_THRESHOLD_MIN = 15
@@ -93,6 +97,14 @@ HIGH_LATENCY_MS = 1500
 # 服务启动/重载后的建连宽限期：此期间「已启用但未连通」记为降级(连接中)，
 # 避免插件重载后几十秒内整页被误判为「核心通道中断」。
 STARTUP_GRACE_SECONDS = 180
+
+# 实时态 soft-degraded（retry/高延迟）需连续保持该秒数才记入日聚合。
+# 瞬时重连、单次采样尖刺不会把日格染黄。
+DEGRADED_CONFIRM_SECONDS = 180
+
+# 日聚合 outage 防抖：major/partial 需连续保持该秒数才记入中断分钟。
+# 与事故开单阈值对齐，避免单次采样把 uptime 和日格一起打歪。
+OUTAGE_CONFIRM_SECONDS = 180
 
 
 class ConnectionHealthService:
@@ -142,6 +154,18 @@ class ConnectionHealthService:
             await self._hydrate_open_incidents()
         except Exception as exc:
             logger.warning(f"[灾害预警] 连接健康事故状态回填失败: {exc}")
+        # 一次性修复历史 uptime_ratio 整除错误（中断分钟 > 0 却显示 100%）。
+        try:
+            repo = self._ensure_repo()
+            if repo is not None:
+                fixed = await repo.recompute_all_uptime_ratios()
+                if fixed:
+                    logger.debug(f"[灾害预警] 已重算连接健康日聚合可用性 {fixed} 条")
+                    self._history_cache = None
+                    self._history_cache_key = ""
+                    self._history_cache_at = 0.0
+        except Exception as exc:
+            logger.warning(f"[灾害预警] 连接健康可用性重算失败: {exc}")
         self._task = asyncio.create_task(self._loop())
         logger.info("[灾害预警] 连接健康采样服务已启动")
 
@@ -174,6 +198,9 @@ class ConnectionHealthService:
                 {
                     "bad_since": None,
                     "good_since": None,
+                    "degraded_since": None,
+                    "outage_since": None,
+                    "outage_state": None,
                     "last_state": "not_monitored",
                     "open_incident_id": None,
                 },
@@ -199,18 +226,42 @@ class ConnectionHealthService:
             except asyncio.CancelledError:
                 raise
 
-    def _startup_grace_active(self) -> bool:
-        """服务启动后宽限期内返回 True（重载建连中）。"""
+    def _startup_grace_active(
+        self, live_components: list[dict[str, Any]] | None = None
+    ) -> bool:
+        """服务启动后宽限期内返回 True（重载建连中）。
+
+        提前结束条件：
+        - 超过 STARTUP_GRACE_SECONDS
+        - 或已启用通道全部连通（无需再把横幅钉在「通道建连中」）
+        """
         start = getattr(self.service, "start_time", None)
         if start is None:
-            return True
+            # 无启动时间戳时不无限宽限，避免横幅永久「建连中」
+            return False
         try:
             if start.tzinfo is None:
                 start = start.replace(tzinfo=timezone.utc)
             age = (self._now_utc() - start.astimezone(timezone.utc)).total_seconds()
-            return age < STARTUP_GRACE_SECONDS
+            if age >= STARTUP_GRACE_SECONDS:
+                return False
         except Exception:
-            return True
+            return False
+
+        if live_components is not None:
+            enabled = [c for c in live_components if bool(c.get("enabled"))]
+            # 尚无已启用通道时保持宽限；全部连通则提前结束
+            if enabled and all(bool(c.get("connected")) for c in enabled):
+                return False
+        return True
+
+    @staticmethod
+    def _has_connecting_channels(live_components: list[dict[str, Any]]) -> bool:
+        """是否仍有已启用但未连通的通道（建连中）。"""
+        for comp in live_components:
+            if bool(comp.get("enabled")) and not bool(comp.get("connected")):
+                return True
+        return False
 
     # ──────────────────────────── 时间工具 ────────────────────────────
 
@@ -289,13 +340,13 @@ class ConnectionHealthService:
         except Exception:
             group_status = {}
 
-        components: list[dict[str, Any]] = []
+        # 第一遍：只收集 enabled/connected，用于提前结束建连宽限
+        prelim: list[dict[str, Any]] = []
         for group_key in COMPONENT_ORDER:
             display_name = COMPONENT_DISPLAY_NAMES.get(group_key, group_key)
             info = by_group.get(group_key) or by_display.get(display_name) or {}
             raw = raw_ws.get(group_key) or {}
 
-            # 启用：优先 payload enabled；否则看 group 下任一子源
             enabled = bool(info.get("enabled"))
             if not enabled:
                 sub = group_status.get(group_key) or {}
@@ -307,6 +358,32 @@ class ConnectionHealthService:
                 # WS 组以 raw 为准更贴近物理连接
                 if group_key not in {"eqsc", "snet_msil"}:
                     connected = bool(raw.get("connected"))
+
+            if not bool(getattr(self.service, "running", False)) and enabled:
+                connected = False
+
+            prelim.append(
+                {
+                    "group_key": group_key,
+                    "display_name": display_name,
+                    "info": info,
+                    "raw": raw,
+                    "enabled": enabled,
+                    "connected": connected,
+                }
+            )
+
+        # 全员连通时提前结束宽限，避免横幅卡在「通道建连中」
+        in_grace = self._startup_grace_active(prelim)
+
+        components: list[dict[str, Any]] = []
+        for item in prelim:
+            group_key = item["group_key"]
+            display_name = item["display_name"]
+            info = item["info"]
+            raw = item["raw"]
+            enabled = bool(item["enabled"])
+            connected = bool(item["connected"])
 
             retry_count = int(info.get("retry_count") or raw.get("retry_count") or 0)
             circuit_open = bool(info.get("circuit_open"))
@@ -325,7 +402,6 @@ class ConnectionHealthService:
                 or ("http" if group_key in {"eqsc", "snet_msil"} else "websocket")
             )
 
-            in_grace = self._startup_grace_active()
             state = self._classify_state(
                 enabled=enabled,
                 connected=connected,
@@ -339,7 +415,6 @@ class ConnectionHealthService:
             )
 
             # 插件整体未运行：已启用通道视为中断（避免停机期间“全绿”）
-            # 注意：running=True 但尚在宽限期建连时，不走这条。
             if not bool(getattr(self.service, "running", False)) and enabled:
                 state = "major_outage"
                 connected = False
@@ -418,6 +493,66 @@ class ConnectionHealthService:
 
     # ──────────────────────────── 采样主流程 ────────────────────────────
 
+    def _aggregate_state_for_day(
+        self,
+        *,
+        group_key: str,
+        state: str,
+        enabled: bool,
+        now: datetime,
+    ) -> str:
+        """将实时态收敛为可写入日聚合的状态。
+
+        - soft-degraded：连续 DEGRADED_CONFIRM_SECONDS 才记降级分钟
+        - major/partial：连续 OUTAGE_CONFIRM_SECONDS 才记中断分钟
+        未达确认窗口的样本仍计入 monitored，但不扣 uptime、不染日格。
+        """
+        tracker = self._trackers.setdefault(
+            group_key,
+            {
+                "bad_since": None,
+                "good_since": None,
+                "degraded_since": None,
+                "outage_since": None,
+                "outage_state": None,
+                "last_state": "not_monitored",
+                "open_incident_id": None,
+            },
+        )
+        if not enabled:
+            tracker["degraded_since"] = None
+            tracker["outage_since"] = None
+            tracker["outage_state"] = None
+            return "not_monitored"
+
+        if state in {"major_outage", "partial_outage"}:
+            tracker["degraded_since"] = None
+            if (
+                tracker.get("outage_since") is None
+                or tracker.get("outage_state") != state
+            ):
+                # 严重度变化时重置确认窗口，避免 partial→major 误继承时长
+                tracker["outage_since"] = now
+                tracker["outage_state"] = state
+            outage_for = (now - tracker["outage_since"]).total_seconds()
+            if outage_for >= OUTAGE_CONFIRM_SECONDS:
+                return state
+            return "operational"
+
+        tracker["outage_since"] = None
+        tracker["outage_state"] = None
+
+        if state == "degraded":
+            if tracker.get("degraded_since") is None:
+                tracker["degraded_since"] = now
+            degraded_for = (now - tracker["degraded_since"]).total_seconds()
+            if degraded_for >= DEGRADED_CONFIRM_SECONDS:
+                return "degraded"
+            return "operational"
+
+        tracker["degraded_since"] = None
+        return state
+
     async def sample_once(self) -> list[dict[str, Any]]:
         """执行一轮采样：写样本、累加日桶、推进事故状态机。"""
         repo = self._ensure_repo()
@@ -439,6 +574,13 @@ class ConnectionHealthService:
             state = comp["state"]
             enabled = bool(comp["enabled"])
             connected = bool(comp["connected"])
+            # 日聚合用防抖后的状态；实时样本/事故机仍用原始 state
+            aggregate_state = self._aggregate_state_for_day(
+                group_key=group_key,
+                state=state,
+                enabled=enabled,
+                now=now,
+            )
 
             sample = {
                 "group_key": group_key,
@@ -453,21 +595,26 @@ class ConnectionHealthService:
                     "status_text": comp.get("status_text"),
                     "connection_type": comp.get("connection_type"),
                     "display_name": comp.get("display_name"),
+                    "aggregate_state": aggregate_state,
                 },
             }
             samples.append(sample)
 
-            # 日聚合：未启用不计入 monitored
+            # 日聚合：未启用不计入 monitored；降级需通过防抖确认
             day_row = {
                 "group_key": group_key,
                 "day": day,
-                "minutes_monitored": minutes if enabled else 0,
-                "minutes_major": minutes if enabled and state == "major_outage" else 0,
-                "minutes_partial": (
-                    minutes if enabled and state == "partial_outage" else 0
+                "minutes_monitored": minutes if enabled else 0.0,
+                "minutes_major": (
+                    minutes if enabled and aggregate_state == "major_outage" else 0.0
                 ),
-                "minutes_degraded": minutes if enabled and state == "degraded" else 0,
-                "worst_state": state if enabled else "not_monitored",
+                "minutes_partial": (
+                    minutes if enabled and aggregate_state == "partial_outage" else 0.0
+                ),
+                "minutes_degraded": (
+                    minutes if enabled and aggregate_state == "degraded" else 0.0
+                ),
+                "worst_state": aggregate_state if enabled else "not_monitored",
                 "sample_count": 1,
                 "updated_at": ts,
             }
@@ -518,6 +665,9 @@ class ConnectionHealthService:
             {
                 "bad_since": None,
                 "good_since": None,
+                "degraded_since": None,
+                "outage_since": None,
+                "outage_state": None,
                 "last_state": "not_monitored",
                 "open_incident_id": None,
             },
@@ -651,17 +801,24 @@ class ConnectionHealthService:
         *,
         monitored_states: list[str],
         now: datetime,
+        live_components: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         running = bool(getattr(self.service, "running", False))
-        in_grace = self._startup_grace_active()
         overall = self._overall_state(monitored_states, running=running)
+        in_grace = self._startup_grace_active(live_components)
+        still_connecting = bool(
+            live_components and self._has_connecting_channels(live_components)
+        )
+
         if not running:
             overall_label = "服务未运行"
-        elif in_grace and overall in {"degraded", "operational", "not_monitored"}:
-            # 建连宽限期内：即使多路仍在握手，也不用「核心中断」吓人
-            overall_label = (
-                "通道建连中" if overall == "degraded" else self._overall_label(overall)
-            )
+        elif in_grace and still_connecting:
+            # 仅当宽限期内仍有未连通通道时显示「通道建连中」；
+            # 全员连通后立即退出，不再被 soft-degraded 卡住。
+            overall_label = "通道建连中"
+            # 横幅状态也按建连中展示，避免文案与颜色脱节
+            if overall in {"operational", "degraded", "not_monitored"}:
+                overall = "degraded"
         else:
             overall_label = self._overall_label(overall)
         return {
@@ -716,7 +873,9 @@ class ConnectionHealthService:
             )
         return {
             "overall": self._build_overall_block(
-                monitored_states=monitored_states, now=now
+                monitored_states=monitored_states,
+                now=now,
+                live_components=live_components,
             ),
             "legend": self._legend(),
             "meta": {
@@ -878,7 +1037,11 @@ class ConnectionHealthService:
                 }
             )
 
-        overall = self._build_overall_block(monitored_states=monitored_states, now=now)
+        overall = self._build_overall_block(
+            monitored_states=monitored_states,
+            now=now,
+            live_components=live_components,
+        )
 
         # Past incidents 按日分组
         incidents_by_day = self._group_incidents_by_day(
@@ -929,6 +1092,8 @@ class ConnectionHealthService:
         partial = float(row.get("minutes_partial") or 0)
         degraded = float(row.get("minutes_degraded") or 0)
 
+        # 日格颜色严格按阈值：不足阈值一律绿色。
+        # tooltip 仍展示实际中断/降级分钟，避免「1 分钟就红」。
         if monitored <= 0:
             state = "not_monitored"
         elif major >= DAY_MAJOR_THRESHOLD_MIN:
@@ -938,22 +1103,12 @@ class ConnectionHealthService:
         elif degraded >= DAY_DEGRADED_THRESHOLD_MIN:
             state = "degraded"
         else:
-            # 即使不足阈值，worst_state 若已是 outage 且有分钟，仍反映
-            worst = str(row.get("worst_state") or "operational")
-            if major > 0:
-                state = "major_outage"
-            elif partial > 0:
-                state = "partial_outage"
-            elif worst == "degraded" and degraded > 0:
-                state = "degraded"
-            else:
-                state = "operational"
+            state = "operational"
 
-        uptime_ratio = row.get("uptime_ratio")
-        try:
-            uptime_ratio = float(uptime_ratio) if uptime_ratio is not None else None
-        except (TypeError, ValueError):
-            uptime_ratio = None
+        # 始终按分钟字段重算可用性，避免历史整除错误或脏 uptime_ratio 误导 tooltip。
+        uptime_ratio = ConnectionHealthRepository._compute_uptime_ratio(
+            monitored, major, partial
+        )
 
         return {
             "day": day,
