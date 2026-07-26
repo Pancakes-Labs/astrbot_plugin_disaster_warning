@@ -93,7 +93,10 @@ class MapAttachmentBuilder:
             image_filename = f"map_{lat}_{lon}_{int(time.time())}.png"
             image_path = os.path.join(self.temp_dir, image_filename)
             return await self.browser_manager.render_card(
-                html_content, image_path, selector="#card-wrapper"
+                html_content,
+                image_path,
+                selector="#card-wrapper",
+                render_label="地震震中地图",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 渲染地图图片时出错: {e}")

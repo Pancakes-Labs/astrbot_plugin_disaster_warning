@@ -336,11 +336,9 @@ class SnetMapRenderer:
                 selector="#card-wrapper",
                 wait_until="networkidle",
                 viewport=SNET_VIEWPORT,
+                render_label="S-Net 测站分布图",
             )
             if result and os.path.exists(output_path):
-                logger.info(
-                    f"[灾害预警] 测站图已生成 ({os.path.getsize(output_path)} bytes): {output_path}"
-                )
                 return output_path
             logger.warning("[灾害预警] 渲染未生成文件")
             return None

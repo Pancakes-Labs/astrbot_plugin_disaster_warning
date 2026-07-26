@@ -66,6 +66,12 @@ class BrowserManager:
         return {"width": width, "height": height}
 
     @staticmethod
+    def _normalize_render_label(render_label: str | None) -> str:
+        """规范化渲染来源标签，供成功/失败日志使用。"""
+        text = str(render_label or "").strip()
+        return text or "卡片"
+
+    @staticmethod
     def _is_target_closed_error(error: Exception | str | None) -> bool:
         """判断是否为 Playwright 目标/浏览器已关闭类错误。"""
         message = str(error or "").lower()
@@ -79,6 +85,54 @@ class BrowserManager:
                 "context has been closed",
             )
         )
+
+    @staticmethod
+    def _is_map_tile_url(url: str | None) -> bool:
+        """判断 URL 是否为地图瓦片资源。"""
+        text = str(url or "").lower()
+        if not text:
+            return False
+        if "tilemap.fanstudio.tech" in text:
+            return True
+        if "appmaptile" in text or "webrd0" in text:
+            return True
+        if "/petaldark/" in text or "/petallight/" in text:
+            return True
+        return any(
+            marker in text
+            for marker in (
+                "/arcwi/",
+                "/arcwob/",
+                "/arcwh/",
+                "/geovis/",
+                "tile.openstreetmap",
+                "tiles.",
+                "/tiles/",
+            )
+        )
+
+    @classmethod
+    def _is_benign_request_failure(
+        cls,
+        *,
+        url: str | None,
+        failure_text: str | None,
+        resource_type: str | None = None,
+    ) -> bool:
+        """识别渲染过程中可忽略的资源失败。
+
+        Leaflet 在瓦片重试、视野更新、截图收尾时会主动中止旧请求，
+        Playwright 常以 net::ERR_ABORTED 上报；出图成功时这些属于噪声。
+        """
+        failure = str(failure_text or "").lower()
+        is_aborted = (
+            "err_aborted" in failure
+            or "net::err_aborted" in failure
+            or failure.strip() in {"aborted", "abort", "canceled", "cancelled"}
+        )
+        if not is_aborted:
+            return False
+        return cls._is_map_tile_url(url)
 
     def _truncate_debug_text(self, value, limit: int = 240) -> str:
         """截断浏览器侧日志文本，避免单条日志过长。"""
@@ -543,6 +597,7 @@ class BrowserManager:
         selector: str = "#card-wrapper",
         wait_until: str = "domcontentloaded",
         viewport: dict | None = None,
+        render_label: str | None = None,
     ) -> str | None:
         """把 HTML 内容渲染为图片文件。
 
@@ -554,8 +609,10 @@ class BrowserManager:
             viewport: 可选临时视口 {"width": int, "height": int}。
                 用于大尺寸卡片（如 S-Net 1400×1000）；截图后会恢复默认 800×800，
                 避免污染页面池中的其它渲染任务。
+            render_label: 渲染来源标签，用于成功日志区分场景。
         """
         resolved_viewport = self._normalize_viewport(viewport)
+        label = self._normalize_render_label(render_label)
         # 远程模式直接走 HTTP 渲染接口，本地模式则复用页面池执行截图。
         if self._mode == "remote":
             if not self._initialized:
@@ -566,11 +623,12 @@ class BrowserManager:
                 output_path,
                 selector,
                 viewport=resolved_viewport,
+                render_label=label,
             )
 
         # 本地模式：使用 Playwright
         if not await self._ensure_local_browser_ready():
-            logger.error("[灾害预警] 浏览器不可用，无法渲染")
+            logger.error(f"[灾害预警] 浏览器不可用，无法渲染{label}")
             return None
 
         page: Page | None = None
@@ -582,6 +640,11 @@ class BrowserManager:
         console_messages: list[str] = []
         page_errors: list[str] = []
         request_failures: list[str] = []
+        benign_request_failures: list[str] = []
+        listeners_attached = False
+        _record_console = None
+        _record_page_error = None
+        _record_request_failed = None
         try:
             # 并发控制 - 限制同时渲染的数量
             try:
@@ -630,7 +693,28 @@ class BrowserManager:
                                     failure_text = failure.get("errorText", "")
                                 else:
                                     failure_text = str(failure)
-                            entry = f"{req.method} {req.url} -> {self._truncate_debug_text(failure_text or 'unknown failure')}"
+                            resource_type = ""
+                            try:
+                                resource_type = str(
+                                    getattr(req, "resource_type", "") or ""
+                                )
+                            except Exception:
+                                resource_type = ""
+                            entry = (
+                                f"{req.method} {req.url} -> "
+                                f"{self._truncate_debug_text(failure_text or 'unknown failure')}"
+                            )
+                            if self._is_benign_request_failure(
+                                url=getattr(req, "url", None),
+                                failure_text=failure_text,
+                                resource_type=resource_type,
+                            ):
+                                # 瓦片重试/视野更新导致的中止请求：仅 debug，避免刷屏。
+                                benign_request_failures.append(entry)
+                                logger.debug(
+                                    f"[灾害预警] 忽略可预期的资源中止: {entry}"
+                                )
+                                return
                             request_failures.append(entry)
                             logger.warning(f"[灾害预警] 页面资源请求失败: {entry}")
                         except Exception as hook_err:
@@ -639,6 +723,7 @@ class BrowserManager:
                     page.on("console", _record_console)
                     page.on("pageerror", _record_page_error)
                     page.on("requestfailed", _record_request_failed)
+                    listeners_attached = True
 
                     # 大尺寸卡片（如 S-Net）临时放大视口，截图后在 finally 中恢复默认
                     if resolved_viewport:
@@ -696,15 +781,17 @@ class BrowserManager:
                             logger.debug("[灾害预警] 地图渲染标记已就绪")
                         except Exception:
                             logger.warning(
-                                "[灾害预警] 等待 .map-ready 标记超时，地图可能未完全加载"
+                                f"[灾害预警] {label}等待 .map-ready 标记超时，地图可能未完全加载"
                             )
                             if request_failures:
                                 logger.warning(
-                                    f"[灾害预警] 地图等待超时期间捕获到资源失败: {' | '.join(request_failures[-5:])}"
+                                    f"[灾害预警] {label}地图等待超时期间捕获到资源失败: "
+                                    f"{' | '.join(request_failures[-5:])}"
                                 )
                             if page_errors:
                                 logger.warning(
-                                    f"[灾害预警] 地图等待超时期间捕获到脚本异常: {' | '.join(page_errors[-3:])}"
+                                    f"[灾害预警] {label}地图等待超时期间捕获到脚本异常: "
+                                    f"{' | '.join(page_errors[-3:])}"
                                 )
                             await self._log_page_diagnostics(
                                 page, reason="map-ready-timeout"
@@ -740,26 +827,51 @@ class BrowserManager:
                     if os.path.exists(output_path):
                         if request_failures:
                             logger.warning(
-                                f"[灾害预警] 卡片渲染虽成功，但捕获到资源请求失败: {' | '.join(request_failures[-5:])}"
+                                f"[灾害预警] {label}渲染虽成功，但捕获到资源请求失败: "
+                                f"{' | '.join(request_failures[-5:])}"
+                            )
+                        elif benign_request_failures:
+                            logger.debug(
+                                f"[灾害预警] {label}渲染成功，已忽略 "
+                                f"{len(benign_request_failures)} 条可预期资源中止"
                             )
                         if page_errors:
                             logger.warning(
-                                f"[灾害预警] 卡片渲染虽成功，但捕获到页面脚本异常: {' | '.join(page_errors[-3:])}"
+                                f"[灾害预警] {label}渲染虽成功，但捕获到页面脚本异常: "
+                                f"{' | '.join(page_errors[-3:])}"
                             )
                         plugin_logger.info(
-                            f"[灾害预警] 卡片渲染成功，耗时 {elapsed:.3f}秒",
+                            f"[灾害预警] {label}渲染成功，耗时 {elapsed:.3f}秒",
                             is_event_linked=True,
                         )
                         render_succeeded = True
                         return output_path
                     else:
-                        logger.warning("[灾害预警] 截图未生成文件")
+                        logger.warning(f"[灾害预警] {label}截图未生成文件")
                         await self._log_page_diagnostics(
                             page, reason="screenshot-missing"
                         )
                         return None
 
                 finally:
+                    # 页面池复用前必须卸掉本次监听器，否则 requestfailed 会随复用次数叠加刷屏。
+                    if page and listeners_attached:
+                        for event_name, handler in (
+                            ("console", _record_console),
+                            ("pageerror", _record_page_error),
+                            ("requestfailed", _record_request_failed),
+                        ):
+                            if handler is None:
+                                continue
+                            try:
+                                page.remove_listener(event_name, handler)
+                            except Exception:
+                                try:
+                                    page.off(event_name, handler)
+                                except Exception:
+                                    pass
+                        listeners_attached = False
+
                     # 成功：恢复视口后归还；失败：直接丢弃坏页并补池，避免污染后续渲染。
                     if page and not page_returned:
                         if render_succeeded:
@@ -789,7 +901,7 @@ class BrowserManager:
                     self._semaphore.release()
 
         except Exception as e:
-            logger.error(f"[灾害预警] 卡片渲染失败: {e}")
+            logger.error(f"[灾害预警] {label}渲染失败: {e}")
             # 上报卡片渲染错误到遥测
             if self._telemetry and self._telemetry.enabled:
                 await self._telemetry.track_error(
@@ -819,11 +931,13 @@ class BrowserManager:
         output_path: str,
         selector: str,
         viewport: dict[str, int] | None = None,
+        render_label: str | None = None,
     ) -> str | None:
         """使用 browserless HTTP API 渲染卡片。
 
         viewport 可选；未提供时使用默认 800×800。
         """
+        label = self._normalize_render_label(render_label)
         start_time = time.time()
 
         # 对注入的 selector 进行 JSON 编码，规避转义和 JS 语法截断安全风险。
@@ -944,7 +1058,7 @@ class BrowserManager:
 
                         elapsed = time.time() - start_time
                         logger.info(
-                            f"[灾害预警] 卡片渲染成功（HTTP API），耗时 {elapsed:.3f}秒"
+                            f"[灾害预警] {label}渲染成功（HTTP API），耗时 {elapsed:.3f}秒"
                         )
                         return output_path
                     else:
@@ -978,7 +1092,7 @@ class BrowserManager:
                                             f.write(image_data)
                                         elapsed = time.time() - start_time
                                         logger.info(
-                                            f"[灾害预警] 卡片渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒"
+                                            f"[灾害预警] {label}渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒"
                                         )
                                         return output_path
                                     else:
@@ -993,10 +1107,10 @@ class BrowserManager:
                         return None
 
         except asyncio.TimeoutError:
-            logger.error("[灾害预警] browserless API 请求超时")
+            logger.error(f"[灾害预警] {label} browserless API 请求超时")
             return None
         except Exception as e:
-            logger.error(f"[灾害预警] browserless API 请求失败: {e}")
+            logger.error(f"[灾害预警] {label} browserless API 请求失败: {e}")
             if self._telemetry and self._telemetry.enabled:
                 await self._telemetry.track_error(
                     e, module="core.browser_manager._render_card_via_http"
