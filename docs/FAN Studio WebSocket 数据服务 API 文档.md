@@ -1,4 +1,5 @@
 <!-- markdownlint-disable MD024 -->
+<!-- markdownlint-disable MD036 -->
 <!-- markdownlint-disable MD051 -->
 # FAN Studio WebSocket 数据服务 API 文档
 
@@ -11,6 +12,38 @@ WebSocket API 将在服务端收到新消息后自动向所有客户端推送相
 **备用服务器地址：** `wss://ws.fanstudio.hk/[路径]`
 
 **心跳间隔：** 服务端将在每分钟和建立连接后发送一个 heartbeat 心跳包以保持连接，客户端可选回复 ping 包。
+
+> [IMPORTANT]
+>
+> 本文档为个人收集整理，非完整内容，并且可能与官方文档表述存在出入或过时的问题，仅供参考，必要时请以[官方文档](https://api.fanstudio.tech/)为准。
+>
+> 自 2026 年 7 月 22 日起，FAN Studio 接口在无鉴权的状态下仅 `/fssn` 和 `/fssn-cmt` 两个服务路径可用，连接其他 WebSocket 路径在建连成功后需要立刻通过应用层发送鉴权数据包以完成鉴权，否则连接无法接收实际业务数据推送。
+
+---
+
+## 鉴权方式（应用层）
+
+WebSocket 连接建立成功后，客户端须立即发送一条 `type` 为 `auth` 的 JSON 格式鉴权文本包：
+
+```json
+{
+  "type": "auth",
+  "appId": "你的应用ID",
+  "key": "sk-你的API密钥"
+}
+```
+
+| 字段 | 类型 | 是否必需 | 说明 |
+| --- | --- | --- | --- |
+| `type` | string | 是 | 固定为 `"auth"` |
+| `appId` | string | 是 | 应用入驻后系统分配的唯一应用标识符 |
+| `key` | string | 是 | 用户通过开发者平台向您的应用申请审核通过后获取的私有 API 密钥 |
+
+> 1. 用户在[开发者平台](https://api.fanstudio.tech/dev-platform/)提交 API Key 申请时，需在“选择应用”中选择该 appId 关联的应用。
+> 2. 开发者在[用户审批](https://api.fanstudio.tech/dev-platform/login.php)后台登录并经开发者一审与管理员二审后，用户生成的私有 Key 即可在此鉴权包中生效。
+> 3. 每个 WebSocket 连接通道 (如主通道 `/all`、独立通道 `/cenc-ir`) 连接成功后均需独立发送一次此鉴权数据包。
+
+---
 
 ## 可用路径
 
