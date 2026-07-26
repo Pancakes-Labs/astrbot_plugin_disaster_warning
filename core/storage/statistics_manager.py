@@ -19,6 +19,7 @@ from ..services.identity.event_identity import (
     resolve_source_id,
 )
 from .database_manager import DatabaseManager
+from .history_dirty_data_cleanup_service import HistoryDirtyDataCleanupService
 from .stats.event_stats_aggregator import EventStatsAggregator
 from .stats.stats_event_support_service import StatsEventSupportService
 from .stats.stats_load_service import StatsLoadService
@@ -28,7 +29,6 @@ from .stats.stats_repository import StatsRepository
 from .stats.stats_rule_service import StatsRuleService
 from .stats.stats_session_service import StatsSessionService
 from .stats.stats_state_factory import StatsStateFactory
-from .tsunami_history_cleanup_service import TsunamiHistoryCleanupService
 
 
 class StatisticsManager:
@@ -85,12 +85,12 @@ class StatisticsManager:
         if not self._db_initialized:
             await self.db.initialize()
             self._db_initialized = True
-            # 启动时折叠旧版海啸重复主表行（独立服务，不侵入 DatabaseManager）
+            # 启动时清理历史脏数据（海啸重复折叠 + CWA 报告 id 复用污染）
             try:
-                cleanup = TsunamiHistoryCleanupService(self.db)
+                cleanup = HistoryDirtyDataCleanupService(self.db)
                 await cleanup.run_once()
             except Exception as exc:
-                logger.warning(f"[灾害预警] 海啸历史清理跳过/失败: {exc}")
+                logger.warning(f"[灾害预警] 历史脏数据清理跳过/失败: {exc}")
             await self._load_stats()
 
     async def record_push(
