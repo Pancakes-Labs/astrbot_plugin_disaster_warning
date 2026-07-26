@@ -1275,6 +1275,9 @@ class ConfigValidator:
             if "usa_shakealert" not in fan_studio_cfg:
                 fan_studio_cfg["usa_shakealert"] = False
             ConfigValidator._ensure_bool(fan_studio_cfg, "usa_shakealert", False)
+            if "fssn_cmt" not in fan_studio_cfg:
+                fan_studio_cfg["fssn_cmt"] = True
+            ConfigValidator._ensure_bool(fan_studio_cfg, "fssn_cmt", True)
 
             # app_id / api_key：WebSocket 建连后发送 {"type":"auth","appId","key"}
             app_id = fan_studio_cfg.get("app_id")
