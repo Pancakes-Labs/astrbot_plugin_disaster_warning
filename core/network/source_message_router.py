@@ -65,6 +65,11 @@ def _resolve_config_key(source_id: str) -> str:
     return source_entry.config_key
 
 
+# FAN Studio 自 2026-07 起：未鉴权时 /all 仅放行 fssn / fssn-cmt。
+# 建连后常先收到仅含这两路的半量 initial_all，鉴权成功后再推完整快照。
+_FAN_PREAUTH_FREE_SOURCE_NAMES = frozenset({"fssn", "fssn-cmt"})
+
+
 class SourceMessageRouter:
     """WebSocket 消息路由装配器。"""
 
@@ -76,6 +81,8 @@ class SourceMessageRouter:
         self._dispatch_service = service.event_ingress_dispatch_service
         self._side_effect_service = service.source_ingress_side_effect_service
         self._source_runtime_query = service.source_runtime_query
+        # 每个 FAN 连接只提示一次「启用了 SA 但 initial_all 无 sa」
+        self._sa_missing_warned_connections: set[str] = set()
 
     def register_all(self, ws_manager: WebSocketManager):
         """把各连接族处理器注册到 WebSocket 管理器。"""
@@ -246,6 +253,60 @@ class SourceMessageRouter:
                 )
         self._parser_map_checked = True
 
+    @staticmethod
+    def _fan_initial_all_known_source_keys(data: dict) -> list[str]:
+        """提取 initial_all 中已注册的 FAN 数据源键。"""
+        keys: list[str] = []
+        for key, value in data.items():
+            if key == "type" or not isinstance(value, dict):
+                continue
+            # 仅认 FAN provider 源名映射，避免把元数据键算进去
+            if key in FAN_STUDIO_PROVIDER_SOURCE_MAP:
+                keys.append(key)
+        return keys
+
+    @classmethod
+    def _is_fan_preauth_partial_initial_all(cls, data: dict) -> bool:
+        """判断是否为鉴权前半量 initial_all（仅 fssn / fssn-cmt）。
+
+        FAN Studio 文档：未鉴权时 /all 仅放行这两路；鉴权成功后会再推完整快照。
+        若把半量包当正式 bootstrap 解析，会出现：
+        - fssn-cmt 解析日志刷两次
+        - SA 缺失警告在半量包上误报一次
+        """
+        if str(data.get("type") or "").strip() != "initial_all":
+            return False
+        source_keys = cls._fan_initial_all_known_source_keys(data)
+        if not source_keys:
+            return False
+        return all(key in _FAN_PREAUTH_FREE_SOURCE_NAMES for key in source_keys)
+
+    def _warn_sa_missing_once(
+        self,
+        *,
+        connection_name: str | None,
+        data: dict,
+    ) -> None:
+        """完整 initial_all 缺 sa 时，每个连接只警告一次。"""
+        conn = str(connection_name or "").strip() or "unknown"
+        if conn in self._sa_missing_warned_connections:
+            return
+        if "sa" in data:
+            return
+        try:
+            sa_enabled = self._source_runtime_query.is_source_enabled("sa_fanstudio")
+        except Exception:
+            sa_enabled = False
+        if not sa_enabled:
+            return
+        self._sa_missing_warned_connections.add(conn)
+        plugin_logger.warning(
+            "[灾害预警] 已启用美国 ShakeAlert 地震预警，"
+            "但本轮 FAN Studio 全量数据中未包含 sa 快照；"
+            "将等待后续更新推送，当前无需本地修复",
+            is_event_linked=True,
+        )
+
     def _create_fan_studio_handler(self):
         """创建 FAN Studio 连接的消息处理器。"""
 
@@ -267,11 +328,21 @@ class SourceMessageRouter:
                     plugin_logger.error(f"[灾害预警] JSON解析失败: {error}")
                     return None
 
+                msg_type = (
+                    str(data.get("type") or "").strip()
+                    if isinstance(data, dict)
+                    else ""
+                )
+
+                # 鉴权成功回执：不进入业务解析
+                if msg_type in {"auth_success", "auth_ok", "authenticated"}:
+                    plugin_logger.debug(
+                        f"[灾害预警] FAN Studio 鉴权成功: {connection_name or 'unknown'}"
+                    )
+                    return None
+
                 # FAN Studio 会以业务错误包表达限流/策略拒绝；收到后主动关闭，尽快释放上游配额
-                if (
-                    isinstance(data, dict)
-                    and str(data.get("type") or "").strip() == "error"
-                ):
+                if msg_type == "error":
                     error_message = str(
                         data.get("message") or data.get("msg") or ""
                     ).strip()
@@ -304,6 +375,30 @@ class SourceMessageRouter:
                             )
                     return None
 
+                # 鉴权前半量 initial_all（仅 fssn/fssn-cmt）：推进静默门闩后丢弃，
+                # 等待鉴权后的完整快照，避免 fssn-cmt 双解析与 SA 误报。
+                if isinstance(data, dict) and self._is_fan_preauth_partial_initial_all(
+                    data
+                ):
+                    coordinator = getattr(self.service, "startup_silence", None)
+                    if coordinator is not None:
+                        try:
+                            coordinator.note_bootstrap_payload(
+                                connection_name=connection_name,
+                                kind="fan_preauth_partial_initial_all",
+                            )
+                        except Exception as exc:
+                            plugin_logger.debug(
+                                f"[灾害预警] FAN 半量 initial_all 通知静默协调器失败: {exc}"
+                            )
+                    plugin_logger.debug(
+                        f"[灾害预警] 忽略 FAN 鉴权前半量 initial_all"
+                        f"（连接 {connection_name or 'unknown'}，"
+                        f"源: {self._fan_initial_all_known_source_keys(data)}），"
+                        "等待完整快照"
+                    )
+                    return None
+
                 # 先校验路由映射，再把一条总线消息拆成多个候选数据源消息
                 self._ensure_fan_studio_parser_mapping()
                 routed_messages = route_fan_studio_message(data)
@@ -311,7 +406,6 @@ class SourceMessageRouter:
                     (item.source_name, item.source_id, item.payload)
                     for item in routed_messages
                 ]
-                msg_type = data.get("type")
                 if msg_type == "initial_all":
                     coordinator = getattr(self.service, "startup_silence", None)
                     if coordinator is not None:
@@ -324,6 +418,11 @@ class SourceMessageRouter:
                             plugin_logger.debug(
                                 f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
                             )
+                    # 仅对完整 initial_all 做 SA 缺失诊断，且每连接一次
+                    self._warn_sa_missing_once(
+                        connection_name=connection_name,
+                        data=data,
+                    )
                 processed_count = 0
 
                 # 遍历被分配出来的数据源及负载，分别尝试分发
@@ -438,6 +537,28 @@ class SourceMessageRouter:
 
         return p2p_handler
 
+    def _note_connection_bootstrap(
+        self,
+        connection_name: str | None,
+        *,
+        kind: str,
+    ) -> None:
+        """通知静默协调器：某连接已收到可用于就绪判定的首包/业务帧。"""
+        if not connection_name:
+            return
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        try:
+            coordinator.note_bootstrap_payload(
+                connection_name=connection_name,
+                kind=kind,
+            )
+        except Exception as exc:
+            plugin_logger.debug(
+                f"[灾害预警] 连接 {connection_name} 通知静默协调器失败: {exc}"
+            )
+
     def _create_wolfx_handler(self):
         """创建 Wolfx WebSocket 连接的消息处理器。"""
 
@@ -460,6 +581,11 @@ class SourceMessageRouter:
                 # 心跳直接跳过不作处理
                 if msg_type in ["heartbeat", "pong"]:
                     return None
+
+                # 非心跳帧即可视为连接已进入业务流，提前放行静默门闩
+                self._note_connection_bootstrap(
+                    connection_name, kind="wolfx_first_payload"
+                )
 
                 # 获取 Wolfx 当前子报文类型对应的系统内 source_id
                 source_id = get_wolfx_source_id(msg_type)
@@ -522,6 +648,11 @@ class SourceMessageRouter:
                 message,
                 connection_name=connection_name,
                 connection_info=connection_info,
+            )
+
+            # 任意入站帧都可推进静默门闩（含状态/心跳类），避免无震时干等 first_payload_timeout
+            self._note_connection_bootstrap(
+                connection_name, kind="global_quake_first_payload"
             )
 
             # 校验是否配备了 global_quake 对应解析模块
