@@ -44,9 +44,11 @@ class CwaReportParser(BaseParser):
         text = str(shock_time or "").strip()
         if not text:
             return ""
-        # 压缩空白与常见分隔，保证同一发震时刻生成稳定键
+        # 压缩空白与常见分隔，保证同一发震时刻生成稳定键；
+        # 空白统一为下划线，避免 event_id 含空格影响下游解析。
         text = text.replace("T", " ")
-        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"_+", "_", text).strip("_")
         return text
 
     @staticmethod
@@ -146,7 +148,10 @@ class CwaReportParser(BaseParser):
             "shakemap_uri": msg_data.get("shakemapURI"),
         }
         event_id, aliases = self._build_stable_event_id(msg_data)
-        raw_upstream_id = str(msg_data.get("id") or "").strip()
+        # 与 _build_stable_event_id 口径一致：id / eventId 均可作为上游报告号
+        raw_upstream_id = str(
+            msg_data.get("id") or msg_data.get("eventId") or ""
+        ).strip()
         if raw_upstream_id:
             metadata["upstream_report_id"] = raw_upstream_id
         metadata["stable_event_id"] = event_id

@@ -490,12 +490,13 @@ class EventDeduplicationService:
                 str(getattr(domain_eq, "place_name", "") or "").strip()
                 or "unknown_place"
             )
-            utc_time = self._to_utc(domain_eq.occurred_at, source_id)
-            time_key = (
-                utc_time.strftime("%Y%m%d%H%M")
-                if utc_time is not None
-                else "unknown_time"
-            )
+            # _to_utc 在 dt 为空时会回退到 now()；指纹路径必须用稳定占位，
+            # 避免缺发震时间时因墙钟分钟变化/轮询同分钟而错误撞键。
+            if domain_eq.occurred_at is None:
+                time_key = "unknown_time"
+            else:
+                utc_time = self._to_utc(domain_eq.occurred_at, source_id)
+                time_key = utc_time.strftime("%Y%m%d%H%M")
             mag = getattr(domain_eq, "magnitude", None)
             mag_key = f"{float(mag):.1f}" if isinstance(mag, (int, float)) else "na"
             source_key = str(source_id or "unknown_source").strip() or "unknown_source"
