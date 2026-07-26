@@ -65,7 +65,14 @@ class DisasterServiceLifecycleService:
                 snet_poll = getattr(self.service, "snet_poll_service", None)
                 if snet_poll is not None:
                     await snet_poll.start()
-                # EQSC 海啸 HTTP 轮询（依赖 AccessToken，可与 token 预热并行）
+
+                # EQSC AccessToken 必须先于海啸/台风轮询预热：
+                # 两路轮询共享同一 token_manager；若首轮并发请求时 token 尚未就绪，
+                # 会各自 force_refresh 造成重复 createAccessToken 与 401 噪声。
+                if hasattr(self.service, "schedule_eqsc_token_warmup"):
+                    self.service.schedule_eqsc_token_warmup()
+
+                # EQSC 海啸 HTTP 轮询（依赖 AccessToken；预热已调度，可并行等待）
                 eqsc_tsunami_poll = getattr(
                     self.service, "eqsc_tsunami_poll_service", None
                 )
@@ -97,11 +104,6 @@ class DisasterServiceLifecycleService:
                     logger.debug(
                         "[灾害预警] 原始消息日志记录未启用。如需调试或记录原始数据，请使用命令 '/灾害预警日志开关' 启用。"
                     )
-
-                # EQSC AccessToken 启动后立刻后台预热，让状态面板尽快显示“可用”。
-                # 不阻塞 WebSocket/管理端启动；历史重建仍放在其后。
-                if hasattr(self.service, "schedule_eqsc_token_warmup"):
-                    self.service.schedule_eqsc_token_warmup()
 
                 # EQSC 历史台风重建放到启动完成后的后台任务：
                 # 此时数据库已就绪，且不会阻塞 WebSocket/管理端启动。

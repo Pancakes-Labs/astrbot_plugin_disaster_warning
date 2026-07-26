@@ -101,7 +101,12 @@ class EqscTokenManager:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def get_access_token(self, *, force_refresh: bool = False) -> str | None:
+    async def get_access_token(
+        self,
+        *,
+        force_refresh: bool = False,
+        stale_token: str | None = None,
+    ) -> str | None:
         """获取有效的 AccessToken。
 
         优先复用内存缓存中的 AccessToken；仅在以下情况才会网络创建：
@@ -112,17 +117,30 @@ class EqscTokenManager:
         Args:
             force_refresh: 为 True 时忽略内存缓存，强制重新创建 AccessToken。
                 用于业务接口返回 401/403 后的单次重试。
+            stale_token: 触发强制刷新的旧 AccessToken。并发 401 时若其它协程
+                已换发新令牌（与 stale_token 不同），直接复用，避免重复创建。
         """
         if not self.is_configured:
             logger.debug("[灾害预警] EQSC 令牌管理器未配置，跳过获取 AccessToken")
             return None
 
+        stale = str(stale_token or "").strip() or None
+
         # 快路径：有效期内直接复用，避免无意义抢锁与重复创建。
+        # force_refresh 且带 stale_token 时，若缓存已是“非 stale”的新令牌，也可快路径返回。
         if not force_refresh:
             cached = self._cached_token_if_usable(require_advance_margin=True)
             if cached:
                 logger.debug(
                     f"[灾害预警] EQSC 复用缓存 AccessToken {self._mask_token(cached)}"
+                )
+                return cached
+        elif stale:
+            cached = self._cached_token_if_usable(require_advance_margin=False)
+            if cached and cached != stale:
+                logger.debug(
+                    "[灾害预警] EQSC 强制刷新前发现已有更新令牌，直接复用 "
+                    f"{self._mask_token(cached)}"
                 )
                 return cached
 
@@ -139,15 +157,28 @@ class EqscTokenManager:
                         f"{self._mask_token(cached)}"
                     )
                     return cached
+            else:
+                # 401 并发刷新：若锁内已是不同于 stale 的有效令牌，说明别人刚换发成功。
+                cached = self._cached_token_if_usable(
+                    current_time=current_time, require_advance_margin=False
+                )
+                if cached and (stale is None or cached != stale):
+                    logger.debug(
+                        "[灾害预警] EQSC 并发强制刷新命中已更新令牌，复用 "
+                        f"{self._mask_token(cached)}"
+                    )
+                    return cached
 
             # 记录刷新前仍可用的旧 token，网络刷新失败时可安全回退
-            previous_token = self._access_token if not force_refresh else ""
-            previous_expires_at = (
-                self._access_token_expires_at if not force_refresh else 0.0
-            )
+            previous_token = self._access_token
+            previous_expires_at = self._access_token_expires_at
 
             if force_refresh:
-                self.invalidate()
+                # 仅在确认当前缓存仍是 stale（或为空）时清空，避免误伤刚换发的新令牌
+                if not self._access_token or (
+                    stale is not None and self._access_token == stale
+                ):
+                    self.invalidate()
 
             # AccessToken 过期/临近过期/被强制刷新：用 RefreshToken 创建
             if await self._create_access_token():

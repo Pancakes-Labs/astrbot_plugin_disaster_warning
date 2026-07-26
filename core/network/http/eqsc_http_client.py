@@ -234,15 +234,17 @@ class EqscHttpClient:
                         return response.status, None, last_text
 
                 if response.status in (401, 403):
-                    self._token_manager.invalidate()
                     logger.warning(
                         f"[灾害预警] {log_label} 鉴权失败: HTTP {response.status}；"
                         f"token={self._mask_token(current_token)}"
                         + (f"；响应: {last_text[:160]}" if last_text else "")
                     )
                     if allow_retry_on_auth_error and attempt == 0:
+                        # 不在锁外主动失效：交给 token_manager 在锁内按 stale_token
+                        # 去重，避免台风/海啸并发 401 时重复 createAccessToken。
                         refreshed = await self._token_manager.get_access_token(
-                            force_refresh=True
+                            force_refresh=True,
+                            stale_token=current_token,
                         )
                         if refreshed and refreshed != current_token:
                             logger.info(
