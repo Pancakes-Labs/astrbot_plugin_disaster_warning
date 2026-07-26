@@ -76,6 +76,82 @@ def _update_content_fingerprint(row: dict[str, Any]) -> str:
     )
 
 
+# SQLite 默认变量上限约 999；批量 IN 查询按此切片，留余量
+_IN_BATCH_SIZE = 500
+
+
+def _iter_id_batches(
+    ids: list[int], *, batch_size: int = _IN_BATCH_SIZE
+) -> list[list[int]]:
+    """去重后按 batch_size 切片，避免单次 IN 参数过多。"""
+    unique_ids = list(dict.fromkeys(int(item) for item in ids))
+    if not unique_ids:
+        return []
+    return [
+        unique_ids[start : start + batch_size]
+        for start in range(0, len(unique_ids), batch_size)
+    ]
+
+
+async def _execute_in_batches(
+    cursor,
+    sql_template: str,
+    ids: list[int],
+    *,
+    batch_size: int = _IN_BATCH_SIZE,
+) -> None:
+    """执行带 {placeholders} 的 SQL；ids 分批绑定，值不拼进语句。"""
+    for chunk in _iter_id_batches(ids, batch_size=batch_size):
+        placeholders = ",".join("?" for _ in chunk)
+        await cursor.execute(
+            sql_template.format(placeholders=placeholders),
+            tuple(chunk),
+        )
+
+
+async def _count_in_batches(
+    cursor,
+    sql_template: str,
+    ids: list[int],
+    *,
+    batch_size: int = _IN_BATCH_SIZE,
+) -> int:
+    """分批 COUNT(*) 并求和；sql_template 需含 {placeholders}。"""
+    total = 0
+    for chunk in _iter_id_batches(ids, batch_size=batch_size):
+        placeholders = ",".join("?" for _ in chunk)
+        await cursor.execute(
+            sql_template.format(placeholders=placeholders),
+            tuple(chunk),
+        )
+        row = await cursor.fetchone()
+        total += int(row[0] if row else 0)
+    return total
+
+
+async def _fetch_updates_for_event_ids(
+    cursor, event_ids: list[int]
+) -> list[dict[str, Any]]:
+    """按 event_id 分批拉取 event_updates 行。"""
+    rows: list[dict[str, Any]] = []
+    for chunk in _iter_id_batches(event_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        await cursor.execute(
+            f"""
+            SELECT id, event_id, source_event_id, report_num, magnitude, depth,
+                   description, level, wind_speed, pressure, latitude, longitude,
+                   time, recorded_at
+            FROM event_updates
+            WHERE event_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            tuple(chunk),
+        )
+        rows.extend(dict(item) for item in await cursor.fetchall())
+    rows.sort(key=lambda item: int(item.get("id") or 0))
+    return rows
+
+
 class HistoryDirtyDataCleanupService:
     """历史脏数据清理服务。"""
 
@@ -398,14 +474,16 @@ class HistoryDirtyDataCleanupService:
                 delete_ids.append(int(item["id"]))
 
         if delete_ids:
-            placeholders = ",".join("?" for _ in delete_ids)
-            await cursor.execute(
-                f"DELETE FROM event_updates WHERE event_id IN ({placeholders})",
-                tuple(delete_ids),
+            # 折叠时已把历史迁入 keep；此处仅清理被折叠主表及其残留 updates
+            await _execute_in_batches(
+                cursor,
+                "DELETE FROM event_updates WHERE event_id IN ({placeholders})",
+                delete_ids,
             )
-            await cursor.execute(
-                f"DELETE FROM events WHERE id IN ({placeholders})",
-                tuple(delete_ids),
+            await _execute_in_batches(
+                cursor,
+                "DELETE FROM events WHERE id IN ({placeholders})",
+                delete_ids,
             )
 
         return {
@@ -440,22 +518,20 @@ class HistoryDirtyDataCleanupService:
             return {"cwa_deleted_events": 0, "cwa_deleted_updates": 0}
 
         poison_ids = list(dict.fromkeys(poison_ids))
-        placeholders = ",".join("?" for _ in poison_ids)
-
-        await cursor.execute(
-            f"SELECT COUNT(*) FROM event_updates WHERE event_id IN ({placeholders})",
-            tuple(poison_ids),
+        updates_count = await _count_in_batches(
+            cursor,
+            "SELECT COUNT(*) FROM event_updates WHERE event_id IN ({placeholders})",
+            poison_ids,
         )
-        updates_count_row = await cursor.fetchone()
-        updates_count = int(updates_count_row[0] if updates_count_row else 0)
-
-        await cursor.execute(
-            f"DELETE FROM event_updates WHERE event_id IN ({placeholders})",
-            tuple(poison_ids),
+        await _execute_in_batches(
+            cursor,
+            "DELETE FROM event_updates WHERE event_id IN ({placeholders})",
+            poison_ids,
         )
-        await cursor.execute(
-            f"DELETE FROM events WHERE id IN ({placeholders})",
-            tuple(poison_ids),
+        await _execute_in_batches(
+            cursor,
+            "DELETE FROM events WHERE id IN ({placeholders})",
+            poison_ids,
         )
 
         logger.info(
@@ -527,10 +603,10 @@ class HistoryDirtyDataCleanupService:
                     keep_ids.append(int(item["id"]))
 
             if drop_ids:
-                placeholders = ",".join("?" for _ in drop_ids)
-                await cursor.execute(
-                    f"DELETE FROM event_updates WHERE id IN ({placeholders})",
-                    tuple(drop_ids),
+                await _execute_in_batches(
+                    cursor,
+                    "DELETE FROM event_updates WHERE id IN ({placeholders})",
+                    drop_ids,
                 )
                 deleted_updates += len(drop_ids)
                 compressed_events += 1
@@ -566,7 +642,9 @@ class HistoryDirtyDataCleanupService:
         rows = [dict(item) for item in await cursor.fetchall()]
         groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in rows:
-            source = str(row.get("source") or row.get("source_id") or "").strip()
+            raw_source = str(row.get("source") or row.get("source_id") or "").strip()
+            # 历史别名归一化后再分组，避免 fan_studio_tsunami / china_tsunami_fanstudio 漏并
+            source = normalize_source_name(raw_source) or raw_source
             unique_id = str(row.get("unique_id") or "").strip()
             if not source or not unique_id:
                 continue
@@ -611,10 +689,10 @@ class HistoryDirtyDataCleanupService:
                     seen.add(fp)
                     keep_update_count += 1
             if drop_ids:
-                placeholders = ",".join("?" for _ in drop_ids)
-                await cursor.execute(
-                    f"DELETE FROM event_updates WHERE id IN ({placeholders})",
-                    tuple(drop_ids),
+                await _execute_in_batches(
+                    cursor,
+                    "DELETE FROM event_updates WHERE id IN ({placeholders})",
+                    drop_ids,
                 )
             desired = max(1, keep_update_count)
             await cursor.execute(
@@ -623,12 +701,11 @@ class HistoryDirtyDataCleanupService:
             )
 
         if delete_ids:
-            delete_ids = list(dict.fromkeys(delete_ids))
-            placeholders = ",".join("?" for _ in delete_ids)
             # updates 已迁移；这里只删主表
-            await cursor.execute(
-                f"DELETE FROM events WHERE id IN ({placeholders})",
-                tuple(delete_ids),
+            await _execute_in_batches(
+                cursor,
+                "DELETE FROM events WHERE id IN ({placeholders})",
+                delete_ids,
             )
             logger.info(
                 f"[灾害预警] 同 unique_id 多主表折叠: 删除重复事件 {len(delete_ids)} 条"
@@ -638,27 +715,39 @@ class HistoryDirtyDataCleanupService:
 
     async def _cleanup_unknown_location_rows(self, cursor) -> dict[str, int]:
         """删除 unique_id 退化为全局常量 unknown_location 的历史脏行。"""
+        # 不用 LIKE：下划线是单字符通配，易误匹配。精确等值 + 安全后缀匹配。
         await cursor.execute(
             """
-            SELECT id FROM events
+            SELECT id, unique_id, real_event_id
+            FROM events
             WHERE unique_id = 'unknown_location'
-               OR unique_id LIKE '%|unknown_location'
+               OR unique_id LIKE '%|unknown\\_location' ESCAPE '\\'
                OR real_event_id = 'unknown_location'
             """
         )
-        ids = [int(row[0]) for row in await cursor.fetchall()]
+        ids: list[int] = []
+        for row in await cursor.fetchall():
+            row_dict = dict(row)
+            unique_id = str(row_dict.get("unique_id") or "").strip()
+            real_event_id = str(row_dict.get("real_event_id") or "").strip()
+            if (
+                unique_id == "unknown_location"
+                or unique_id.endswith("|unknown_location")
+                or real_event_id == "unknown_location"
+            ):
+                ids.append(int(row_dict["id"]))
         if not ids:
             return {"unknown_location_deleted": 0}
 
-        ids = list(dict.fromkeys(ids))
-        placeholders = ",".join("?" for _ in ids)
-        await cursor.execute(
-            f"DELETE FROM event_updates WHERE event_id IN ({placeholders})",
-            tuple(ids),
+        await _execute_in_batches(
+            cursor,
+            "DELETE FROM event_updates WHERE event_id IN ({placeholders})",
+            ids,
         )
-        await cursor.execute(
-            f"DELETE FROM events WHERE id IN ({placeholders})",
-            tuple(ids),
+        await _execute_in_batches(
+            cursor,
+            "DELETE FROM events WHERE id IN ({placeholders})",
+            ids,
         )
         logger.info(f"[灾害预警] unknown_location 撞键清理: 删除事件 {len(ids)} 条")
         return {"unknown_location_deleted": len(ids)}
@@ -716,15 +805,29 @@ class HistoryDirtyDataCleanupService:
         *,
         keep: dict[str, Any],
     ) -> bool:
-        """把同组历史行折叠到 keep，并写入 event_updates 报次快照。"""
+        """把同组历史行折叠到 keep，并合并 event_updates 报次快照。
+
+        不再无条件清空 keep 上已有 updates：先迁移同组 updates，
+        再按主表行补缺失报次，最后按内容指纹去重，避免丢失 wind/pressure 等字段。
+        """
         await self._normalize_keep_row(cursor, items_sorted, keep=keep)
 
         keep_id = int(keep["id"])
-        await cursor.execute(
-            "DELETE FROM event_updates WHERE event_id = ?",
-            (keep_id,),
-        )
+        # 1) 把同组其它主表上的 updates 迁到 keep
+        for item in items_sorted:
+            old_id = int(item["id"])
+            if old_id == keep_id:
+                continue
+            await cursor.execute(
+                "UPDATE event_updates SET event_id=? WHERE event_id=?",
+                (keep_id, old_id),
+            )
 
+        # 2) 读取 keep 上现有 updates（含刚迁移的）
+        existing_updates = await _fetch_updates_for_event_ids(cursor, [keep_id])
+        seen_fps = {_update_content_fingerprint(item) for item in existing_updates}
+
+        # 3) 用主表行补缺失快照（仅当内容指纹尚未存在）
         for index, item in enumerate(items_sorted, start=1):
             description = item.get("description")
             level = item.get("level")
@@ -741,6 +844,22 @@ class HistoryDirtyDataCleanupService:
             recorded_at = (
                 item.get("updated_at") or item.get("created_at") or item.get("time")
             )
+            candidate = {
+                "report_num": index,
+                "magnitude": magnitude,
+                "depth": depth,
+                "description": description,
+                "level": level,
+                "wind_speed": item.get("max_wave_height") or item.get("wind_speed"),
+                "pressure": item.get("pressure"),
+                "latitude": latitude,
+                "longitude": longitude,
+                "time": event_time,
+            }
+            fp = _update_content_fingerprint(candidate)
+            if fp in seen_fps:
+                continue
+            seen_fps.add(fp)
             await cursor.execute(
                 """
                 INSERT INTO event_updates
@@ -757,14 +876,48 @@ class HistoryDirtyDataCleanupService:
                     depth,
                     description,
                     level,
-                    item.get("max_wave_height") or item.get("wind_speed"),
-                    item.get("pressure"),
+                    candidate["wind_speed"],
+                    candidate["pressure"],
                     latitude,
                     longitude,
                     event_time,
                     recorded_at,
                 ),
             )
+
+        # 4) 压缩 keep 上同内容重复 updates，并回写 update_count
+        await cursor.execute(
+            """
+            SELECT id, report_num, magnitude, depth, description, level,
+                   wind_speed, pressure, latitude, longitude, time
+            FROM event_updates
+            WHERE event_id=?
+            ORDER BY id ASC
+            """,
+            (keep_id,),
+        )
+        updates = [dict(item) for item in await cursor.fetchall()]
+        seen: set[str] = set()
+        drop_ids: list[int] = []
+        keep_update_count = 0
+        for item in updates:
+            fp = _update_content_fingerprint(item)
+            if fp in seen:
+                drop_ids.append(int(item["id"]))
+            else:
+                seen.add(fp)
+                keep_update_count += 1
+        if drop_ids:
+            await _execute_in_batches(
+                cursor,
+                "DELETE FROM event_updates WHERE id IN ({placeholders})",
+                drop_ids,
+            )
+        desired = max(1, keep_update_count, len(items_sorted))
+        await cursor.execute(
+            "UPDATE events SET update_count=? WHERE id=?",
+            (desired, keep_id),
+        )
         return True
 
 
