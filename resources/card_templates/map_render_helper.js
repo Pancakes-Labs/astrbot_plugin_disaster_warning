@@ -63,14 +63,19 @@
                 clearTimeout(settleTimer);
             }
             settleTimer = setTimeout(function () {
-                if (pendingTiles <= 0 && sawTileRequest) {
-                    map.invalidateSize({ pan: false, debounceMoveend: true });
-                    requestAnimationFrame(function () {
-                        requestAnimationFrame(function () {
-                            markReady(reason);
-                        });
-                    });
+                // 不再强制要求 sawTileRequest：
+                // 台风等模板会在 setupStableTileRender 之前 addTo(map)，
+                // 瓦片可能在监听器挂上前就已加载完；若仍要求 sawTileRequest，
+                // 会一直拖到 readyFallbackMs 才打 map-ready，导致 Playwright 10s 等待误报超时。
+                if (pendingTiles > 0) {
+                    return;
                 }
+                map.invalidateSize({ pan: false, debounceMoveend: true });
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () {
+                        markReady(reason);
+                    });
+                });
             }, cfg.readyDebounceMs);
         }
 

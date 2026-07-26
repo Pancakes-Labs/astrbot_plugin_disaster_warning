@@ -2002,7 +2002,7 @@ function init() {
                 if (map && tileLayer && typeof setupStableTileRender === 'function') {
                     setupStableTileRender(map, tileLayer, {
                         readyDebounceMs: 500,
-                        readyFallbackMs: 20000,
+                        readyFallbackMs: 6000,
                         readyClass: 'map-ready',
                         debug: false,
                         onReady: function() {
