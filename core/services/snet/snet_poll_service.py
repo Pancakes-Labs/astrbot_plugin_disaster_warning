@@ -187,6 +187,13 @@ class SnetPollService:
         if not tiles_payload:
             return None
 
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_completed("snet_msil", success=True)
+            except Exception:
+                pass
+
         threshold = (
             self._resolve_min_shindo()
             if min_shindo is None
