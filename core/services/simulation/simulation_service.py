@@ -115,6 +115,10 @@ def get_simulation_params(
                     "label": "FAN Studio - 中国地震台网 (烈度速报)",
                 },
                 {
+                    "value": "fssn_cmt_fanstudio",
+                    "label": "FAN Studio - FSSN 矩心矩张量解 (CMT)",
+                },
+                {
                     "value": "cwa_fanstudio",
                     "label": "FAN Studio - 台湾中央气象署 (强震即时警报)",
                 },
@@ -257,6 +261,53 @@ def build_earthquake_simulation(
                 ],
             }
         )
+        earthquake.metadata = dict(metadata)
+    elif source == "fssn_cmt_fanstudio":
+        # FSSN CMT 模拟：补充节面、多震级等特征
+        earthquake.headline = "FSSN CMT 模拟地震"
+        # 默认使用走向200/倾角77/滑动角74的斜滑逆冲类型作为模拟样本
+        metadata.update(
+            {
+                "info_type": "CMT",
+                "cmt_id": f"sim_cmt_{sim_id_suffix}",
+                "fssn_event_id": f"FSSN_SIM_{sim_id_suffix}",
+                "all_magnitudes": {
+                    "M": magnitude,
+                    "Mww": magnitude + 0.2,
+                    "mB": magnitude + 0.1,
+                    "Mwp": magnitude - 0.1,
+                },
+                "display_magnitude": magnitude,
+                "display_magnitude_type": "M",
+                "depth": depth,
+                "depth_error": 5.0,
+                "centroid_depth": depth - 2.0 if depth > 2.0 else depth,
+                "nodal_plane1": {
+                    "strike": 200.0,
+                    "dip": 77.0,
+                    "rake": 74.0,
+                },
+                "nodal_plane2": {
+                    "strike": 73.0,
+                    "dip": 21.0,
+                    "rake": 141.0,
+                },
+                "moment_tensor": {
+                    "mnn": -5.0526e17,
+                    "mee": -6.9553e17,
+                    "mdd": 1.2008e18,
+                    "mne": 1.2994e18,
+                    "mnd": -9.2356e17,
+                    "med": 2.6576e18,
+                },
+                "beachball_ready": True,
+                "is_supplement_product": True,
+            }
+        )
+        from ...domain.earthquake.cmt_normalize import parse_nodal_plane
+
+        metadata["nodal_plane1"] = parse_nodal_plane(metadata["nodal_plane1"])
+        metadata["nodal_plane2"] = parse_nodal_plane(metadata["nodal_plane2"])
         earthquake.metadata = dict(metadata)
 
     identity = EventIdentity(
