@@ -88,11 +88,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             if size_str:
                 try:
                     size = int(size_str)
-                    if size < 100 or size > 2000:
+                    if size < 100 or size > 1024:
                         yield _quoted_plain_result(
-                            "⚠️ 提示：图片大小限制在 100 到 2000 像素之间，已自动修正。"
+                            "⚠️ 提示：图片大小限制在 100 到 1024 像素之间，已自动修正。"
                         )
-                        size = max(100, min(2000, size))
+                        size = max(100, min(1024, size))
                 except ValueError:
                     pass
 
@@ -100,8 +100,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             if line_width_str:
                 try:
                     line_width = int(line_width_str)
-                    if line_width < 1 or line_width > 20:
-                        line_width = max(1, min(20, line_width))
+                    if line_width < 1 or line_width > 15:
+                        yield _quoted_plain_result(
+                            "⚠️ 提示：线宽限制在 1 到 15 像素之间，已自动修正。"
+                        )
+                        line_width = max(1, min(15, line_width))
                 except ValueError:
                     pass
 
