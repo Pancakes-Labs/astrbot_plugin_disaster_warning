@@ -744,12 +744,15 @@ class FssnCmtPresenter(BasePresenter):
             if val is not None and key != display_mag_type:
                 mag_tokens.append(f"{key} {val:.1f}")
 
+        mag_str = (
+            f"{display_mag:.1f}" if isinstance(display_mag, (int, float)) else "未知"
+        )
         if mag_tokens:
             lines.append(
-                f"📊震级：{display_mag_type} {display_mag:.1f}（{' / '.join(mag_tokens)}）"
+                f"📊震级：{display_mag_type} {mag_str}（{' / '.join(mag_tokens)}）"
             )
         else:
-            lines.append(f"📊震级：{display_mag_type} {display_mag:.1f}")
+            lines.append(f"📊震级：{display_mag_type} {mag_str}")
 
         # 震源深度与矩心深度
         depth_val = meta.get("depth") if meta.get("depth") is not None else data.depth
