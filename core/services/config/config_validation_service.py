@@ -1334,6 +1334,11 @@ class ConfigValidator:
             ConfigValidator._ensure_bool(
                 eqsc_cfg, "jma_tsunami_include_training", False
             )
+            if "china_cenc_intensity_report" not in eqsc_cfg:
+                eqsc_cfg["china_cenc_intensity_report"] = bool(
+                    eqsc_cfg.get("enabled", False)
+                )
+            ConfigValidator._ensure_bool(eqsc_cfg, "china_cenc_intensity_report", False)
 
             # Base URL 校验：确保为非空字符串且去除尾部斜杠
             base_url = eqsc_cfg.get("base_url")

@@ -37,6 +37,9 @@ _ALIAS_MAP: dict[str, str] = {
     "p2p_tsunami": "jma_tsunami_p2p",
     "eqsc_tsunami": "jma_tsunami_eqsc",
     "eqsc_typhoon": "typhoon_eqsc",
+    "eqsc_cenc_ir": "cenc_ir_eqsc",
+    "cenc_ir_eqsc": "cenc_ir_eqsc",
+    "eqsc_intensity_report": "cenc_ir_eqsc",
     "fan_studio_typhoon": "typhoon_fanstudio",
     "wolfx_jma_eew": "jma_wolfx",
     "wolfx_cenc_eew": "cea_wolfx",
@@ -99,7 +102,8 @@ _ALIAS_MAP: dict[str, str] = {
 # 展示名称映射表：用于把内部规范 key 转回更友好的前端展示标签。
 _DISPLAY_MAP: dict[str, str] = {
     "cenc_fanstudio": "中国地震台网 (CENC) - Fan",
-    "cenc_ir_fanstudio": "中国地震台网 (CENC) - 烈度速报",
+    "cenc_ir_fanstudio": "中国地震台网 (CENC) - 烈度速报 - Fan",
+    "cenc_ir_eqsc": "中国地震台网 (CENC) - 烈度速报 - EQSC",
     "cea_fanstudio": "中国地震预警网 (CEA)",
     "cea_pr_fanstudio": "中国地震预警网 (省级)",
     "cwa_fanstudio": "台湾中央气象署: 强震即时警报 - Fan",
@@ -163,7 +167,7 @@ def is_cenc_intensity_report(
     震级分布与时间序列；但仍保留来源贡献统计与事件列表落库。
     """
     normalized = normalize_source_name(source or "")
-    if normalized == "cenc_ir_fanstudio":
+    if normalized in {"cenc_ir_fanstudio", "cenc_ir_eqsc"}:
         return True
     info_text = str(info_type or "").strip()
     return "烈度速报" in info_text
@@ -243,9 +247,9 @@ def cenc_intensity_report_source_keys() -> tuple[str, ...]:
     包含规范 key 与历史别名，供 SQL 侧过滤与 Python 判定保持一致。
     统一折叠为 strip + lower 形态，避免大小写/空白导致 SQL 与 Python 分叉。
     """
-    keys: set[str] = {"cenc_ir_fanstudio"}
+    keys: set[str] = {"cenc_ir_fanstudio", "cenc_ir_eqsc"}
     for alias, target in _ALIAS_MAP.items():
-        if target == "cenc_ir_fanstudio":
+        if target in {"cenc_ir_fanstudio", "cenc_ir_eqsc"}:
             keys.add(str(alias).strip().lower())
     return tuple(sorted(keys))
 
