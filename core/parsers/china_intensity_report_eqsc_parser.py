@@ -12,6 +12,7 @@ from typing import Any
 
 from ...utils.converters import safe_float_convert
 from ...utils.plugin_logger import plugin_logger
+from ..sources.source_catalog import get_source_entry
 from .china_intensity_report_parser import CencIntensityReportParser
 
 
@@ -22,9 +23,6 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
         # 复用 FAN 解析器实现，仅切换 source_id / provider 语义
         super().__init__(message_logger)
         self.source_id = "cenc_ir_eqsc"
-        self.source_entry = self.source_entry  # 触发 catalog 重读
-        from ..sources.source_catalog import get_source_entry
-
         self.source_entry = get_source_entry(self.source_id)
         self.source_config = self.source_entry
 

@@ -27,6 +27,9 @@ _NO_KEY_PATTERN = re.compile(r"^No(\d+)$", re.IGNORECASE)
 class EqscCencIntensityClient(EqscHttpClient):
     """EQSC CENC 烈度速报 HTTP 客户端。"""
 
+    # 详情缓存容量上限，防止长跑按 event_id 无限堆积大包。
+    MAX_DETAIL_CACHE_ENTRIES = 128
+
     def __init__(
         self,
         token_manager: EqscTokenManager,
@@ -55,13 +58,36 @@ class EqscCencIntensityClient(EqscHttpClient):
         )
         # 列表缓存：(items, expires_at)
         self._list_cache: tuple[list[dict[str, Any]], float] | None = None
-        # 详情缓存: {event_id: (data, expires_at)}
+        # 详情缓存: {event_id: (data, expires_at)}；按插入顺序近似 FIFO 淘汰
         self._detail_cache: dict[str, tuple[dict[str, Any], float]] = {}
 
     def clear_cache(self) -> None:
         """清除列表与详情缓存。"""
         self._list_cache = None
         self._detail_cache.clear()
+
+    def _store_detail_cache(self, event_id: str, data: dict[str, Any]) -> None:
+        """写入详情缓存，并做过期清理 + 容量上限淘汰。"""
+        now = time.time()
+        # 先清过期项，再写入，避免无界增长
+        expired_keys = [
+            key
+            for key, (_payload, expires_at) in self._detail_cache.items()
+            if not self._is_cache_valid(expires_at)
+        ]
+        for key in expired_keys:
+            self._detail_cache.pop(key, None)
+
+        # 更新已存在 key 时先 pop 再 put，保持“最近写入”位于末尾
+        self._detail_cache.pop(event_id, None)
+        self._detail_cache[event_id] = (data, now + self._cache_ttl)
+
+        overflow = len(self._detail_cache) - self.MAX_DETAIL_CACHE_ENTRIES
+        if overflow <= 0:
+            return
+        stale_ids = list(self._detail_cache.keys())[:overflow]
+        for key in stale_ids:
+            self._detail_cache.pop(key, None)
 
     @staticmethod
     def normalize_event_id(value: Any) -> str:
@@ -224,10 +250,7 @@ class EqscCencIntensityClient(EqscHttpClient):
             if status != 200 or not isinstance(data, dict) or not data:
                 return None
 
-            self._detail_cache[normalized_id] = (
-                data,
-                time.time() + self._cache_ttl,
-            )
+            self._store_detail_cache(normalized_id, data)
             logger.debug(
                 f"[灾害预警] EQSC CENC 烈度速报详情 {normalized_id} 查询成功并已缓存"
             )
