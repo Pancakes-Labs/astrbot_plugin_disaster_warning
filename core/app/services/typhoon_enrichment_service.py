@@ -131,6 +131,10 @@ class TyphoonEnrichmentService:
             jma_tsunami = bool(raw_eqsc.get("jma_tsunami"))
         else:
             jma_tsunami = config_enabled
+        if "china_cenc_intensity_report" in raw_eqsc:
+            cenc_ir = bool(raw_eqsc.get("china_cenc_intensity_report"))
+        else:
+            cenc_ir = config_enabled
         return {
             # enabled：通道可工作（组总闸 + token 已配置）
             "enabled": self.is_channel_enabled,
@@ -139,16 +143,18 @@ class TyphoonEnrichmentService:
             # 台风富化实际可工作
             "typhoon_enrichment_active": self.is_enabled,
             "jma_tsunami": jma_tsunami,
+            "china_cenc_intensity_report": cenc_ir,
             "token_configured": bool(self._token_manager.is_configured),
             "access_token_valid": access_token_valid,
             "circuit_open": circuit_open,
             "circuit_failures": int(self._circuit_failures),
             "connection_type": "http",
             "provider": "eqsc",
-            # EQSC 子数据源：台风富化在上，海啸仅保留一个入口（与 P2P 同名展示）
+            # EQSC 子数据源：台风 → 海啸 → CENC 烈度速报
             "sub_sources": {
                 "china_typhoon": typhoon_enrichment,
                 "jma_tsunami": jma_tsunami,
+                "china_cenc_intensity_report": cenc_ir,
             },
         }
 

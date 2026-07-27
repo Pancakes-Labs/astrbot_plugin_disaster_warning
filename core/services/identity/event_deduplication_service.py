@@ -54,6 +54,12 @@ class EventDeduplicationService:
         # 带容量上限，防止长跑进程内存无限增长。
         self._tsunami_cache: dict[str, dict[str, Any]] = {}
         self._tsunami_cache_max_size = 512
+        # CENC 烈度速报跨源去重：
+        # key = soft fingerprint（发震时间+震级+位置网格）
+        # value = {"source_id", "priority", "event_id", "ts"}
+        # EQSC 优先级更高：同内容后到的 FAN 会被吞掉。
+        self._cenc_ir_cache: dict[str, dict[str, Any]] = {}
+        self._cenc_ir_cache_max_size = 256
 
     @staticmethod
     def _extract_issue_type_from_earthquake(
@@ -353,6 +359,135 @@ class EventDeduplicationService:
         )
         return True
 
+    @classmethod
+    def _is_cenc_intensity_report_source(cls, source_id: str) -> bool:
+        """是否为 CENC 烈度速报双源之一。"""
+        return source_id in {"cenc_ir_eqsc", "cenc_ir_fanstudio"}
+
+    def _build_cenc_ir_soft_fingerprint(
+        self,
+        event: EventEnvelope,
+        domain_eq: EarthquakeEvent,
+        source_id: str,
+    ) -> str:
+        """构建 CENC 烈度速报跨源软指纹。"""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        info_type = str(
+            metadata.get("info_type")
+            or self._extract_issue_type_from_earthquake(domain_eq, metadata)
+            or ""
+        ).strip()
+        if "烈度速报" not in info_type and not self._is_cenc_intensity_report_source(
+            source_id
+        ):
+            return ""
+
+        if domain_eq.occurred_at is None:
+            time_key = "unknown_time"
+        else:
+            utc_time = self._to_utc(domain_eq.occurred_at, source_id)
+            time_key = utc_time.strftime("%Y%m%d%H%M")
+
+        mag = domain_eq.magnitude
+        try:
+            mag_key = f"{float(mag):.1f}" if mag is not None else "na"
+        except (TypeError, ValueError):
+            mag_key = "na"
+
+        lat = domain_eq.latitude
+        lon = domain_eq.longitude
+        if lat is None or lon is None:
+            place = str(getattr(domain_eq, "place_name", "") or "").strip() or "na"
+            return f"cenc_ir|{time_key}|{mag_key}|{place}"
+
+        lat_grid = round(float(lat) * 5.0) / 5.0
+        lon_grid = round(float(lon) * 5.0) / 5.0
+        return f"cenc_ir|{time_key}|{mag_key}|{lat_grid:.1f},{lon_grid:.1f}"
+
+    def _remember_cenc_ir_fingerprint(
+        self,
+        fingerprint: str,
+        *,
+        source_id: str,
+        priority: int,
+        event_id: str,
+    ) -> None:
+        """写入烈度速报跨源指纹缓存。"""
+        self._cenc_ir_cache[fingerprint] = {
+            "source_id": source_id,
+            "priority": priority,
+            "event_id": event_id,
+            "ts": datetime.now(timezone.utc).timestamp(),
+        }
+        overflow = len(self._cenc_ir_cache) - int(self._cenc_ir_cache_max_size)
+        if overflow <= 0:
+            return
+        ordered = sorted(
+            self._cenc_ir_cache.items(),
+            key=lambda item: float((item[1] or {}).get("ts") or 0.0),
+        )
+        for key, _ in ordered[:overflow]:
+            self._cenc_ir_cache.pop(key, None)
+
+    def _should_push_cenc_intensity_report(
+        self,
+        event: EventEnvelope,
+        domain_eq: EarthquakeEvent,
+        source_id: str,
+    ) -> bool:
+        """CENC 烈度速报跨源去重。"""
+        if not self._is_cenc_intensity_report_source(source_id):
+            return True
+
+        fingerprint = self._build_cenc_ir_soft_fingerprint(event, domain_eq, source_id)
+        if not fingerprint:
+            return True
+
+        priority = self._resolve_source_priority(source_id)
+        existing = self._cenc_ir_cache.get(fingerprint)
+        if existing is None:
+            self._remember_cenc_ir_fingerprint(
+                fingerprint,
+                source_id=source_id,
+                priority=priority,
+                event_id=str(event.id or ""),
+            )
+            return True
+
+        existing_priority = int(existing.get("priority") or 0)
+        existing_source = str(existing.get("source_id") or "")
+        if priority < existing_priority:
+            plugin_logger.debug(
+                f"[灾害预警] 烈度速报与 {existing_source} 重复且优先级更低，"
+                f"过滤 {source_id} 推送 (事件 ID {event.id})",
+                is_event_linked=True,
+            )
+            return False
+        if priority == existing_priority and existing_source == source_id:
+            plugin_logger.debug(
+                f"[灾害预警] 烈度速报内容未变化，过滤重复推送: {source_id} "
+                f"(event={event.id})",
+                is_event_linked=True,
+            )
+            return False
+        if priority == existing_priority and existing_source != source_id:
+            plugin_logger.debug(
+                f"[灾害预警] 烈度速报与 {existing_source} 重复，过滤 {source_id} 推送",
+                is_event_linked=True,
+            )
+            return False
+
+        self._remember_cenc_ir_fingerprint(
+            fingerprint,
+            source_id=source_id,
+            priority=priority,
+            event_id=str(event.id or ""),
+        )
+        plugin_logger.debug(
+            f"[灾害预警] 烈度速报高优先级源 {source_id} 覆盖 {existing_source}，允许推送"
+        )
+        return True
+
     def seed_event(self, event: EventEnvelope) -> bool:
         """静默启动播种：写入去重指纹，不表示允许推送。
 
@@ -477,6 +612,14 @@ class EventDeduplicationService:
 
         metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
         source_id = self._get_source_id(event)
+
+        # CENC 烈度速报：FAN / EQSC 跨源软去重（EQSC 优先）
+        if self._is_cenc_intensity_report_source(source_id):
+            if not self._should_push_cenc_intensity_report(
+                envelope, domain_eq, source_id
+            ):
+                return False
+
         event_fingerprint = self.generate_event_fingerprint(event, domain_eq, source_id)
         current_time = self._to_utc(domain_eq.occurred_at, source_id)
 
