@@ -158,11 +158,12 @@ class EqscTokenManager:
                     )
                     return cached
             else:
-                # 401 并发刷新：若锁内已是不同于 stale 的有效令牌，说明别人刚换发成功。
+                # 401 并发刷新：若锁内已有可用令牌且不是传入的 stale 令牌，说明别人刚换发成功，复用新令牌。
+                # 如果传入的 stale 令牌仍等于当前缓存，或者无 stale 令牌，则执行强制刷新。
                 cached = self._cached_token_if_usable(
                     current_time=current_time, require_advance_margin=False
                 )
-                if cached and (stale is None or cached != stale):
+                if cached and stale is not None and cached != stale:
                     logger.debug(
                         "[灾害预警] EQSC 并发强制刷新命中已更新令牌，复用 "
                         f"{self._mask_token(cached)}"
