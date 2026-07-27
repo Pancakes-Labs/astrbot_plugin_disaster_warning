@@ -12,6 +12,7 @@ import math
 import os
 import time
 import traceback
+import uuid
 from datetime import datetime, timezone
 
 import astrbot.api.message_components as Comp
@@ -121,7 +122,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 temp_dir = os.path.join(plugin_root, "temp")
                 os.makedirs(temp_dir, exist_ok=True)
 
-            img_filename = f"beachball_{int(time.time())}_{int(strike_val)}_{int(dip_val)}_{int(rake_val)}.png"
+            img_filename = f"beachball_{uuid.uuid4().hex}_{int(time.time())}.png"
             img_path = os.path.join(str(temp_dir), img_filename)
 
             # 调用 Pillow 渲染器（线宽经构造参数与 render 参数双重生效）
