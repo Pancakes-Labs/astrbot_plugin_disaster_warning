@@ -90,7 +90,7 @@
           "china_cenc_intensity_report": {
             "description": "中国地震台网（CENC）：烈度速报",
             "type": "bool",
-            "default": true,
+            "default": false,
             "hint": "通过 FAN Studio 独立 WebSocket 接收中国地震台网烈度速报。"
           },
           "japan_jma_eew": {
@@ -312,6 +312,23 @@
               "min": 15,
               "max": 300,
               "step": 15
+            }
+          },
+          "china_cenc_intensity_report": {
+            "description": "中国地震台网（CENC）：烈度速报（EQSC）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 EQSC HTTP 轮询获取 CENC 烈度速报。"
+          },
+          "cenc_ir_poll_interval_seconds": {
+            "description": "烈度速报轮询间隔（秒）",
+            "type": "int",
+            "default": 90,
+            "hint": "单位：秒。EQSC CENC 烈度速报列表轮询间隔。速报更新不频繁，建议 60~180 秒。",
+            "slider": {
+              "min": 30,
+              "max": 600,
+              "step": 10
             }
           }
         }

@@ -543,7 +543,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 
 #### 🔹 Global Quake (实时测算)
 
-- **原理**: 连接到 OpenQuakeAPI 的 Global Quake 子源。这些数据是由全球数千个测站通过算法实时计算得出的。
+- **原理**: 连接到 OpenQuakeAPI 的 `/ws/all` 聚合端点，按 `source` 字段路由 Global Quake 等子源。这些数据是由全球数千个测站通过算法实时计算得出的。
 - **特点**: 在偏远地区或国际海域，由于官方机构反应时间较长，GQ 往往能最先提供初步数据，但震级和位置可能随报数更新而有较大波动。
 
 ---
@@ -2096,7 +2096,7 @@ graph TB
 🕐 日志写入时间: 2026-02-27 14:28:19
 📡 来源: websocket_global_quake
 📋 类型: websocket_message
-🔗 连接: URL: wss://api.aloys23.link/gq
+🔗 连接: URL: wss://api.aloys23.link/ws/all
 
 📊 原始数据:
     📋 消息类型: earthquake

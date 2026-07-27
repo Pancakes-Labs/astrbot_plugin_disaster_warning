@@ -115,12 +115,22 @@ class ConnectionsPayloadBuilder:
         effective_jma_tsunami = bool(
             health.get("jma_tsunami", jma_tsunami_cfg) if health else jma_tsunami_cfg
         )
+        if "china_cenc_intensity_report" in eqsc_cfg:
+            cenc_ir_cfg = bool(eqsc_cfg.get("china_cenc_intensity_report"))
+        else:
+            cenc_ir_cfg = config_enabled
+        effective_cenc_ir = bool(
+            health.get("china_cenc_intensity_report", cenc_ir_cfg)
+            if health
+            else cenc_ir_cfg
+        )
         circuit_open = bool(health.get("circuit_open", False))
         access_token_valid = bool(health.get("access_token_valid", False))
-        # 子源展示固定顺序：台风 → 海啸（仅一个海啸入口）
+        # 子源展示固定顺序：台风 → 海啸 → CENC 烈度速报
         sub_sources = {
             "china_typhoon": effective_typhoon_enrichment,
             "jma_tsunami": effective_jma_tsunami,
+            "china_cenc_intensity_report": effective_cenc_ir,
         }
 
         # HTTP 通道无 WS 重试语义。
@@ -160,7 +170,7 @@ class ConnectionsPayloadBuilder:
             "status": status_text,
             "latency": latency,
             "sub_sources": dict(sub_sources),
-            "source_ids": ["jma_tsunami_eqsc"],
+            "source_ids": ["jma_tsunami_eqsc", "cenc_ir_eqsc"],
             "connection_type": "http",
             "provider": "eqsc",
             "circuit_open": circuit_open,

@@ -16,6 +16,7 @@ from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import get_source_entry, get_source_ids_by_dispatch_family
 from ..sources.source_entry import ProviderFamily
 from ..sources.source_router import (
+    get_openquake_source_id,
     get_provider_source_map,
     get_wolfx_source_id,
     route_fan_studio_message,
@@ -627,7 +628,11 @@ class SourceMessageRouter:
         return wolfx_handler
 
     def _create_global_quake_handler(self):
-        """创建 OpenQuakeAPI (Global Quake) WebSocket 连接的消息处理器。"""
+        """创建 OpenQuakeAPI 聚合连接的消息处理器。
+
+        连接挂在全量端点后，按 RealtimeEvent.source 分发到已注册子源；
+        当前仅接入 Global Quake（gq），其余 source 先忽略以便后续继续接入。
+        """
 
         async def global_quake_handler(
             message, connection_name=None, connection_info=None
@@ -644,28 +649,78 @@ class SourceMessageRouter:
                 connection_name, kind="global_quake_first_payload"
             )
 
-            # 校验是否配备了 global_quake 对应解析模块
-            if not self._has_parser("global_quake"):
-                plugin_logger.warning("[灾害预警] 未找到 Global Quake 解析器")
-                return
-
             try:
-                # 上游当前以 JSON 文本为主，同时兼容历史 protobuf 二进制帧
+                # 历史 protobuf 二进制帧仍按 Global Quake 路径处理
+                if isinstance(message, (bytes, bytearray)):
+                    if not self._is_source_routable("global_quake", "global_quake"):
+                        return
+                    await self._parse_and_dispatch(
+                        source_id="global_quake",
+                        source_label="global_quake",
+                        parser_input=message,
+                        connection_name=connection_name,
+                        connection_info=connection_info,
+                        source_channel="gq",
+                        parser_log_label="Global Quake",
+                    )
+                    return
+
+                raw_text = message if isinstance(message, str) else None
+                if raw_text is None:
+                    plugin_logger.debug(
+                        f"[灾害预警] OpenQuakeAPI 忽略非文本/非二进制消息，"
+                        f"类型为 {type(message).__name__}"
+                    )
+                    return
+
+                try:
+                    data = json.loads(raw_text)
+                except json.JSONDecodeError as error:
+                    plugin_logger.error(
+                        f"[灾害预警] OpenQuakeAPI JSON 解析失败: {error}"
+                    )
+                    return
+
+                if not isinstance(data, dict):
+                    plugin_logger.debug("[灾害预警] OpenQuakeAPI 忽略非对象 JSON 消息")
+                    return
+
+                source_name = str(data.get("source") or "").strip()
+                msg_type = str(data.get("type") or "").strip().lower()
+                action = str(data.get("action") or "").strip().lower()
+
+                # 连接态/心跳类帧仅用于保活与静默门闩，不进入业务解析
+                if msg_type in {"status", "heartbeat"} or action in {
+                    "connected",
+                    "disconnected",
+                    "info",
+                }:
+                    return
+
+                source_id = get_openquake_source_id(source_name)
+                if source_id is None:
+                    return
+
+                if not self._is_source_routable(source_id, source_name or source_id):
+                    return
+
                 await self._parse_and_dispatch(
-                    source_id="global_quake",
-                    source_label="global_quake",
-                    parser_input=message,
+                    source_id=source_id,
+                    source_label=source_name or source_id,
+                    parser_input=raw_text,
                     connection_name=connection_name,
                     connection_info=connection_info,
-                    source_channel=None,
-                    parser_log_label="Global Quake",
+                    source_channel=source_name or source_id,
+                    parser_log_label=source_id,
                 )
             except Exception as error:
                 connection_uri = (
                     connection_info.get("uri") if connection_info else "未知地址"
                 )
                 plugin_logger.error(
-                    f"[灾害预警] Global Quake 解析器处理来自 {connection_name or '未知连接'} 的消息失败，连接地址为 {connection_uri}，错误为 {error}",
+                    f"[灾害预警] OpenQuakeAPI 处理器处理来自 "
+                    f"{connection_name or '未知连接'} 的消息失败，"
+                    f"连接地址为 {connection_uri}，错误为 {error}",
                     exc_info=True,
                 )
                 # 异常遥测

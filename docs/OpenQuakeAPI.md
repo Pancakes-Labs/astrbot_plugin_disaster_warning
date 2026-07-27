@@ -19,10 +19,11 @@ wss://api.aloys23.link/{path}
 
 | 路径 | 数据源 | 说明 |
 | --- | --- | --- |
-| `/gq` | GlobalQuake | 全球地震实时数据 |
-| `/nmefc` | NMEFC | 海啸预警 |
-| `/nmefc-wave` | NMEFC | 海浪警报 |
-| `/nmefc-surge` | NMEFC | 风暴潮警报 |
+| `/ws/quake/gq` | GlobalQuake | 全球地震实时数据 |
+| `/ws/tsunami/nmefc` | NMEFC | 海啸预警 |
+| `/ws/tsunami/nmefc-wave` | NMEFC | 海浪警报 |
+| `/ws/tsunami/nmefc-surge` | NMEFC | 风暴潮警报 |
+| `/ws/all` | 全部 | 所有数据源的聚合推送 |
 
 ## 事件通用格式
 
@@ -30,7 +31,7 @@ wss://api.aloys23.link/{path}
 
 ```json
 {
-  // 数据源标识: gq / nmefc / nmefc-wave / nmefc-surge
+  // 数据源标识: gq / nmefc / nmefc-wave / nmefc-surge / all
   "source": "gq",
   // 事件分类: earthquake / cluster / station / status / tsunami / alert
   "type": "earthquake",
@@ -102,9 +103,30 @@ wss://api.aloys23.link/{path}
 
 ---
 
+## 全部数据聚合
+
+**路径**: `/ws/all`
+
+所有数据源的聚合推送，连接此端点可同时接收 GlobalQuake、NMEFC 海啸、海浪、风暴潮等全部数据源的事件。
+
+## 事件说明
+
+`/ws/all` 透传所有数据源的事件， `source` 字段保留原始数据源标识，事件结构与各数据源相同。
+
+| source | 原始数据源 | 事件类型 |
+| --- | --- | --- |
+| `gq` | GlobalQuake 全球地震 | earthquake / cluster / station / status |
+| `nmefc` | NMEFC 海啸预警 | tsunami |
+| `nmefc-wave` | NMEFC 海浪警报 | alert |
+| `nmefc-surge` | NMEFC 风暴潮警报 | alert |
+
+各事件的具体数据结构请参考对应数据源页面。
+
+---
+
 ## 全球地震数据
 
-**路径**: `/gq`
+**路径**: `/ws/quake/gq`
 
 数据来自 GlobalQuake 全球地震监测网络，订阅全球范围内的实时地震事件。
 
@@ -223,7 +245,7 @@ wss://api.aloys23.link/{path}
 
 ## 海啸预警
 
-**路径**: `/nmefc`
+**路径**: `/ws/tsunami/nmefc`
 
 数据来自国家海洋环境预报中心 (NMEFC)，订阅中国沿海海啸预警信息。
 
@@ -305,9 +327,7 @@ wss://api.aloys23.link/{path}
 
 ---
 
-## 海浪警报
-
-**路径**: `/nmefc-wave`
+**路径**: `/ws/tsunami/nmefc-wave`
 
 数据来自国家海洋环境预报中心 (NMEFC)，订阅中国沿海海浪预警信息。
 
@@ -364,9 +384,7 @@ wss://api.aloys23.link/{path}
 
 ---
 
-## 风暴潮警报
-
-**路径**: `/nmefc-surge`
+**路径**: `/ws/tsunami/nmefc-surge`
 
 数据来自国家海洋环境预报中心 (NMEFC)，订阅中国沿海风暴潮预警信息。
 

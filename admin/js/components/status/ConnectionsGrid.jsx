@@ -128,13 +128,14 @@ function ConnectionsGrid() {
             }
         });
 
-        // EQSC 只展示业务子开关：台风富化 + 海啸轮询。
-        // catalog 占位可能带上 jma_tsunami_eqsc（source_id），需要过滤掉，避免出现第三条重复海啸。
+        // EQSC 只展示业务子开关。
+        // catalog 占位可能带上 jma_tsunami_eqsc / cenc_ir_eqsc（source_id），需要过滤掉，避免重复条目。
         if (target.id === 'eqsc') {
             const eqscAllowedKeys = new Set([
                 'china_typhoon',
                 'jma_tsunami',
                 'japan_jma_tsunami',
+                'china_cenc_intensity_report',
             ]);
             Object.keys(allSubSources).forEach((key) => {
                 if (!eqscAllowedKeys.has(key)) {
@@ -384,6 +385,9 @@ function ConnectionsGrid() {
                 // 与 P2P 子源展示名一致，仅展示一个海啸入口
                 jma_tsunami: '日本气象厅: 海啸予报',
                 japan_jma_tsunami: '日本气象厅: 海啸予报',
+                // EQSC HTTP 轮询的 CENC 烈度速报（与 FAN 独立 WS 并列）
+                china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
+                cenc_ir_eqsc: '中国地震台网 (CENC) 烈度速报',
             },
         };
 
@@ -440,12 +444,14 @@ function ConnectionsGrid() {
                     <Box className="connection-sub-source-list">
                         {Object.entries(conn.sub_sources)
                             .sort(([keyA, enabledA], [keyB, enabledB]) => {
-                                // EQSC：台风在上、海啸在下；其余仍优先展示已启用项
+                                // EQSC：台风 → 海啸 → CENC 烈度速报；其余仍优先展示已启用项
                                 if (conn.name === 'EQSC API' || displayName === 'EQSC API') {
                                     const eqscOrder = {
                                         china_typhoon: 0,
                                         jma_tsunami: 1,
                                         japan_jma_tsunami: 1,
+                                        china_cenc_intensity_report: 2,
+                                        cenc_ir_eqsc: 2,
                                     };
                                     const orderA = eqscOrder[keyA];
                                     const orderB = eqscOrder[keyB];
