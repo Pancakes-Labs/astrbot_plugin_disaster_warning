@@ -460,8 +460,13 @@ class DisasterWarningService:
                 except Exception as exc:
                     logger.debug(f"[灾害预警] 静默播种去重指纹失败（已忽略）: {exc}")
 
-    async def _handle_disaster_event(self, event: EventEnvelope):
-        """处理灾害事件。主链路仅接收解析器产出的统一事件。"""
+    async def _handle_disaster_event(self, event: EventEnvelope) -> bool:
+        """处理灾害事件。主链路仅接收解析器产出的统一事件。
+
+        Returns:
+            True: 事件已被正常处理（含静默吸收、业务去重跳过、流水线完成）。
+            False: 处理过程出现未恢复异常。轮询侧据此决定是否提交“已处理”指纹。
+        """
         try:
             # 地震预警查询状态更新属于轻量级旁路状态维护，即使失败也不阻断主流程。
             self._update_eew_query_state(event)
@@ -475,7 +480,7 @@ class DisasterWarningService:
             if coordinator is not None:
                 coordinator.note_event_absorbed(event)
             logger.debug(f"[灾害预警] 静默启动中，已吸收并播种事件: {event.id}")
-            return
+            return True
 
         try:
             # 台风事件：
@@ -492,13 +497,14 @@ class DisasterWarningService:
                         logger.debug(
                             f"[灾害预警] 台风事件在富化前被去重过滤，跳过后续推送: {event.id}"
                         )
-                        return
+                        return True
 
                     # 仅对 FAN 触发路径执行 EQSC 富化（遗留兼容）
                     event = await self.typhoon_enrichment_service.enrich(event)
 
             # 真正的日志记录、推送、统计与 Web 管理端通知由事件流水线统一处理。
             await self.event_pipeline.handle(event)
+            return True
 
         except Exception as e:
             logger.error(f"[灾害预警] 处理灾害事件失败: {e}")
@@ -513,6 +519,7 @@ class DisasterWarningService:
                         module="disaster_service._handle_disaster_event",
                     )
                 )
+            return False
 
     async def _handle_offline_notification(self, payload: dict[str, Any]) -> None:
         """处理 WebSocket 管理器的离线通知回调。"""

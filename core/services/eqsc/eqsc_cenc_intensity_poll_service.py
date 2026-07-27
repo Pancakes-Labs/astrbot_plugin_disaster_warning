@@ -152,7 +152,11 @@ class EqscCencIntensityPollService:
         logger.info("[灾害预警] EQSC CENC 烈度速报轮询任务已启动")
 
     async def stop(self) -> None:
-        """停止后台轮询并按需释放客户端。"""
+        """停止后台轮询并释放客户端 HTTP 会话。
+
+        始终 close 客户端：EqscHttpClient.close() 会关闭 aiohttp 会话，
+        且仅在 owns_token_manager=True 时关闭 token_manager，共享鉴权时不会误关。
+        """
         task = self._task
         self._task = None
         if task is not None:
@@ -161,7 +165,7 @@ class EqscCencIntensityPollService:
                 await task
             except asyncio.CancelledError:
                 pass
-        if self._client is not None and self._owns_token_manager:
+        if self._client is not None:
             await self._client.close()
         self._client = None
 
@@ -259,11 +263,11 @@ class EqscCencIntensityPollService:
         if event is None:
             return False
 
-        try:
-            await self.service._handle_disaster_event(event)
-        except Exception:
-            # 失败不提交，下轮重试
-            raise
+        # _handle_disaster_event 内部吞掉异常并返回 False；
+        # 仅成功处理后才提交指纹，避免“失败当完成”导致漏重试。
+        handled = await self.service._handle_disaster_event(event)
+        if not handled:
+            return False
 
         self._remember_event(event_id, list_fp)
         return True

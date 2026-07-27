@@ -238,12 +238,10 @@ class EqscTsunamiPollService:
             return raw
 
         event_id = getattr(event, "id", None)
-        # 仅在成功进入事件流水线后再提交指纹，避免处理失败导致后续漏推。
-        try:
-            await self.service._handle_disaster_event(event)
-        except Exception:
-            # 失败时不更新指纹，下一轮内容未变仍会重试。
-            raise
+        # 仅在成功处理后提交指纹；_handle_disaster_event 吞异常并返回 False。
+        handled = await self.service._handle_disaster_event(event)
+        if not handled:
+            return raw
         self._last_payload_fingerprint = fingerprint
         self._last_event_id = str(event_id) if event_id else None
         return raw

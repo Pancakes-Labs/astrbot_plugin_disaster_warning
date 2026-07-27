@@ -149,7 +149,11 @@ class EqscTyphoonPollService:
         logger.info("[灾害预警] EQSC 台风轮询任务已启动")
 
     async def stop(self) -> None:
-        """停止后台轮询并按需释放客户端。"""
+        """停止后台轮询并释放客户端 HTTP 会话。
+
+        始终 close 客户端：会话由客户端自身管理；token_manager 是否关闭
+        由 owns_token_manager 在 EqscHttpClient.close() 内决定。
+        """
         task = self._task
         self._task = None
         if task is not None:
@@ -158,7 +162,7 @@ class EqscTyphoonPollService:
                 await task
             except asyncio.CancelledError:
                 pass
-        if self._client is not None and self._owns_token_manager:
+        if self._client is not None:
             await self._client.close()
         self._client = None
 
@@ -273,13 +277,19 @@ class EqscTyphoonPollService:
                 continue
 
             try:
-                await self.service._handle_disaster_event(envelope)
+                handled = await self.service._handle_disaster_event(envelope)
             except Exception as exc:
                 # 单台风软失败：记录后继续处理其余活跃台风；
                 # 不提交指纹，下一轮可重试该台风。
                 logger.error(
                     f"[灾害预警] EQSC 台风事件推送失败，已跳过并继续本轮: "
                     f"ID 为 {typhoon_id}, 错误信息：{exc}"
+                )
+                continue
+            if not handled:
+                logger.error(
+                    f"[灾害预警] EQSC 台风事件处理未成功，已跳过并继续本轮: "
+                    f"ID 为 {typhoon_id}"
                 )
                 continue
             self._last_fingerprints[typhoon_id] = fingerprint
