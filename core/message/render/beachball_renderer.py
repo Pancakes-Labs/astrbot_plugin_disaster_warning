@@ -24,8 +24,9 @@ class BeachballRenderer:
         line_width: int = 6,
         background_color: tuple[int, int, int, int] = (0, 0, 0, 0),
     ):
-        self.size = max(1, int(size))
-        self.line_width = max(1, min(20, int(line_width)))
+        # 尺寸限制在 100 ~ 1024 像素之间，线宽限制在 1 ~ 15 像素之间
+        self.size = max(100, min(1024, int(size)))
+        self.line_width = max(1, min(15, int(line_width)))
         self.radius = self.size // 2
         self.center = (self.radius, self.radius)
         self.bg_color = background_color
@@ -227,7 +228,7 @@ class BeachballRenderer:
             lw = (
                 self.line_width
                 if line_width is None
-                else max(1, min(20, int(line_width)))
+                else max(1, min(15, int(line_width)))
             )
 
             # 1. 创建超采样图像以消除锯齿 (SSAA x2)
@@ -252,18 +253,20 @@ class BeachballRenderer:
             r_fill = max(1.0, r_path - stroke_w / 2.0)
             r_outer = r_path + stroke_w / 2.0
 
-            img = Image.new("RGBA", (canvas_size, canvas_size), self.bg_color)
-            draw = ImageDraw.Draw(img)
-
             # 2. 计算法平面 / 滑动向量
             n_vector, u_vector = self._strike_dip_slip_to_fault_plane(strike, dip, rake)
 
-            # 3. 像素级投影判定与着色（仅填充，不在此阶段画线）
+            # 3. 内存字节缓冲区初始化，避免百万次 draw.point 方法调用
+            compress_b = bytes(self.compress_color)
+            tension_b = bytes(self.tension_color)
+            bg_b = bytes(self.bg_color)
+            raw_buffer = bytearray(bg_b * (canvas_size * canvas_size))
+
             for y_pixel in range(canvas_size):
+                row_offset = y_pixel * canvas_size * 4
+                dy_px = (y_pixel + 0.5) - cy
                 for x_pixel in range(canvas_size):
-                    # 使用像素中心，减少边缘锯齿与溢出
                     dx_px = (x_pixel + 0.5) - cx
-                    dy_px = (y_pixel + 0.5) - cy
                     dist_px = math.hypot(dx_px, dy_px)
                     if dist_px > r_fill:
                         continue
@@ -281,10 +284,14 @@ class BeachballRenderer:
                     dot_n = sum(v[i] * n_vector[i] for i in range(3))
                     dot_u = sum(v[i] * u_vector[i] for i in range(3))
 
+                    pixel_offset = row_offset + x_pixel * 4
                     if dot_n * dot_u > 0:
-                        draw.point((x_pixel, y_pixel), fill=self.compress_color)
+                        raw_buffer[pixel_offset : pixel_offset + 4] = compress_b
                     else:
-                        draw.point((x_pixel, y_pixel), fill=self.tension_color)
+                        raw_buffer[pixel_offset : pixel_offset + 4] = tension_b
+
+            img = Image.frombytes("RGBA", (canvas_size, canvas_size), bytes(raw_buffer))
+            draw = ImageDraw.Draw(img)
 
             # 4. 节面分界线：与外圈同一 stroke_w 的折线描边
             for normal in (n_vector, u_vector):
