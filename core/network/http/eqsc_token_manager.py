@@ -185,8 +185,9 @@ class EqscTokenManager:
             if await self._create_access_token():
                 return self._access_token
 
-            # 提前刷新失败时，若旧 token 仍未真正过期，继续复用，避免误伤业务
-            if previous_token and current_time < previous_expires_at:
+            # 提前刷新失败时，必须读取最新当前时间判定旧 token 是否在网络请求期间已真正过期
+            now = time.time()
+            if previous_token and now < previous_expires_at:
                 self._access_token = previous_token
                 self._access_token_expires_at = previous_expires_at
                 logger.warning(
