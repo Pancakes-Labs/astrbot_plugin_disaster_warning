@@ -139,10 +139,13 @@ def _matches_payload_rule(payload: dict[str, Any], entry: SourceEntry) -> bool:
 def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
     """按提供方家族导出名称到数据源标识的映射。"""
     result: dict[str, str] = {}
-    # FAN Studio 主要按来源名映射，Wolfx 主要按消息类型映射
+    # FAN Studio / OpenQuakeAPI 主要按来源名映射，Wolfx 主要按消息类型映射
     for source_id in get_source_ids_by_family(provider_family):
         entry = SOURCE_CATALOG[source_id]
-        if provider_family == ProviderFamily.FAN_STUDIO:
+        if provider_family in (
+            ProviderFamily.FAN_STUDIO,
+            ProviderFamily.GLOBAL_QUAKE,
+        ):
             for source_name in entry.provider_source_names:
                 result.setdefault(source_name, source_id)
         elif provider_family == ProviderFamily.WOLFX:
@@ -165,6 +168,39 @@ def get_wolfx_source_id(message_type: str) -> str | None:
     if not source_ids:
         return None
     return source_ids[0]
+
+
+def get_openquake_source_id(source_name: str | None) -> str | None:
+    """根据 OpenQuakeAPI RealtimeEvent.source 解析统一数据源标识。
+
+    /ws/all 聚合推送会保留原始 source（gq / nmefc / nmefc-wave / nmefc-surge）。
+    当前仅接入 Global Quake；其余 source 返回 None，便于后续继续挂接。
+    source 缺失时按历史兼容回落到 global_quake。
+    """
+    name = str(source_name or "").strip().lower()
+    if not name:
+        return "global_quake"
+
+    # 优先走目录声明的 provider_source_names（大小写不敏感）
+    for source_id in get_source_ids_by_family(ProviderFamily.GLOBAL_QUAKE):
+        entry = SOURCE_CATALOG[source_id]
+        aliases = {
+            str(item or "").strip().lower()
+            for item in (entry.provider_source_names or ())
+        }
+        aliases.update(
+            str(item or "").strip().lower() for item in (entry.provider_aliases or ())
+        )
+        aliases.add(str(entry.source_id or "").strip().lower())
+        if name in aliases:
+            return source_id
+
+    # 兼容直接按 source_id 命中
+    if name in SOURCE_CATALOG and SOURCE_CATALOG[name].provider_family == (
+        ProviderFamily.GLOBAL_QUAKE
+    ):
+        return name
+    return None
 
 
 def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
@@ -278,15 +314,18 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
 # 预构建两类常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
 FAN_STUDIO_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.FAN_STUDIO)
 WOLFX_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.WOLFX)
+OPENQUAKE_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.GLOBAL_QUAKE)
 
 
 __all__ = [
     "RoutedMessage",
     "FAN_STUDIO_SOURCE_REGISTRY",
     "WOLFX_SOURCE_REGISTRY",
+    "OPENQUAKE_SOURCE_REGISTRY",
     "detect_fan_studio_source_entry",
     "detect_fan_studio_source_id",
     "get_fan_studio_source_id",
+    "get_openquake_source_id",
     "get_provider_source_map",
     "get_wolfx_source_id",
     "route_fan_studio_message",
