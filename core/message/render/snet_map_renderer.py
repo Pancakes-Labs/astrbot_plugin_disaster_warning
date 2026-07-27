@@ -384,6 +384,8 @@ class SnetMapRenderer:
                     "shindo_class": sc,
                     "dot_class": dot_class,
                     "dot_bg": dot_bg,
+                    # 与计数/色阶同源：模板直接用布尔，避免硬编码
+                    "triggered": shindo_f >= _SNET_GRADIENT_END_SHINDO,
                 }
             )
 
@@ -442,6 +444,7 @@ class SnetMapRenderer:
                     "gradient_end_shindo": _SNET_GRADIENT_END_SHINDO,
                 }
             ),
+            "gradient_end_shindo": _SNET_GRADIENT_END_SHINDO,
             "display_time": display_time,
             "triggered_count": triggered_count,
             "total_stations": total_stations,
