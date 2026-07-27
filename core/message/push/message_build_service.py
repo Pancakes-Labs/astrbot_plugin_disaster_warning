@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -866,7 +867,9 @@ class MessageBuildService:
         strike = plane1.get("strike")
         dip = plane1.get("dip")
         rake = plane1.get("rake")
-        cmt_id = meta.get("cmt_id") or event.id
+        cmt_id = str(meta.get("cmt_id") or event.id).strip()
+        # 清理路径中潜在的非法/目录穿越字符
+        safe_cmt_id = re.sub(r"[^\w\.-]", "_", cmt_id)
 
         if strike is None or dip is None or rake is None:
             return
@@ -874,7 +877,7 @@ class MessageBuildService:
         try:
             # 引入 beachball 渲染器并设定本地缓存机制
             async def _render_ball() -> str | None:
-                img_filename = f"fssn_cmt_ball_{cmt_id}.png"
+                img_filename = f"fssn_cmt_ball_{safe_cmt_id}.png"
                 img_path = os.path.join(str(self.manager.temp_dir), img_filename)
                 renderer = BeachballRenderer(size=360)  # 一期渲染360px大小
                 return await asyncio.to_thread(
@@ -885,7 +888,7 @@ class MessageBuildService:
                     output_path=img_path,
                 )
 
-            cache_key = f"cmt_beachball_{cmt_id}_{strike}_{dip}_{rake}"
+            cache_key = f"cmt_beachball_{safe_cmt_id}_{strike}_{dip}_{rake}"
             out = await self.manager._render_with_cache(cache_key, _render_ball)
 
             if not out or not os.path.exists(out):
@@ -896,7 +899,7 @@ class MessageBuildService:
                 b64_data = base64.b64encode(f.read()).decode()
 
             chain.chain.append(Comp.Image.fromBase64(b64_data))
-            logger.info(f"[灾害预警] 已成功附加 FSSN CMT 沙滩球图片 ({cmt_id})")
+            logger.info(f"[灾害预警] 已成功附加 FSSN CMT 沙滩球图片 ({safe_cmt_id})")
 
         except Exception as exc:
             logger.error(f"[灾害预警] FSSN CMT 附加沙滩球失败: {exc}", exc_info=True)
