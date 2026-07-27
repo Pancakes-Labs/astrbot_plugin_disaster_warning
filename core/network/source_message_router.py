@@ -375,22 +375,11 @@ class SourceMessageRouter:
                             )
                     return None
 
-                # 鉴权前半量 initial_all（仅 fssn/fssn-cmt）：推进静默门闩后丢弃，
-                # 等待鉴权后的完整快照，避免 fssn-cmt 双解析与 SA 误报。
+                # 鉴权前半量 initial_all（仅 fssn/fssn-cmt）：直接丢弃等待鉴权后的完整快照，
+                # 不再通知静默协调器标记已收到 bootstrap，避免导致门闩提前放行。
                 if isinstance(data, dict) and self._is_fan_preauth_partial_initial_all(
                     data
                 ):
-                    coordinator = getattr(self.service, "startup_silence", None)
-                    if coordinator is not None:
-                        try:
-                            coordinator.note_bootstrap_payload(
-                                connection_name=connection_name,
-                                kind="fan_preauth_partial_initial_all",
-                            )
-                        except Exception as exc:
-                            plugin_logger.debug(
-                                f"[灾害预警] FAN 半量 initial_all 通知静默协调器失败: {exc}"
-                            )
                     plugin_logger.debug(
                         f"[灾害预警] 忽略 FAN 鉴权前半量 initial_all"
                         f"（连接 {connection_name or 'unknown'}，"
