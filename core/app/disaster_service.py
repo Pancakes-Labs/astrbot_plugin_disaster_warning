@@ -36,6 +36,9 @@ from ..parsers.parser_registry import (
 )
 from ..services.config.config_service import ConfigAccessor
 from ..services.config.connection_plan_builder import ConnectionPlanBuilder
+from ..services.eqsc.eqsc_cenc_intensity_poll_service import (
+    EqscCencIntensityPollService,
+)
 from ..services.eqsc.eqsc_tsunami_poll_service import EqscTsunamiPollService
 from ..services.eqsc.eqsc_typhoon_poll_service import EqscTyphoonPollService
 from ..services.geo.cn_seis_int_loc_loader import get_district_points
@@ -181,6 +184,8 @@ class DisasterWarningService:
         self.eqsc_tsunami_poll_service = EqscTsunamiPollService(self)
         # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
         self.eqsc_typhoon_poll_service = EqscTyphoonPollService(self)
+        # EQSC CENC 烈度速报 HTTP 轮询（列表发现 + 详情投递；优先于 FAN 独立 WS）
+        self.eqsc_cenc_intensity_poll_service = EqscCencIntensityPollService(self)
         # 连接健康采样 / 90 天条带 / 自动事故（Statuspage 风格）
         # 延迟导入，避免 health ↔ app 包级循环依赖。
         from ..services.health.connection_health_service import ConnectionHealthService

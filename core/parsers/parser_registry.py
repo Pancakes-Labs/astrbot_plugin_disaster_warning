@@ -9,6 +9,7 @@ from __future__ import annotations
 from ..sources.source_catalog import SOURCE_CATALOG, get_source_entry
 from .china_earthquake_parser import CencEarthquakeParser, CencEarthquakeWolfxParser
 from .china_eew_parser import CEAEEWParser, CEAEEWPRParser, CEAEEWWolfxParser
+from .china_intensity_report_eqsc_parser import CencIntensityReportEqscParser
 from .china_intensity_report_parser import CencIntensityReportParser
 from .fssn_cmt_parser import FssnCmtParser
 from .global_sources_parser import (
@@ -30,6 +31,7 @@ PARSER_CLASS_BY_NAME = {
     "china_eew_parser": CEAEEWParser,
     "china_report_parser": CencEarthquakeParser,
     "china_intensity_report_parser": CencIntensityReportParser,
+    "china_intensity_report_eqsc_parser": CencIntensityReportEqscParser,
     "taiwan_eew_parser": CwaEewParser,
     "taiwan_report_parser": CwaReportParser,
     "japan_eew_parser": JmaEewFanStudioParser,

@@ -84,6 +84,11 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.start()
+                eqsc_cenc_ir_poll = getattr(
+                    self.service, "eqsc_cenc_intensity_poll_service", None
+                )
+                if eqsc_cenc_ir_poll is not None:
+                    await eqsc_cenc_ir_poll.start()
                 # 连接健康采样：依赖 statistics_manager 已 initialize
                 health_service = getattr(
                     self.service, "connection_health_service", None
@@ -165,6 +170,12 @@ class DisasterServiceLifecycleService:
             and getattr(eqsc_typhoon, "is_enabled", lambda: False)()
         ):
             expected_polls.append("eqsc_typhoon")
+        eqsc_cenc_ir = getattr(self.service, "eqsc_cenc_intensity_poll_service", None)
+        if (
+            eqsc_cenc_ir is not None
+            and getattr(eqsc_cenc_ir, "is_enabled", lambda: False)()
+        ):
+            expected_polls.append("eqsc_cenc_ir")
 
         coordinator.arm(
             enabled=enabled,
@@ -261,6 +272,11 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.stop()
+                eqsc_cenc_ir_poll = getattr(
+                    self.service, "eqsc_cenc_intensity_poll_service", None
+                )
+                if eqsc_cenc_ir_poll is not None:
+                    await eqsc_cenc_ir_poll.stop()
 
                 # 关闭台风 EQSC 富化服务的 HTTP 会话与令牌管理器资源
                 typhoon_enrichment = getattr(
