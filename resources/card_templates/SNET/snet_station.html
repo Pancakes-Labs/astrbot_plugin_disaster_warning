@@ -369,7 +369,8 @@ html, body {
         </div>
         <div class="list-scroll">
             {% for s in list_stations %}
-            <div class="list-row {% if loop.index is even %}list-row-even{% else %}list-row-odd{% endif %} {% if s.shindo >= 0 %}list-row-triggered{% else %}list-row-inactive{% endif %}">
+            {# 触发高亮与计数一致：震度0起点 = 計測震度 >= -0.5 #}
+            <div class="list-row {% if loop.index is even %}list-row-even{% else %}list-row-odd{% endif %} {% if s.shindo >= -0.5 %}list-row-triggered{% else %}list-row-inactive{% endif %}">
                 <span class="station-dot {{ s.dot_class }}" data-bg="{{ s.dot_bg | default('', true) }}"></span>
                 <span class="station-name">{{ s.name }}</span>
                 <span class="station-shindo {{ s.shindo_class }}">{{ '%.3f'|format(s.shindo) }}</span>

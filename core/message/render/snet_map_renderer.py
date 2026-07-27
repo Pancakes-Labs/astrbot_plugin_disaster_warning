@@ -390,10 +390,13 @@ class SnetMapRenderer:
         sorted_stations = sorted(station_list, key=lambda x: x["shindo"], reverse=True)
         # 安静时也展示全部语义：仍按震度降序截取 Top-N，保留三位小数，无额外空状态文案
         list_stations = sorted_stations[:SNET_LIST_LIMIT]
-        triggered = [s for s in sorted_stations if s["shindo"] >= 0]
+        # 触发测站：日本震度 0 起点为計測震度 -0.5（与图标/色阶一致）
+        triggered = [
+            s for s in sorted_stations if s["shindo"] >= _SNET_GRADIENT_END_SHINDO
+        ]
         triggered_count = len(triggered)
         total_stations = len(sorted_stations)
-        # 最大震度：有 >=0 用触发最高；否则用全网最高（通常为负基线）
+        # 最大震度：有 >= -0.5（震度0起点）用触发最高；否则用全网最高（通常为负基线）
         top = (
             triggered[0]
             if triggered
