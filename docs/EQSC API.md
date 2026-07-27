@@ -161,6 +161,172 @@ curl -X GET "/jma_tsunami.json"
 
 ---
 
+## CENC烈度速报列表
+
+/listIntensityReportCENC.json
+
+获取 CENC 烈度速报列表，该请求需要鉴权。
+
+## 请求参数
+
+| 参数名 | 类型 | 示例 | 描述 |
+| --- | --- | --- | --- |
+| limit | number | `1` | 返回数据数量，可空 |
+
+## 示例请求
+
+示例：请求列表的前两个数据
+
+```bash
+curl -X GET "/listIntensityReportCENC.json?limit=2"
+ -H "Authorization: Bearer your_access_token"
+```
+
+## 示例响应
+
+列表数据
+
+```json
+{
+    "No1": {
+        "eventID": "20251202185622",
+        "placeName": "西藏那曲市比如县",
+        "magnitude": "4.9",
+        "url": "/intensityReportCENC.json?id=20251202185622"
+    },
+    "No2": {
+        "eventID": "20251129065328",
+        "placeName": "青海海西州都兰县",
+        "magnitude": "4",
+        "url": "/intensityReportCENC.json?id=20251129065328"
+    }
+}
+```
+
+## 响应数据字段
+
+| 字段名 | 类型 | 示例 | 描述 |
+| --- | --- | --- | --- |
+| No\_.eventID | string | `20251202185622` | 事件ID |
+| No\_.placeName | string | `西藏那曲市比如县` | 震央地名 |
+| No\_.magnitude | string | `4.9` | 震级 |
+| No\_.url | string | `/intensityReportCENC.json?id=20251202185622` | 详细URL |
+
+---
+
+## CENC烈度速报
+
+/intensityReportCENC.json
+
+获取 CENC 烈度速报详细数据，该请求需要鉴权。
+
+## 请求参数
+
+| 参数名 | 类型 | 示例 | 描述 |
+| --- | --- | --- | --- |
+| id | string | `20251202185622` | 请求事件ID |
+
+## 示例请求
+
+示例：请求id为20251202185622的数据
+
+```bash
+curl -X GET "/intensityReportCENC.json?id=20251202185622 "
+ -H "Authorization: Bearer your_access_token"
+```
+
+## 示例响应
+
+详细数据
+
+```json
+{
+    "eventInfo": {
+        "eventID": 20251129065328,
+        "placeName": "青海海西州都兰县",
+        "longitude": 96.48,
+        "latitude": 36.75,
+        "depth": 10,
+        "magnitude": 4,
+        "shockTime": "20251129 06:53:28"
+    },
+    "intensityReport": {
+        "info": "  基于'GB/T177422020中国地震烈度表......",
+        "stations": [
+            {
+                "stationInfo": {
+                    "network": "QH",
+                    "id": "HD031",
+                    "name": "HD031",
+                    "type": "SOIL",
+                    "vs30": 282.927642822,
+                    "province": "青海",
+                    "city": "海西州",
+                    "county": "都兰县",
+                    "town": "宗加镇",
+                    "datetime": "20251129 06:53:28"
+                },
+                "latitude": 36.43,
+                "longitude": 96.46,
+                "intensity": 4.7,
+                "distance": 35.5554653915427,
+                "i_pga": 5.2,
+                "pga": 39.7,
+                "pgaE": 21.8521270751953,
+                "pgaN": 39.6974143981934,
+                "pgaZ": 8.60245323181152,
+                "i_pgv": 4.1,
+                "pgv": 1.3,
+                "pgvE": 0.494569497512951,
+                "pgvN": 1.32149280286641,
+                "pgvZ": 0.185401801425941
+            }
+        ],
+        "predictedIntensityContourline": "......"
+    }
+}
+```
+
+## 响应数据字段
+
+| 字段名 | 类型 | 示例 | 描述 |
+| --- | --- | --- | --- |
+| eventInfo.eventID | number | `20251129065328` | 事件ID |
+| eventInfo.placeName | string | `青海海西州都兰县` | 震央地名 |
+| eventInfo.longitude | number | `96.48` | 震央经度 |
+| eventInfo.latitude | number | `36.75` | 震央纬度 |
+| eventInfo.depth | number | `10` | 震源深度 |
+| eventInfo.magnitude | number | `4` | 震级 |
+| eventInfo.shockTime | string | `20251129 06:53:28` | 发震时间 |
+| intensityReport.info | string | `基于'GB/T177422020中国地震烈度表......` | 详细信息 |
+| intensityReport.stations.stationInfo.network | string | `QH` | 台站所属网络 |
+| intensityReport.stations.stationInfo.id | string | `HD031` | 台站ID |
+| intensityReport.stations.stationInfo.name | string | `HD031` | 台站名 |
+| intensityReport.stations.stationInfo.type | string | `SOIL` | 台站类型 |
+| intensityReport.stations.stationInfo.vs30 | number | `282.927642822` | 台站Vs30 |
+| intensityReport.stations.stationInfo.province | string | `青海` | 台站所属省份 |
+| intensityReport.stations.stationInfo.city | string | `海西州` | 台站所属市 |
+| intensityReport.stations.stationInfo.county | string | `都兰县` | 台站所属县 |
+| intensityReport.stations.stationInfo.town | string | `宗加镇` | 台站所属镇 |
+| intensityReport.stations.stationInfo.datetime | string | `20251129 06:53:28` | 事件时间 |
+| intensityReport.stations.latitude | number | `36.43` | 台站纬度 |
+| intensityReport.stations.longitude | number | `96.46` | 台站经度 |
+| intensityReport.stations.intensity | number | `4.7` | 台站烈度 |
+| intensityReport.stations.distance | number | `35.5554653915427` | 台站震中距 |
+| intensityReport.stations.i\_pga | number | `5.2` | 无 |
+| intensityReport.stations.pga | number | `39.7` | 无 |
+| intensityReport.stations.pgaE | number | `21.8521270751953` | 无 |
+| intensityReport.stations.pgaN | number | `39.6974143981934` | 无 |
+| intensityReport.stations.pgaZ | number | `8.60245323181152` | 无 |
+| intensityReport.stations.i\_pgv | number | `4.1` | 无 |
+| intensityReport.stations.pgv | number | `1.3` | 无 |
+| intensityReport.stations.pgvE | number | `0.494569497512951` | 无 |
+| intensityReport.stations.pgvN | number | `1.32149280286641` | 无 |
+| intensityReport.stations.pgvZ | number | `0.185401801425941` | 无 |
+| intensityReport.predictedIntensityContourline | string | `......` | 烈度等值线geojson |
+
+---
+
 ## NMC台风路径数据
 
 /typhoonNMC.json
