@@ -133,7 +133,8 @@ def parse_depth_with_error(raw: Any) -> tuple[float | None, float | None]:
     match = _DEPTH_ERROR_RE.match(text)
     if not match:
         # 兜底：提取首个数字
-        number = safe_float_convert(re.search(r"[-+]?\d+(?:\.\d+)?", text))
+        search_match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        number = safe_float_convert(search_match.group(0) if search_match else None)
         return (float(number) if number is not None else None), None
     depth = safe_float_convert(match.group("depth"))
     error = safe_float_convert(match.group("error1") or match.group("error2"))
