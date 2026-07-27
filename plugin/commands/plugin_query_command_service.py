@@ -921,7 +921,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
             img_path = os.path.join(
                 str(temp_dir),
-                f"jma_hypo_{int(time.time())}.png",
+                f"jma_hypo_{uuid.uuid4().hex}_{int(time.time())}.png",
             )
             renderer = JmaHypoRenderer(plugin_root=str(plugin_root))
             # PIL 渲染与读盘为 CPU/IO 密集同步操作，放到线程池避免阻塞事件循环
