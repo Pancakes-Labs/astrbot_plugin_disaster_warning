@@ -1218,26 +1218,65 @@ function roundRect(c, x, y, w, h, r) {
     c.closePath();
 }
 
+/**
+ * 绘制四象限风圈。
+ *
+ * 屏幕坐标约定（与 canvas 一致）：
+ *   x = cx + r * cos(θ),  y = cy - r * sin(θ)
+ *   θ=0° 东, 90° 北, 180° 西, 270° 南（逆时针）
+ *
+ * 因此象限角度区间必须是：
+ *   NE: 0°–90°（东→北）
+ *   NW: 90°–180°（北→西）
+ *   SW: 180°–270°（西→南）
+ *   SE: 270°–360°（南→东）
+ *
+ * 历史 bug：曾把 SE/NW 对调，导致最大半径画到东南而非西北。
+ * 缺象限时以半径 0 处理，路径经中心闭合，避免跨象限“挖空”。
+ */
 function drawRadiiPoly(cx, cy, lat, lon, radii, fillColor, edgeColor, dashed, lineWidth) {
     if (!radii) return;
-    var quads = [[0, 90, 'NE'], [90, 180, 'SE'], [180, 270, 'SW'], [270, 360, 'NW']];
-    var hasAny = quads.some(function(q) { return radii[q[2]] > 0; });
+    // 逆时针：东→北→西→南→东；键名必须与角度区间一致
+    var quads = [
+        [0, 90, 'NE'],
+        [90, 180, 'NW'],
+        [180, 270, 'SW'],
+        [270, 360, 'SE']
+    ];
+    var hasAny = quads.some(function(q) {
+        var n = radii[q[2]];
+        return n != null && n > 0;
+    });
     if (!hasAny) return;
+
     var polyPts = [];
+    var step = 6;
     quads.forEach(function(q) {
         var rk = radii[q[2]];
-        if (!rk || rk <= 0) return;
-        var rp = kmToPx(lat, lon, rk);
-        if (rp < 3) return;
-        for (var deg = q[0]; deg <= q[1]; deg += 6) {
-            var rad = deg * Math.PI / 180;
-            polyPts.push([cx + rp * Math.cos(rad), cy - rp * Math.sin(rad)]);
+        var rp = (rk != null && rk > 0) ? kmToPx(lat, lon, rk) : 0;
+        // 半径过小视为 0，仍推进角度，保证四象限连续闭合
+        if (rp < 3) rp = 0;
+        for (var deg = q[0]; deg <= q[1]; deg += step) {
+            if (rp <= 0) {
+                // 缺/零半径：落到中心，形成扇形缺口而不是跨象限连线
+                if (!polyPts.length ||
+                    polyPts[polyPts.length - 1][0] !== cx ||
+                    polyPts[polyPts.length - 1][1] !== cy) {
+                    polyPts.push([cx, cy]);
+                }
+            } else {
+                var rad = deg * Math.PI / 180;
+                polyPts.push([cx + rp * Math.cos(rad), cy - rp * Math.sin(rad)]);
+            }
         }
     });
     if (polyPts.length < 3) return;
+
     ctx.beginPath();
     ctx.moveTo(polyPts[0][0], polyPts[0][1]);
-    for (var i = 1; i < polyPts.length; i++) ctx.lineTo(polyPts[i][0], polyPts[i][1]);
+    for (var i = 1; i < polyPts.length; i++) {
+        ctx.lineTo(polyPts[i][0], polyPts[i][1]);
+    }
     ctx.closePath();
     ctx.fillStyle = fillColor;
     ctx.fill();
