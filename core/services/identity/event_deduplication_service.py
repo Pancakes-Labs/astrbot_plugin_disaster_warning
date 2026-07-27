@@ -264,6 +264,33 @@ class EventDeduplicationService:
             is_training=coerce_bool(metadata.get("is_training"), default=False),
         )
 
+    def _remember_priority_fingerprint(
+        self,
+        cache: dict[str, dict[str, Any]],
+        max_size: int,
+        fingerprint: str,
+        *,
+        source_id: str,
+        priority: int,
+        event_id: str,
+    ) -> None:
+        """写入跨源优先级指纹缓存，并在超限时按时间戳淘汰最旧条目。"""
+        cache[fingerprint] = {
+            "source_id": source_id,
+            "priority": priority,
+            "event_id": event_id,
+            "ts": datetime.now(timezone.utc).timestamp(),
+        }
+        overflow = len(cache) - int(max_size)
+        if overflow <= 0:
+            return
+        ordered = sorted(
+            cache.items(),
+            key=lambda item: float((item[1] or {}).get("ts") or 0.0),
+        )
+        for key, _ in ordered[:overflow]:
+            cache.pop(key, None)
+
     def _remember_tsunami_fingerprint(
         self,
         fingerprint: str,
@@ -273,22 +300,90 @@ class EventDeduplicationService:
         event_id: str,
     ) -> None:
         """写入海啸指纹缓存，并在超限时淘汰最旧条目。"""
-        self._tsunami_cache[fingerprint] = {
-            "source_id": source_id,
-            "priority": priority,
-            "event_id": event_id,
-            "ts": datetime.now(timezone.utc).timestamp(),
-        }
-        overflow = len(self._tsunami_cache) - int(self._tsunami_cache_max_size)
-        if overflow <= 0:
-            return
-        # 按时间戳升序淘汰最旧项
-        ordered = sorted(
-            self._tsunami_cache.items(),
-            key=lambda item: float((item[1] or {}).get("ts") or 0.0),
+        self._remember_priority_fingerprint(
+            self._tsunami_cache,
+            self._tsunami_cache_max_size,
+            fingerprint,
+            source_id=source_id,
+            priority=priority,
+            event_id=event_id,
         )
-        for key, _ in ordered[:overflow]:
-            self._tsunami_cache.pop(key, None)
+
+    def _should_push_by_priority_fingerprint(
+        self,
+        *,
+        cache: dict[str, dict[str, Any]],
+        max_size: int,
+        fingerprint: str,
+        source_id: str,
+        event_id: str,
+        kind: str,
+        log_level: str = "info",
+    ) -> bool:
+        """跨源优先级去重公共实现。
+
+        Args:
+            kind: 业务类别文案，如「海啸」「烈度速报」，用于日志前缀。
+
+        规则：
+        1. 指纹未见过 → 放行并记录
+        2. 指纹相同且来源优先级更低 → 过滤
+        3. 指纹相同且同优先级同/不同源 → 过滤（先到先得 / 内容未变）
+        4. 指纹相同但来源优先级更高 → 放行并升级缓存
+        """
+        priority = self._resolve_source_priority(source_id)
+        existing = cache.get(fingerprint)
+        if existing is None:
+            self._remember_priority_fingerprint(
+                cache,
+                max_size,
+                fingerprint,
+                source_id=source_id,
+                priority=priority,
+                event_id=event_id,
+            )
+            return True
+
+        existing_priority = int(existing.get("priority") or 0)
+        existing_source = str(existing.get("source_id") or "")
+        log_fn = plugin_logger.info if log_level == "info" else plugin_logger.debug
+
+        if priority < existing_priority:
+            log_fn(
+                f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
+                f"过滤 {source_id} 推送 (event={event_id})",
+                is_event_linked=True,
+            )
+            return False
+        if priority == existing_priority and existing_source == source_id:
+            log_fn(
+                f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
+                f"(event={event_id})",
+                is_event_linked=True,
+            )
+            return False
+        if priority == existing_priority and existing_source != source_id:
+            # 同优先级不同源：先到先得
+            log_fn(
+                f"[灾害预警] {kind}内容与 {existing_source} 重复，"
+                f"过滤 {source_id} 推送",
+                is_event_linked=True,
+            )
+            return False
+
+        # 更高优先级源后到：放行并升级缓存
+        self._remember_priority_fingerprint(
+            cache,
+            max_size,
+            fingerprint,
+            source_id=source_id,
+            priority=priority,
+            event_id=event_id,
+        )
+        plugin_logger.debug(
+            f"[灾害预警] {kind}高优先级源 {source_id} 覆盖 {existing_source}，允许推送"
+        )
+        return True
 
     def _should_push_tsunami(self, event: EventEnvelope) -> bool:
         """JMA 海啸跨源去重：同内容指纹只推一次，EQSC 优先。
@@ -313,51 +408,15 @@ class EventDeduplicationService:
         if not fingerprint:
             return True
 
-        priority = self._resolve_source_priority(source_id)
-        existing = self._tsunami_cache.get(fingerprint)
-        if existing is None:
-            self._remember_tsunami_fingerprint(
-                fingerprint,
-                source_id=source_id,
-                priority=priority,
-                event_id=str(event.id or ""),
-            )
-            return True
-
-        existing_priority = int(existing.get("priority") or 0)
-        existing_source = str(existing.get("source_id") or "")
-        if priority < existing_priority:
-            plugin_logger.info(
-                f"[灾害预警] 海啸内容与 {existing_source} 重复且优先级更低，"
-                f"过滤 {source_id} 推送 (event={event.id})",
-                is_event_linked=True,
-            )
-            return False
-        if priority == existing_priority and existing_source == source_id:
-            plugin_logger.info(
-                f"[灾害预警] 海啸内容未变化，过滤重复推送: {source_id} (event={event.id})",
-                is_event_linked=True,
-            )
-            return False
-        if priority == existing_priority and existing_source != source_id:
-            # 同优先级不同源：先到先得
-            plugin_logger.info(
-                f"[灾害预警] 海啸内容与 {existing_source} 重复，过滤 {source_id} 推送",
-                is_event_linked=True,
-            )
-            return False
-
-        # 更高优先级源后到：放行并升级缓存（例如 EQSC 覆盖 P2P）
-        self._remember_tsunami_fingerprint(
-            fingerprint,
+        return self._should_push_by_priority_fingerprint(
+            cache=self._tsunami_cache,
+            max_size=self._tsunami_cache_max_size,
+            fingerprint=fingerprint,
             source_id=source_id,
-            priority=priority,
             event_id=str(event.id or ""),
+            kind="海啸",
+            log_level="info",
         )
-        plugin_logger.debug(
-            f"[灾害预警] 海啸高优先级源 {source_id} 覆盖 {existing_source}，允许推送"
-        )
-        return True
 
     @classmethod
     def _is_cenc_intensity_report_source(cls, source_id: str) -> bool:
@@ -413,21 +472,14 @@ class EventDeduplicationService:
         event_id: str,
     ) -> None:
         """写入烈度速报跨源指纹缓存。"""
-        self._cenc_ir_cache[fingerprint] = {
-            "source_id": source_id,
-            "priority": priority,
-            "event_id": event_id,
-            "ts": datetime.now(timezone.utc).timestamp(),
-        }
-        overflow = len(self._cenc_ir_cache) - int(self._cenc_ir_cache_max_size)
-        if overflow <= 0:
-            return
-        ordered = sorted(
-            self._cenc_ir_cache.items(),
-            key=lambda item: float((item[1] or {}).get("ts") or 0.0),
+        self._remember_priority_fingerprint(
+            self._cenc_ir_cache,
+            self._cenc_ir_cache_max_size,
+            fingerprint,
+            source_id=source_id,
+            priority=priority,
+            event_id=event_id,
         )
-        for key, _ in ordered[:overflow]:
-            self._cenc_ir_cache.pop(key, None)
 
     def _should_push_cenc_intensity_report(
         self,
@@ -435,7 +487,7 @@ class EventDeduplicationService:
         domain_eq: EarthquakeEvent,
         source_id: str,
     ) -> bool:
-        """CENC 烈度速报跨源去重。"""
+        """CENC 烈度速报跨源去重（FAN / EQSC，EQSC 优先）。"""
         if not self._is_cenc_intensity_report_source(source_id):
             return True
 
@@ -443,50 +495,15 @@ class EventDeduplicationService:
         if not fingerprint:
             return True
 
-        priority = self._resolve_source_priority(source_id)
-        existing = self._cenc_ir_cache.get(fingerprint)
-        if existing is None:
-            self._remember_cenc_ir_fingerprint(
-                fingerprint,
-                source_id=source_id,
-                priority=priority,
-                event_id=str(event.id or ""),
-            )
-            return True
-
-        existing_priority = int(existing.get("priority") or 0)
-        existing_source = str(existing.get("source_id") or "")
-        if priority < existing_priority:
-            plugin_logger.debug(
-                f"[灾害预警] 烈度速报与 {existing_source} 重复且优先级更低，"
-                f"过滤 {source_id} 推送 (事件 ID {event.id})",
-                is_event_linked=True,
-            )
-            return False
-        if priority == existing_priority and existing_source == source_id:
-            plugin_logger.debug(
-                f"[灾害预警] 烈度速报内容未变化，过滤重复推送: {source_id} "
-                f"(event={event.id})",
-                is_event_linked=True,
-            )
-            return False
-        if priority == existing_priority and existing_source != source_id:
-            plugin_logger.debug(
-                f"[灾害预警] 烈度速报与 {existing_source} 重复，过滤 {source_id} 推送",
-                is_event_linked=True,
-            )
-            return False
-
-        self._remember_cenc_ir_fingerprint(
-            fingerprint,
+        return self._should_push_by_priority_fingerprint(
+            cache=self._cenc_ir_cache,
+            max_size=self._cenc_ir_cache_max_size,
+            fingerprint=fingerprint,
             source_id=source_id,
-            priority=priority,
             event_id=str(event.id or ""),
+            kind="烈度速报",
+            log_level="debug",
         )
-        plugin_logger.debug(
-            f"[灾害预警] 烈度速报高优先级源 {source_id} 覆盖 {existing_source}，允许推送"
-        )
-        return True
 
     def seed_event(self, event: EventEnvelope) -> bool:
         """静默启动播种：写入去重指纹，不表示允许推送。

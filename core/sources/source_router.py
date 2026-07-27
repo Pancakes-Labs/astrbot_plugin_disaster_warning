@@ -311,17 +311,16 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
     ]
 
 
-# 预构建两类常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
+# 预构建常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
 FAN_STUDIO_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.FAN_STUDIO)
 WOLFX_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.WOLFX)
-OPENQUAKE_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.GLOBAL_QUAKE)
+# OpenQuake 聚合路由走 get_openquake_source_id()，不预构建未使用的 registry
 
 
 __all__ = [
     "RoutedMessage",
     "FAN_STUDIO_SOURCE_REGISTRY",
     "WOLFX_SOURCE_REGISTRY",
-    "OPENQUAKE_SOURCE_REGISTRY",
     "detect_fan_studio_source_entry",
     "detect_fan_studio_source_id",
     "get_fan_studio_source_id",
