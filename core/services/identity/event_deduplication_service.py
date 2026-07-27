@@ -319,17 +319,22 @@ class EventDeduplicationService:
         event_id: str,
         kind: str,
         log_level: str = "info",
+        filter_same_source: bool = True,
     ) -> bool:
         """跨源优先级去重公共实现。
 
         Args:
             kind: 业务类别文案，如「海啸」「烈度速报」，用于日志前缀。
+            filter_same_source: 为 True 时，同优先级同源也过滤（适合内容指纹，
+                如海啸）。为 False 时同源放行给下游更新链路（适合粗软指纹，
+                如 CENC 烈度速报仅做跨源去重）。
 
         规则：
         1. 指纹未见过 → 放行并记录
         2. 指纹相同且来源优先级更低 → 过滤
-        3. 指纹相同且同优先级同/不同源 → 过滤（先到先得 / 内容未变）
-        4. 指纹相同但来源优先级更高 → 放行并升级缓存
+        3. 指纹相同且同优先级不同源 → 过滤（先到先得）
+        4. 指纹相同且同优先级同源 → 由 filter_same_source 决定
+        5. 指纹相同但来源优先级更高 → 放行并升级缓存
         """
         priority = self._resolve_source_priority(source_id)
         existing = cache.get(fingerprint)
@@ -356,6 +361,13 @@ class EventDeduplicationService:
             )
             return False
         if priority == existing_priority and existing_source == source_id:
+            if not filter_same_source:
+                # 粗软指纹：同源更新交给 recent_events / _should_allow_update
+                plugin_logger.debug(
+                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定: "
+                    f"{source_id} (事件 ID {event_id})"
+                )
+                return True
             log_fn(
                 f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
                 f"(event={event_id})",
@@ -487,7 +499,11 @@ class EventDeduplicationService:
         domain_eq: EarthquakeEvent,
         source_id: str,
     ) -> bool:
-        """CENC 烈度速报跨源去重（FAN / EQSC，EQSC 优先）。"""
+        """CENC 烈度速报跨源去重（FAN / EQSC，EQSC 优先）。
+
+        软指纹仅含发震时间/震级/粗网格，不含报次与内容版本；
+        因此只过滤跨源重复，同源更新放行给下游。
+        """
         if not self._is_cenc_intensity_report_source(source_id):
             return True
 
@@ -503,6 +519,7 @@ class EventDeduplicationService:
             event_id=str(event.id or ""),
             kind="烈度速报",
             log_level="debug",
+            filter_same_source=False,
         )
 
     def seed_event(self, event: EventEnvelope) -> bool:

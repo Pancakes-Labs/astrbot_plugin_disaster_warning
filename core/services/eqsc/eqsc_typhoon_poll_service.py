@@ -42,6 +42,9 @@ class EqscTyphoonPollService:
         self._last_success_at: float | None = None
         self._consecutive_failures = 0
         self._client: EqscTyphoonClient | None = None
+        # 是否由本服务创建并拥有 client（借用 enrichment 的 client 时为 False）
+        self._owns_client = False
+        # 仅在自建 client 且自建 token 时有意义；close 时由 client 内部决定是否关 token
         self._owns_token_manager = False
 
     @property
@@ -96,7 +99,9 @@ class EqscTyphoonPollService:
 
         shared_client = self._get_shared_typhoon_client()
         if shared_client is not None:
+            # 借用富化服务的 client 对象：stop 时绝不能 close
             self._client = shared_client
+            self._owns_client = False
             self._owns_token_manager = False
             return self._client
 
@@ -104,12 +109,14 @@ class EqscTyphoonPollService:
         message_logger = getattr(self.service, "message_logger", None)
         shared_tm = self._get_shared_token_manager()
         if shared_tm is not None:
+            # 自建 client，仅共享 token：stop 时 close client（不关 token）
             self._client = EqscTyphoonClient(
                 shared_tm,
                 eqsc_config,
                 message_logger=message_logger,
                 owns_token_manager=False,
             )
+            self._owns_client = True
             self._owns_token_manager = False
             return self._client
 
@@ -123,6 +130,7 @@ class EqscTyphoonPollService:
             message_logger=message_logger,
             owns_token_manager=True,
         )
+        self._owns_client = True
         self._owns_token_manager = True
         return self._client
 
@@ -149,10 +157,10 @@ class EqscTyphoonPollService:
         logger.info("[灾害预警] EQSC 台风轮询任务已启动")
 
     async def stop(self) -> None:
-        """停止后台轮询并释放客户端 HTTP 会话。
+        """停止后台轮询；仅关闭本服务自己创建的客户端。
 
-        始终 close 客户端：会话由客户端自身管理；token_manager 是否关闭
-        由 owns_token_manager 在 EqscHttpClient.close() 内决定。
+        借用 TyphoonEnrichmentService 的 client 时不得 close，否则会拆掉富化侧会话。
+        自建 client 时始终 close（session 由 client 管理；token 是否关闭看 owns_token_manager）。
         """
         task = self._task
         self._task = None
@@ -162,9 +170,10 @@ class EqscTyphoonPollService:
                 await task
             except asyncio.CancelledError:
                 pass
-        if self._client is not None:
+        if self._client is not None and self._owns_client:
             await self._client.close()
         self._client = None
+        self._owns_client = False
 
     async def _poll_loop(self) -> None:
         """后台轮询循环。"""
