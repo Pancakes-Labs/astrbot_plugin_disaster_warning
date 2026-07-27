@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 import os
 import time
 import traceback
@@ -70,8 +71,17 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 strike_val = float(strike)
                 dip_val = float(dip)
                 rake_val = float(rake)
+                if (
+                    math.isnan(strike_val)
+                    or math.isinf(strike_val)
+                    or math.isnan(dip_val)
+                    or math.isinf(dip_val)
+                    or math.isnan(rake_val)
+                    or math.isinf(rake_val)
+                ):
+                    raise ValueError("Numeric overflow or NaN")
             except ValueError:
-                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为数值。")
+                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为有效数值。")
                 return
 
             size = 360
@@ -177,8 +187,17 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 strike_val = float(strike)
                 dip_val = float(dip)
                 rake_val = float(rake)
+                if (
+                    math.isnan(strike_val)
+                    or math.isinf(strike_val)
+                    or math.isnan(dip_val)
+                    or math.isinf(dip_val)
+                    or math.isnan(rake_val)
+                    or math.isinf(rake_val)
+                ):
+                    raise ValueError("Numeric overflow or NaN")
             except ValueError:
-                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为数值。")
+                yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为有效数值。")
                 return
 
             from ...core.domain.earthquake.cmt_normalize import (
