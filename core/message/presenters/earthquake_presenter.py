@@ -690,6 +690,112 @@ class UsgsEarthquakePresenter(BasePresenter):
         )
 
 
+class FssnCmtPresenter(BasePresenter):
+    """FSSN 矩心矩张量解 (CMT) 展示器。"""
+
+    presenter_name = "fssn_cmt_presenter"
+
+    @staticmethod
+    def _format_depth_error(depth: float | None, error: float | None) -> str:
+        if depth is None:
+            return "未知"
+        if depth == 0.0:
+            return "极浅"
+        if error is not None:
+            return f"{depth} km (±{error})"
+        return f"{depth} km"
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        """构建 FSSN CMT 中文基础文本。"""
+        if not _is_earthquake_view(data):
+            return "🚨[CMT] 数据类型错误"
+
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+
+        # 标题固定使用 [CMT] FSSN 矩心矩张量解
+        lines = ["🌐[CMT] FSSN 矩心矩张量解"]
+
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            lines.append(
+                f"⏰发震时间：{TimeConverter.format_time(shock_time, timezone)}"
+            )
+
+        if data.title and data.latitude is not None and data.longitude is not None:
+            coords = _format_coordinates(data.latitude, data.longitude)
+            lines.append(f"📍震中：{data.title} ({coords})")
+
+        # 整理 CMT 震级格式：M xxx (Mww yyy / mB zzz ...)
+        meta = data.metadata if isinstance(data.metadata, dict) else {}
+        all_mags = meta.get("all_magnitudes") or {}
+
+        # 主显示使用 display_magnitude_type，默认取 stats_magnitude (M)
+        display_mag = data.magnitude
+        display_mag_type = meta.get("display_magnitude_type", "M")
+
+        # 补充震级列表
+        mag_tokens = []
+        for key in ("Mww", "mB", "mb", "MLv", "Mwp"):
+            val = all_mags.get(key)
+            if val is not None and key != display_mag_type:
+                mag_tokens.append(f"{key} {val:.1f}")
+
+        mag_str = (
+            f"{display_mag:.1f}" if isinstance(display_mag, (int, float)) else "未知"
+        )
+        if mag_tokens:
+            lines.append(
+                f"📊震级：{display_mag_type} {mag_str}（{' / '.join(mag_tokens)}）"
+            )
+        else:
+            lines.append(f"📊震级：{display_mag_type} {mag_str}")
+
+        # 震源深度与矩心深度
+        depth_val = meta.get("depth") if meta.get("depth") is not None else data.depth
+        depth_err = meta.get("depth_error")
+        centroid_val = meta.get("centroid_depth")
+
+        depth_text = cls._format_depth_error(depth_val, depth_err)
+        if centroid_val is not None:
+            lines.append(f"🏔️深度：{depth_text}｜矩心深度：{centroid_val} km")
+        else:
+            lines.append(f"🏔️深度：{depth_text}")
+
+        # 两个节面断层走向、倾角与滑动角
+        plane1 = meta.get("nodal_plane1")
+        plane2 = meta.get("nodal_plane2")
+        from ...domain.earthquake.cmt_normalize import format_fault_type_label
+
+        if plane1:
+            lines.append(
+                f"🧭节面1：走向 {plane1.get('strike')}° / 倾角 {plane1.get('dip')}° / 滑动角 {plane1.get('rake')}°"
+            )
+            lines.append(f"    类型：{format_fault_type_label(plane1)}")
+        if plane2:
+            lines.append(
+                f"🧭节面2：走向 {plane2.get('strike')}° / 倾角 {plane2.get('dip')}° / 滑动角 {plane2.get('rake')}°"
+            )
+            lines.append(f"    类型：{format_fault_type_label(plane2)}")
+
+        lines.append("📋备注：左/右旋最终确定需依赖实际发震断层面")
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        """展示 FSSN CMT。"""
+        return cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )
+
+
 class ShakeAlertEewPresenter(BasePresenter):
     """美国 ShakeAlert 地震预警展示器。"""
 

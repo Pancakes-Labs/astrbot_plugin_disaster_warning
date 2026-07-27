@@ -379,8 +379,17 @@ function ConnectionHealthPanel() {
             ) {
                 lines.push('全天正常');
             }
-            if (day.uptime_ratio != null) {
-                lines.push(`当日可用性 ${(Number(day.uptime_ratio) * 100).toFixed(2)}%`);
+            // 优先用后端重算后的 uptime_ratio；缺失时按分钟字段本地回算，
+            // 避免与行尾「近 N 天」可用性混淆。
+            let dayUptime = day.uptime_ratio;
+            if (dayUptime == null && day.minutes_monitored > 0) {
+                const mon = Number(day.minutes_monitored) || 0;
+                const outage = (Number(day.minutes_major) || 0)
+                    + (Number(day.minutes_partial) || 0);
+                dayUptime = Math.max(0, Math.min(1, 1 - (Math.min(mon, outage) / mon)));
+            }
+            if (dayUptime != null) {
+                lines.push(`当日可用性 ${(Number(dayUptime) * 100).toFixed(2)}%`);
             }
         }
         return (

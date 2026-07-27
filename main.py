@@ -133,6 +133,8 @@ class DisasterWarningPlugin(Star):
 • /台风信息查询 或 /台风查询 [台风ID|名称|数量] [完整|简要] [活跃] - 查询台风信息（优先EQSC，失败回退本地）
 • /JMA震央分布 [开始日期] [结束日期] - 查询 JMA 震央分布统计（默认今天）
 • /JMA震央分布绘图 [投影类型] [开始日期] [结束日期] - 绘制 JMA 震央分布图
+• /生成沙滩球 或 /沙滩球 <走向> <倾角> <滑动角> [大小] [线宽] - 生成震源机制沙滩球图片
+• /节面解析 <走向> <倾角> <滑动角> - 解析断层节面参数与运动分量
 • /灾害预警统计 - 查看详细的事件统计报告
 • /灾害预警统计清除 - 清除所有统计信息 (仅管理员)
 • /灾害预警推送开关 - 开启或关闭当前会话的推送 (仅管理员)
@@ -340,6 +342,44 @@ class DisasterWarningPlugin(Star):
         async for result in self._query_command_service.handle_query_snet(
             event,
             arg=arg,
+        ):
+            yield result
+
+    @filter.command("生成沙滩球", alias={"沙滩球", "beachball", "球"})
+    async def generate_beachball(
+        self,
+        event: AstrMessageEvent,
+        strike: str,
+        dip: str,
+        rake: str,
+        size: str = None,
+        line_width: str = None,
+    ):
+        """根据走向、倾角、滑动角生成沙滩球图片"""
+        async for result in self._query_command_service.handle_generate_beachball(
+            event,
+            strike=strike,
+            dip=dip,
+            rake=rake,
+            size_str=size,
+            line_width_str=line_width,
+        ):
+            yield result
+
+    @filter.command("节面解析", alias={"节面成分解析"})
+    async def parse_nodal_plane(
+        self,
+        event: AstrMessageEvent,
+        strike: str,
+        dip: str,
+        rake: str,
+    ):
+        """根据走向、倾角、滑动角解析节面断层破裂分量"""
+        async for result in self._query_command_service.handle_parse_nodal_plane(
+            event,
+            strike=strike,
+            dip=dip,
+            rake=rake,
         ):
             yield result
 

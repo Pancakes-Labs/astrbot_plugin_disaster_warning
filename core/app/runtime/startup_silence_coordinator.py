@@ -66,12 +66,14 @@ class StartupSilenceCoordinator:
     """
 
     # 时序参数（秒）
+    # 目标：多数场景约 5 秒内结束静默（建连/首包 + 短 settle），
+    # 同时保留硬超时兜底，避免慢源无限阻塞推送。
     min_silence_seconds: float = 0.5
-    settle_seconds: float = 2.0
-    hard_timeout_seconds: float = 60.0
-    first_payload_timeout_seconds: float = 5.0
+    settle_seconds: float = 1.0
+    hard_timeout_seconds: float = 30.0
+    first_payload_timeout_seconds: float = 2.0
     # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
-    first_poll_timeout_seconds: float = 15.0
+    first_poll_timeout_seconds: float = 8.0
 
     state: SilenceState = SilenceState.DISABLED
     enabled: bool = False

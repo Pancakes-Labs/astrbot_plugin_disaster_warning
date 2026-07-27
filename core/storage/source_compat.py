@@ -25,6 +25,9 @@ _ALIAS_MAP: dict[str, str] = {
     "fan_studio_cwa": "cwa_fanstudio",
     "fan_studio_cwa_report": "cwa_fanstudio_report",
     "fan_studio_usgs": "usgs_fanstudio",
+    "fan_studio_fssn_cmt": "fssn_cmt_fanstudio",
+    "fssn-cmt": "fssn_cmt_fanstudio",
+    "fssn_cmt": "fssn_cmt_fanstudio",
     "fan_studio_sa": "sa_fanstudio",
     "fan_studio_jma": "jma_fanstudio",
     "fan_studio_weather": "china_weather_fanstudio",
@@ -102,6 +105,7 @@ _DISPLAY_MAP: dict[str, str] = {
     "cwa_fanstudio": "台湾中央气象署: 强震即时警报 - Fan",
     "cwa_fanstudio_report": "台湾中央气象署: 地震报告",
     "usgs_fanstudio": "美国地质调查局 (USGS)",
+    "fssn_cmt_fanstudio": "FSSN 矩心矩张量解 (CMT)",
     "sa_fanstudio": "美国 ShakeAlert 地震预警",
     "jma_fanstudio": "日本气象厅: 紧急地震速报 - Fan",
     "china_weather_fanstudio": "中国气象局: 气象预警",
@@ -163,6 +167,74 @@ def is_cenc_intensity_report(
         return True
     info_text = str(info_type or "").strip()
     return "烈度速报" in info_text
+
+
+def is_fssn_cmt_report(
+    source: str | None = None,
+    *,
+    info_type: str | None = None,
+) -> bool:
+    """判断是否为 FSSN CMT 补充产品。
+
+    与烈度速报同口径：保留 by_source / 事件列表，不计入 total_events、by_type、震级分布与时间序列。
+    """
+    normalized = normalize_source_name(source or "")
+    if normalized == "fssn_cmt_fanstudio":
+        return True
+    info_text = str(info_type or "").strip().upper()
+    return info_text == "CMT" or "矩心矩张量" in str(info_type or "")
+
+
+def is_earthquake_supplement_product(
+    source: str | None = None,
+    *,
+    info_type: str | None = None,
+) -> bool:
+    """判断是否为地震补充产品（烈度速报 / CMT 等）。"""
+    return is_cenc_intensity_report(source, info_type=info_type) or is_fssn_cmt_report(
+        source, info_type=info_type
+    )
+
+
+def fssn_cmt_report_source_keys() -> tuple[str, ...]:
+    """返回可识别为 FSSN CMT 的 source/source_id 键集合。"""
+    keys: set[str] = {"fssn_cmt_fanstudio"}
+    for alias, target in _ALIAS_MAP.items():
+        if target == "fssn_cmt_fanstudio":
+            keys.add(str(alias).strip().lower())
+    return tuple(sorted(keys))
+
+
+def build_earthquake_supplement_sql_predicate(
+    *,
+    source_expr: str = "source",
+    source_id_expr: str = "source_id",
+    info_type_expr: str = "info_type",
+) -> str:
+    """构建 SQLite 侧“是否为地震补充产品”布尔表达式。
+
+    覆盖 CENC 烈度速报与 FSSN CMT，供 total_events 去重统计复用。
+    """
+    intensity_keys = ", ".join(
+        "'" + key.replace("'", "''") + "'"
+        for key in cenc_intensity_report_source_keys()
+    )
+    cmt_keys = ", ".join(
+        "'" + key.replace("'", "''") + "'" for key in fssn_cmt_report_source_keys()
+    )
+    source_key_expr = (
+        "LOWER(TRIM(COALESCE("
+        f"NULLIF(TRIM({source_id_expr}), ''), "
+        f"NULLIF(TRIM({source_expr}), ''), "
+        "'')))"
+    )
+    return (
+        f"({source_key_expr} IN ({intensity_keys}) "
+        f"OR {source_key_expr} IN ({cmt_keys}) "
+        f"OR INSTR(COALESCE({info_type_expr}, ''), '烈度速报') > 0 "
+        f"OR UPPER(TRIM(COALESCE({info_type_expr}, ''))) = 'CMT' "
+        f"OR INSTR(COALESCE({info_type_expr}, ''), '矩心矩张量') > 0)"
+    )
 
 
 def cenc_intensity_report_source_keys() -> tuple[str, ...]:

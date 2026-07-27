@@ -188,6 +188,7 @@ class JmaHypoClient:
         dates: list[date],
         *,
         session: aiohttp.ClientSession | None = None,
+        timeout_sec: float | None = 60.0,
     ) -> dict[str, Any]:
         """并发拉取多日数据。
 
@@ -195,7 +196,7 @@ class JmaHypoClient:
             {
               "events": [...],
               "day_counts": {"YYYYMMDD": n, ...},  # 仅成功覆盖日（含 0 事件）
-              "missing_days": ["YYYY-MM-DD", ...],  # 仅真正缺失/失败日
+              "missing_days": ["YYYY-MM-DD", ...],  # 仅真正缺失/失败/超时日
               "zero_event_days": ["YYYY-MM-DD", ...],  # 成功但零事件
               "requested_days": int,
               "covered_days": int,
@@ -230,8 +231,32 @@ class JmaHypoClient:
                 return d, events
 
         try:
-            results = await asyncio.gather(*[_one(d) for d in dates])
-            for d, events in results:
+            tasks = [asyncio.create_task(_one(d)) for d in dates]
+            if timeout_sec and timeout_sec > 0:
+                try:
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=timeout_sec,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[灾害预警] JMA 震央范围抓取达到整体超时上限 ({timeout_sec}s)，将保留已完成日期的结果"
+                    )
+                    results = []
+                    for t in tasks:
+                        if t.done() and not t.cancelled() and t.exception() is None:
+                            results.append(t.result())
+                        else:
+                            t.cancel()
+            else:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            processed_dates: set[date] = set()
+            for res in results:
+                if not isinstance(res, tuple) or len(res) != 2:
+                    continue
+                d, events = res
+                processed_dates.add(d)
                 key = d.strftime("%Y%m%d")
                 if events is None:
                     # 404 / 非 200 / 异常：真正缺失
@@ -243,6 +268,12 @@ class JmaHypoClient:
                     all_events.extend(events)
                 else:
                     zero_event_days.append(d.isoformat())
+
+            # 因整体超时未完成的日期补充计入 missing_days
+            for d in dates:
+                if d not in processed_dates:
+                    missing_days.append(d.isoformat())
+
         finally:
             if owns_session and client is not None:
                 await client.close()

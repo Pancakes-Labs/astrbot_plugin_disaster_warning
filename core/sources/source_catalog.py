@@ -552,6 +552,46 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         payload_signatures=(("url",),),
         payload_predicates=("usgs_report",),
     ),
+    # fssn_cmt_fanstudio: FSSN 矩心矩张量解 (CMT) - 学术补充源
+    # 与 CENC 烈度速报类似：保留 by_source / 事件列表，不计入 total_events 主事件流。
+    "fssn_cmt_fanstudio": SourceEntry(
+        source_id="fssn_cmt_fanstudio",
+        source_enum="fan_studio_fssn_cmt",
+        source_type=SourceType.EARTHQUAKE_INFO,
+        provider_family=ProviderFamily.FAN_STUDIO,
+        config_group="fan_studio",
+        config_key="fssn_cmt",
+        parser_name="fssn_cmt_parser",
+        presentation_type="earthquake_report",
+        text_presenter_key="fssn_cmt",
+        report_policy="none",
+        intensity_mode="magnitude",
+        priority=1,
+        display_name="FSSN 矩心矩张量解 (CMT)",
+        description="FSSN 矩心矩张量解 (CMT) - FAN Studio WebSocket（学术补充，有滞后）",
+        default_timezone="Asia/Shanghai",
+        publish_time_field="shockTime",
+        fingerprint_prefix="fssn_cmt",
+        connection_group="fan_studio_all",
+        connection_handler="fan_studio",
+        connection_data_source="fan_studio_mixed",
+        connection_url="wss://ws.fanstudio.tech/all",
+        connection_backup_url="wss://ws.fanstudio.hk/all",
+        dispatch_family="fan_studio_report",
+        provider_source_names=("fssn-cmt",),
+        provider_aliases=(
+            "fan_studio_fssn_cmt",
+            "fssn-cmt",
+            "fssn_cmt",
+            "fssn_cmt_fanstudio",
+        ),
+        routing_tags=("fan_studio", "global", "report", "cmt", "fssn"),
+        payload_signatures=(
+            ("eventId", "nodalPlane1", "mnn"),
+            ("allMagnitudes", "centroidDepth", "nodalPlane1"),
+        ),
+        payload_predicates=("fssn_cmt",),
+    ),
     # sa_fanstudio: 美国 ShakeAlert - 来自 FAN Studio
     # 推送频率较高，统计语义按地震事件（earthquake）处理，不参与 EEW 机构状态卡片
     # （与 Global Quake 一致：无 institution_key / query_group）。

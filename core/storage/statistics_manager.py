@@ -90,7 +90,9 @@ class StatisticsManager:
                 cleanup = HistoryDirtyDataCleanupService(self.db)
                 await cleanup.run_once()
             except Exception as exc:
-                logger.warning(f"[灾害预警] 历史脏数据清理跳过/失败: {exc}")
+                logger.warning(
+                    f"[灾害预警] 历史脏数据清理跳过/失败: {exc}", exc_info=True
+                )
             await self._load_stats()
 
     async def record_push(

@@ -111,6 +111,12 @@
             "default": false,
             "hint": "通过 FAN Studio WebSocket 接收美国 ShakeAlert 地震预警信息"
           },
+          "fssn_cmt": {
+            "description": "FSSN：矩心矩张量解 (CMT)",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 FAN Studio WebSocket 接收 FSSN 矩心矩张量解。"
+          },
           "china_weather_alarm": {
             "description": "中国气象局：气象预警",
             "type": "bool",

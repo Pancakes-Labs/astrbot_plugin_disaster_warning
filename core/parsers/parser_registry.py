@@ -10,6 +10,7 @@ from ..sources.source_catalog import SOURCE_CATALOG, get_source_entry
 from .china_earthquake_parser import CencEarthquakeParser, CencEarthquakeWolfxParser
 from .china_eew_parser import CEAEEWParser, CEAEEWPRParser, CEAEEWWolfxParser
 from .china_intensity_report_parser import CencIntensityReportParser
+from .fssn_cmt_parser import FssnCmtParser
 from .global_sources_parser import (
     GlobalQuakeParser,
     ShakeAlertEewParser,
@@ -42,6 +43,7 @@ PARSER_CLASS_BY_NAME = {
     "shakealert_eew_parser": ShakeAlertEewParser,
     "global_quake_parser": GlobalQuakeParser,
     "snet_parser": SnetParser,
+    "fssn_cmt_parser": FssnCmtParser,
 }
 
 

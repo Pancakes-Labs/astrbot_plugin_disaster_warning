@@ -22,6 +22,7 @@ from ...domain.tsunami.tsunami_levels import (
     to_optional_float,
 )
 from ...domain.tsunami.tsunami_title import build_tsunami_list_title
+from ..source_compat import is_cenc_intensity_report, is_fssn_cmt_report
 
 CHINA_PROVINCES = [
     "北京",
@@ -170,7 +171,19 @@ class StatsEventSupportService:
                 or envelope_metadata.get("info_type")
                 or ""
             ).strip()
-            from ..source_compat import is_cenc_intensity_report
+
+            if is_fssn_cmt_report(envelope.source_id or "", info_type=info_type):
+                # CMT 列表展示：震级 · 震中 矩心深xx
+                cmt_depth = event_metadata.get(
+                    "centroid_depth"
+                ) or envelope_metadata.get("centroid_depth")
+                if cmt_depth is not None:
+                    try:
+                        cmt_depth_num = float(cmt_depth)
+                        return f"{base} · 矩心深{cmt_depth_num:.0f}km"
+                    except (TypeError, ValueError):
+                        pass
+                return base
 
             if is_cenc_intensity_report(envelope.source_id or "", info_type=info_type):
                 intensity = domain_event.intensity

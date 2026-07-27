@@ -8,7 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .payload_guards import is_shakealert_compatible_payload
+from .payload_guards import (
+    is_shakealert_compatible_payload,
+    looks_like_fssn_cmt_payload,
+)
 from .source_catalog import (
     SOURCE_CATALOG,
     get_source_ids_by_family,
@@ -86,8 +89,11 @@ def _payload_matches_predicate(payload: dict[str, Any], predicate: str) -> bool:
     if predicate == "usgs_report":
         # USGS 报文通常会附带官方详情地址，可作为辅助识别条件
         return "usgs.gov" in str(payload.get("url", "") or "")
+    if predicate == "fssn_cmt":
+        # FSSN CMT：检测到符合 FSSN CMT 特征的载荷
+        return looks_like_fssn_cmt_payload(payload)
     if predicate == "shakealert_eew":
-        # ShakeAlert 与 FSSN 字段高度重合；共享守卫排除 FSSN/USGS 特征。
+        # ShakeAlert 与 FSSN 字段高度重合；共享守卫排除 FSSN/USGS/CMT 特征。
         return is_shakealert_compatible_payload(payload)
     if predicate == "typhoon_active":
         # 台风数据必须包含移动方向、风速和气压字段，且数据为数组格式

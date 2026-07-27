@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,6 +29,7 @@ from ...domain.event_models import (
 from ...services.identity.event_identity import resolve_report_num
 from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
+from ..render.beachball_renderer import BeachballRenderer
 
 
 class MessageBuildService:
@@ -369,14 +372,18 @@ class MessageBuildService:
             event,
             message_format_config=message_format_config,
         )
-        # 地图渲染与插入（S-Net 跳过，避免重复）
-        if source_id != "snet_msil":
+        # 地图渲染与插入（S-Net、CMT 跳过，避免重复或误附加通用地图）
+        if source_id not in ("snet_msil", "fssn_cmt_fanstudio"):
             await self._append_map_if_needed(
                 chain,
                 event,
                 source_id=source_id,
                 message_format_config=message_format_config,
             )
+        # 附加 CMT 震源球 (Beachball)
+        await self._append_fssn_cmt_beachball_if_needed(
+            chain, event, source_id=source_id
+        )
         # 气象警报图标附加
         await self._append_weather_icon_if_needed(chain, event, active_config)
         # 海啸观测与预报图附加
@@ -835,3 +842,64 @@ class MessageBuildService:
                 media_label=f"CWA地震报告图件/{idx}",
                 allow_url_fallback=True,
             )
+
+    async def _append_fssn_cmt_beachball_if_needed(
+        self,
+        chain: MessageChain,
+        event: EventEnvelope,
+        *,
+        source_id: str,
+    ) -> None:
+        """为 FSSN CMT 地震事件动态渲染并附加沙滩球图片。"""
+        if source_id != "fssn_cmt_fanstudio":
+            return
+
+        domain_event = self._get_domain_event(event)
+        if not isinstance(domain_event, EarthquakeEvent):
+            return
+
+        meta = domain_event.metadata if isinstance(domain_event.metadata, dict) else {}
+        plane1 = meta.get("nodal_plane1")
+        if not plane1:
+            logger.debug("[灾害预警] FSSN CMT 事件缺失节面信息，跳过沙滩球渲染")
+            return
+
+        strike = plane1.get("strike")
+        dip = plane1.get("dip")
+        rake = plane1.get("rake")
+        cmt_id = str(meta.get("cmt_id") or event.id).strip()
+        # 清理路径中潜在的非法/目录穿越字符
+        safe_cmt_id = re.sub(r"[^\w\.-]", "_", cmt_id)
+
+        if strike is None or dip is None or rake is None:
+            return
+
+        try:
+            # 引入 beachball 渲染器并设定本地缓存机制
+            async def _render_ball() -> str | None:
+                img_filename = f"fssn_cmt_ball_{safe_cmt_id}.png"
+                img_path = os.path.join(str(self.manager.temp_dir), img_filename)
+                renderer = BeachballRenderer(size=360)  # 一期渲染360px大小
+                return await asyncio.to_thread(
+                    renderer.render,
+                    strike=float(strike),
+                    dip=float(dip),
+                    rake=float(rake),
+                    output_path=img_path,
+                )
+
+            cache_key = f"cmt_beachball_{safe_cmt_id}_{strike}_{dip}_{rake}"
+            out = await self.manager._render_with_cache(cache_key, _render_ball)
+
+            if not out or not os.path.exists(out):
+                logger.warning(f"[灾害预警] FSSN CMT 沙滩球生成结果不存在: {out}")
+                return
+
+            with open(out, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode()
+
+            chain.chain.append(Comp.Image.fromBase64(b64_data))
+            logger.info(f"[灾害预警] 已成功附加 FSSN CMT 沙滩球图片 ({safe_cmt_id})")
+
+        except Exception as exc:
+            logger.error(f"[灾害预警] FSSN CMT 附加沙滩球失败: {exc}", exc_info=True)
