@@ -248,7 +248,7 @@ class BeachballRenderer:
                 margin = (stroke_w + 1) // 2 + 1
                 r_path = min(cx, cy) - margin
 
-            # 填充与节面线仅绘制到描边内缘，避免颜色溢出外圈
+            # 填充与节面线仅绘制到描边内缘，避免颜色溢出外圈；同步更新 r_fill 和 r_outer
             r_fill = max(1.0, r_path - stroke_w / 2.0)
             r_outer = r_path + stroke_w / 2.0
 
