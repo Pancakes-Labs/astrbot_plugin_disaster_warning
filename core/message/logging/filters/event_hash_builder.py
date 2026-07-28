@@ -86,14 +86,23 @@ class EventHashBuilder:
             hash_parts.append(f"eid:{event_id}")
 
             # OpenQuake/GQ 使用 revisionId；其他 EEW 使用 updates/ReportNum/Serial。
-            report_num = (
-                data.get("updates")
-                or data.get("ReportNum")
-                or data.get("Serial")
-                or data.get("revisionId")
-                or data.get("revision_id")
+            # 严格查找第一个非 None 且非空字符串的字段，确保 0 (如第 0 报或 revisionId 0) 作为有效标识被保留
+            report_num_keys = [
+                "updates",
+                "ReportNum",
+                "Serial",
+                "revisionId",
+                "revision_id",
+            ]
+            report_num = next(
+                (
+                    data[k]
+                    for k in report_num_keys
+                    if data.get(k) is not None and str(data[k]) != ""
+                ),
+                None,
             )
-            if report_num is not None and str(report_num) != "":
+            if report_num is not None:
                 hash_parts.append(f"rn:{report_num}")
 
             # 动作维度：同一事件的 update / archived / cancelled 应分别落盘。
@@ -101,31 +110,52 @@ class EventHashBuilder:
             if action:
                 hash_parts.append(f"act:{action}")
 
-            if report_num is None or str(report_num) == "":
-                updated = (
-                    data.get("updated")
-                    or data.get("updateTime")
-                    or data.get("lastUpdateMs")
-                    or data.get("timestampMs")
+            if report_num is None:
+                updated_keys = ["updated", "updateTime", "lastUpdateMs", "timestampMs"]
+                updated = next(
+                    (
+                        data[k]
+                        for k in updated_keys
+                        if data.get(k) is not None and str(data[k]) != ""
+                    ),
+                    None,
                 )
-                if updated:
+                if updated is not None:
                     hash_parts.append(f"up:{str(updated)}")
 
-                mag = data.get("magnitude") or data.get("Magnitude")
-                if mag:
+                mag = (
+                    data.get("magnitude")
+                    if data.get("magnitude") is not None
+                    else data.get("Magnitude")
+                )
+                if mag is not None:
                     hash_parts.append(f"m:{mag}")
 
             return "|".join(hash_parts)
 
-        time_info = (
-            data.get("shockTime")
-            or data.get("time")
-            or data.get("OriginTime")
-            or data.get("originTimeIso")
-            or data.get("originTimeMs")
+        # 退化匹配路径：时间字段可能为 ISO 字符串或毫秒时间戳，保留原字符串精细度以防截断后冲突
+        time_info_keys = [
+            "shockTime",
+            "time",
+            "OriginTime",
+            "originTimeIso",
+            "originTimeMs",
+        ]
+        time_info = next(
+            (
+                data[k]
+                for k in time_info_keys
+                if data.get(k) is not None and str(data[k]) != ""
+            ),
+            None,
         )
-        if time_info:
-            hash_parts.append(f"et:{str(time_info)[:16]}")
+        if time_info is not None:
+            time_str = str(time_info)
+            # 如果是普通的简短时间串截取前 16 位，如果是精确 ISO/毫秒串则全量保留
+            if "T" in time_str or len(time_str) > 16:
+                hash_parts.append(f"et:{time_str}")
+            else:
+                hash_parts.append(f"et:{time_str[:16]}")
 
         mag = data.get("magnitude") or data.get("Magnitude")
         if mag:
