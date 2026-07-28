@@ -466,7 +466,21 @@ class JmaEewPresenter(BasePresenter):
             coords = _format_coordinates(data.latitude, data.longitude)
             lines.append(f"📍震中：{data.title} ({coords})")
 
-        if data.magnitude is not None:
+        # PLUM/假定震源下 M1.0 为占位震级：优先读 metadata 标记，再兜底 is_assumption+≈1.0
+        magnitude_is_placeholder = bool(
+            (data.metadata or {}).get("magnitude_is_placeholder")
+        )
+        if (
+            not magnitude_is_placeholder
+            and data.is_assumption
+            and data.magnitude is not None
+            and abs(float(data.magnitude) - 1.0) < 0.05
+        ):
+            magnitude_is_placeholder = True
+
+        if magnitude_is_placeholder or (data.is_assumption and data.magnitude is None):
+            lines.append("📊震级：不明（PLUM法）")
+        elif data.magnitude is not None:
             lines.append(f"📊震级：M {data.magnitude:.1f}")
 
         if data.depth is not None:
@@ -491,7 +505,7 @@ class JmaEewPresenter(BasePresenter):
         display_context: EarthquakeDisplayContext,
         options: dict | None = None,
     ) -> str:
-        """展示速报，并拼装细分的警报覆盖县市与预估范围。"""
+        """展示速报，并按震度档汇总警报区域（方案 C）。"""
         rendered = cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
@@ -500,45 +514,63 @@ class JmaEewPresenter(BasePresenter):
 
         lines = rendered.split("\n") if rendered else []
 
-        jma_warning_areas = display_context.jma_warning_areas
-        if (
-            isinstance(jma_warning_areas, list)
-            and jma_warning_areas
-            and not any(line.startswith("⚠️警报区域：") for line in lines)
-        ):
-            lines.append("⚠️警报区域：")
-            # 多区域场景按固定数量分行，避免单行过长影响阅读。
-            chunk_size = 3
-            for i in range(0, len(jma_warning_areas), chunk_size):
-                chunk = [
-                    str(item).strip()
-                    for item in jma_warning_areas[i : i + chunk_size]
-                    if str(item).strip()
+        # 按震度档汇总区域，替代旧的「预估震度范围」逐条输出
+        area_groups = getattr(display_context, "jma_warning_area_groups", None)
+        if not isinstance(area_groups, list) or not area_groups:
+            # 兼容旧 metadata / 未透传字段的路径
+            raw_groups = (display_context.metadata or {}).get("jma_warning_area_groups")
+            area_groups = raw_groups if isinstance(raw_groups, list) else []
+
+        has_group_block = False
+        if isinstance(area_groups, list) and area_groups:
+            group_lines: list[str] = []
+            for group in area_groups:
+                if not isinstance(group, dict):
+                    continue
+                range_text = str(group.get("range_text") or "").strip()
+                if not range_text:
+                    continue
+                emoji = str(group.get("emoji") or "").strip() or "⚪"
+                areas = [
+                    str(name).strip()
+                    for name in list(group.get("areas") or [])
+                    if str(name).strip()
                 ]
-                if chunk:
-                    lines.append("  " + "、".join(chunk))
+                if not areas:
+                    continue
+                group_lines.append(f"  {emoji} {range_text}：{'、'.join(areas)}")
 
-        jma_warn_area = display_context.jma_warn_area
-        if (
-            isinstance(jma_warn_area, str)
-            and jma_warn_area.strip()
-            and not any(line.startswith("⚠️警报区域：") for line in lines)
-        ):
-            lines.append(f"⚠️警报区域：{jma_warn_area.strip()}")
+            if group_lines:
+                lines.append("💥预估震度分布：")
+                lines.extend(group_lines)
+                has_group_block = True
 
-        jma_warning_area_ranges = display_context.jma_warning_area_ranges
-        if isinstance(jma_warning_area_ranges, list):
-            for shindo_range in jma_warning_area_ranges:
-                if (
-                    isinstance(shindo_range, str)
-                    and shindo_range.strip()
-                    and not any(
-                        line.startswith("💥预估震度范围：")
-                        and shindo_range.strip() in line
-                        for line in lines
-                    )
-                ):
-                    lines.append(f"💥预估震度范围：{shindo_range.strip()}")
+        # 无分组数据时回退到旧的警报区域列表展示
+        if not has_group_block:
+            jma_warning_areas = display_context.jma_warning_areas
+            if (
+                isinstance(jma_warning_areas, list)
+                and jma_warning_areas
+                and not any(line.startswith("⚠️警报区域：") for line in lines)
+            ):
+                lines.append("⚠️警报区域：")
+                chunk_size = 3
+                for i in range(0, len(jma_warning_areas), chunk_size):
+                    chunk = [
+                        str(item).strip()
+                        for item in jma_warning_areas[i : i + chunk_size]
+                        if str(item).strip()
+                    ]
+                    if chunk:
+                        lines.append("  " + "、".join(chunk))
+
+            jma_warn_area = display_context.jma_warn_area
+            if (
+                isinstance(jma_warn_area, str)
+                and jma_warn_area.strip()
+                and not any(line.startswith("⚠️警报区域：") for line in lines)
+            ):
+                lines.append(f"⚠️警报区域：{jma_warn_area.strip()}")
 
         _append_local_estimation(lines, display_context)
         return "\n".join(lines)
