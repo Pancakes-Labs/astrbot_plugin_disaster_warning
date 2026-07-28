@@ -25,6 +25,7 @@ from ...domain.tsunami.tsunami_levels import (
 from ...domain.tsunami.tsunami_title import (
     build_tsunami_list_title,
     is_generic_tsunami_title,
+    parse_tsunami_batch_num,
 )
 from ...domain.typhoon import (
     format_display_name,
@@ -34,6 +35,7 @@ from ...domain.typhoon import (
 )
 from ...services.identity.event_identity import resolve_report_num, resolve_source_id
 from .cenc_intensity_record_fields import apply_cenc_intensity_report_fields
+from .earthquake_detail_record_fields import apply_earthquake_detail_record_fields
 
 
 def _adapt_event_envelope(event: EventEnvelope) -> EventEnvelope:
@@ -161,6 +163,14 @@ class EventRecordFactory:
             record,
             event,
             earthquake_level=earthquake_level,
+            info_type=info_type,
+            event_metadata=event_metadata,
+            envelope_metadata=envelope_metadata,
+        )
+        # P2P 各地震度 / FSSN CMT 等补充正文：写入 weather_detail 供管理端展开
+        apply_earthquake_detail_record_fields(
+            record,
+            event,
             info_type=info_type,
             event_metadata=event_metadata,
             envelope_metadata=envelope_metadata,
@@ -660,6 +670,14 @@ class EventRecordFactory:
             area_count=area_count_int,
         )
 
+        batch_raw = merged.get("batch")
+        business_report_num = parse_tsunami_batch_num(batch_raw)
+        if business_report_num is None:
+            # 兼容：从 weather_detail / description 回退解析业务报次
+            business_report_num = parse_tsunami_batch_num(
+                weather_detail
+            ) or parse_tsunami_batch_num(record.get("description"))
+
         record.update(
             {
                 "time": data.issued_at.isoformat() if data.issued_at else None,
@@ -678,11 +696,15 @@ class EventRecordFactory:
                 "immediate_area_count": immediate_count_int,
                 "is_cancelled": bool(cancelled or level == "解除"),
                 "is_training": bool(is_training),
+                # 业务 batch 原文保留，便于前端/调试对照
+                "batch": batch_raw if batch_raw not in (None, "") else None,
             }
         )
-        # 首报默认 report_num=1；后续合并会在 merger 中递增
-        if record.get("report_num") in (None, "", 0):
-            record["report_num"] = 1
+        # 海啸 report_num = 业务报次（batch），不是系统 update_count。
+        # 有 batch 才写入；无 batch 时留给 merger / insert 用 update 序号或默认 1 兜底，
+        # 避免日本海啸无 batch 时每报都被写死成 1。
+        if business_report_num is not None:
+            record["report_num"] = business_report_num
         return record
 
     @staticmethod
