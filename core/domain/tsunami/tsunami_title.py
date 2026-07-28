@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .tsunami_levels import (
@@ -165,21 +166,59 @@ def format_tsunami_magnitude_token(
     return f"{prefix}{mag_text}"
 
 
+def parse_tsunami_batch_num(batch: Any) -> int | None:
+    """解析海啸业务报次为整数。
+
+    支持：
+    - 纯数字：3 / "3" / 3.0
+    - 中文报次：第3报 / 第 3 报 / 第3批
+    - 摘要片段：批次 3
+
+    无法解析时返回 None（不是系统 update_count）。
+    """
+    if batch is None:
+        return None
+    if isinstance(batch, bool):
+        return None
+    if isinstance(batch, (int, float)):
+        try:
+            number = int(batch)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    text = _clean_text(batch)
+    if not text:
+        return None
+    # 纯数字
+    try:
+        number = int(float(text))
+        if number > 0:
+            return number
+    except (TypeError, ValueError):
+        pass
+
+    match = re.search(r"第\s*(\d+)\s*[报批]", text) or re.search(r"批次\s*(\d+)", text)
+    if not match:
+        return None
+    try:
+        number = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def format_tsunami_batch_token(batch: Any) -> str:
     """格式化批次/报次：第3报。"""
+    parsed = parse_tsunami_batch_num(batch)
+    if parsed is not None:
+        return f"第{parsed}报"
     text = _clean_text(batch)
     if not text:
         return ""
     # 已是“第n报/批”
     if text.startswith("第") and ("报" in text or "批" in text):
         return text
-    # 纯数字
-    try:
-        number = int(float(text))
-        if number > 0:
-            return f"第{number}报"
-    except (TypeError, ValueError):
-        pass
     return f"第{text}报"
 
 
@@ -222,7 +261,8 @@ def build_tsunami_list_title(
         place = ""
 
     mag_token = format_tsunami_magnitude_token(magnitude, region=region_key)
-    batch_token = format_tsunami_batch_token(batch) if region_key == "china" else ""
+    # 业务报次统一由卡片徽章展示，标题内不再内嵌「（第N报）」，避免与徽章语义打架。
+    batch_token = ""
 
     # 主段：级别
     head = level_label
@@ -377,4 +417,5 @@ __all__ = [
     "format_tsunami_magnitude_token",
     "is_generic_tsunami_title",
     "is_legacy_tsunami_description",
+    "parse_tsunami_batch_num",
 ]
