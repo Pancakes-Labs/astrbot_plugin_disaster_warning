@@ -1291,13 +1291,85 @@ html.theme-dark .event-filter-source-menu {
     opacity: 0.5;
 }
 
-/* 台风 / 海啸卡片第二行参数摘要 */
+/* 台风 / 海啸 / 地震卡片第二行参数摘要 */
 .event-meta-typhoon,
-.event-meta-tsunami {
+.event-meta-tsunami,
+.event-meta-earthquake {
     opacity: 0.72;
     margin-top: 2px;
     font-size: 0.8125rem;
     line-height: 1.35;
+}
+
+.event-meta-earthquake {
+    opacity: 0.88;
+    gap: 8px;
+}
+
+.event-quake-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--md-sys-color-primary) 10%, var(--md-sys-color-surface));
+    color: var(--md-sys-color-on-surface-variant);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
+}
+
+body.dark-theme .event-quake-chip {
+    background: rgba(103, 80, 164, 0.18);
+    border-color: rgba(103, 80, 164, 0.28);
+}
+
+/* 气象预警 / 地震情报补充正文展开面板 */
+.event-weather-detail-panel {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--md-sys-color-tertiary) 8%, var(--md-sys-color-surface));
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent);
+}
+
+.event-weather-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.event-weather-detail-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.event-weather-detail-title {
+    letter-spacing: 0.01em;
+}
+
+.event-weather-detail-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--md-sys-color-on-surface);
+    opacity: 0.92;
+}
+
+.event-weather-detail-body--timeline {
+    margin-top: 4px;
+    font-size: 12px;
+    opacity: 0.88;
+}
+
+body.dark-theme .event-weather-detail-panel {
+    background: rgba(126, 87, 194, 0.12);
+    border-color: rgba(126, 87, 194, 0.22);
 }
 
 /* ---- 海啸结构化面板（对齐推送展示器信息密度） ---- */
@@ -1762,6 +1834,216 @@ body.dark-theme .event-tsunami-section.is-grade {
 .event-group-typhoon-text--strong {
     opacity: 0.9;
     font-weight: 600 !important;
+}
+
+/* 展开壳：顶部摘要 + 下方时间线，视觉上连成一张连续卡片 */
+.event-group-expanded-shell {
+    --hover-lift: 1px;
+    --card-bg: var(--md-sys-color-surface);
+    --card-border-color: var(--glass-border);
+    --card-shadow: var(--glass-shadow);
+    --card-hover-bg: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-primary) 10%);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 46%, transparent);
+    --card-hover-shadow: 0 8px 22px rgba(103, 80, 164, 0.10);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-radius: var(--radius-lg);
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    overflow: hidden;
+}
+
+.event-group-expanded-shell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        background 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-group-expanded-shell > * {
+    transition: transform 0.18s ease-out;
+}
+
+.event-group-expanded-shell:hover::before,
+.event-group-expanded-shell:hover > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-group-expanded-shell:hover::before {
+    background: var(--card-hover-bg);
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
+}
+
+.event-group-sticky-card {
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+}
+
+/* 顶部摘要卡：去掉独立卡片外壳，融入展开壳 */
+.event-group-sticky-card .event-card {
+    margin-bottom: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    border: none;
+}
+
+.event-group-sticky-card .event-card::before {
+    display: none;
+}
+
+/* 时间线区：与顶部摘要用细分割线衔接，不再单独成卡 */
+.event-group-timeline-section {
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    padding: 0 8px 8px;
+}
+
+.event-group-timeline-panel {
+    padding: 8px 16px 16px;
+}
+
+.event-group-timeline-header {
+    display: flex;
+    align-items: center;
+    margin: 0 0 8px 0;
+    padding: 0;
+}
+
+.event-group-timeline-header .event-group-collapse-text {
+    margin: 0 !important;
+    line-height: 1.2 !important;
+}
+
+.event-group-timeline-panel .event-group-collapse-button {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+}
+
+/* 业务报次提示芯片（与更新序号区分） */
+.event-group-business-chip {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--md-sys-color-tertiary) 12%, var(--md-sys-color-surface));
+    color: var(--md-sys-color-on-surface-variant);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent);
+    opacity: 0.92;
+}
+
+body.dark-theme .event-group-business-chip {
+    background: rgba(126, 87, 194, 0.16);
+    border-color: rgba(126, 87, 194, 0.28);
+}
+
+/* 时间线历史行：复用 EventCard 主卡片级详情 */
+.event-group-timeline-row--card {
+    align-items: stretch;
+}
+
+.event-group-history-card-wrap {
+    margin-top: 4px;
+    min-width: 0;
+}
+
+.event-group-history-card-wrap .event-card,
+.event-group-history-card-wrap .event-card-history {
+    padding: 10px 12px;
+    margin-bottom: 0;
+    gap: 12px;
+    border-radius: 12px;
+    box-shadow: none;
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 28%, transparent);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+}
+
+.event-group-history-card-wrap .event-card::before {
+    display: none;
+}
+
+.event-group-history-card-wrap .event-title-text {
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+}
+
+.event-group-history-card-wrap .event-tsunami-panel {
+    margin-top: 6px;
+}
+
+.event-group-history-card-wrap .event-tsunami-sections {
+    margin-top: 2px;
+}
+
+.event-group-history-card-wrap .mag-badge,
+.event-group-history-card-wrap .mag-badge-history {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+}
+
+body.dark-theme .event-group-history-card-wrap .event-card,
+body.dark-theme .event-group-history-card-wrap .event-card-history {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 海啸时间线详情（兼容旧结构） */
+.event-group-tsunami-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+    min-width: 0;
+}
+
+.event-group-tsunami-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    opacity: 0.9;
+    line-height: 1.4 !important;
+}
+
+.event-group-tsunami-fallback {
+    font-size: 12px !important;
+    opacity: 0.75;
+    line-height: 1.4 !important;
+}
+
+.event-group-tsunami-details .event-tsunami-panel {
+    margin-top: 2px;
+}
+
+/* 气象时间线 / 展开详情 */
+.event-group-weather-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+    min-width: 0;
+}
+
+.event-group-weather-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    opacity: 0.9;
 }
 
 /* 速报更新等级芯片(如 "第1报" 芯片) */

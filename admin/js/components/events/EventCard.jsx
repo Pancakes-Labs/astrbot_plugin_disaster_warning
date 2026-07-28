@@ -13,13 +13,14 @@ const { Typography } = MaterialUI;
  * @param {boolean} [props.isExpanded=false] 当前是否处于展开状态
  * @param {number|null} [props.reportIndex=null] 多报更新时的历史期数标签
  */
-function EventCard({ 
-    event, 
-    displayTimezone, 
-    isHistory = false, 
-    isExpandable = false, 
-    isExpanded = false, 
-    reportIndex = null 
+function EventCard({
+    event,
+    displayTimezone,
+    isHistory = false,
+    isExpandable = false,
+    isExpanded = false,
+    reportIndex = null,
+    hideExpandBadge = false,
 }) {
     const formatters = window.EventFormatSerialization || window.EventFormatters || {};
     const {
@@ -30,6 +31,9 @@ function EventCard({
         resolveWeatherFallbackUrl = () => null,
         buildTsunamiTitle = null,
         buildTsunamiMeta = null,
+        resolveEventReportNum = null,
+        formatReportLabel = null,
+        formatMagnitudeBadge = null,
     } = formatters;
     const buildWeatherIconFallbackHandler = _rawBuildHandler || ((_, cb) => (e) => typeof cb === 'function' && cb(e));
     const evt = event || {};
@@ -193,19 +197,61 @@ function EventCard({
         ].filter(Boolean).join(' · ')
         : '';
 
-    // 计算报告第几期 (第几报) 的文案
-    let reportLabel = '';
-    if (reportIndex !== null && reportIndex > 0) {
-        reportLabel = `第 ${reportIndex} 报`;
-    } else if (evt.report_num) {
-        reportLabel = `第 ${evt.report_num} 报`;
-    }
+    // 计算报告第几期 (第几报) 的文案：统一走 resolveEventReportNum，
+    // 避免标题内嵌 batch 与 report_num 徽章两套语义打架。
+    const resolvedReportNum = typeof resolveEventReportNum === 'function'
+        ? resolveEventReportNum(evt, reportIndex)
+        : (reportIndex !== null && reportIndex > 0
+            ? reportIndex
+            : (Number(evt.report_num) > 0 ? Number(evt.report_num) : null));
+    const reportLabel = typeof formatReportLabel === 'function'
+        ? formatReportLabel(resolvedReportNum)
+        : (resolvedReportNum ? `第 ${resolvedReportNum} 报` : '');
+
+    // 地震深度：折叠外也直接可见。
+    // 合法深度 >= 0；缺失/负数不展示；0 km 映射为「极浅」。
+    const earthquakeDepthRaw = evt.depth;
+    const earthquakeDepthNum = Number(earthquakeDepthRaw);
+    const hasValidEarthquakeDepth = earthquakeDepthRaw !== null
+        && earthquakeDepthRaw !== undefined
+        && earthquakeDepthRaw !== ''
+        && Number.isFinite(earthquakeDepthNum)
+        && earthquakeDepthNum >= 0;
+    const earthquakeDepthText = hasValidEarthquakeDepth
+        ? (earthquakeDepthNum === 0
+            ? '极浅'
+            : `${Number.isInteger(earthquakeDepthNum) ? earthquakeDepthNum : earthquakeDepthNum} km`)
+        : '';
+    const earthquakeMagnitudeText = typeof formatMagnitudeBadge === 'function'
+        ? formatMagnitudeBadge(evt.magnitude ?? evt._groupMagnitude)
+        : '';
+
+    // 正文展开语义：
+    // - 气象预警：weather_detail / description
+    // - 地震情报补充正文：weather_detail（P2P 各地震度、CENC 烈度速报、FSSN CMT 等）
+    // 注意：地震标题 description 常是「M x.x 地点」，不能当正文回退，否则会误出展开入口。
+    const detailBodyText = (() => {
+        const weatherDetail = String(evt.weather_detail || '').trim();
+        if (isWeather) {
+            return weatherDetail || String(evt.description || '').trim();
+        }
+        if (isEarthquake) {
+            return weatherDetail;
+        }
+        return '';
+    })();
+    // 列表主卡：可点开展开；时间线历史行：isExpanded 时直接展示正文（无展开控件）
+    const canExpandDetail = !!detailBodyText && !isHistory && (isWeather || isEarthquake);
+    const showDetailPanel = !!detailBodyText && (isWeather || isEarthquake) && isExpanded;
+    const detailPanelTitle = isWeather ? '预警正文' : '情报正文';
+    const showExpandControl = (isExpandable || canExpandDetail) && !hideExpandBadge;
 
     // 拼装卡片的主容器 Class 类名
     const cardClassName = [
         'event-card',
-        isExpandable ? 'clickable' : '',
+        (isExpandable || canExpandDetail) ? 'clickable' : '',
         isHistory ? 'event-card-history' : '',
+        showDetailPanel ? 'is-detail-expanded' : '',
     ].filter(Boolean).join(' ');
 
     // 拼装左侧徽标容器 Class 类名，关联震度警报的危险背景色类
@@ -310,6 +356,20 @@ function EventCard({
                             : formatSourceName(evt.source_id || evt.source || evt._groupSource || 'unknown'))}
                     </span>
                 </div>
+                {isEarthquake && (earthquakeDepthText || (earthquakeMagnitudeText && earthquakeMagnitudeText !== '--')) && (
+                    <div className="event-meta event-meta-earthquake">
+                        {earthquakeMagnitudeText && earthquakeMagnitudeText !== '--' && (
+                            <span className="event-meta-item event-quake-chip">
+                                🧭 M {earthquakeMagnitudeText}
+                            </span>
+                        )}
+                        {earthquakeDepthText && (
+                            <span className="event-meta-item event-quake-chip">
+                                ⬇️ 深度 {earthquakeDepthText}
+                            </span>
+                        )}
+                    </div>
+                )}
                 {typhoonMeta && (
                     <div className="event-meta event-meta-typhoon">
                         <span className="event-meta-item">{typhoonMeta}</span>
@@ -330,7 +390,8 @@ function EventCard({
                                 ))}
                             </div>
                         )}
-                        {Array.isArray(tsunamiMeta.sections) && tsunamiMeta.sections.length > 0 && (
+                        {/* 主卡片与时间线历史行（isExpanded）都展示 sections，信息密度对齐主卡片 */}
+                        {(!isHistory || isExpanded) && Array.isArray(tsunamiMeta.sections) && tsunamiMeta.sections.length > 0 && (
                             <div className="event-tsunami-sections">
                                 {tsunamiMeta.sections.map((section) => (
                                     <div
@@ -365,13 +426,27 @@ function EventCard({
                         ) : null}
                     </div>
                 )}
+                {/* 气象预警 / 地震情报补充正文展开面板（主卡展开或时间线历史行） */}
+                {showDetailPanel && (
+                    <div className="event-weather-detail-panel">
+                        <div className="event-weather-detail-head">
+                            <span className="event-weather-detail-icon">📝</span>
+                            <span className="event-weather-detail-title">{detailPanelTitle}</span>
+                        </div>
+                        <div className="event-weather-detail-body">{detailBodyText}</div>
+                    </div>
+                )}
             </div>
 
-            {/* 极右侧：多更新折叠控制提示（若包含） */}
-            {isExpandable && (
+            {/* 极右侧：多更新折叠 / 正文展开控制提示 */}
+            {showExpandControl && (
                 <div className="update-badge">
                     <span className="update-count">
-                        {isExpanded ? '收起' : `${evt.updateCount || ''} 条更新`}
+                        {isExpanded
+                            ? '收起'
+                            : (isExpandable
+                                ? `${evt.updateCount || ''} 条更新`
+                                : '查看正文')}
                     </span>
                     <span className="update-icon">{isExpanded ? '▲' : '▼'}</span>
                 </div>
