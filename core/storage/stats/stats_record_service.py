@@ -105,13 +105,15 @@ class StatsRecordService:
                         existing_real = str(existing.get("real_event_id") or "").strip()
                         if existing_real:
                             push_record["real_event_id"] = existing_real
-                        # 海啸多报：用 update_count 作为报次，便于前端时间线展示
+                        # 海啸：report_num 优先业务 batch；无 batch 时用 update 序号兜底。
+                        # 不再无条件地 report_num = update_count。
                         if isinstance(event.event, TsunamiEvent):
-                            push_record["report_num"] = next_count
                             if not push_record.get("real_event_id"):
                                 push_record["real_event_id"] = (
                                     existing_real or push_record.get("event_id")
                                 )
+                            if push_record.get("report_num") in (None, "", 0):
+                                push_record["report_num"] = next_count
                         await self.manager.db.update_event(
                             existing_source or source_id,
                             push_record,
