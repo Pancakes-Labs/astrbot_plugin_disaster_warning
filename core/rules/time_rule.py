@@ -17,8 +17,9 @@ class EventTimeRule(BaseRule):
 
     rule_name = "time_rule"
 
-    def __init__(self, max_age_hours: float = 1.0):
-        # 默认限制历史事件时间距今不得超过 1 小时
+    def __init__(self, max_age_hours: float = 3.0):
+        # 默认限制历史事件时间距今不得超过 3 小时
+        # （CMT 等补充产品可能在发震后 1～2 小时才产出，1 小时阈值会误拦）
         self.max_age_hours = max_age_hours
 
     def evaluate(self, context: RuleContext) -> RuleDecision:
