@@ -423,7 +423,7 @@ class JmaTsunamiEqscParser(BaseParser):
     - 区域级 firstHeight.condition、maxHeight.description/value、immediate
     - isTraining / expiresAt / cancelled 状态位
 
-    解析目标：把上述字段完整落入 metadata / forecasts，供展示器与跨源去重复用。
+    解析目标：把上述字段完整落入 metadata / forecasts，供展示器与同源去重复用。
     """
 
     def __init__(self, message_logger=None):
@@ -584,7 +584,7 @@ class JmaTsunamiEqscParser(BaseParser):
             is_training = coerce_bool(data.get("isTraining"), default=False)
 
             # ---- 区域预报 ----
-            # 归一化后 forecasts 供展示器与跨源内容指纹共用
+            # 归一化后 forecasts 供展示器与同源内容指纹共用
             forecasts = normalize_jma_tsunami_areas(
                 data.get("areas", []), cancelled=cancelled
             )

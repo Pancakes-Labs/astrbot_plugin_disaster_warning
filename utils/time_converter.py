@@ -90,6 +90,10 @@ class TimeConverter:
             "%Y-%m-%dT%H:%M:%S",  # 无时区 ISO
             "%Y/%m/%d %H:%M",
             "%Y-%m-%d %H:%M",
+            # EQSC 等源常见：紧凑日期 + 空格时间，如 20260728 16:04:08
+            "%Y%m%d %H:%M:%S",
+            "%Y%m%d %H:%M:%S.%f",
+            "%Y%m%d %H:%M",
             "%Y%m%d%H%M%S",
             "%Y%m%d%H%M",
         ]

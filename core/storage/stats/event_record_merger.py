@@ -187,10 +187,15 @@ class EventRecordMerger:
                 source_id=source_id,
                 update_count=next_count,
             )
+            # 先清掉旧 report_num，避免无 batch 的日本海啸沿用上一报业务号。
+            # apply_tsunami_fields 仅在解析到业务 batch 时写入 report_num。
+            record.pop("report_num", None)
             EventRecordFactory.apply_tsunami_fields(record, event)
             if real_event_id:
                 record["real_event_id"] = real_event_id
-            record["report_num"] = next_count
+            # 无业务 batch：用系统更新序号区分各报（日本海啸常见）
+            if record.get("report_num") in (None, "", 0):
+                record["report_num"] = next_count or 1
 
             updated_record = target_list.pop(i)
             target_list.insert(0, updated_record)

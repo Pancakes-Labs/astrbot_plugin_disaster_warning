@@ -103,6 +103,11 @@ def _extract_earthquake_projection_details(
         for area_range in list(metadata.get("jma_warning_area_ranges") or [])
         if str(area_range).strip()
     ]
+    jma_warning_area_groups = [
+        dict(group)
+        for group in list(metadata.get("jma_warning_area_groups") or [])
+        if isinstance(group, dict) and str(group.get("range_text") or "").strip()
+    ]
 
     return {
         "impact_area": impact_area,
@@ -112,6 +117,7 @@ def _extract_earthquake_projection_details(
         "jma_comment": jma_comment,
         "jma_warning_areas": jma_warning_areas,
         "jma_warning_area_ranges": jma_warning_area_ranges,
+        "jma_warning_area_groups": jma_warning_area_groups,
         # 预存的本地/网络 URI 地址
         "image_uri": str(metadata.get("image_uri") or "").strip(),
         "shakemap_uri": str(metadata.get("shakemap_uri") or "").strip(),
@@ -196,6 +202,9 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
         "jma_comment": jma_comment,
         "jma_warning_areas": list(payload_details["jma_warning_areas"]),
         "jma_warning_area_ranges": list(payload_details["jma_warning_area_ranges"]),
+        "jma_warning_area_groups": list(
+            payload_details.get("jma_warning_area_groups") or []
+        ),
     }
     if local_estimation is not None:
         # 本地烈度估算仅在存在时写入，避免污染不相关事件的展示元数据。
@@ -236,6 +245,9 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
         jma_comment=jma_comment,
         jma_warning_areas=list(payload_details["jma_warning_areas"]),
         jma_warning_area_ranges=list(payload_details["jma_warning_area_ranges"]),
+        jma_warning_area_groups=list(
+            payload_details.get("jma_warning_area_groups") or []
+        ),
         display_model=EarthquakeDisplayModel(
             title=title,
             extras=dict(display_metadata),

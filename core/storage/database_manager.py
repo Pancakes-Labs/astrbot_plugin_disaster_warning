@@ -174,6 +174,39 @@ class DatabaseManager:
                 await cursor.execute(
                     "ALTER TABLE event_updates ADD COLUMN longitude REAL"
                 )
+            # 海啸/气象历史报详情：与主卡片同级展示所需的摘要字段
+            if "subtitle" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN subtitle TEXT"
+                )
+            if "weather_detail" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN weather_detail TEXT"
+                )
+            if "place_name" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN place_name TEXT"
+                )
+            if "max_wave_height" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN max_wave_height REAL"
+                )
+            if "area_count" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN area_count INTEGER"
+                )
+            if "immediate_area_count" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN immediate_area_count INTEGER"
+                )
+            if "is_cancelled" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN is_cancelled INTEGER DEFAULT 0"
+                )
+            if "is_training" not in updates_columns:
+                await cursor.execute(
+                    "ALTER TABLE event_updates ADD COLUMN is_training INTEGER DEFAULT 0"
+                )
 
         # 创建不存在的表
         await self._create_tables(cursor)
@@ -218,6 +251,7 @@ class DatabaseManager:
             """
         )
         # 事件更新表：保存每次历史报次的详细快照，用于重建更新轨迹
+        # 海啸/气象额外保留 weather_detail 等，使时间线历史报可与主卡片同级展示
         await cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS event_updates (
@@ -228,11 +262,19 @@ class DatabaseManager:
                 magnitude       REAL,
                 depth           REAL,
                 description     TEXT,
+                subtitle        TEXT,
+                weather_detail  TEXT,
+                place_name      TEXT,
                 level           TEXT,
                 wind_speed      REAL,
                 pressure        REAL,
                 latitude        REAL,
                 longitude       REAL,
+                max_wave_height REAL,
+                area_count      INTEGER,
+                immediate_area_count INTEGER,
+                is_cancelled    INTEGER DEFAULT 0,
+                is_training     INTEGER DEFAULT 0,
                 time            TEXT,
                 recorded_at     TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -413,6 +455,7 @@ class DatabaseManager:
 
             # 首次写入主事件表后，同步写入一条更新记录，保证历史链条从首报开始完整。
             # 台风快照优先使用当次观测值，避免与主表峰值语义混淆。
+            # 海啸/气象同步写入 weather_detail 等，使历史报可与主卡片同级展示。
             snapshot_level = event_data.get("_snapshot_level", event_data.get("level"))
             snapshot_wind = event_data.get(
                 "_snapshot_wind_speed", event_data.get("wind_speed")
@@ -423,8 +466,12 @@ class DatabaseManager:
             await cursor.execute(
                 """
                 INSERT INTO event_updates
-                    (event_id, source_event_id, report_num, magnitude, depth, description, level, wind_speed, pressure, latitude, longitude, time)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    (event_id, source_event_id, report_num, magnitude, depth,
+                     description, subtitle, weather_detail, place_name, level,
+                     wind_speed, pressure, latitude, longitude,
+                     max_wave_height, area_count, immediate_area_count,
+                     is_cancelled, is_training, time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     new_id,
@@ -433,11 +480,19 @@ class DatabaseManager:
                     event_data.get("magnitude"),
                     event_data.get("depth"),
                     event_data.get("description"),
+                    event_data.get("subtitle"),
+                    event_data.get("weather_detail"),
+                    event_data.get("place_name"),
                     snapshot_level,
                     snapshot_wind,
                     snapshot_pressure,
                     event_data.get("latitude"),
                     event_data.get("longitude"),
+                    event_data.get("max_wave_height"),
+                    event_data.get("area_count"),
+                    event_data.get("immediate_area_count"),
+                    1 if event_data.get("is_cancelled") else 0,
+                    1 if event_data.get("is_training") else 0,
                     event_data.get("time"),
                 ),
             )
@@ -520,25 +575,53 @@ class DatabaseManager:
         magnitude: Any = None,
         depth: Any = None,
         description: Any = None,
+        subtitle: Any = None,
+        weather_detail: Any = None,
+        place_name: Any = None,
         level: Any = None,
         wind_speed: Any = None,
         pressure: Any = None,
         latitude: Any = None,
         longitude: Any = None,
+        max_wave_height: Any = None,
+        area_count: Any = None,
+        immediate_area_count: Any = None,
+        is_cancelled: Any = None,
+        is_training: Any = None,
         time_value: Any = None,
     ) -> str:
-        """构建 event_updates 内容指纹，用于识别同内容重复写入。"""
+        """构建 event_updates 内容指纹，用于识别同内容重复写入。
+
+        除震级/深度/坐标等基础字段外，还需覆盖海啸/气象历史报详情字段，
+        避免仅 weather_detail / 波高 / 解除态变化时被误判为内容未变。
+        """
         return "|".join(
             [
                 cls._normalize_snapshot_value(report_num),
                 cls._normalize_snapshot_value(magnitude),
                 cls._normalize_snapshot_value(depth),
                 cls._normalize_snapshot_value(description),
+                cls._normalize_snapshot_value(subtitle),
+                cls._normalize_snapshot_value(weather_detail),
+                cls._normalize_snapshot_value(place_name),
                 cls._normalize_snapshot_value(level),
                 cls._normalize_snapshot_value(wind_speed),
                 cls._normalize_snapshot_value(pressure),
                 cls._normalize_snapshot_value(latitude),
                 cls._normalize_snapshot_value(longitude),
+                cls._normalize_snapshot_value(max_wave_height),
+                cls._normalize_snapshot_value(area_count),
+                cls._normalize_snapshot_value(immediate_area_count),
+                cls._normalize_snapshot_value(
+                    1
+                    if is_cancelled in (True, 1, "1")
+                    else (0 if is_cancelled in (False, 0, "0") else is_cancelled)
+                ),
+                cls._normalize_snapshot_value(
+                    1
+                    if is_training in (True, 1, "1")
+                    else (0 if is_training in (False, 0, "0") else is_training)
+                ),
                 cls._normalize_snapshot_value(time_value),
             ]
         )
@@ -554,11 +637,33 @@ class DatabaseManager:
         }
     )
 
+    # 海啸源：WebSocket 重连/多通道补发可能导致同内容重复入库。
+    # 内容指纹一致时不抬升 update_count、不追加 event_updates。
+    _TSUNAMI_DEDUPE_SOURCES = frozenset(
+        {
+            "fan_studio_tsunami",
+            "china_tsunami_fanstudio",
+            "china_tsunami",
+            "jma_tsunami_p2p",
+            "jma_tsunami",
+            "japan_jma_tsunami",
+            "p2p_tsunami",
+            "jma_tsunami_eqsc",
+            "eqsc_tsunami",
+        }
+    )
+
     @classmethod
     def _should_dedupe_list_poll_update(
         cls, source: str, event_data: dict[str, Any]
     ) -> bool:
-        """判断本次 update 是否属于 Wolfx 列表轮询去重范围。"""
+        """判断本次 update 是否应做内容指纹去重。
+
+        覆盖：
+        1. Wolfx 列表轮询源（定时重复拉取）
+        2. 海啸源（重连补发 / 多通道同内容）
+        3. 显式 type=tsunami 的记录（兜底）
+        """
         candidates = (
             source,
             event_data.get("source"),
@@ -568,6 +673,12 @@ class DatabaseManager:
             key = str(raw or "").strip().lower()
             if key in cls._LIST_POLL_DEDUPE_SOURCES:
                 return True
+            if key in cls._TSUNAMI_DEDUPE_SOURCES:
+                return True
+
+        event_type = str(event_data.get("type") or "").strip().lower()
+        if event_type == "tsunami":
+            return True
         return False
 
     async def update_event(self, source: str, event_data: dict[str, Any]) -> bool:
@@ -672,7 +783,7 @@ class DatabaseManager:
                 update_snapshot_wind = event_data["_snapshot_wind_speed"]
                 update_snapshot_pressure = event_data["_snapshot_pressure"]
 
-            # Wolfx 列表轮询：与最近一条 updates 内容完全一致时不追加、不抬升 update_count
+            # 列表轮询 / 海啸重连补发：与最近一条 updates 内容完全一致时不追加、不抬升
             content_unchanged = False
             if self._should_dedupe_list_poll_update(source, event_data):
                 incoming_fp = self._build_update_content_fingerprint(
@@ -680,17 +791,27 @@ class DatabaseManager:
                     magnitude=event_data.get("magnitude"),
                     depth=event_data.get("depth"),
                     description=event_data.get("description"),
+                    subtitle=event_data.get("subtitle"),
+                    weather_detail=event_data.get("weather_detail"),
+                    place_name=event_data.get("place_name"),
                     level=update_snapshot_level,
                     wind_speed=update_snapshot_wind,
                     pressure=update_snapshot_pressure,
                     latitude=event_data.get("latitude"),
                     longitude=event_data.get("longitude"),
+                    max_wave_height=event_data.get("max_wave_height"),
+                    area_count=event_data.get("area_count"),
+                    immediate_area_count=event_data.get("immediate_area_count"),
+                    is_cancelled=event_data.get("is_cancelled"),
+                    is_training=event_data.get("is_training"),
                     time_value=event_data.get("time"),
                 )
                 await cursor.execute(
                     """
-                    SELECT report_num, magnitude, depth, description, level, wind_speed,
-                           pressure, latitude, longitude, time
+                    SELECT report_num, magnitude, depth, description, subtitle,
+                           weather_detail, place_name, level, wind_speed, pressure,
+                           latitude, longitude, max_wave_height, area_count,
+                           immediate_area_count, is_cancelled, is_training, time
                     FROM event_updates
                     WHERE event_id=?
                     ORDER BY id DESC
@@ -705,12 +826,20 @@ class DatabaseManager:
                         magnitude=last_update[1],
                         depth=last_update[2],
                         description=last_update[3],
-                        level=last_update[4],
-                        wind_speed=last_update[5],
-                        pressure=last_update[6],
-                        latitude=last_update[7],
-                        longitude=last_update[8],
-                        time_value=last_update[9],
+                        subtitle=last_update[4],
+                        weather_detail=last_update[5],
+                        place_name=last_update[6],
+                        level=last_update[7],
+                        wind_speed=last_update[8],
+                        pressure=last_update[9],
+                        latitude=last_update[10],
+                        longitude=last_update[11],
+                        max_wave_height=last_update[12],
+                        area_count=last_update[13],
+                        immediate_area_count=last_update[14],
+                        is_cancelled=last_update[15],
+                        is_training=last_update[16],
+                        time_value=last_update[17],
                     )
                     content_unchanged = last_fp == incoming_fp
 
@@ -786,12 +915,17 @@ class DatabaseManager:
 
             # 主事件表字段更新后，仅在内容变化时追加报次快照。
             # 台风快照写入本次观测值，避免把“已抬升的峰值”误记成当前观测。
+            # 海啸/气象同步写入 weather_detail 等详情，供时间线历史报复用主卡片展示。
             if not content_unchanged:
                 await cursor.execute(
                     """
                     INSERT INTO event_updates
-                        (event_id, source_event_id, report_num, magnitude, depth, description, level, wind_speed, pressure, latitude, longitude, time)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        (event_id, source_event_id, report_num, magnitude, depth,
+                         description, subtitle, weather_detail, place_name, level,
+                         wind_speed, pressure, latitude, longitude,
+                         max_wave_height, area_count, immediate_area_count,
+                         is_cancelled, is_training, time)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         db_id,
@@ -800,11 +934,19 @@ class DatabaseManager:
                         event_data.get("magnitude"),
                         event_data.get("depth"),
                         event_data.get("description"),
+                        event_data.get("subtitle"),
+                        event_data.get("weather_detail"),
+                        event_data.get("place_name"),
                         update_snapshot_level,
                         update_snapshot_wind,
                         update_snapshot_pressure,
                         event_data.get("latitude"),
                         event_data.get("longitude"),
+                        event_data.get("max_wave_height"),
+                        event_data.get("area_count"),
+                        event_data.get("immediate_area_count"),
+                        1 if event_data.get("is_cancelled") else 0,
+                        1 if event_data.get("is_training") else 0,
                         event_data.get("time"),
                     ),
                 )

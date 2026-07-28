@@ -45,16 +45,18 @@ class ScaleConverter:
     def parse_jma_cwa_scale(scale_str: str | int | float) -> float | None:
         """
         解析日本或台湾震度字符串。
-        支持格式：'5-'、'5+'、'5弱'、'5強'、'5'、'6.5' 等。
+        支持格式：'5-'、'5+'、'5弱'、'5強'、'5强'、'5' 等。
 
-        映射规则如下：
+        映射规则与项目内 P2P/展示层规范值对齐：
         X弱 / X- -> X - 0.5
-        X強 / X+ -> X + 0.5
+        X強 / X强 / X+ -> X
         X        -> X.0
 
         例如：
         5弱 -> 4.5
-        5強 -> 5.5
+        5強 -> 5.0
+        6弱 -> 5.5
+        6強 -> 6.0
         """
         if scale_str is None:
             return None
@@ -67,18 +69,39 @@ class ScaleConverter:
         if not scale_str:
             return None
 
-        # 支持 5+、5-、5弱、5強 等多种格式。
-        match = re.search(r"(\d+)(弱|強|\+|\-)?", scale_str)
+        # 先走显式字典，避免简繁体与符号写法产生歧义。
+        normalized = scale_str.replace("強", "强").replace("＋", "+").replace("－", "-")
+        explicit_mapping = {
+            "5-": 4.5,
+            "5弱": 4.5,
+            "5+": 5.0,
+            "5强": 5.0,
+            "6-": 5.5,
+            "6弱": 5.5,
+            "6+": 6.0,
+            "6强": 6.0,
+            "7": 7.0,
+            "4": 4.0,
+            "3": 3.0,
+            "2": 2.0,
+            "1": 1.0,
+            "0": 0.0,
+        }
+        if normalized in explicit_mapping:
+            return explicit_mapping[normalized]
+
+        # 支持 5+、5-、5弱、5強/5强 等多种格式。
+        # 「強/强/+」映射为整数档（5.0/6.0），与 convert_p2p_scale 及展示层一致。
+        match = re.search(r"(\d+)(弱|強|强|\+|\-)?", normalized)
         if match:
             base = int(match.group(1))
             suffix = match.group(2)
 
             if suffix in ["弱", "-"]:
                 return base - 0.5
-            elif suffix in ["強", "+"]:
-                return base + 0.5
-            else:
+            if suffix in ["強", "强", "+"]:
                 return float(base)
+            return float(base)
 
         return None
 

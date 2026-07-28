@@ -3,176 +3,218 @@ const { Typography } = MaterialUI;
 /**
  * 地震或灾害事件多报更新时间轴面板组件 (EventGroupTimeline)
  * 当某次地震存在多次修正速报或更新时，用户点击卡片会展开此组件。
- * 该组件以垂直时间线形式，由新到旧列出该事件组名下接收到的所有历史报告，
- * 并展示各期报告中的详细震级、震源深度以及对应的地震烈度/震度标志。
+ * 该组件以垂直时间线形式，由新到旧列出该事件组名下接收到的所有历史报告。
+ *
+ * 海啸/气象/地震/台风统一复用 EventCard 渲染各报详情，
+ * 使历史报与主卡片信息密度一致（chips / sections / 深度等）。
+ * 收起由顶部主卡片统一提供，本组件不再接收 onCollapse。
  *
  * @param {Object} props
  * @param {Object} props.group 包含同一事件关联的 events 列表与最新一条 event 记录的分组数据
  * @param {string} props.displayTimezone 全局配置的时区，如 'UTC+8'
- * @param {Function} props.onCollapse 折叠收起该面板的回调函数
  */
-function EventGroupTimeline({ group, displayTimezone, onCollapse }) {
-    const { getDisplayTimeValue, formatMagnitudeBadge, getEarthquakeBadgeContent } = window.EventFormatters;
-    const typhoonFormatters = window.DisasterTyphoonFormatters;
+function EventGroupTimeline({ group, displayTimezone }) {
+    const formatters = window.EventFormatters || {};
+    const {
+        getDisplayTimeValue,
+        resolveEventReportNum,
+        formatReportLabel,
+    } = formatters;
     const totalReports = group.events.length;
     const groupType = group.latestEvent.type || '';
     const isTyphoonGroup = groupType === 'typhoon';
 
+    /**
+     * 将历史快照与最新主事件合并。
+     * 身份字段（source/type/place）可继承；状态字段（weather_detail/is_cancelled 等）
+     * 仅在本报有值或最新行时继承，避免解除报覆盖历史报。
+     */
+    const mergeTimelineEvent = (evt, isLatestRow = false) => {
+        const latest = group.latestEvent || {};
+        const hasOwn = (key) => (
+            evt[key] !== undefined && evt[key] !== null && evt[key] !== ''
+        );
+
+        // 历史快照若无 weather_detail，尽量从 description 推断取消态，避免误继承最新解除
+        const ownCancelled = hasOwn('is_cancelled')
+            ? Boolean(evt.is_cancelled)
+            : (hasOwn('cancelled')
+                ? Boolean(evt.cancelled)
+                : (String(evt.level || '').includes('解除')
+                    || String(evt.description || '').includes('解除')
+                    || null));
+
+        return {
+            // 先铺本报快照，再显式写身份/状态字段，避免 ...evt 中的 null/'' 冲掉父级身份
+            ...evt,
+            // 身份字段：本报有值用本报，否则继承最新主事件
+            source: evt.source || latest.source,
+            source_id: evt.source_id || latest.source_id || latest.source,
+            type: evt.type || latest.type,
+            info_type: evt.info_type || latest.info_type,
+            weather_type_code: evt.weather_type_code || latest.weather_type_code,
+            icon_url: evt.icon_url || latest.icon_url,
+            description: hasOwn('description') ? evt.description : (isLatestRow ? latest.description : (evt.description || '')),
+            subtitle: hasOwn('subtitle') ? evt.subtitle : (isLatestRow ? latest.subtitle : (evt.subtitle || '')),
+            level: hasOwn('level') ? evt.level : (isLatestRow ? latest.level : (evt.level || '')),
+            magnitude: hasOwn('magnitude') ? evt.magnitude : (isLatestRow ? latest.magnitude : evt.magnitude),
+            depth: hasOwn('depth') ? evt.depth : (isLatestRow ? latest.depth : evt.depth),
+            report_num: hasOwn('report_num') ? evt.report_num : (isLatestRow ? latest.report_num : evt.report_num),
+            time: evt.time || evt.timestamp || (isLatestRow ? latest.time : ''),
+            timestamp: evt.timestamp || evt.time || (isLatestRow ? latest.timestamp : ''),
+            recorded_at: evt.recorded_at || (isLatestRow ? latest.recorded_at : evt.recorded_at),
+            // 详情摘要：有则用本报；最新行可回退主表；历史行不继承最新解除摘要
+            weather_detail: hasOwn('weather_detail')
+                ? evt.weather_detail
+                : (isLatestRow ? (latest.weather_detail || '') : ''),
+            // 地点属身份字段：本报优先，缺失时继承主事件，避免历史卡丢地点
+            place_name: hasOwn('place_name')
+                ? evt.place_name
+                : (latest.place_name || evt.place_name || ''),
+            max_wave_height: hasOwn('max_wave_height')
+                ? evt.max_wave_height
+                : (isLatestRow ? latest.max_wave_height : null),
+            area_count: hasOwn('area_count')
+                ? evt.area_count
+                : (isLatestRow ? latest.area_count : null),
+            immediate_area_count: hasOwn('immediate_area_count')
+                ? evt.immediate_area_count
+                : (isLatestRow ? latest.immediate_area_count : null),
+            is_cancelled: ownCancelled !== null
+                ? ownCancelled
+                : (isLatestRow ? Boolean(latest.is_cancelled) : false),
+            is_training: hasOwn('is_training')
+                ? Boolean(evt.is_training)
+                : (hasOwn('isTraining')
+                    ? Boolean(evt.isTraining)
+                    : (isLatestRow ? Boolean(latest.is_training) : false)),
+            latitude: hasOwn('latitude') ? evt.latitude : (isLatestRow ? latest.latitude : evt.latitude),
+            longitude: hasOwn('longitude') ? evt.longitude : (isLatestRow ? latest.longitude : evt.longitude),
+            // 台风快照字段
+            _snapshot_level: evt._snapshot_level || evt.level,
+            _snapshot_wind_speed: evt._snapshot_wind_speed ?? evt.wind_speed,
+            _snapshot_pressure: evt._snapshot_pressure ?? evt.pressure,
+            _snapshot_latitude: evt._snapshot_latitude ?? evt.latitude,
+            _snapshot_longitude: evt._snapshot_longitude ?? evt.longitude,
+            wind_speed: evt.wind_speed ?? (isLatestRow ? latest.wind_speed : evt.wind_speed),
+            pressure: evt.pressure ?? (isLatestRow ? latest.pressure : evt.pressure),
+            batch: evt.batch ?? (isLatestRow ? latest.batch : evt.batch),
+        };
+    };
+
+    // 预计算组内业务报次：若多行撞同一业务号，时间线统一改用组内序号，
+    // 避免地震/气象多报共用同一 report_num 时全部显示成「第 N 报」。
+    const businessReportNums = (group.events || []).map((evt, idx) => {
+        const merged = mergeTimelineEvent(evt, idx === 0);
+        const num = typeof resolveEventReportNum === 'function'
+            ? resolveEventReportNum(merged)
+            : Number(merged?.report_num);
+        return (Number.isInteger(num) && num > 0) ? num : null;
+    });
+    const seenBusinessNums = new Set();
+    let hasDuplicateBusinessReportNum = false;
+    for (const num of businessReportNums) {
+        if (num == null) continue;
+        if (seenBusinessNums.has(num)) {
+            hasDuplicateBusinessReportNum = true;
+            break;
+        }
+        seenBusinessNums.add(num);
+    }
+
     return (
-        <div className="event-group-expanded event-group-expanded-panel">
-            {/* 收起控制条 */}
-            <button
-                onClick={onCollapse}
-                onKeyDown={(e) => { 
-                    if (e.key === 'Enter' || e.key === ' ') { 
-                        e.preventDefault(); 
-                        onCollapse(); 
-                    } 
-                }}
-                aria-expanded={true}
-                className="event-group-collapse-button"
-            >
+        <div className="event-group-timeline-panel">
+            {/* 收起由顶部主卡片统一提供，这里只保留轻量统计标题，避免重复「收起」 */}
+            <div className="event-group-timeline-header">
                 <Typography variant="body2" className="event-group-collapse-text">
                     共 {totalReports} 次更新
                 </Typography>
-                <div className="update-badge">
-                    <span>收起</span>
-                    <span className="update-icon">▲</span>
-                </div>
-            </button>
+            </div>
 
             {/* 垂直时间线容器 */}
             <div className="event-group-timeline">
-                {/* 垂直中心轴线 */}
                 <div className="event-group-timeline-line"></div>
-                
-                {/* 遍历输出每一报的历史明细 */}
-                {group.events.map((evt, idx) => {
-                    // 台风路径点统一按时间线位置编号：主表最新状态没有 report_num，
-                    // 若混用历史快照的 report_num，会把最新点错误显示为“第1报”。
-                    const reportIndex = totalReports - idx;
-                    const actualReportNum = Number(evt?.report_num);
-                    const hasValidReportNum = Number.isInteger(actualReportNum) && actualReportNum > 0;
-                    const displayReportNum = isTyphoonGroup
-                        ? reportIndex
-                        : (hasValidReportNum ? actualReportNum : reportIndex);
-                    
-                    // 标识最新的这一期（第0项）
-                    const isLatest = idx === 0;
-                    const rowType = evt.type || group.latestEvent.type || '';
-                    const isEarthquake = rowType === 'earthquake' || rowType === 'earthquake_warning';
-                    const isTyphoon = rowType === 'typhoon';
-                    
-                    // 获取报告中的地震参数
-                    const rowDepth = evt.depth ?? group.latestEvent.depth;
-                    const rowMagnitude = evt.magnitude ?? group.latestEvent.magnitude;
-                    const rowMagnitudeText = formatMagnitudeBadge(rowMagnitude);
-                    
-                    // 提取此报对应的地震烈度徽标元数据
-                    const rowBadgeMeta = getEarthquakeBadgeContent({
-                        ...group.latestEvent,
-                        ...evt,
-                        _groupMagnitude: group.latestEvent.magnitude
-                    });
 
-                    // 台风路径点参数：优先使用当前快照字段，回退到主字段峰值。
-                    const typhoonLevel = evt._snapshot_level || evt.level || '';
-                    const typhoonWind = Number(evt._snapshot_wind_speed ?? evt.wind_speed);
-                    const typhoonPressure = evt._snapshot_pressure != null
-                        ? Number(evt._snapshot_pressure)
-                        : (evt.pressure != null ? Number(evt.pressure) : null);
-                    const typhoonLat = evt._snapshot_latitude != null
-                        ? Number(evt._snapshot_latitude)
-                        : (evt.latitude != null ? Number(evt.latitude) : null);
-                    const typhoonLon = evt._snapshot_longitude != null
-                        ? Number(evt._snapshot_longitude)
-                        : (evt.longitude != null ? Number(evt.longitude) : null);
-                    const typhoonLevelEmoji = typhoonFormatters?.getTyphoonLevelEmoji(typhoonLevel) || '🌀';
-                    const typhoonLevelColor = typhoonFormatters?.getTyphoonLevelColor(typhoonLevel) || '';
-                    const typhoonCoords = typhoonFormatters?.formatTyphoonCoords(typhoonLat, typhoonLon) || '';
+                {group.events.map((evt, idx) => {
+                    // 时间线芯片：默认可用业务报次；台风/海啸、无业务号、或组内业务号撞车时用序号。
+                    // 业务报次（batch）仍可由主卡片徽章 / 业务 chip 展示，语义分离。
+                    const sequenceNum = totalReports - idx;
+                    const isLatest = idx === 0;
+                    const mergedEvt = mergeTimelineEvent(evt, isLatest);
+
+                    const businessReportNum = businessReportNums[idx];
+                    const hasBusinessReportNum = businessReportNum != null;
+                    const useSequenceLabel = isTyphoonGroup
+                        || groupType === 'tsunami'
+                        || !hasBusinessReportNum
+                        || hasDuplicateBusinessReportNum;
+                    const displayReportNum = useSequenceLabel ? sequenceNum : businessReportNum;
+                    // 统一写「第 X 报」；海啸业务号不同时另注业务报数
+                    const reportLabelText = typeof formatReportLabel === 'function'
+                        ? formatReportLabel(displayReportNum)
+                        : `第 ${displayReportNum} 报`;
+                    const businessHint = (groupType === 'tsunami'
+                        && hasBusinessReportNum
+                        && businessReportNum !== sequenceNum)
+                        ? (typeof formatReportLabel === 'function'
+                            ? formatReportLabel(businessReportNum)
+                            : `第 ${businessReportNum} 报`)
+                        : '';
+
+                    // 展示时间：优先本报更新时间
+                    const displayTime = typeof getDisplayTimeValue === 'function'
+                        ? getDisplayTimeValue(mergedEvt, true)
+                        : (mergedEvt.time || mergedEvt.timestamp || '');
 
                     return (
                         <div
                             key={idx}
                             className={`event-group-timeline-item ${idx === group.events.length - 1 ? 'is-last' : ''}`}
                         >
-                            {/* 时间线节点小圆点 */}
                             <div className={`event-group-timeline-dot ${isLatest ? 'is-latest' : ''}`}></div>
-                            
-                            {/* 单期报告内容排版行 */}
-                            <div className="event-group-timeline-row">
-                                {/* 若是地震类型，渲染对应的烈度徽标 */}
-                                {isEarthquake && <IntensityBadge meta={rowBadgeMeta} />}
-                                
+
+                            <div className="event-group-timeline-row event-group-timeline-row--card">
                                 <div className="event-group-timeline-main">
-                                    {/* 报告数、最新标及发生时间 */}
+                                    {/* 更新序号 + 业务报次提示 + 最新标 + 时间 */}
                                     <div className="event-group-timeline-meta-row">
                                         <span className={`event-group-report-chip ${isLatest ? 'is-latest' : ''}`}>
-                                            第 {displayReportNum} 报
+                                            {reportLabelText}
                                         </span>
+                                        {businessHint ? (
+                                            <span className="event-group-business-chip" title="源站业务报次">
+                                                业务报数 {businessHint}
+                                            </span>
+                                        ) : null}
                                         {isLatest && <span className="event-group-latest-chip">最新</span>}
                                         <Typography variant="body2" className="event-group-time-text">
-                                            🕒 {formatTimeFriendly(getDisplayTimeValue(evt, true), displayTimezone, evt.source || group.latestEvent.source || '')}
+                                            🕒 {formatTimeFriendly(
+                                                displayTime,
+                                                displayTimezone,
+                                                mergedEvt.source || group.latestEvent.source || ''
+                                            )}
                                         </Typography>
                                     </div>
-                                    
-                                    {/* 地震专用数值参数区（震级、深度） */}
-                                    {isEarthquake && (
-                                        <div className="event-group-quake-details">
-                                            <Typography variant="body2" className="event-group-quake-text event-group-quake-text--strong">
-                                                震级: {rowMagnitudeText !== '--' ? `M ${rowMagnitudeText}` : '调查中'}
-                                            </Typography>
-                                            <Typography variant="body2" className="event-group-quake-text">
-                                                深度: {(rowDepth !== undefined && rowDepth !== null) ? `${rowDepth} km` : '未知'}
-                                            </Typography>
-                                        </div>
-                                    )}
 
-                                    {/* 台风专用路径点参数区（强度、位置、最大风速、气压） */}
-                                    {isTyphoon && (
-                                        <div className="event-group-typhoon-details">
-                                            <Typography variant="body2" className="event-group-typhoon-text event-group-typhoon-text--strong" style={typhoonLevelColor ? { color: typhoonLevelColor } : undefined}>
-                                                {typhoonLevelEmoji} {typhoonLevel || '未知等级'}
-                                            </Typography>
-                                            {typhoonCoords && (
-                                                <Typography variant="body2" className="event-group-typhoon-text">
-                                                    中心位置: ({typhoonCoords})
-                                                </Typography>
-                                            )}
-                                            {Number.isFinite(typhoonWind) && typhoonWind > 0 && (
-                                                <Typography variant="body2" className="event-group-typhoon-text">
-                                                    最大风速: {typhoonWind.toFixed(1)} m/s
-                                                </Typography>
-                                            )}
-                                            {typhoonPressure != null && typhoonPressure > 0 && (
-                                                <Typography variant="body2" className="event-group-typhoon-text">
-                                                    中心气压: {typhoonPressure} hPa
-                                                </Typography>
-                                            )}
-                                        </div>
-                                    )}
+                                    {/* 复用主卡片同款 EventCard，展示完整 chips / sections / 深度等。
+                                        报次已在上方 chip 展示；hideReportBadge 禁止 batch 回退再画徽章。 */}
+                                    <div className="event-group-history-card-wrap">
+                                        <EventCard
+                                            event={mergedEvt}
+                                            displayTimezone={displayTimezone}
+                                            isHistory={true}
+                                            isExpandable={false}
+                                            isExpanded={true}
+                                            reportIndex={null}
+                                            hideExpandBadge={true}
+                                            hideReportBadge={true}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     );
                 })}
             </div>
-        </div>
-    );
-}
-
-/**
- * 局部时序烈度徽标子组件 (IntensityBadge)
- *
- * @param {Object} props
- * @param {Object} props.meta 包含 label (机构) 与 text (烈度数值/符号) 的配置
- */
-function IntensityBadge({ meta }) {
-    const toneClass = meta?.toneClass ? `event-badge-tone-${meta.toneClass}` : 'event-badge-tone-unknown';
-    return (
-        <div className={`event-group-intensity-badge ${toneClass}`}>
-            <span className="event-group-intensity-label">{meta.label}</span>
-            <span className="event-group-intensity-value">{meta.text}</span>
         </div>
     );
 }

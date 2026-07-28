@@ -2,7 +2,8 @@
 EQSC JMA 海啸情报轮询服务。
 
 独立于 WebSocket 接入：周期性拉取 /jma_tsunami.json，
-经内容指纹去重后进入统一事件流水线，作为 P2P 津波予報的高优先级补充源。
+经同源内容指纹去重后进入统一事件流水线，作为 P2P 津波予報的高优先级补充源。
+各源独立推送，不再与 P2P 做跨源互斥。
 """
 
 from __future__ import annotations

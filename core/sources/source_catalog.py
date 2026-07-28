@@ -711,7 +711,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         text_presenter_key="tsunami_jma",
         report_policy="none",
         intensity_mode="none",
-        # EQSC 字段更完整，优先级低于 EQSC（数值越大越优先）
+        # 字段完整度语义：低于 EQSC（数值越大越优先）；当前不做跨源互斥
         priority=1,
         display_name="日本气象厅",
         description="日本气象厅：津波予報 - P2P地震情报 WebSocket",
@@ -741,7 +741,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         text_presenter_key="tsunami_jma",
         report_policy="none",
         intensity_mode="none",
-        # 高于 P2P：字段更完整，跨源去重时优先保留 EQSC
+        # 高于 P2P：字段更完整；priority 语义保留，当前不做跨源互斥
         priority=3,
         display_name="日本气象厅",
         description="日本气象厅：津波予報 - EQSC HTTP 轮询（P2P 高优先级补充）",

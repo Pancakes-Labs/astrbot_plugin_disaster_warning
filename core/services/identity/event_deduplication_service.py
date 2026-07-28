@@ -47,10 +47,10 @@ class EventDeduplicationService:
         # 当同一台风的核心参数（等级、位置、风速、气压、移向移速、风圈半径）
         # 与上次推送完全一致时直接过滤，避免数据源刷屏。
         self._typhoon_cache: dict[str, str] = {}
-        # JMA 海啸跨源去重缓存：
-        # key = content_fingerprint
+        # JMA 海啸同源去重缓存：
+        # key = source_id|content_fingerprint
         # value = {"source_id", "priority", "event_id", "ts"}
-        # EQSC 优先级更高：同内容后到的低优先级源会被吞掉。
+        # 各源独立推送，不再跨源互斥；priority 仅作语义记录保留。
         # 带容量上限，防止长跑进程内存无限增长。
         self._tsunami_cache: dict[str, dict[str, Any]] = {}
         self._tsunami_cache_max_size = 512
@@ -324,9 +324,9 @@ class EventDeduplicationService:
         """跨源优先级去重公共实现。
 
         Args:
-            kind: 业务类别文案，如「海啸」「烈度速报」，用于日志前缀。
-            filter_same_source: 为 True 时，同优先级同源也过滤（适合内容指纹，
-                如海啸）。为 False 时同源放行给下游更新链路（适合粗软指纹，
+            kind: 业务类别文案，如「烈度速报」，用于日志前缀。
+            filter_same_source: 为 True 时，同优先级同源也过滤。
+                为 False 时同源放行给下游更新链路（适合粗软指纹，
                 如 CENC 烈度速报仅做跨源去重）。
 
         规则：
@@ -398,21 +398,19 @@ class EventDeduplicationService:
         return True
 
     def _should_push_tsunami(self, event: EventEnvelope) -> bool:
-        """JMA 海啸跨源去重：同内容指纹只推一次，EQSC 优先。
+        """JMA 海啸同源内容去重：各源独立推送，同内容只推一次。
 
-        规则：
-        1. 指纹未见过 → 放行并记录
-        2. 指纹相同且来源优先级 <= 已记录 → 过滤
-        3. 指纹相同但来源优先级更高（如 EQSC 后到）→ 放行并升级缓存
-           （用于 P2P 先到简报、EQSC 后到完整报的升级场景；
-            若内容完全一致，EQSC 后到仍会因指纹相同且 priority 更高而放行一次，
-            但解析器指纹已含区域细节，EQSC 通常会因更丰富字段产生不同指纹从而放行更新）
+        设计取舍：
+        - 不再做 P2P / EQSC 跨源互斥，便于双源互补与测试数据积累。
+        - catalog 中的 priority 语义仍保留并写入缓存，但不参与过滤决策。
+        - 同源同内容（含 event_id）未变化时过滤，避免轮询/重放刷屏。
+        - 解除报 areas 为空时依赖 event_id 区分不同事件，避免误杀后续解除。
         """
         if not isinstance(event.event, TsunamiEvent):
             return True
 
         source_id = self._get_source_id(event)
-        # 仅对日本海啸双源做跨源去重；中国海啸等保持放行
+        # 仅对日本海啸双源做同源内容去重；中国海啸等保持放行
         if source_id not in {"jma_tsunami_p2p", "jma_tsunami_eqsc"}:
             return True
 
@@ -420,15 +418,27 @@ class EventDeduplicationService:
         if not fingerprint:
             return True
 
-        return self._should_push_by_priority_fingerprint(
-            cache=self._tsunami_cache,
-            max_size=self._tsunami_cache_max_size,
-            fingerprint=fingerprint,
+        event_id = str(event.id or "")
+        # 同源隔离：不同源即使内容相同也各自放行
+        cache_key = f"{source_id}|{fingerprint}"
+        existing = self._tsunami_cache.get(cache_key)
+        if existing is not None:
+            plugin_logger.info(
+                f"[灾害预警] 海啸内容未变化，过滤重复推送: {source_id} "
+                f"(event={event_id})",
+                is_event_linked=True,
+            )
+            return False
+
+        # priority 仅作语义记录，不参与跨源过滤
+        priority = self._resolve_source_priority(source_id)
+        self._remember_tsunami_fingerprint(
+            cache_key,
             source_id=source_id,
-            event_id=str(event.id or ""),
-            kind="海啸",
-            log_level="info",
+            priority=priority,
+            event_id=event_id,
         )
+        return True
 
     @classmethod
     def _is_cenc_intensity_report_source(cls, source_id: str) -> bool:
@@ -553,22 +563,22 @@ class EventDeduplicationService:
         return True
 
     def _seed_tsunami(self, event: EventEnvelope) -> bool:
-        """播种海啸内容指纹。"""
+        """播种海啸同源内容指纹。"""
         if not isinstance(event.event, TsunamiEvent):
             return False
         source_id = self._get_source_id(event)
         fingerprint = self._extract_tsunami_fingerprint(event)
         if not fingerprint:
             return False
+        # 与推送路径一致：按源隔离，避免静默播种时跨源互相覆盖
+        cache_key = f"{source_id}|{fingerprint}"
         priority = self._resolve_source_priority(source_id)
-        existing = self._tsunami_cache.get(fingerprint)
-        if existing is None or priority >= int(existing.get("priority") or 0):
-            self._remember_tsunami_fingerprint(
-                fingerprint,
-                source_id=source_id,
-                priority=priority,
-                event_id=str(event.id or ""),
-            )
+        self._remember_tsunami_fingerprint(
+            cache_key,
+            source_id=source_id,
+            priority=priority,
+            event_id=str(event.id or ""),
+        )
         plugin_logger.debug(
             f"[灾害预警] 静默播种海啸指纹: {source_id} 事件 ID {event.id}"
         )
@@ -625,7 +635,7 @@ class EventDeduplicationService:
         """判断是否应该推送事件。
 
         台风事件走专用核心参数指纹去重链路，
-        海啸事件走 JMA 跨源内容指纹去重（EQSC 优先），
+        海啸事件走 JMA 同源内容指纹去重（各源独立推送），
         地震事件进入指纹与报次更新判定链路，
         其余非地震事件直接放行。
         """
@@ -636,7 +646,7 @@ class EventDeduplicationService:
         if isinstance(envelope.event, TyphoonEvent):
             return self._should_push_typhoon(envelope)
 
-        # 海啸事件：P2P / EQSC 跨源内容去重
+        # 海啸事件：P2P / EQSC 同源内容去重（不再跨源互斥）
         if isinstance(envelope.event, TsunamiEvent):
             return self._should_push_tsunami(envelope)
 

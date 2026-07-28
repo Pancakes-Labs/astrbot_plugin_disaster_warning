@@ -29,6 +29,7 @@ from .tsunami_title import (
     format_tsunami_magnitude_token,
     is_generic_tsunami_title,
     is_legacy_tsunami_description,
+    parse_tsunami_batch_num,
 )
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "is_generic_tsunami_title",
     "is_legacy_tsunami_description",
     "jp_tsunami_level_weight",
+    "parse_tsunami_batch_num",
     "normalize_cn_tsunami_level",
     "normalize_jp_tsunami_level",
     "normalize_jma_tsunami_areas",
