@@ -215,13 +215,14 @@ def _append_cn_district_estimation(
     lon = display_context.longitude
     mag = display_context.magnitude
     depth = display_context.depth
-    # 缺少必要参数时跳过
-    if lat is None or lon is None or mag is None or depth is None:
+    # 缺少位置或震级时无法估算；深度缺失时按 10 km 兜底
+    if lat is None or lon is None or mag is None:
         return
+    depth_km = float(depth) if depth is not None else 10.0
 
     try:
         estimates = CnDistrictIntensityService.estimate_affected_districts(
-            float(lat), float(lon), float(mag), float(depth)
+            float(lat), float(lon), float(mag), depth_km
         )
     except Exception:
         return

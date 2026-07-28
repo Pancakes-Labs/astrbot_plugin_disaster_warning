@@ -77,13 +77,15 @@ class LocalMonitor:
 
         is_allowed, distance, intensity = self.check_event(earthquake)
 
-        # 基于震源深度与震中距估算 P/S 波预计到达时间
+        # 基于震源深度与震中距估算 P/S 波预计到达时间。
+        # 缺 depth时与本地烈度一致，按 10 km 兜底估算。
         depth = getattr(earthquake, "depth", None)
+        depth_km = float(depth) if depth is not None else 10.0
         p_travel_sec: float | None = None
         s_travel_sec: float | None = None
-        if depth is not None and distance > 0:
+        if distance > 0:
             try:
-                travel_result = TravelTimeService.lookup(float(depth), float(distance))
+                travel_result = TravelTimeService.lookup(depth_km, float(distance))
                 p_travel_sec = travel_result.p_travel_sec
                 s_travel_sec = travel_result.s_travel_sec
             except Exception as exc:
