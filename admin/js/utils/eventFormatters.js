@@ -386,13 +386,110 @@
     }
 
     /**
+     * 从文本中剥离内嵌报数标记，例如「（第3报）」「(第 3 报)」。
+     * 列表标题旁已有独立报数徽章，避免标题与徽章两套语义打架。
+     */
+    function stripEmbeddedReportToken(text) {
+        const raw = String(text || '').trim();
+        if (!raw) return '';
+        return raw
+            .replace(/[（(]\s*第\s*\d+\s*报\s*[）)]/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .replace(/\s*·\s*$/g, '')
+            .trim();
+    }
+
+    /**
+     * 从 description / weather_detail / batch 字段尽力解析业务报次。
+     */
+    function extractReportNumFromText(text) {
+        const raw = String(text || '').trim();
+        if (!raw) return null;
+        const match = raw.match(/第\s*(\d+)\s*[报批]/)
+            || raw.match(/批次\s*(\d+)/)
+            || raw.match(/(?:^|[^\d])(\d+)\s*报/);
+        if (!match) return null;
+        const num = Number(match[1]);
+        return Number.isInteger(num) && num > 0 ? num : null;
+    }
+
+    /**
+     * 从事件对象提取业务 batch 报次（不含系统 update_count）。
+     */
+    function resolveBusinessBatchNum(evt) {
+        if (!evt || typeof evt !== 'object') return null;
+        const batchCandidates = [
+            evt.batch,
+            evt.Batch,
+            evt.weather_detail,
+            // 旧 description 可能内嵌「（第3报）」；新标题已剥离，但仍兼容历史数据
+            evt.description,
+            evt.subtitle,
+        ];
+        for (const candidate of batchCandidates) {
+            if (candidate === null || candidate === undefined || candidate === '') continue;
+            const asNum = Number(candidate);
+            if (Number.isInteger(asNum) && asNum > 0) return asNum;
+            const parsed = extractReportNumFromText(candidate);
+            if (parsed) return parsed;
+        }
+        return null;
+    }
+
+    /**
+     * 统一解析事件展示用报次。
+     *
+     * 语义：
+     * - 地震等：report_num 即业务报次
+     * - 海啸：report_num 应为业务 batch；旧数据可能被错误写成 update_count，
+     *   因此海啸优先读 batch / weather_detail 中的业务报次，再回退 report_num
+     * - update_count 只表示系统合并次数，用于「N 条更新」，不进徽章
+     *
+     * 优先级：显式 override >（海啸业务 batch）> report_num > 文本回退
+     */
+    function resolveEventReportNum(evt, override = null) {
+        if (override !== null && override !== undefined && override !== '') {
+            const forced = Number(override);
+            if (Number.isInteger(forced) && forced > 0) return forced;
+        }
+        if (!evt || typeof evt !== 'object') return null;
+
+        const eventType = String(evt.type || evt._groupType || '').toLowerCase();
+        const isTsunami = eventType === 'tsunami';
+
+        if (isTsunami) {
+            const businessBatch = resolveBusinessBatchNum(evt);
+            if (businessBatch) return businessBatch;
+        }
+
+        const direct = Number(evt.report_num);
+        if (Number.isInteger(direct) && direct > 0) return direct;
+
+        if (!isTsunami) {
+            const fallbackBatch = resolveBusinessBatchNum(evt);
+            if (fallbackBatch) return fallbackBatch;
+        }
+        return null;
+    }
+
+    /**
+     * 格式化「第 N 报」展示文案。
+     */
+    function formatReportLabel(reportNum) {
+        const num = Number(reportNum);
+        if (!Number.isInteger(num) || num <= 0) return '';
+        return `第 ${num} 报`;
+    }
+
+    /**
      * 构建海啸列表主标题。
      * 优先用后端新 description；若是旧「海啸信息 (信息)」则用结构化字段重拼。
+     * 注意：标题内不再附带「（第N报）」，报次统一由卡片徽章展示，避免与 report_num 冲突。
      */
     function buildTsunamiTitle(evt) {
         if (!evt || typeof evt !== 'object') return '海啸情报';
 
-        const description = cleanTsunamiText(evt.description);
+        const description = stripEmbeddedReportToken(cleanTsunamiText(evt.description));
         const level = cleanTsunamiText(evt.level);
         const place = resolveTsunamiPlaceName(evt);
         const magToken = formatTsunamiMagnitudeToken(evt);
@@ -571,12 +668,23 @@
         const depthRaw = evt.depth;
         if (depthRaw !== null && depthRaw !== undefined && depthRaw !== '') {
             const depthNum = Number(depthRaw);
-            if (Number.isFinite(depthNum)) {
-                const depthText = Number.isInteger(depthNum) ? `${depthNum}` : String(depthNum);
-                pushChip('depth', '⬇️', `深度 ${depthText}km`, 'default');
+            // 合法深度 >= 0；负数（调查中占位）不展示；0 映射为极浅
+            if (Number.isFinite(depthNum) && depthNum >= 0) {
+                const depthText = depthNum === 0
+                    ? '极浅'
+                    : `${Number.isInteger(depthNum) ? depthNum : depthNum}km`;
+                pushChip('depth', '⬇️', `深度 ${depthText}`, 'default');
             }
         } else if (parsed.depthText) {
-            pushChip('depth', '⬇️', `深度 ${parsed.depthText}`, 'default');
+            const parsedDepthNum = Number(String(parsed.depthText).replace(/km/i, ''));
+            if (Number.isFinite(parsedDepthNum) && parsedDepthNum >= 0) {
+                pushChip(
+                    'depth',
+                    '⬇️',
+                    parsedDepthNum === 0 ? '深度 极浅' : `深度 ${parsed.depthText}`,
+                    'default',
+                );
+            }
         }
 
         // 波高：结构化字段优先，再回退 weather_detail
@@ -617,9 +725,7 @@
             pushChip('stations', '📡', `监测站 ${parsed.stationCount}`, 'station');
         }
 
-        if (parsed.batchText) {
-            pushChip('batch', '#️⃣', `第${parsed.batchText}报`.replace(/^第第/, '第'), 'default');
-        }
+        // 报次统一由卡片标题旁徽章展示，chip 区不再重复「第N报」，避免与 report_num 冲突。
 
         if (evt.is_cancelled || evt.cancelled || cleanTsunamiText(evt.level) === '解除') {
             pushChip('cancelled', '✅', '已解除', 'cancel');
@@ -852,6 +958,11 @@
         normalizeBadgeToneToken,
         getEarthquakeBadgeContent,
         buildEarthquakeTitle,
+        stripEmbeddedReportToken,
+        extractReportNumFromText,
+        resolveBusinessBatchNum,
+        resolveEventReportNum,
+        formatReportLabel,
         isGenericTsunamiTitle,
         isLegacyTsunamiDescription,
         resolveTsunamiRegion,
