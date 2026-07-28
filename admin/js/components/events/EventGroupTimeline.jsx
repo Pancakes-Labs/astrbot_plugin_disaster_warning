@@ -67,9 +67,10 @@ function EventGroupTimeline({ group, displayTimezone }) {
             weather_detail: hasOwn('weather_detail')
                 ? evt.weather_detail
                 : (isLatestRow ? (latest.weather_detail || '') : ''),
+            // 地点属身份字段：本报优先，缺失时继承主事件，避免历史卡丢地点
             place_name: hasOwn('place_name')
                 ? evt.place_name
-                : (isLatestRow ? latest.place_name : (evt.place_name || '')),
+                : (latest.place_name || evt.place_name || ''),
             max_wave_height: hasOwn('max_wave_height')
                 ? evt.max_wave_height
                 : (isLatestRow ? latest.max_wave_height : null),
@@ -101,6 +102,26 @@ function EventGroupTimeline({ group, displayTimezone }) {
         };
     };
 
+    // 预计算组内业务报次：若多行撞同一业务号，时间线统一改用组内序号，
+    // 避免地震/气象多报共用同一 report_num 时全部显示成「第 N 报」。
+    const businessReportNums = (group.events || []).map((evt, idx) => {
+        const merged = mergeTimelineEvent(evt, idx === 0);
+        const num = typeof resolveEventReportNum === 'function'
+            ? resolveEventReportNum(merged)
+            : Number(merged?.report_num);
+        return (Number.isInteger(num) && num > 0) ? num : null;
+    });
+    const seenBusinessNums = new Set();
+    let hasDuplicateBusinessReportNum = false;
+    for (const num of businessReportNums) {
+        if (num == null) continue;
+        if (seenBusinessNums.has(num)) {
+            hasDuplicateBusinessReportNum = true;
+            break;
+        }
+        seenBusinessNums.add(num);
+    }
+
     return (
         <div className="event-group-timeline-panel">
             {/* 收起由顶部主卡片统一提供，这里只保留轻量统计标题，避免重复「收起」 */}
@@ -115,22 +136,18 @@ function EventGroupTimeline({ group, displayTimezone }) {
                 <div className="event-group-timeline-line"></div>
 
                 {group.events.map((evt, idx) => {
-                    // 时间线芯片一律按「组内更新序号」编号（最新=N … 最旧=1），
-                    // 避免海啸业务 batch 长期停在「第3报」时，9 次系统更新全部显示成同一个号。
-                    // 业务报次（batch）仍由主卡片徽章展示，语义分离。
+                    // 时间线芯片：默认可用业务报次；台风/海啸、无业务号、或组内业务号撞车时用序号。
+                    // 业务报次（batch）仍可由主卡片徽章 / 业务 chip 展示，语义分离。
                     const sequenceNum = totalReports - idx;
                     const isLatest = idx === 0;
                     const mergedEvt = mergeTimelineEvent(evt, isLatest);
 
-                    const businessReportNum = typeof resolveEventReportNum === 'function'
-                        ? resolveEventReportNum(mergedEvt)
-                        : Number(mergedEvt?.report_num);
-                    const hasBusinessReportNum = Number.isInteger(businessReportNum) && businessReportNum > 0;
-                    // 台风 / 海啸多报：用序号；地震等业务报次若与序号一致或每报不同，仍可用业务号，
-                    // 但当多行业务号撞车时强制回退序号。
+                    const businessReportNum = businessReportNums[idx];
+                    const hasBusinessReportNum = businessReportNum != null;
                     const useSequenceLabel = isTyphoonGroup
                         || groupType === 'tsunami'
-                        || !hasBusinessReportNum;
+                        || !hasBusinessReportNum
+                        || hasDuplicateBusinessReportNum;
                     const displayReportNum = useSequenceLabel ? sequenceNum : businessReportNum;
                     // 统一写「第 X 报」；海啸业务号不同时另注业务报数
                     const reportLabelText = typeof formatReportLabel === 'function'
