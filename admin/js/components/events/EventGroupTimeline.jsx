@@ -7,13 +7,13 @@ const { Typography } = MaterialUI;
  *
  * 海啸/气象/地震/台风统一复用 EventCard 渲染各报详情，
  * 使历史报与主卡片信息密度一致（chips / sections / 深度等）。
+ * 收起由顶部主卡片统一提供，本组件不再接收 onCollapse。
  *
  * @param {Object} props
  * @param {Object} props.group 包含同一事件关联的 events 列表与最新一条 event 记录的分组数据
  * @param {string} props.displayTimezone 全局配置的时区，如 'UTC+8'
- * @param {Function} props.onCollapse 折叠收起该面板的回调函数
  */
-function EventGroupTimeline({ group, displayTimezone, onCollapse }) {
+function EventGroupTimeline({ group, displayTimezone }) {
     const formatters = window.EventFormatters || {};
     const {
         getDisplayTimeValue,
@@ -45,15 +45,15 @@ function EventGroupTimeline({ group, displayTimezone, onCollapse }) {
                     || null));
 
         return {
-            // 先铺父级身份字段，再覆盖本报快照
+            // 先铺本报快照，再显式写身份/状态字段，避免 ...evt 中的 null/'' 冲掉父级身份
+            ...evt,
+            // 身份字段：本报有值用本报，否则继承最新主事件
             source: evt.source || latest.source,
             source_id: evt.source_id || latest.source_id || latest.source,
             type: evt.type || latest.type,
             info_type: evt.info_type || latest.info_type,
             weather_type_code: evt.weather_type_code || latest.weather_type_code,
             icon_url: evt.icon_url || latest.icon_url,
-            // 本报快照字段优先
-            ...evt,
             description: hasOwn('description') ? evt.description : (isLatestRow ? latest.description : (evt.description || '')),
             subtitle: hasOwn('subtitle') ? evt.subtitle : (isLatestRow ? latest.subtitle : (evt.subtitle || '')),
             level: hasOwn('level') ? evt.level : (isLatestRow ? latest.level : (evt.level || '')),
@@ -179,20 +179,17 @@ function EventGroupTimeline({ group, displayTimezone, onCollapse }) {
                                     </div>
 
                                     {/* 复用主卡片同款 EventCard，展示完整 chips / sections / 深度等。
-                                        报次已在上方 chip 展示，这里不再重复 reportIndex。 */}
+                                        报次已在上方 chip 展示；hideReportBadge 禁止 batch 回退再画徽章。 */}
                                     <div className="event-group-history-card-wrap">
                                         <EventCard
-                                            event={{
-                                                ...mergedEvt,
-                                                // 避免 EventCard 再读 report_num 重复画「第N报」
-                                                report_num: null,
-                                            }}
+                                            event={mergedEvt}
                                             displayTimezone={displayTimezone}
                                             isHistory={true}
                                             isExpandable={false}
                                             isExpanded={true}
                                             reportIndex={null}
                                             hideExpandBadge={true}
+                                            hideReportBadge={true}
                                         />
                                     </div>
                                 </div>

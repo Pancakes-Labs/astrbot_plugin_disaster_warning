@@ -415,9 +415,11 @@
 
     /**
      * 从事件对象提取业务 batch 报次（不含系统 update_count）。
+     * 纯数字限制 1～999，避免时间戳/事件 ID 被误当成报次。
      */
     function resolveBusinessBatchNum(evt) {
         if (!evt || typeof evt !== 'object') return null;
+        const MAX_BUSINESS_BATCH = 999;
         const batchCandidates = [
             evt.batch,
             evt.Batch,
@@ -429,9 +431,11 @@
         for (const candidate of batchCandidates) {
             if (candidate === null || candidate === undefined || candidate === '') continue;
             const asNum = Number(candidate);
-            if (Number.isInteger(asNum) && asNum > 0) return asNum;
+            if (Number.isInteger(asNum) && asNum >= 1 && asNum <= MAX_BUSINESS_BATCH) {
+                return asNum;
+            }
             const parsed = extractReportNumFromText(candidate);
-            if (parsed) return parsed;
+            if (parsed && parsed >= 1 && parsed <= MAX_BUSINESS_BATCH) return parsed;
         }
         return null;
     }
@@ -669,6 +673,7 @@
         if (depthRaw !== null && depthRaw !== undefined && depthRaw !== '') {
             const depthNum = Number(depthRaw);
             // 合法深度 >= 0；负数（调查中占位）不展示；0 映射为极浅
+            // 文案与 EventCard 地震芯片统一为「Nkm / 极浅」
             if (Number.isFinite(depthNum) && depthNum >= 0) {
                 const depthText = depthNum === 0
                     ? '极浅'
@@ -678,12 +683,10 @@
         } else if (parsed.depthText) {
             const parsedDepthNum = Number(String(parsed.depthText).replace(/km/i, ''));
             if (Number.isFinite(parsedDepthNum) && parsedDepthNum >= 0) {
-                pushChip(
-                    'depth',
-                    '⬇️',
-                    parsedDepthNum === 0 ? '深度 极浅' : `深度 ${parsed.depthText}`,
-                    'default',
-                );
+                const depthText = parsedDepthNum === 0
+                    ? '极浅'
+                    : `${Number.isInteger(parsedDepthNum) ? parsedDepthNum : parsedDepthNum}km`;
+                pushChip('depth', '⬇️', `深度 ${depthText}`, 'default');
             }
         }
 

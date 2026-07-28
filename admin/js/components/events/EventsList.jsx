@@ -226,15 +226,18 @@ function EventsList() {
                                 const isExpanded = expandedEvents.has(group.id);
                                 const latestType = String(group.latestEvent?.type || '').toLowerCase();
                                 const weatherDetail = String(group.latestEvent?.weather_detail || '').trim();
+                                // 与 EventCard 对齐：earthquake / earthquake_warning 均可展开情报正文
+                                const isEarthquakeType = latestType === 'earthquake'
+                                    || latestType === 'earthquake_warning';
                                 // 气象可回退 description；地震仅认 weather_detail，避免标题误当正文
                                 const detailBody = latestType === 'weather_alarm'
                                     ? (weatherDetail || String(group.latestEvent?.description || '').trim())
-                                    : weatherDetail;
+                                    : (isEarthquakeType ? weatherDetail : '');
                                 // 多报更新：真正的同源折叠
                                 // 气象预警 / 地震情报补充正文：额外提供正文展开语义
                                 const hasMultiReport = group.updateCount > 1;
                                 const canExpandDetail = (
-                                    (latestType === 'weather_alarm' || latestType === 'earthquake')
+                                    (latestType === 'weather_alarm' || isEarthquakeType)
                                     && !!detailBody
                                     && !hasMultiReport
                                 );
@@ -245,12 +248,26 @@ function EventsList() {
                                     _groupType: group.latestEvent.type,
                                     _groupMagnitude: group.latestEvent.magnitude,
                                 };
+                                const toggleGroup = () => toggleEventGroup(group.id);
+                                const onExpandKeyDown = (e) => {
+                                    if (!isExpandable) return;
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        toggleGroup();
+                                    }
+                                };
 
                                 return (
                                     <div key={group.id} className="event-group">
                                         {/* 折叠收起形态：展示带有多报更新数量 / 正文入口的事件概要卡片 */}
                                         <Collapse in={!isExpanded} timeout={220} unmountOnExit>
-                                            <div onClick={() => isExpandable && toggleEventGroup(group.id)}>
+                                            <div
+                                                role={isExpandable ? 'button' : undefined}
+                                                tabIndex={isExpandable ? 0 : undefined}
+                                                aria-expanded={isExpandable ? false : undefined}
+                                                onClick={() => isExpandable && toggleGroup()}
+                                                onKeyDown={onExpandKeyDown}
+                                            >
                                                 <EventCard
                                                     event={cardEvent}
                                                     displayTimezone={displayTimezone}
@@ -265,7 +282,16 @@ function EventsList() {
                                             <div className={`event-group-expanded-shell ${hasMultiReport ? 'has-timeline' : 'is-detail-only'}`}>
                                                 <div
                                                     className="event-group-sticky-card"
-                                                    onClick={() => toggleEventGroup(group.id)}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-expanded={true}
+                                                    onClick={toggleGroup}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' || e.key === ' ') {
+                                                            e.preventDefault();
+                                                            toggleGroup();
+                                                        }
+                                                    }}
                                                 >
                                                     <EventCard
                                                         event={cardEvent}
@@ -280,7 +306,6 @@ function EventsList() {
                                                         <EventGroupTimeline
                                                             group={group}
                                                             displayTimezone={displayTimezone}
-                                                            onCollapse={() => toggleEventGroup(group.id)}
                                                         />
                                                     </div>
                                                 )}

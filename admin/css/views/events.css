@@ -1354,6 +1354,7 @@ body.dark-theme .event-quake-chip {
 
 .event-weather-detail-body {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
     font-size: 13px;
     line-height: 1.55;

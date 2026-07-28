@@ -12,6 +12,8 @@ const { Typography } = MaterialUI;
  * @param {boolean} [props.isExpandable=false] 卡片是否包含多报更新并可展开折叠
  * @param {boolean} [props.isExpanded=false] 当前是否处于展开状态
  * @param {number|null} [props.reportIndex=null] 多报更新时的历史期数标签
+ * @param {boolean} [props.hideExpandBadge=false] 隐藏右侧展开/收起控件
+ * @param {boolean} [props.hideReportBadge=false] 隐藏标题旁「第N报」徽章（时间线已有 chip 时使用）
  */
 function EventCard({
     event,
@@ -21,6 +23,7 @@ function EventCard({
     isExpanded = false,
     reportIndex = null,
     hideExpandBadge = false,
+    hideReportBadge = false,
 }) {
     const formatters = window.EventFormatSerialization || window.EventFormatters || {};
     const {
@@ -199,11 +202,14 @@ function EventCard({
 
     // 计算报告第几期 (第几报) 的文案：统一走 resolveEventReportNum，
     // 避免标题内嵌 batch 与 report_num 徽章两套语义打架。
-    const resolvedReportNum = typeof resolveEventReportNum === 'function'
-        ? resolveEventReportNum(evt, reportIndex)
-        : (reportIndex !== null && reportIndex > 0
-            ? reportIndex
-            : (Number(evt.report_num) > 0 ? Number(evt.report_num) : null));
+    // hideReportBadge：时间线历史行上方已有序号 chip，禁止再从 batch 回退画徽章。
+    const resolvedReportNum = hideReportBadge
+        ? null
+        : (typeof resolveEventReportNum === 'function'
+            ? resolveEventReportNum(evt, reportIndex)
+            : (reportIndex !== null && reportIndex > 0
+                ? reportIndex
+                : (Number(evt.report_num) > 0 ? Number(evt.report_num) : null)));
     const reportLabel = typeof formatReportLabel === 'function'
         ? formatReportLabel(resolvedReportNum)
         : (resolvedReportNum ? `第 ${resolvedReportNum} 报` : '');
@@ -220,7 +226,7 @@ function EventCard({
     const earthquakeDepthText = hasValidEarthquakeDepth
         ? (earthquakeDepthNum === 0
             ? '极浅'
-            : `${Number.isInteger(earthquakeDepthNum) ? earthquakeDepthNum : earthquakeDepthNum} km`)
+            : `${Number.isInteger(earthquakeDepthNum) ? earthquakeDepthNum : earthquakeDepthNum}km`)
         : '';
     const earthquakeMagnitudeText = typeof formatMagnitudeBadge === 'function'
         ? formatMagnitudeBadge(evt.magnitude ?? evt._groupMagnitude)
