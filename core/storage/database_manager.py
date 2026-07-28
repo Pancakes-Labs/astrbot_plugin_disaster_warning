@@ -575,25 +575,53 @@ class DatabaseManager:
         magnitude: Any = None,
         depth: Any = None,
         description: Any = None,
+        subtitle: Any = None,
+        weather_detail: Any = None,
+        place_name: Any = None,
         level: Any = None,
         wind_speed: Any = None,
         pressure: Any = None,
         latitude: Any = None,
         longitude: Any = None,
+        max_wave_height: Any = None,
+        area_count: Any = None,
+        immediate_area_count: Any = None,
+        is_cancelled: Any = None,
+        is_training: Any = None,
         time_value: Any = None,
     ) -> str:
-        """构建 event_updates 内容指纹，用于识别同内容重复写入。"""
+        """构建 event_updates 内容指纹，用于识别同内容重复写入。
+
+        除震级/深度/坐标等基础字段外，还需覆盖海啸/气象历史报详情字段，
+        避免仅 weather_detail / 波高 / 解除态变化时被误判为内容未变。
+        """
         return "|".join(
             [
                 cls._normalize_snapshot_value(report_num),
                 cls._normalize_snapshot_value(magnitude),
                 cls._normalize_snapshot_value(depth),
                 cls._normalize_snapshot_value(description),
+                cls._normalize_snapshot_value(subtitle),
+                cls._normalize_snapshot_value(weather_detail),
+                cls._normalize_snapshot_value(place_name),
                 cls._normalize_snapshot_value(level),
                 cls._normalize_snapshot_value(wind_speed),
                 cls._normalize_snapshot_value(pressure),
                 cls._normalize_snapshot_value(latitude),
                 cls._normalize_snapshot_value(longitude),
+                cls._normalize_snapshot_value(max_wave_height),
+                cls._normalize_snapshot_value(area_count),
+                cls._normalize_snapshot_value(immediate_area_count),
+                cls._normalize_snapshot_value(
+                    1
+                    if is_cancelled in (True, 1, "1")
+                    else (0 if is_cancelled in (False, 0, "0") else is_cancelled)
+                ),
+                cls._normalize_snapshot_value(
+                    1
+                    if is_training in (True, 1, "1")
+                    else (0 if is_training in (False, 0, "0") else is_training)
+                ),
                 cls._normalize_snapshot_value(time_value),
             ]
         )
@@ -755,7 +783,7 @@ class DatabaseManager:
                 update_snapshot_wind = event_data["_snapshot_wind_speed"]
                 update_snapshot_pressure = event_data["_snapshot_pressure"]
 
-            # Wolfx 列表轮询：与最近一条 updates 内容完全一致时不追加、不抬升 update_count
+            # 列表轮询 / 海啸重连补发：与最近一条 updates 内容完全一致时不追加、不抬升
             content_unchanged = False
             if self._should_dedupe_list_poll_update(source, event_data):
                 incoming_fp = self._build_update_content_fingerprint(
@@ -763,17 +791,27 @@ class DatabaseManager:
                     magnitude=event_data.get("magnitude"),
                     depth=event_data.get("depth"),
                     description=event_data.get("description"),
+                    subtitle=event_data.get("subtitle"),
+                    weather_detail=event_data.get("weather_detail"),
+                    place_name=event_data.get("place_name"),
                     level=update_snapshot_level,
                     wind_speed=update_snapshot_wind,
                     pressure=update_snapshot_pressure,
                     latitude=event_data.get("latitude"),
                     longitude=event_data.get("longitude"),
+                    max_wave_height=event_data.get("max_wave_height"),
+                    area_count=event_data.get("area_count"),
+                    immediate_area_count=event_data.get("immediate_area_count"),
+                    is_cancelled=event_data.get("is_cancelled"),
+                    is_training=event_data.get("is_training"),
                     time_value=event_data.get("time"),
                 )
                 await cursor.execute(
                     """
-                    SELECT report_num, magnitude, depth, description, level, wind_speed,
-                           pressure, latitude, longitude, time
+                    SELECT report_num, magnitude, depth, description, subtitle,
+                           weather_detail, place_name, level, wind_speed, pressure,
+                           latitude, longitude, max_wave_height, area_count,
+                           immediate_area_count, is_cancelled, is_training, time
                     FROM event_updates
                     WHERE event_id=?
                     ORDER BY id DESC
@@ -788,12 +826,20 @@ class DatabaseManager:
                         magnitude=last_update[1],
                         depth=last_update[2],
                         description=last_update[3],
-                        level=last_update[4],
-                        wind_speed=last_update[5],
-                        pressure=last_update[6],
-                        latitude=last_update[7],
-                        longitude=last_update[8],
-                        time_value=last_update[9],
+                        subtitle=last_update[4],
+                        weather_detail=last_update[5],
+                        place_name=last_update[6],
+                        level=last_update[7],
+                        wind_speed=last_update[8],
+                        pressure=last_update[9],
+                        latitude=last_update[10],
+                        longitude=last_update[11],
+                        max_wave_height=last_update[12],
+                        area_count=last_update[13],
+                        immediate_area_count=last_update[14],
+                        is_cancelled=last_update[15],
+                        is_training=last_update[16],
+                        time_value=last_update[17],
                     )
                     content_unchanged = last_fp == incoming_fp
 

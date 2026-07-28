@@ -170,12 +170,15 @@ def parse_tsunami_batch_num(batch: Any) -> int | None:
     """解析海啸业务报次为整数。
 
     支持：
-    - 纯数字：3 / "3" / 3.0
+    - 纯数字：3 / "3" / 3.0（限制 1～999，避免时间戳/事件 ID 误当报次）
     - 中文报次：第3报 / 第 3 报 / 第3批
     - 摘要片段：批次 3
 
     无法解析时返回 None（不是系统 update_count）。
     """
+    # 业务报次合理上限：超过则视为非报次标识（时间戳、事件 ID 等）
+    _MAX_BUSINESS_BATCH = 999
+
     if batch is None:
         return None
     if isinstance(batch, bool):
@@ -185,15 +188,15 @@ def parse_tsunami_batch_num(batch: Any) -> int | None:
             number = int(batch)
         except (TypeError, ValueError):
             return None
-        return number if number > 0 else None
+        return number if 1 <= number <= _MAX_BUSINESS_BATCH else None
 
     text = _clean_text(batch)
     if not text:
         return None
-    # 纯数字
+    # 纯数字：同样限制上限
     try:
         number = int(float(text))
-        if number > 0:
+        if 1 <= number <= _MAX_BUSINESS_BATCH:
             return number
     except (TypeError, ValueError):
         pass
@@ -205,7 +208,7 @@ def parse_tsunami_batch_num(batch: Any) -> int | None:
         number = int(match.group(1))
     except (TypeError, ValueError):
         return None
-    return number if number > 0 else None
+    return number if 1 <= number <= _MAX_BUSINESS_BATCH else None
 
 
 def format_tsunami_batch_token(batch: Any) -> str:

@@ -21,8 +21,14 @@ from ...domain.event_models import EventEnvelope
 from ...domain.event_payload import SourcePayload
 from ..source_compat import is_cenc_intensity_report, is_fssn_cmt_report
 
+# weather_detail 文本长度上限（命名常量，便于统一调整）
+DEFAULT_DETAIL_LIMIT = 2048
+JMA_COMMENT_LIMIT = 256
+JMA_DETAIL_LIMIT = 4096
+FSSN_CMT_DETAIL_LIMIT = 1024
 
-def truncate_text(text: str, *, limit: int = 900) -> str:
+
+def truncate_text(text: str, *, limit: int = DEFAULT_DETAIL_LIMIT) -> str:
     """截断长文本，避免 weather_detail 过大。"""
     content = str(text or "").strip()
     if not content or len(content) <= limit:
@@ -235,10 +241,10 @@ def _build_jma_earthquake_detail(
             parts.append(points_summary)
 
     if comment:
-        parts.append("备注：" + truncate_text(comment, limit=280))
+        parts.append("备注：" + truncate_text(comment, limit=JMA_COMMENT_LIMIT))
 
     # 用换行拼接多段，前端 pre-wrap 可直接展开阅读
-    return truncate_text("\n".join(parts), limit=1200)
+    return truncate_text("\n".join(parts), limit=JMA_DETAIL_LIMIT)
 
 
 def _format_mag_token(mag_type: str, value: Any) -> str:
@@ -390,7 +396,7 @@ def _build_fssn_cmt_detail(
         lines.append("标识：" + " · ".join(id_parts))
 
     lines.append("备注：左/右旋最终确定需依赖实际发震断层面")
-    return truncate_text("\n".join(lines), limit=1000)
+    return truncate_text("\n".join(lines), limit=FSSN_CMT_DETAIL_LIMIT)
 
 
 def apply_earthquake_detail_record_fields(
@@ -415,17 +421,31 @@ def apply_earthquake_detail_record_fields(
     if is_cenc_intensity_report(source_id, info_type=info_type):
         return
 
-    payload = (
-        event.payload.to_dict() if isinstance(event.payload, SourcePayload) else {}
-    )
-    if not isinstance(payload, dict):
+    # SourcePayload.to_dict() 仅返回 raw 浅拷贝，不含 attributes。
+    # 这里直接读 payload 对象字段，避免 attributes 丢失导致写不出正文。
+    if isinstance(event.payload, SourcePayload):
+        payload_raw = (
+            dict(event.payload.raw) if isinstance(event.payload.raw, dict) else {}
+        )
+        payload_attributes = (
+            dict(event.payload.attributes)
+            if isinstance(event.payload.attributes, dict)
+            else {}
+        )
+        # 兼容旧调用方：部分字段可能直接挂在 raw 顶层
+        payload = payload_raw
+    elif isinstance(event.payload, dict):
+        payload = dict(event.payload)
+        raw_candidate = payload.get("raw")
+        payload_raw = raw_candidate if isinstance(raw_candidate, dict) else payload
+        attrs_candidate = payload.get("attributes")
+        payload_attributes = (
+            attrs_candidate if isinstance(attrs_candidate, dict) else {}
+        )
+    else:
         payload = {}
-    payload_attributes = payload.get("attributes")
-    if not isinstance(payload_attributes, dict):
-        payload_attributes = {}
-    payload_raw = payload.get("raw")
-    if not isinstance(payload_raw, dict):
         payload_raw = {}
+        payload_attributes = {}
 
     detail = ""
     if is_fssn_cmt_report(source_id, info_type=info_type) or is_fssn_cmt_source(
