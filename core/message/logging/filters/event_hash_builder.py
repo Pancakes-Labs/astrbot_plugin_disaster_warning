@@ -85,14 +85,29 @@ class EventHashBuilder:
         if event_id:
             hash_parts.append(f"eid:{event_id}")
 
+            # OpenQuake/GQ 使用 revisionId；其他 EEW 使用 updates/ReportNum/Serial。
             report_num = (
-                data.get("updates") or data.get("ReportNum") or data.get("Serial")
+                data.get("updates")
+                or data.get("ReportNum")
+                or data.get("Serial")
+                or data.get("revisionId")
+                or data.get("revision_id")
             )
-            if report_num:
+            if report_num is not None and str(report_num) != "":
                 hash_parts.append(f"rn:{report_num}")
 
-            if not report_num:
-                updated = data.get("updated") or data.get("updateTime")
+            # 动作维度：同一事件的 update / archived / cancelled 应分别落盘。
+            action = data.get("action")
+            if action:
+                hash_parts.append(f"act:{action}")
+
+            if report_num is None or str(report_num) == "":
+                updated = (
+                    data.get("updated")
+                    or data.get("updateTime")
+                    or data.get("lastUpdateMs")
+                    or data.get("timestampMs")
+                )
                 if updated:
                     hash_parts.append(f"up:{str(updated)}")
 
@@ -102,7 +117,13 @@ class EventHashBuilder:
 
             return "|".join(hash_parts)
 
-        time_info = data.get("shockTime") or data.get("time") or data.get("OriginTime")
+        time_info = (
+            data.get("shockTime")
+            or data.get("time")
+            or data.get("OriginTime")
+            or data.get("originTimeIso")
+            or data.get("originTimeMs")
+        )
         if time_info:
             hash_parts.append(f"et:{str(time_info)[:16]}")
 
@@ -117,6 +138,10 @@ class EventHashBuilder:
                 hash_parts.append(f"el:{float(lat):.1f},{float(lon):.1f}")
             except (ValueError, TypeError):
                 pass
+
+        action = data.get("action")
+        if action:
+            hash_parts.append(f"act:{action}")
 
         return "|".join(hash_parts)
 

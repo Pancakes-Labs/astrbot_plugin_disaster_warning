@@ -25,7 +25,7 @@ class MessageLogHelperService:
 
     @staticmethod
     def extract_payload(data: dict[str, Any]) -> dict[str, Any]:
-        """提取实际业务载荷，兼容 FAN / P2P / Wolfx 等结构。"""
+        """提取实际业务载荷，兼容 FAN / P2P / Wolfx / OpenQuake 等结构。"""
         # 不同来源的消息封装层级不一致，这里统一剥离外层包装，方便后续哈希与展示逻辑复用。
         if not isinstance(data, dict):
             return {}
@@ -34,6 +34,21 @@ class MessageLogHelperService:
             return data["Data"]
         if "data" in data and isinstance(data["data"], dict):
             return data["data"]
+        # OpenQuakeAPI RealtimeEvent: {source,type,action,timestampMs,payload:{...}}
+        # 业务主键（id/revisionId 等）在内层 payload，必须解包，否则去重哈希会退化成
+        # 仅 source+etype，导致同一来源后续所有地震更新都被当成重复事件过滤掉。
+        if "payload" in data and isinstance(data["payload"], dict):
+            inner = dict(data["payload"])
+            # 保留外层动作/类型，便于区分 update / archived / cancelled 等不同日志。
+            if "action" in data and "action" not in inner:
+                inner["action"] = data["action"]
+            if "type" in data and "type" not in inner:
+                inner["type"] = data["type"]
+            if "source" in data and "source" not in inner:
+                inner["source"] = data["source"]
+            if "timestampMs" in data and "timestampMs" not in inner:
+                inner["timestampMs"] = data["timestampMs"]
+            return inner
         if "code" in data and "issue" in data:
             return data
         if "type" in data and ("EventID" in data or "ID" in data):
