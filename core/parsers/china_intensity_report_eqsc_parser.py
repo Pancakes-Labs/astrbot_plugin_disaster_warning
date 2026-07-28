@@ -8,6 +8,7 @@ EQSC CENC 烈度速报解析器。
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from ...utils.converters import safe_float_convert
@@ -254,15 +255,21 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
             )
             attrs.update(metadata)
             envelope.payload.attributes = attrs
-            # provider_family 以 catalog 为准
+            # provider_family / source_id 以 catalog 与本解析器为准
+            envelope.payload.source_id = self.source_id
             if self.source_entry is not None:
                 envelope.payload.provider_family = (
                     self.source_entry.provider_family.value
                 )
-        if envelope.identity is not None and self.source_entry is not None:
-            envelope.identity.source_id = self.source_id
-            envelope.identity.provider_family = self.source_entry.provider_family.value
-            envelope.identity.source_enum = self.source_entry.source_enum
+        # EventIdentity 为 frozen dataclass，必须用 replace 重建，不能原地赋值
+        if envelope.identity is not None:
+            identity_kwargs: dict[str, Any] = {"source_id": self.source_id}
+            if self.source_entry is not None:
+                identity_kwargs["provider_family"] = (
+                    self.source_entry.provider_family.value
+                )
+                identity_kwargs["source_enum"] = self.source_entry.source_enum
+            envelope.identity = replace(envelope.identity, **identity_kwargs)
         return envelope
 
     def _parse_data(self, data: dict[str, Any]):
