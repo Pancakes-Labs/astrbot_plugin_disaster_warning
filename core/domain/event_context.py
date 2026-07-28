@@ -65,6 +65,8 @@ class EarthquakeDisplayContext:
     jma_comment: str | None = None
     jma_warning_areas: list[str] = field(default_factory=list)
     jma_warning_area_ranges: list[str] = field(default_factory=list)
+    # 按震度档汇总的警报区域：[{range_text, scale_from, emoji, areas:[...]}, ...]
+    jma_warning_area_groups: list[dict[str, Any]] = field(default_factory=list)
     # display_model 是已经进一步整理好的展示结果，可供下游直接使用。
     display_model: EarthquakeDisplayModel | None = None
     # metadata 放补充信息，options 放展示阶段的可选控制参数。

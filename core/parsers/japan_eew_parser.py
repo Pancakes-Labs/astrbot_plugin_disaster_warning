@@ -188,6 +188,17 @@ class JmaEewP2PParser(BaseParser):
             plugin_logger.error(f"[灾害预警] {self.source_id} 消息处理失败: {exc}")
             return None
 
+    @staticmethod
+    def _collect_p2p_area_scale_candidates(area: dict[str, Any]) -> list[int]:
+        """收集区域可用的 P2P 震度业务值，忽略占位值 99（以上）。"""
+        candidates: list[int] = []
+        for key in ("scaleFrom", "scaleTo"):
+            raw = ScaleConverter.normalize_p2p_scale_value(area.get(key))
+            if raw is None or raw <= 0 or raw == 99:
+                continue
+            candidates.append(raw)
+        return candidates
+
     def _parse_eew_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析紧急地震速报数据。"""
         try:
@@ -195,6 +206,8 @@ class JmaEewP2PParser(BaseParser):
             hypocenter = earthquake_info.get("hypocenter", {})
             issue_info = data.get("issue", {})
             areas = data.get("areas", [])
+            if not isinstance(areas, list):
+                areas = []
 
             # 最大震度可能直接给出，也可能需要从区域列表中推导
             max_scale_raw = -1
@@ -203,29 +216,24 @@ class JmaEewP2PParser(BaseParser):
             elif "max_scale" in earthquake_info:
                 max_scale_raw = earthquake_info.get("max_scale", -1)
             else:
-                raw_scales = []
+                raw_scales: list[int] = []
                 for area in areas:
                     if not isinstance(area, dict):
                         continue
-                    scale = (
-                        ScaleConverter.normalize_p2p_scale_value(area.get("scaleFrom"))
-                        or 0
-                    )
-                    if scale <= 0:
-                        scale = (
-                            ScaleConverter.normalize_p2p_scale_value(
-                                area.get("scaleTo")
-                            )
-                            or 0
-                        )
-                    if scale > 0:
-                        raw_scales.append(scale)
+                    candidates = self._collect_p2p_area_scale_candidates(area)
+                    if candidates:
+                        raw_scales.append(max(candidates))
 
                 max_scale_raw = max(raw_scales) if raw_scales else -1
                 if max_scale_raw > 0:
                     plugin_logger.warning(
                         f"[灾害预警] {self.source_id} 使用areas计算maxScale: {max_scale_raw}"
                     )
+
+            try:
+                max_scale_raw = int(max_scale_raw)
+            except (TypeError, ValueError):
+                max_scale_raw = -1
 
             scale = (
                 ScaleConverter.convert_p2p_scale(max_scale_raw)
@@ -276,6 +284,14 @@ class JmaEewP2PParser(BaseParser):
                         is_plum = True
                         break
 
+            # PLUM/假定震源下 M1.0 通常是占位震级，不应作为真实震级展示或参与过滤。
+            magnitude = safe_float_convert(hypocenter.get("magnitude"))
+            magnitude_is_placeholder = bool(
+                is_plum and magnitude is not None and abs(magnitude - 1.0) < 0.05
+            )
+            if magnitude_is_placeholder:
+                magnitude = None
+
             report_num = (
                 issue_info.get("serial", 1)
                 if isinstance(issue_info.get("serial"), int)
@@ -283,6 +299,9 @@ class JmaEewP2PParser(BaseParser):
             )
             warning_areas: list[str] = []
             warning_area_ranges: list[str] = []
+            # range_text -> 分组信息，用于「按震度档汇总区域」展示
+            area_groups: dict[str, dict[str, Any]] = {}
+
             # 日本预警区域列表会同时用于文本展示与影响范围提示，这里先归一化整理
             for area in areas:
                 if not isinstance(area, dict):
@@ -295,23 +314,42 @@ class JmaEewP2PParser(BaseParser):
                 range_text = ScaleConverter.format_p2p_scale_range(scale_from, scale_to)
                 emoji = ScaleConverter.get_p2p_scale_emoji(scale_from, scale_to)
 
-                max_area_scale = (
-                    max(value for value in (scale_from, scale_to) if value is not None)
-                    if scale_from is not None or scale_to is not None
-                    else None
-                )
+                scale_candidates = self._collect_p2p_area_scale_candidates(area)
+                max_area_scale = max(scale_candidates) if scale_candidates else None
+                # 若仅有 from + 99(以上)，仍按 from 作为档位键
+                if max_area_scale is None and scale_from is not None and scale_from > 0:
+                    max_area_scale = scale_from
 
                 # 震度在 4.5 (5弱) 及以上的警报区域需要保留进警报范围中
                 if area_name and max_area_scale is not None and max_area_scale >= 45:
                     kind = str(area.get("kindCode", "") or "").strip()
                     status = "已到达" if kind == "11" else "未到达"
-                    area_parts = [status]
+                    area_label = f"{area_name}({status})"
+                    warning_areas.append(f"{emoji}{area_label}")
+
                     if range_text:
-                        area_parts.append(f"震度{range_text}")
-                    warning_areas.append(f"{emoji}{area_name}({'・'.join(area_parts)})")
+                        group = area_groups.get(range_text)
+                        if group is None:
+                            group = {
+                                "range_text": range_text,
+                                "scale_from": scale_from
+                                if scale_from is not None
+                                else max_area_scale,
+                                "emoji": emoji,
+                                "areas": [],
+                            }
+                            area_groups[range_text] = group
+                        if area_label not in group["areas"]:
+                            group["areas"].append(area_label)
 
                 if range_text and range_text not in warning_area_ranges:
                     warning_area_ranges.append(range_text)
+
+            warning_area_groups = sorted(
+                area_groups.values(),
+                key=lambda item: int(item.get("scale_from") or 0),
+                reverse=True,
+            )
 
             source_entry = get_source_entry(self.source_id)
             metadata = {
@@ -327,8 +365,10 @@ class JmaEewP2PParser(BaseParser):
                 "info_type": "警报",
                 "is_training": bool(is_test),
                 "is_assumption": bool(is_plum),
+                "magnitude_is_placeholder": magnitude_is_placeholder,
                 "jma_warning_areas": warning_areas,
                 "jma_warning_area_ranges": warning_area_ranges,
+                "jma_warning_area_groups": warning_area_groups,
             }
 
             # 实例化地震预警领域模型
@@ -337,7 +377,7 @@ class JmaEewP2PParser(BaseParser):
                 latitude=safe_float_convert(hypocenter.get("latitude")),
                 longitude=safe_float_convert(hypocenter.get("longitude")),
                 depth=safe_float_convert(hypocenter.get("depth")),
-                magnitude=safe_float_convert(hypocenter.get("magnitude")),
+                magnitude=magnitude,
                 place_name=str(hypocenter.get("name", "未知地点") or "未知地点"),
                 scale=scale,
                 metadata=dict(metadata),
@@ -401,6 +441,38 @@ class JmaEewWolfxParser(BaseParser):
         """初始化 Wolfx 日本预警解析器。"""
         super().__init__("jma_wolfx", message_logger)
 
+    @staticmethod
+    def _normalize_wolfx_warn_areas(warn_area: Any) -> list[dict[str, Any]]:
+        """把 Wolfx WarnArea 统一规整为 dict 列表（兼容单对象与数组）。"""
+        if isinstance(warn_area, list):
+            return [item for item in warn_area if isinstance(item, dict)]
+        if isinstance(warn_area, dict):
+            return [warn_area]
+        return []
+
+    @staticmethod
+    def _format_wolfx_shindo_range(shindo1: Any, shindo2: Any) -> str:
+        """格式化 Wolfx 区域震度范围文本。"""
+        left = ScaleConverter.format_jma_cwa_scale_display(shindo1) if shindo1 else ""
+        right = ScaleConverter.format_jma_cwa_scale_display(shindo2) if shindo2 else ""
+        if left and right and left != right:
+            return f"{left} ～ {right}"
+        return left or right
+
+    @staticmethod
+    def _wolfx_area_sort_key(shindo1: Any, shindo2: Any) -> float:
+        """按区域震度高低排序，优先取较大档。"""
+        values: list[float] = []
+        for raw in (shindo1, shindo2):
+            parsed = (
+                ScaleConverter.parse_jma_cwa_scale(raw)
+                if raw not in (None, "")
+                else None
+            )
+            if parsed is not None:
+                values.append(parsed)
+        return max(values) if values else -1.0
+
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析 Wolfx 日本地震预警数据。"""
         try:
@@ -414,18 +486,104 @@ class JmaEewWolfxParser(BaseParser):
             report_num = (
                 data.get("Serial", 1) if isinstance(data.get("Serial"), int) else 1
             )
-            warn_area = data.get("WarnArea", {})
-            jma_warn_area = ""
+            warn_area_items = self._normalize_wolfx_warn_areas(data.get("WarnArea"))
+            warning_areas: list[str] = []
             warning_area_ranges: list[str] = []
-            if isinstance(warn_area, dict):
-                jma_warn_area = str(warn_area.get("Chiiki", "") or "").strip()
-                shindo1 = warn_area.get("Shindo1")
-                shindo2 = warn_area.get("Shindo2")
-                if shindo1:
-                    range_text = f"{shindo1}"
-                    if shindo2 and shindo2 != shindo1:
-                        range_text += f" ～ {shindo2}"
+            area_groups: dict[str, dict[str, Any]] = {}
+            info_type = ""
+            jma_warn_area = ""
+
+            for item in warn_area_items:
+                area_name = str(item.get("Chiiki", "") or "").strip()
+                area_type = str(item.get("Type", "") or "").strip()
+                shindo1 = item.get("Shindo1")
+                shindo2 = item.get("Shindo2")
+                range_text = self._format_wolfx_shindo_range(shindo1, shindo2)
+                scale_value = self._wolfx_area_sort_key(shindo1, shindo2)
+                emoji = "⚪"
+                if scale_value >= 0:
+                    # 复用 P2P emoji 阈值：把规范浮点值映射到相近业务档
+                    if scale_value >= 6.5:
+                        emoji = "🟣"
+                    elif scale_value >= 5.5:
+                        emoji = "🔴"
+                    elif scale_value >= 4.5:
+                        emoji = "🟠"
+                    elif scale_value >= 3.5:
+                        emoji = "🟡"
+                    elif scale_value >= 2.5:
+                        emoji = "🟢"
+                    elif scale_value >= 1.5:
+                        emoji = "🔵"
+
+                # 警报区域优先；无 Type 时按震度档兜底；≥5弱 的预报区也纳入分布
+                is_warning_type = area_type in {"警報", "警报"}
+                if is_warning_type:
+                    info_type = "警报"
+                elif not info_type and area_type:
+                    info_type = area_type
+
+                if area_name and (is_warning_type or scale_value >= 4.5):
+                    arrive_raw = item.get("Arrive")
+                    if isinstance(arrive_raw, bool):
+                        status = "已到达" if arrive_raw else "未到达"
+                    else:
+                        arrive_text = str(arrive_raw or "").strip()
+                        # Wolfx 常给 PLUM 说明字符串，无法判断到达时不硬编码
+                        if "到達" in arrive_text and "予測なし" not in arrive_text:
+                            status = "已到达"
+                        elif arrive_text:
+                            status = "未到达"
+                        else:
+                            status = ""
+                    area_label = f"{area_name}({status})" if status else area_name
+                    warning_areas.append(f"{emoji}{area_label}")
+
+                    if range_text:
+                        group = area_groups.get(range_text)
+                        if group is None:
+                            group = {
+                                "range_text": range_text,
+                                "scale_from": scale_value,
+                                "emoji": emoji,
+                                "areas": [],
+                            }
+                            area_groups[range_text] = group
+                        if area_label not in group["areas"]:
+                            group["areas"].append(area_label)
+
+                if range_text and range_text not in warning_area_ranges:
                     warning_area_ranges.append(range_text)
+
+            warning_area_groups = sorted(
+                area_groups.values(),
+                key=lambda item: float(item.get("scale_from") or 0),
+                reverse=True,
+            )
+            if warning_areas:
+                # 兼容旧字段：拼接区域名摘要
+                jma_warn_area = "、".join(
+                    str(item.get("Chiiki", "") or "").strip()
+                    for item in warn_area_items
+                    if str(item.get("Chiiki", "") or "").strip()
+                    and (
+                        str(item.get("Type", "") or "").strip() in {"警報", "警报"}
+                        or self._wolfx_area_sort_key(
+                            item.get("Shindo1"), item.get("Shindo2")
+                        )
+                        >= 4.5
+                    )
+                )
+
+            is_assumption = bool(data.get("isAssumption", False))
+            magnitude = safe_float_convert(
+                data.get("Magunitude") or data.get("Magnitude")
+            )
+            magnitude_is_placeholder = bool(
+                is_assumption and magnitude is not None and abs(magnitude - 1.0) < 0.05
+            )
+            if magnitude_is_placeholder:
+                magnitude = None
 
             source_entry = get_source_entry(self.source_id)
             metadata = {
@@ -437,15 +595,15 @@ class JmaEewWolfxParser(BaseParser):
                 "report_num": report_num,
                 "is_final": bool(data.get("isFinal", False)),
                 "is_cancel": bool(data.get("isCancel", False)),
-                "info_type": data.get("WarnArea", {}).get("Type", "")
-                if isinstance(data.get("WarnArea"), dict)
-                else "",
+                "info_type": info_type,
                 "is_training": bool(data.get("isTraining", False)),
-                "is_assumption": bool(data.get("isAssumption", False)),
+                "is_assumption": is_assumption,
+                "magnitude_is_placeholder": magnitude_is_placeholder,
                 "is_sea": bool(data.get("isSea", False)),
                 "jma_warn_area": jma_warn_area,
-                "jma_warning_areas": [jma_warn_area] if jma_warn_area else [],
+                "jma_warning_areas": warning_areas,
                 "jma_warning_area_ranges": warning_area_ranges,
+                "jma_warning_area_groups": warning_area_groups,
             }
 
             # 实例化地震领域模型
@@ -454,9 +612,7 @@ class JmaEewWolfxParser(BaseParser):
                 latitude=safe_float_convert(data.get("Latitude")),
                 longitude=safe_float_convert(data.get("Longitude")),
                 depth=safe_float_convert(data.get("Depth")),
-                magnitude=safe_float_convert(
-                    data.get("Magunitude") or data.get("Magnitude")
-                ),
+                magnitude=magnitude,
                 place_name=str(data.get("Hypocenter", "") or ""),
                 scale=ScaleConverter.parse_jma_cwa_scale(data.get("MaxIntensity", "")),
                 metadata=dict(metadata),
