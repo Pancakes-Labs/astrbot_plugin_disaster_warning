@@ -122,6 +122,7 @@ class BaseParser:
             "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
             "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
             "china_weather_fanstudio": ["title", "description"],
+            "china_weather_openquake": ["title", "description"],
         }
 
         if self.source_id in critical_fields:
@@ -169,6 +170,8 @@ class BaseParser:
         dt = TimeConverter.parse_datetime(time_str)
         if dt is None and time_str:
             plugin_logger.warning(
-                f"[灾害预警] 时间解析失败: '{time_str}'", is_event_linked=True
+                f"[灾害预警] 时间解析失败: '{time_str}'",
+                is_event_linked=True,
+                event_stream="earthquake",
             )
         return dt

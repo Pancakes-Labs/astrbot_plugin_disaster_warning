@@ -74,7 +74,13 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
             return None
         return parser_class(*args, **kwargs)
 
-    # 细化分派 2：日本地震预警，拆分为 FAN Studio、P2P 还是 Wolfx 接收版本
+    # 细化分派 2：气象预警，按数据源注入正确的 source_id
+    if entry.parser_name == "weather_alarm_parser":
+        # message_logger 作为位置参数传入，需显式提取避免与 source_id 冲突
+        message_logger = args[0] if args else kwargs.get("message_logger")
+        return WeatherAlarmParser(source_id=source_id, message_logger=message_logger)
+
+    # 细化分派 3：日本地震预警，拆分为 FAN Studio、P2P 还是 Wolfx 接收版本
     if entry.parser_name == "japan_eew_parser":
         parser_class = {
             "jma_fanstudio": JmaEewFanStudioParser,
@@ -85,7 +91,7 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
             return None
         return parser_class(*args, **kwargs)
 
-    # 细化分派 3：日本地震情报，拆分为 P2P 还是 Wolfx 地震列表版本
+    # 细化分派 4：日本地震情报，拆分为 P2P 还是 Wolfx 地震列表版本
     if entry.parser_name == "japan_report_parser":
         parser_class = {
             "jma_p2p_info": JmaEarthquakeP2PParser,
@@ -95,7 +101,7 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
             return None
         return parser_class(*args, **kwargs)
 
-    # 细化分派 4：中国地震台网地震测定，拆分为 FAN Studio 还是 Wolfx 接收版本
+    # 细化分派 5：中国地震台网地震测定，拆分为 FAN Studio 还是 Wolfx 接收版本
     if entry.parser_name == "china_report_parser":
         parser_class = {
             "cenc_fanstudio": CencEarthquakeParser,
@@ -105,7 +111,7 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
             return None
         return parser_class(*args, **kwargs)
 
-    # 细化分派 5：台湾地震预警，拆分为 FAN Studio 还是 Wolfx 接收版本
+    # 细化分派 6：台湾地震预警，拆分为 FAN Studio 还是 Wolfx 接收版本
     if entry.parser_name == "taiwan_eew_parser":
         parser_class = {
             "cwa_fanstudio": CwaEewParser,
