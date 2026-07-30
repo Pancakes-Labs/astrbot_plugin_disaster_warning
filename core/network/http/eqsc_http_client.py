@@ -77,13 +77,21 @@ class EqscHttpClient:
         return self._token_manager
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用。"""
+        """确保 aiohttp 会话可用。
+
+        超时参数说明：
+        - connect/sock_connect=15：国内到 equake.top 的 TCP+TLS 握手在网络抖动时
+          容易超过 8 秒，放宽到 15 秒减少 ConnectionTimeoutError。
+        - sock_read=30：EQSC 列表接口（如 typhoonNMC.json 含 20 个台风完整轨迹）
+          响应体较大，上游聚合耗时 + 大包传输容易超 15 秒，放宽到 30 秒。
+        - total=45：connect(15) + sock_read(30) 的上限，留足完整请求生命周期。
+        """
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(
-                total=25,
-                connect=8,
-                sock_connect=8,
-                sock_read=15,
+                total=45,
+                connect=15,
+                sock_connect=15,
+                sock_read=30,
             )
             self._session = aiohttp.ClientSession(timeout=timeout)
         return self._session
