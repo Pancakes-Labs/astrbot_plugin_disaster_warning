@@ -29,6 +29,10 @@ from ...domain.event_models import (
 from ...services.identity.event_identity import resolve_report_num
 from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
+from ..presenters.weather_alarm_code_map import (
+    build_weather_icon_url,
+    resolve_weather_icon_code,
+)
 from ..render.beachball_renderer import BeachballRenderer
 
 
@@ -262,6 +266,14 @@ class MessageBuildService:
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
 
+    # 气象预警图标接口返回伪图片（HTTP 200 + content_type=image/png 但实际为 HTML）的特征关键词。
+    # 上游 Fan Studio 图标接口对不存在的编码会返回 HTML 错误页而非真实图片，
+    # 这类失败稳定触发，降级为 DEBUG 避免控制台刷屏。
+    _PSEUDO_IMAGE_ERROR_MARKERS: tuple[str, ...] = (
+        "响应体不是有效图片",
+        "响应类型不是图片",
+    )
+
     async def _append_remote_image_component(
         self,
         chain: MessageChain,
@@ -304,13 +316,25 @@ class MessageBuildService:
                 )
 
         if fetch_result:
-            logger.warning(
-                "[灾害预警] 远程图片抓取失败 "
-                f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
-                f"status={fetch_result.get('status')}, content_type={fetch_result.get('content_type')}, "
-                f"content_length={fetch_result.get('content_length')}, bytes={fetch_result.get('bytes')}, "
-                f"error={fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
+            error_msg = str(fetch_result.get("error") or "")
+            # 特征识别：气象预警图标接口返回伪图片（HTML 错误页伪装为 image/png），
+            # 这类失败稳定触发，降级为 DEBUG 避免控制台刷屏。
+            is_pseudo_image = media_label == "气象预警图标" and any(
+                marker in error_msg for marker in self._PSEUDO_IMAGE_ERROR_MARKERS
             )
+            if is_pseudo_image:
+                logger.debug(
+                    f"[灾害预警] 气象预警图标接口返回伪图片，将走本地回退: "
+                    f"编码相关 URL：{normalized_url}, 错误信息：{error_msg}"
+                )
+            else:
+                logger.warning(
+                    "[灾害预警] 远程图片抓取失败 "
+                    f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
+                    f"status={fetch_result.get('status')}, content_type={fetch_result.get('content_type')}, "
+                    f"content_length={fetch_result.get('content_length')}, bytes={fetch_result.get('bytes')}, "
+                    f"error={fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
+                )
 
         # 抓取或 Base64 转换失败后，若开启 URL 回退，则尝试利用 URL 方式插入图片组件
         if allow_url_fallback:
@@ -717,37 +741,48 @@ class MessageBuildService:
             return
 
         metadata = self._get_event_metadata(event)
-        # 从多层元数据中提取气象预警类型编码（Fan Studio 新格式如 11B20_yellow）。
-        weather_type_code = (
+        # 从多层元数据中提取气象预警类型编码。
+        # Fan Studio 格式如 11B20_yellow；OpenQuakeAPI CMA 格式如 p0002003。
+        raw_weather_code = (
             metadata.get("weather_code")
             or metadata.get("type")
             or metadata.get("alert_code")
             or metadata.get("code")
             or getattr(domain_event, "alert_type", "")
         )
-        if not isinstance(weather_type_code, str) or not weather_type_code.strip():
+        if not isinstance(raw_weather_code, str) or not raw_weather_code.strip():
             return
 
-        weather_type_code = weather_type_code.strip()
+        raw_weather_code = raw_weather_code.strip()
 
-        # 组装 FAN Studio 官方图标接口链接。
-        # 注意：原 image.nmc.cn 的 /assets/img/alarm/ 路径已全面下线(404)，
-        # 现使用 FAN Studio 官方图标代理接口，直接传入数据源原始 type 编码即可。
-        icon_url = (
-            f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
+        # 统一解析为 Fan Studio 图标接口兼容的 11B 完整码。
+        # p 编码（OpenQuakeAPI CMA）会通过映射表转换为 11B 码；
+        # 已有 11B 码直接使用；无法映射的返回 None 走本地回退。
+        title_text = getattr(domain_event, "title", "") or metadata.get("title", "")
+        headline_text = getattr(domain_event, "headline", "") or metadata.get(
+            "headline", ""
         )
-        # 优先预下载官方图标转 Base64 附加，避免框架发送时因图标下载失败导致整条推送报错。
-        appended = await self._append_remote_image_component(
-            chain,
-            icon_url,
-            media_label="气象预警图标",
-            allow_url_fallback=False,
+        icon_code = resolve_weather_icon_code(
+            raw_weather_code,
+            title=title_text,
+            headline=headline_text,
         )
-        if appended:
-            logger.debug(f"[灾害预警] 已附加气象预警图标: {icon_url}")
-            return
 
-        # 官方接口下载失败时，根据颜色后缀/紧凑编码/标题颜色提示回退到本地通用图标。
+        if icon_code:
+            # 组装 FAN Studio 官方图标接口链接。
+            icon_url = build_weather_icon_url(icon_code)
+            # 优先预下载官方图标转 Base64 附加，避免框架发送时因图标下载失败导致整条推送报错。
+            appended = await self._append_remote_image_component(
+                chain,
+                icon_url,
+                media_label="气象预警图标",
+                allow_url_fallback=False,
+            )
+            if appended:
+                logger.debug(f"[灾害预警] 已附加气象预警图标: {icon_url}")
+                return
+
+        # 官方接口下载失败或无可用图标码时，根据颜色后缀/紧凑编码/标题颜色提示回退到本地通用图标。
         color_hint_candidates = [
             metadata.get("severity_color"),
             metadata.get("level"),
@@ -762,7 +797,7 @@ class MessageBuildService:
             if isinstance(item, str) and item.strip()
         )
         fallback_path = self._resolve_weather_fallback_icon_path(
-            weather_type_code,
+            raw_weather_code,
             color_hint=color_hint or None,
         )
         if fallback_path:
@@ -770,9 +805,9 @@ class MessageBuildService:
                 with open(fallback_path, "rb") as f:
                     b64_data = base64.b64encode(f.read()).decode()
                 chain.chain.append(Comp.Image.fromBase64(b64_data))
-                logger.warning(
+                logger.debug(
                     f"[灾害预警] 气象预警官方图标下载失败，已回退到本地通用图标: "
-                    f"预警编码为 {weather_type_code}, 回退图标路径: {fallback_path}"
+                    f"预警编码为 {raw_weather_code}"
                 )
                 return
             except Exception as e:
@@ -780,8 +815,9 @@ class MessageBuildService:
                     f"[灾害预警] 本地回退图标读取失败: {fallback_path}, 错误信息: {e}"
                 )
 
-        logger.warning(
-            f"[灾害预警] 气象预警图标下载失败且无可用回退图标，已跳过: {icon_url}"
+        logger.debug(
+            f"[灾害预警] 气象预警图标下载失败且无可用回退图标，已跳过: "
+            f"原始编码={raw_weather_code}, 解析码={icon_code}"
         )
 
     async def _append_tsunami_media_if_needed(
