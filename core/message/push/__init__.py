@@ -11,6 +11,7 @@ from .push_flow_handler import PushFlowHandler
 from .push_orchestrator import PushOrchestrator
 from .push_policy import evaluate_push_decision_with_components
 from .session_sender import SessionSender
+from .weather_aggregation_service import WeatherAggregationService
 
 __all__ = [
     "MessageBuildService",
@@ -18,5 +19,6 @@ __all__ = [
     "PushFlowHandler",
     "PushOrchestrator",
     "SessionSender",
+    "WeatherAggregationService",
     "evaluate_push_decision_with_components",
 ]
