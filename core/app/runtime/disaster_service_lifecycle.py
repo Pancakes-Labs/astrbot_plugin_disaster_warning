@@ -285,6 +285,18 @@ class DisasterServiceLifecycleService:
                 if typhoon_enrichment:
                     await typhoon_enrichment.close()
 
+                # 停机前推送气象预警聚合缓冲区中尚未发送的事件，避免丢失。
+                weather_agg = getattr(
+                    self.service, "_weather_aggregation_service", None
+                )
+                if weather_agg is not None:
+                    try:
+                        await weather_agg.flush_all()
+                    except Exception as flush_err:
+                        logger.debug(
+                            f"[灾害预警] 停机时推送气象预警聚合缓冲区失败（已忽略）: {flush_err}"
+                        )
+
                 # 统计数据库只在已初始化时关闭，避免访问尚未建立的数据库句柄。
                 if (
                     self.service.statistics_manager
