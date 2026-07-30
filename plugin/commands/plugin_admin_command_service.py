@@ -154,6 +154,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "china_cenc_earthquake": "中国地震台网 (CENC)",
                     "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
                     "usgs_earthquake": "美国地质调查局 (USGS)",
+                    "fssn_cmt": "FSSN 矩心矩张量解 (CMT)",
                     "usa_shakealert": "美国 ShakeAlert 地震预警",
                     "china_weather_alarm": "中国气象局: 气象预警",
                     "china_tsunami": "自然资源部海啸预警中心",
@@ -174,14 +175,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 },
                 "OpenQuakeAPI": {
                     "global_quake": "Global Quake",
+                    "china_weather_alarm": "中国气象局: 气象预警",
                 },
                 "EQSC API": {
-                    "china_typhoon": "中国气象局：实时活跃台风",
-                    # 与 P2P 子源名称一致，仅展示一个海啸
+                    "typhoon_enrichment": "中国气象局：实时活跃台风",
                     "jma_tsunami": "日本气象厅: 海啸予报",
+                    "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
                 },
                 "NIED S-Net": {
-                    "snet_msil": "日本海沟 S-Net 海底震度计",
+                    "enabled": "日本海沟 S-Net 海底震度计",
                 },
             }
 
@@ -255,7 +257,6 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 }
 
             eqsc_enabled = bool(eqsc_health.get("enabled"))
-            eqsc_config_enabled = bool(eqsc_health.get("config_enabled", eqsc_enabled))
             eqsc_circuit_open = bool(eqsc_health.get("circuit_open", False))
             eqsc_token_valid = bool(eqsc_health.get("access_token_valid", False))
             if not eqsc_enabled:
@@ -310,10 +311,27 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # 2. 连接状态详情行
             connection_lines = ["📡 连接详情"]
             conn_details = status.get("connection_details", {})
+            # 从 connections 视图提取各连接分组的配置启用状态，
+            # 用于区分"未启用 / 异常 / 正常"三种状态，避免将未启用的
+            # 连接（如 FAN Studio 烈度速报）误显示为"异常"。
+            connections_view = status.get("connections", {})
+            group_enabled_map: dict[str, bool] = {}
+            for conn_info in connections_view.values():
+                if isinstance(conn_info, dict):
+                    gk = str(conn_info.get("group_key") or "")
+                    if gk:
+                        group_enabled_map[gk] = bool(conn_info.get("enabled", False))
+
             for conn_name, display_name in connection_label_map.items():
                 detail = conn_details.get(conn_name, {})
                 connected = bool(detail.get("connected", False))
-                state_text = "🟢 正常" if connected else "🔴 异常"
+                is_enabled = group_enabled_map.get(conn_name, False)
+                if not is_enabled:
+                    state_text = "⚪ 未启用"
+                elif connected:
+                    state_text = "🟢 正常"
+                else:
+                    state_text = "🔴 异常"
                 connection_lines.append(f"• {display_name}：{state_text}")
 
             connection_lines.append(f"• EQSC API：{eqsc_state_text}")
@@ -330,26 +348,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     grouped_sources[service_name].append(source_name)
 
             sub_source_status = dict(status.get("sub_source_status", {}) or {})
-            # 注入 EQSC 子源（不在 SOURCE_CATALOG 的 WebSocket 分组内）
-            # 子数据源展示只看各自子开关本身
-            eqsc_sub_sources = eqsc_health.get("sub_sources")
-            eqsc_typhoon_enrichment = bool(
-                eqsc_health.get("typhoon_enrichment", eqsc_config_enabled)
-            )
-            eqsc_jma_tsunami = bool(eqsc_health.get("jma_tsunami", eqsc_config_enabled))
-            # 固定顺序：台风 → 海啸（仅一个海啸入口，名称与 P2P 一致）
-            eqsc_sub_sources = {
-                "china_typhoon": eqsc_typhoon_enrichment,
-                "jma_tsunami": eqsc_jma_tsunami,
-            }
-            sub_source_status["eqsc"] = dict(eqsc_sub_sources)
-            if eqsc_config_enabled:
-                grouped_sources.setdefault("eqsc", ["china_typhoon", "jma_tsunami"])
-
-            # 注入 S-Net：仅展示单一子源 snet_msil（与前端网格一致）
-            sub_source_status["snet"] = {"snet_msil": snet_enabled}
-            if snet_enabled:
-                grouped_sources.setdefault("snet", ["snet_msil"])
+            # EQSC / S-Net 为 HTTP 通道，SOURCE_CATALOG 已注册其子源，
+            # build_sub_source_status() 会按 config_key 正确归组，
+            # 无需再硬编码注入，避免 key 名与 grouped_sources 漂移导致计数错误。
 
             for service_name, display_name in source_group_label_map.items():
                 if (
@@ -357,6 +358,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     and service_name not in sub_source_status
                 ):
                     continue
+
+                # 分组之间增加空行，提升可读性
+                if len(data_source_lines) > 1:
+                    data_source_lines.append("")
 
                 raw_sources = grouped_sources.get(service_name, [])
                 group_status = sub_source_status.get(service_name, {})
