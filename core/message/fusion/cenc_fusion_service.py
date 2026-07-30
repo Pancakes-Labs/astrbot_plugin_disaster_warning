@@ -134,6 +134,7 @@ class CENCFusionService:
             plugin_logger.info(
                 f"[灾害预警] 融合策略: Fan CENC 事件 {event.id} 命中 Wolfx 缓存并补充烈度: {earthquake.intensity}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return await self._execute_push(
                 event,
@@ -144,6 +145,7 @@ class CENCFusionService:
         plugin_logger.info(
             f"[灾害预警] 融合策略: 拦截 Fan CENC 事件 {event.id}，事件标识为 {event_key}，兼容槽位序号为 {report_num}，测定类型为 {measurement_type}，等待 Wolfx 补充（{timeout} 秒）...",
             is_event_linked=True,
+            event_stream="earthquake",
         )
 
         loop = asyncio.get_running_loop()
@@ -180,6 +182,7 @@ class CENCFusionService:
                 plugin_logger.info(
                     "[灾害预警] 融合策略: CENC 等待超时，推送原始 Fan 事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
                 return await self._execute_push(
                     event,
@@ -190,6 +193,7 @@ class CENCFusionService:
                 plugin_logger.info(
                     "[灾害预警] 融合策略: CENC 融合完成，推送补充后的 Fan 事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
                 return await self._execute_push(
                     event,
@@ -275,6 +279,7 @@ class CENCFusionService:
             plugin_logger.info(
                 f"[灾害预警] 融合策略: 成功用 Wolfx 补充 Fan CENC 事件 {pending_key} 的烈度: {intensity}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
 
             if future is not None and hasattr(future, "done") and not future.done():

@@ -109,6 +109,7 @@ class CWAEewFusionService:
             plugin_logger.info(
                 f"[灾害预警] 融合策略：Fan CWA EEW 事件 {event.id} 已命中 Wolfx 缓存，补充的最大震度为 {scale}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return await self._execute_push(
                 event,
@@ -119,6 +120,7 @@ class CWAEewFusionService:
         plugin_logger.info(
             f"[灾害预警] 融合策略：已拦截 Fan CWA EEW 事件 {event.id}，事件标识为 {event_key}，报数为 {report_num}，等待 Wolfx 在 {timeout} 秒内补充最大震度",
             is_event_linked=True,
+            event_stream="earthquake",
         )
 
         loop = asyncio.get_running_loop()
@@ -152,6 +154,7 @@ class CWAEewFusionService:
                 plugin_logger.info(
                     "[灾害预警] 融合策略：CWA EEW 等待超时，推送原始 Fan 事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
                 return await self._execute_push(
                     event,
@@ -162,6 +165,7 @@ class CWAEewFusionService:
                 plugin_logger.info(
                     "[灾害预警] 融合策略：CWA EEW 融合完成，推送补充最大震度后的 Fan 事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
                 return await self._execute_push(
                     event,
@@ -261,11 +265,13 @@ class CWAEewFusionService:
                 plugin_logger.info(
                     f"[灾害预警] 融合策略：已使用 Wolfx 为 Fan CWA EEW 事件 {pending_key} 补充最大震度，数值为 {scale}",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
             else:
                 plugin_logger.info(
                     f"[灾害预警] 融合策略：Fan CWA EEW 事件 {pending_key} 已自带最大震度，保留 Fan 的数值 ({fan_earthquake.scale})",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
 
             if future is not None and hasattr(future, "done") and not future.done():

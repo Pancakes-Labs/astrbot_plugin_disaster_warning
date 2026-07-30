@@ -260,22 +260,42 @@ class PushFlowHandler:
                 plugin_logger.info(
                     f"[灾害预警] 事件 {event.id} 已完成会话筛选，{push_success_count} 个会话通过，另有 {summary} 被拦截{failure_suffix}",
                     is_event_linked=True,
+                    event_stream=self._resolve_event_stream(event),
                 )
             else:
                 plugin_logger.info(
                     f"[灾害预警] 事件 {event.id} 未通过任何会话的推送条件，拦截情况：{summary}{failure_suffix}",
                     is_event_linked=True,
+                    event_stream=self._resolve_event_stream(event),
                 )
         elif push_success_count > 0:
             plugin_logger.info(
                 f"[灾害预警] 事件 {event.id} 已通过全部会话的推送条件，共 {push_success_count} 个会话{failure_suffix}",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
         elif failure_summary:
             plugin_logger.info(
                 f"[灾害预警] 事件 {event.id} 已通过发送前筛选，但发送阶段全部失败：{failure_summary}",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
+
+    @staticmethod
+    def _resolve_event_stream(event: EventEnvelope) -> str:
+        """根据事件类型解析事件流标签，用于细粒度日志级别控制。"""
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if event_type == "weather_alarm":
+            return "weather_alarm"
+        if event_type == "typhoon":
+            return "typhoon"
+        if event_type == "tsunami":
+            return "tsunami"
+        # 地震类事件统一归入 earthquake 流
+        source_id = str(getattr(event, "source_id", "") or "").strip()
+        if source_id == "global_quake":
+            return "global_quake"
+        return "earthquake"
 
     def _log_push_completion(
         self,
@@ -314,9 +334,11 @@ class PushFlowHandler:
             plugin_logger.info(
                 f"[灾害预警] 事件 {event.id} 推送完成，成功推送到 {push_success_count} 个会话",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
         elif send_failure_stats:
             plugin_logger.warning(
                 f"[灾害预警] 事件 {event.id} 推送完成，但没有任何会话发送成功",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )

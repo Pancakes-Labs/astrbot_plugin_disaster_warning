@@ -110,6 +110,25 @@ class EventDeduplicationService:
         return 1
 
     @staticmethod
+    def _resolve_event_stream_by_source_id(source_id: str) -> str:
+        """根据数据源标识解析事件流标签，用于细粒度日志级别控制。
+
+        确保去重器中的报数日志与对应解析器的日志流标签一致，
+        避免事件的报数日志以 earthquake 流输出导致级别不匹配。
+        """
+        if not source_id:
+            return "earthquake"
+        if source_id == "global_quake":
+            return "global_quake"
+        if "weather" in source_id:
+            return "weather_alarm"
+        if "typhoon" in source_id:
+            return "typhoon"
+        if "tsunami" in source_id:
+            return "tsunami"
+        return "earthquake"
+
+    @staticmethod
     def _normalize_fingerprint_value(value: Any) -> str:
         """规范化指纹字段，避免 int/float/None 的字符串差异导致误放行。
 
@@ -189,6 +208,7 @@ class EventDeduplicationService:
             plugin_logger.info(
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
+                event_stream="typhoon",
             )
             return False
         return True
@@ -215,6 +235,7 @@ class EventDeduplicationService:
             plugin_logger.info(
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
+                event_stream="typhoon",
             )
             return False
 
@@ -352,12 +373,14 @@ class EventDeduplicationService:
         existing_priority = int(existing.get("priority") or 0)
         existing_source = str(existing.get("source_id") or "")
         log_fn = plugin_logger.info if log_level == "info" else plugin_logger.debug
+        stream_tag = self._resolve_event_stream_by_source_id(source_id)
 
         if priority < existing_priority:
             log_fn(
                 f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
                 f"过滤 {source_id} 推送 (event={event_id})",
                 is_event_linked=True,
+                event_stream=stream_tag,
             )
             return False
         if priority == existing_priority and existing_source == source_id:
@@ -372,6 +395,7 @@ class EventDeduplicationService:
                 f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
                 f"(event={event_id})",
                 is_event_linked=True,
+                event_stream=stream_tag,
             )
             return False
         if priority == existing_priority and existing_source != source_id:
@@ -380,6 +404,7 @@ class EventDeduplicationService:
                 f"[灾害预警] {kind}内容与 {existing_source} 重复，"
                 f"过滤 {source_id} 推送",
                 is_event_linked=True,
+                event_stream=stream_tag,
             )
             return False
 
@@ -427,6 +452,7 @@ class EventDeduplicationService:
                 f"[灾害预警] 海啸内容未变化，过滤重复推送: {source_id} "
                 f"(event={event_id})",
                 is_event_linked=True,
+                event_stream="tsunami",
             )
             return False
 
@@ -707,12 +733,15 @@ class EventDeduplicationService:
                     plugin_logger.info(
                         f"[灾害预警] 同一数据源重复事件，过滤: {source_id}",
                         is_event_linked=True,
+                        event_stream=self._resolve_event_stream_by_source_id(source_id),
                     )
                     return False
 
             # 同一指纹但来自不同数据源的事件允许继续入链，便于后续融合策略处理。
             plugin_logger.info(
-                f"[灾害预警] 不同数据源，允许推送: {source_id}", is_event_linked=True
+                f"[灾害预警] 不同数据源，允许推送: {source_id}",
+                is_event_linked=True,
+                event_stream=self._resolve_event_stream_by_source_id(source_id),
             )
             current_report = self._resolve_report_num(event, metadata)
             issue_type = self._extract_issue_type_from_earthquake(domain_eq, metadata)
@@ -830,6 +859,7 @@ class EventDeduplicationService:
                 f"[灾害预警] 新报数: 第 {current_report} 报 {'(最终报)' if current_is_final else ''}"
                 f" (已处理: {sorted(processed_reports)})",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream_by_source_id(source_id),
             )
             return True
 
@@ -837,7 +867,9 @@ class EventDeduplicationService:
         current_is_final = bool(active_metadata.get("is_final", False))
         if current_is_final and not existing_event.get("is_final", False):
             plugin_logger.info(
-                "[灾害预警] 最终报更新: 非最终报 -> 最终报", is_event_linked=True
+                "[灾害预警] 最终报更新: 非最终报 -> 最终报",
+                is_event_linked=True,
+                event_stream=self._resolve_event_stream_by_source_id(source_id),
             )
             return True
 

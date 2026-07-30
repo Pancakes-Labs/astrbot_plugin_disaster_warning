@@ -122,6 +122,21 @@ class SourceMessageRouter:
         parsers = getattr(self.service, "parsers", {})
         return source_id in parsers and parsers[source_id] is not None
 
+    @staticmethod
+    def _resolve_stream_by_source_id(source_id: str) -> str:
+        """根据数据源标识解析事件流标签，用于细粒度日志级别控制。"""
+        if not source_id:
+            return "earthquake"
+        if "weather" in source_id:
+            return "weather_alarm"
+        if "typhoon" in source_id:
+            return "typhoon"
+        if "tsunami" in source_id:
+            return "tsunami"
+        if source_id == "global_quake":
+            return "global_quake"
+        return "earthquake"
+
     def _is_source_routable(self, source_id: str, source_label: str) -> bool:
         config_key = _resolve_config_key(source_id)
         # 校验：1. 数据源是否在当前配置中被启用
@@ -133,7 +148,9 @@ class SourceMessageRouter:
         # 校验：2. 相应的消息解析器是否存在，避免解析抛错
         if not self._has_parser(source_id):
             logger.warning(
-                f"[灾害预警] 未找到解析器: {source_id}", is_event_linked=True
+                f"[灾害预警] 未找到解析器: {source_id}",
+                is_event_linked=True,
+                event_stream="earthquake",
             )
             return False
         return True
@@ -251,6 +268,7 @@ class SourceMessageRouter:
                     f"[灾害预警] Source ID '{source_id}' (源: {source_name}) 未注册解析器，"
                     f"请检查 core/app/disaster_service.py 中的初始化。",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
         self._parser_map_checked = True
 
@@ -306,6 +324,7 @@ class SourceMessageRouter:
             "但本轮 FAN Studio 全量数据中未包含 sa 快照；"
             "将等待后续更新推送，当前无需本地修复",
             is_event_linked=True,
+            event_stream="earthquake",
         )
 
     def _create_fan_studio_handler(self):
@@ -423,6 +442,7 @@ class SourceMessageRouter:
                     plugin_logger.info(
                         f"[灾害预警] 处理 {source} 数据 ({_resolve_config_key(source_id)})",
                         is_event_linked=True,
+                        event_stream=self._resolve_stream_by_source_id(source_id),
                     )
                     dispatched = await self._parse_and_dispatch(
                         source_id=source_id,
@@ -496,6 +516,7 @@ class SourceMessageRouter:
                     plugin_logger.info(
                         "[灾害预警] P2P 处理器收到紧急地震速报，业务码为 556，准备解析",
                         is_event_linked=True,
+                        event_stream="earthquake",
                     )
             except (json.JSONDecodeError, AttributeError, TypeError):
                 data = {}
