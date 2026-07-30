@@ -173,8 +173,9 @@ def get_wolfx_source_id(message_type: str) -> str | None:
 def get_openquake_source_id(source_name: str | None) -> str | None:
     """根据 OpenQuakeAPI RealtimeEvent.source 解析统一数据源标识。
 
-    /ws/all 聚合推送会保留原始 source（gq / nmefc / nmefc-wave / nmefc-surge）。
-    当前仅接入 Global Quake；其余 source 返回 None，便于后续继续挂接。
+    /ws/all 聚合推送会保留原始 source（gq / nmefc / nmefc-wave / nmefc-surge / cma）。
+    当前已接入 Global Quake（gq）与中国气象局气象预警（cma）；
+    其余 source 返回 None，便于后续继续挂接。
     source 缺失时按历史兼容回落到 global_quake。
     """
     name = str(source_name or "").strip().lower()
