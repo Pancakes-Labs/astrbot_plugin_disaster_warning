@@ -116,3 +116,41 @@ COLOR_LEVEL_EMOJI = {
 
 # 默认描述最大长度，避免长篇气象正文把消息刷得过长。
 DEFAULT_MAX_DESCRIPTION_LENGTH = 384
+
+# 升级/降级等变更关键词，用于识别预警变更后的最终颜色
+_COLOR_CHANGE_KEYWORDS = ("升级为", "降级为", "变更为")
+
+
+def extract_final_weather_color(*texts: str) -> str | None:
+    """从文本中提取预警最终颜色，正确处理升级/降级场景。
+
+    优先从包含"升级为/降级为"的文本中提取变更关键词之后的颜色；
+    若无变更场景，则按红色→白色优先级返回首个匹配的颜色。
+
+    Args:
+        texts: 待检索的文本（level、title、headline 等），按优先级传入。
+
+    Returns:
+        颜色名称（如"红色"），无匹配时返回 None。
+    """
+    # 第一轮：优先处理包含变更关键词的文本，取变更后的最终颜色
+    for text in texts:
+        if not text:
+            continue
+        text = str(text)
+        for keyword in _COLOR_CHANGE_KEYWORDS:
+            idx = text.find(keyword)
+            if idx >= 0:
+                tail = text[idx + len(keyword) :]
+                for color in COLOR_LEVEL_EMOJI:
+                    if color in tail:
+                        return color
+    # 第二轮：无变更场景，按红色优先返回首个匹配的颜色
+    for text in texts:
+        if not text:
+            continue
+        text = str(text)
+        for color in COLOR_LEVEL_EMOJI:
+            if color in text:
+                return color
+    return None

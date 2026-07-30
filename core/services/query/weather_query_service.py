@@ -13,6 +13,7 @@ from ....utils.time_converter import TimeConverter
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
+    extract_final_weather_color,
 )
 
 
@@ -104,6 +105,14 @@ def extract_weather_org(title_text: str, headline_text: str) -> str:
     if match:
         return match.group(1)
 
+    # 提取以气象台/气象局/气象站/气象中心结尾的机构名（如"康县气象台"）
+    # 覆盖"升级/降级"类预警 headline 无"发布"关键词的场景
+    org_match = re.search(
+        r"^(.+?(?:气象台|气象局|气象站|气象中心|气象分局))", candidate
+    )
+    if org_match:
+        return org_match.group(1)
+
     time_match = re.search(
         r"^(.*?)(?:\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分(?:\d{1,2}秒)?)$",
         candidate,
@@ -131,12 +140,13 @@ def detect_weather_type(title_text: str, weather_type_code: str | None) -> str:
 
 
 def detect_weather_color(level_text: str, title_text: str) -> str:
-    """识别预警颜色。"""
-    candidate = f"{level_text or ''} {title_text or ''}"
-    for color in COLOR_LEVEL_EMOJI:
-        if color in candidate:
-            return color
-    return "未知颜色"
+    """识别预警颜色。
+
+    对于"升级为/降级为"类预警，优先取变更后的最终颜色，
+    避免因红色优先匹配而返回变更前的旧颜色。
+    """
+    final_color = extract_final_weather_color(level_text, title_text)
+    return final_color if final_color else "未知颜色"
 
 
 def extract_weather_warning_core(title_text: str) -> str | None:
