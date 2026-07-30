@@ -71,12 +71,12 @@ class RawMessageFilter:
                     # 对于无法成功解析出业务数据的二进制包（比如非地震业务的心跳握手或状态广播），选择不过滤直接拦截不记日志
                     return "未识别或不需要记录的二进制数据帧"
             if isinstance(payload_data, dict):
-                # 针对 JSON 结构的字典数据，如果是 Global Quake 且类型不是 earthquake 业务，也直接过滤
-                if (
-                    "global_quake" in source_id.lower()
-                    and str(payload_data.get("type") or "").lower() != "earthquake"
-                ):
-                    return "Global Quake 非地震业务JSON消息过滤"
+                # 针对 JSON 结构的字典数据，如果是 OpenQuakeAPI 聚合连接，
+                # 仅保留 earthquake（GQ）和 weather（CMA 气象）业务类型，其余过滤。
+                if "global_quake" in source_id.lower():
+                    inner_type = str(payload_data.get("type") or "").lower()
+                    if inner_type not in ("earthquake", "weather"):
+                        return f"OpenQuakeAPI 非地震/气象业务JSON消息过滤: {inner_type}"
                 return self._handle_dict_message(payload_data, source_id)
         except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             pass
