@@ -61,31 +61,31 @@
             "description": "中国地震网地震预警",
             "type": "bool",
             "default": false,
-            "hint": "通过 FAN Studio WebSocket 接收中国地震网地震预警信息"
+            "hint": "通过 FAN Studio WebSocket 接收中国地震网地震预警信息。"
           },
           "china_earthquake_warning_provincial": {
             "description": "中国地震网地震预警(省级)",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收中国地震网省级地震预警信息"
+            "hint": "通过 FAN Studio WebSocket 接收中国地震网省级地震预警信息。"
           },
           "taiwan_cwa_earthquake": {
             "description": "台湾中央气象署：强震即时警报",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收台湾中央气象署强震即时警报(EEW)"
+            "hint": "通过 FAN Studio WebSocket 接收台湾中央气象署强震即时警报。"
           },
           "taiwan_cwa_report": {
             "description": "台湾中央气象署：地震报告",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收台湾中央气象署地震报告"
+            "hint": "通过 FAN Studio WebSocket 接收台湾中央气象署地震报告。"
           },
           "china_cenc_earthquake": {
             "description": "中国地震台网（CENC）：地震测定",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收中国地震台网地震测定信息"
+            "hint": "通过 FAN Studio WebSocket 接收中国地震台网地震测定信息。"
           },
           "china_cenc_intensity_report": {
             "description": "中国地震台网（CENC）：烈度速报",
@@ -97,19 +97,19 @@
             "description": "日本气象厅（JMA）：紧急地震速报",
             "type": "bool",
             "default": false,
-            "hint": "通过 FAN Studio WebSocket 接收日本气象厅地震预警信息"
+            "hint": "通过 FAN Studio WebSocket 接收日本气象厅地震预警信息。"
           },
           "usgs_earthquake": {
             "description": "美国地质调查局（USGS）：地震测定",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收USGS地震测定信息"
+            "hint": "通过 FAN Studio WebSocket 接收USGS地震测定信息。"
           },
           "usa_shakealert": {
             "description": "美国 ShakeAlert：地震预警",
             "type": "bool",
             "default": false,
-            "hint": "通过 FAN Studio WebSocket 接收美国 ShakeAlert 地震预警信息"
+            "hint": "通过 FAN Studio WebSocket 接收美国 ShakeAlert 地震预警信息。"
           },
           "fssn_cmt": {
             "description": "FSSN：矩心矩张量解 (CMT)",
@@ -120,14 +120,14 @@
           "china_weather_alarm": {
             "description": "中国气象局：气象预警",
             "type": "bool",
-            "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收中国气象局气象预警信息"
+            "default": false,
+            "hint": "通过 FAN Studio WebSocket 接收中国气象局气象预警信息。"
           },
           "china_tsunami": {
             "description": "自然资源部海啸预警中心：海啸预警信息",
             "type": "bool",
             "default": true,
-            "hint": "通过 FAN Studio WebSocket 接收自然资源部海啸预警中心海啸预警信息"
+            "hint": "通过 FAN Studio WebSocket 接收自然资源部海啸预警中心海啸预警信息。"
           },
           "china_typhoon": {
             "description": "中国气象局：实时活跃台风",
@@ -225,6 +225,12 @@
             "type": "bool",
             "default": true,
             "hint": "通过 OpenQuakeAPI 获取 Global Quake 全球地震实时数据（由全球测站实时测算，精度有限）。"
+          },
+          "china_weather_alarm": {
+            "description": "中国气象局：气象预警",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 OpenQuakeAPI 接收中国气象局气象预警信息。"
           }
         }
       },
@@ -715,7 +721,7 @@
   "push_frequency_control": {
     "description": "⏱️ 推送频率控制",
     "type": "object",
-    "hint": "用于控制地震预警类型消息的推送频率",
+    "hint": "用于控制预警消息的推送频率",
     "items": {
       "cea_cwa_report_n": {
         "description": "CEA/CWA：每收到N报推送一次",
@@ -760,6 +766,75 @@
         "type": "bool",
         "hint": "只推送最终报（以及第1报），适用于支持最终报的数据源（如 JMA、Global Quake）",
         "default": false
+      },
+      "weather_aggregation": {
+        "description": "气象预警聚合推送",
+        "type": "object",
+        "hint": "在时间窗口内积攒气象预警事件后合并推送，避免高频数据源刷屏。支持合并转发的平台（如 QQ）将打包为合并转发消息；不支持的平台将启用限流，仅推送优先级最高的若干条。",
+        "items": {
+          "enabled": {
+            "description": "启用气象预警聚合",
+            "type": "bool",
+            "default": true,
+            "hint": "启用后将在时间窗口内积攒气象预警事件，到期后合并推送。关闭后每条气象预警独立推送。"
+          },
+          "time_window_seconds": {
+            "description": "聚合时间窗口",
+            "type": "int",
+            "default": 900,
+            "hint": "单位：秒。气象预警事件的积攒时间窗口，默认 15 分钟。窗口到期后统一推送积攒的事件。",
+            "slider": {
+              "min": 60,
+              "max": 3600,
+              "step": 30
+            }
+          },
+          "max_batch_size": {
+            "description": "单批最大聚合条数",
+            "type": "int",
+            "default": 20,
+            "hint": "单次合并推送最多包含的气象预警条数。超过此数量时分批发送。仅在启用合并转发时生效。",
+            "slider": {
+              "min": 1,
+              "max": 50,
+              "step": 1
+            }
+          },
+          "flush_on_red": {
+            "description": "收到红色预警时立即推送",
+            "type": "bool",
+            "default": false,
+            "hint": "收到红色级别气象预警时立即触发推送，不等时间窗口到期。确保高优先级预警及时送达。"
+          },
+          "rate_limit_enabled": {
+            "description": "启用限流（不支持合并转发的平台）",
+            "type": "bool",
+            "default": true,
+            "hint": "对于不支持合并转发的平台，启用限流机制：在限流时间窗口内最多推送指定数量的消息，优先推送高级别预警。"
+          },
+          "rate_limit_max_messages": {
+            "description": "限流最大消息数",
+            "type": "int",
+            "default": 3,
+            "hint": "限流时间窗口内最多推送的消息数量。仅在启用限流时生效。",
+            "slider": {
+              "min": 1,
+              "max": 20,
+              "step": 1
+            }
+          },
+          "rate_limit_window_seconds": {
+            "description": "限流时间窗口",
+            "type": "int",
+            "default": 900,
+            "hint": "单位：秒。限流计数的时间窗口，默认 900 秒（15 分钟）。",
+            "slider": {
+              "min": 60,
+              "max": 3600,
+              "step": 30
+            }
+          }
+        }
       }
     }
   },
@@ -1359,6 +1434,55 @@
         ],
         "default": "降级为DEBUG",
         "hint": "仅在日志输出选项为“简洁”时生效。降级为DEBUG：事件流日志均以 DEBUG 级别在 AstrBot 控制台输出；完全屏蔽：彻底过滤除 ERROR 外的事件流日志，不论 AstrBot 控制台为什么级别均不输出。"
+      },
+      "event_stream_log_level": {
+        "description": "事件流日志级别覆盖",
+        "type": "object",
+        "hint": "按事件流类型独立控制日志级别，优先级高于「日志输出选项」总开关。可用于将高频事件流（如气象预警、Global Quake）的日志降级为 DEBUG 或屏蔽，而不影响其他事件流。设为 INFO 时回退到总开关行为。",
+        "items": {
+          "all": {
+            "description": "全部事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "INFO",
+            "hint": "全局覆盖开关。设为 DEBUG 或屏蔽时将覆盖所有事件流的独立设置。设为 INFO 时使用各事件流的独立设置或回退到总开关。"
+          },
+          "weather_alarm": {
+            "description": "气象预警事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "DEBUG",
+            "hint": "气象预警解析、过滤、推送链路的日志级别。由于 OQ 数据源推送频率高，默认降级为 DEBUG。"
+          },
+          "global_quake": {
+            "description": "Global Quake 事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "DEBUG",
+            "hint": "Global Quake 解析、过滤、推送链路的日志级别。由于推送频率较高，默认降级为 DEBUG。"
+          },
+          "earthquake": {
+            "description": "地震事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "INFO",
+            "hint": "地震预警、报告等事件流的日志级别。"
+          },
+          "tsunami": {
+            "description": "海啸事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "INFO",
+            "hint": "海啸预警事件流的日志级别。"
+          },
+          "typhoon": {
+            "description": "台风事件流日志级别",
+            "type": "string",
+            "options": ["INFO", "DEBUG", "屏蔽"],
+            "default": "INFO",
+            "hint": "台风事件流的日志级别。"
+          }
+        }
       },
       "enable_raw_message_logging": {
         "description": "启用原始消息格式记录",
