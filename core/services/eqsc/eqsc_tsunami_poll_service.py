@@ -156,10 +156,23 @@ class EqscTsunamiPollService:
 
     async def _poll_loop(self) -> None:
         """后台轮询循环。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_started("eqsc_tsunami")
+            except Exception as exc:
+                logger.debug(
+                    f"[灾害预警] EQSC 海啸轮询通知静默协调器抓取开始失败: {exc}"
+                )
         try:
             await self.fetch_once(emit_event=True)
         except Exception as exc:
             logger.error(f"[灾害预警] EQSC 海啸首次抓取失败: {exc}")
+            if coordinator is not None:
+                try:
+                    coordinator.note_poll_fetch_completed("eqsc_tsunami", success=False)
+                except Exception:
+                    pass
 
         while getattr(self.service, "running", False):
             try:
@@ -193,10 +206,21 @@ class EqscTsunamiPollService:
             is_training=is_training,
         )
 
+    def _notify_silence_fetch_completed(self, *, success: bool) -> None:
+        """通知静默协调器本轮抓取已结束（成功或失败）。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        try:
+            coordinator.note_poll_fetch_completed("eqsc_tsunami", success=success)
+        except Exception as exc:
+            logger.debug(f"[灾害预警] EQSC 海啸轮询通知静默协调器失败: {exc}")
+
     async def fetch_once(self, *, emit_event: bool = True) -> dict[str, Any] | None:
         """抓取一轮 EQSC 海啸快照，可选投递事件。"""
         client = self._ensure_client()
         if client is None:
+            self._notify_silence_fetch_completed(success=False)
             return None
 
         # 轮询侧强制绕过短缓存，确保按间隔拿到最新快照；
@@ -204,16 +228,12 @@ class EqscTsunamiPollService:
         raw = await client.fetch_latest_tsunami(use_cache=False)
         if not isinstance(raw, dict) or not raw:
             self._consecutive_failures += 1
+            self._notify_silence_fetch_completed(success=False)
             return None
 
         self._consecutive_failures = 0
         self._last_success_at = time.time()
-        coordinator = getattr(self.service, "startup_silence", None)
-        if coordinator is not None:
-            try:
-                coordinator.note_poll_fetch_completed("eqsc_tsunami", success=True)
-            except Exception as exc:
-                logger.debug(f"[灾害预警] EQSC 海啸轮询通知静默协调器失败: {exc}")
+        self._notify_silence_fetch_completed(success=True)
 
         fingerprint = self._build_snapshot_fingerprint(raw)
 

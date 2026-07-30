@@ -39,6 +39,11 @@ class GateState:
     connected_at: float | None = None
     primed_at: float | None = None
     last_bootstrap_kind: str = ""
+    # 轮询门闩：首轮抓取开始时间与是否正在抓取中。
+    # 超时判定从实际开始抓取时间起算，避免 arm 到轮询启动之间的初始化耗时（数据库/浏览器/缓存加载）被误计入轮询超时。
+    # fetching=True 时不触发超时放行，避免首轮抓取进行中被误放行。
+    fetch_started_at: float | None = None
+    fetching: bool = False
 
     @property
     def satisfied(self) -> bool:
@@ -254,6 +259,29 @@ class StartupSilenceCoordinator:
             return
         self._mark_primed(gate, bootstrap_kind=kind)
 
+    def note_poll_fetch_started(self, poll_id: str) -> None:
+        """HTTP 轮询开始首轮抓取。
+
+        记录实际开始抓取的时间，作为 first_poll_timeout 的起算点。
+        arm 到轮询启动之间有数据库初始化、浏览器启动等耗时操作，
+        若从 arm 时间起算会导致轮询尚未开始抓取即被超时放行。
+        """
+        if not self.enabled or self.state == SilenceState.READY:
+            return
+        gate_id = str(poll_id or "").strip()
+        if not gate_id:
+            return
+        gate = self.gates.get(gate_id)
+        if gate is None:
+            gate = GateState(gate_id=gate_id, kind="poll")
+            self.gates[gate_id] = gate
+        now = self._try_mono()
+        gate.fetch_started_at = now
+        gate.fetching = True
+        if self.state == SilenceState.ARMING:
+            self.state = SilenceState.PRIMING
+        self._evaluate_ready(reason_hint=f"poll_fetch_started:{gate_id}")
+
     def note_poll_fetch_completed(self, poll_id: str, *, success: bool = True) -> None:
         """HTTP 轮询完成首轮（成功或确认可跳过）。"""
         if not self.enabled or self.state == SilenceState.READY:
@@ -265,6 +293,8 @@ class StartupSilenceCoordinator:
         if gate is None:
             gate = GateState(gate_id=gate_id, kind="poll")
             self.gates[gate_id] = gate
+        # 无论成功失败，都清除抓取中标志，允许 watchdog 超时判定。
+        gate.fetching = False
         if not success:
             # 失败不直接 primed；watchdog 的 first_poll_timeout / 硬超时会兜底。
             return
@@ -354,6 +384,8 @@ class StartupSilenceCoordinator:
                     "skip_reason": g.skip_reason,
                     "satisfied": g.satisfied,
                     "last_bootstrap_kind": g.last_bootstrap_kind,
+                    "fetch_started_at": g.fetch_started_at,
+                    "fetching": g.fetching,
                 }
                 for gid, g in self.gates.items()
             },
@@ -505,14 +537,19 @@ class StartupSilenceCoordinator:
                             self._mark_primed(
                                 gate, bootstrap_kind="first_payload_timeout"
                             )
-                        # 轮询门闩：武装后长时间无成功首轮 → 超时放行，避免拖满硬超时
+                        # 轮询门闩：开始抓取后长时间无成功首轮 → 超时放行，避免拖满硬超时。
+                        # 超时从实际开始抓取时间起算（fetch_started_at），
+                        # 而非 arm 时间，避免初始化耗时被误计入。
+                        # fetching=True（正在抓取中）时不触发超时，避免首轮抓取
+                        # 耗时较长（如台风 HTTP + 渲染）时被误放行。
                         if (
                             gate.kind == "poll"
                             and gate.required
                             and not gate.skipped
                             and not gate.primed
-                            and self.started_mono is not None
-                            and (now - self.started_mono)
+                            and gate.fetch_started_at is not None
+                            and not gate.fetching
+                            and (now - gate.fetch_started_at)
                             >= self.first_poll_timeout_seconds
                         ):
                             self._mark_primed(

@@ -147,11 +147,22 @@ class SnetPollService:
 
     async def _poll_loop(self) -> None:
         """后台轮询循环。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_started("snet_msil")
+            except Exception as exc:
+                logger.debug(f"[灾害预警] S-Net 轮询通知静默协调器抓取开始失败: {exc}")
         # 启动后先立即抓一次（若仍处于静默期，流水线会自行吞掉推送）
         try:
             await self.fetch_once(emit_event=True)
         except Exception as exc:
             logger.error(f"[灾害预警] S-Net 首次抓取失败: {exc}")
+            if coordinator is not None:
+                try:
+                    coordinator.note_poll_fetch_completed("snet_msil", success=False)
+                except Exception:
+                    pass
 
         while getattr(self.service, "running", False):
             try:
@@ -185,6 +196,12 @@ class SnetPollService:
         """
         tiles_payload = await self._download_latest_tiles()
         if not tiles_payload:
+            coordinator = getattr(self.service, "startup_silence", None)
+            if coordinator is not None:
+                try:
+                    coordinator.note_poll_fetch_completed("snet_msil", success=False)
+                except Exception as exc:
+                    logger.debug(f"[灾害预警] S-Net 轮询通知静默协调器失败: {exc}")
             return None
 
         coordinator = getattr(self.service, "startup_silence", None)
