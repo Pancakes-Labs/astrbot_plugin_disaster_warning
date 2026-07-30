@@ -119,6 +119,7 @@ wss://api.aloys23.link/{path}
 | `nmefc` | NMEFC 海啸预警 | tsunami |
 | `nmefc-wave` | NMEFC 海浪警报 | alert |
 | `nmefc-surge` | NMEFC 风暴潮警报 | alert |
+| `cma` | CMA 气象预警 | weather |
 
 各事件的具体数据结构请参考对应数据源页面。
 
@@ -438,3 +439,55 @@ wss://api.aloys23.link/{path}
   }
 }
 ```
+
+---
+
+## 气象预警
+
+**路径**: `/ws/cma`
+
+数据来自中国气象局 (CMA) 国家预警信息发布中心，订阅全国气象灾害预警信息。
+
+## 事件列表
+
+| type | action | 说明 |
+| --- | --- | --- |
+| `weather` | `new` | 新的气象预警 |
+
+首次连接时建立基线缓存，后续仅推送新增预警，已撤销的预警不会主动推送移除事件。
+
+payload 字段直接透传自 [中国气象局预警地图 API](https://weather.cma.cn/api/map/alarm) ，不额外处理。
+
+## 事件数据
+
+```json
+{
+  "source": "cma",
+  "type": "weather",
+  "action": "new",
+  "timestampMs": 1752401400000,
+  "payload": {
+    "id": "32031241600000_20260729124523",
+    "headline": "铜山区气象台发布强对流黄色预警[Ⅲ级/较重]",
+    "effective": "2026/07/29 12:45",
+    "description": "铜山区气象台2026年07月29日12时41分发布强对流黄色预警信号：预计今天午后到上半夜我区部分镇（街道）将出现雷电，并伴有短时强降水、局地7-9级雷暴大风等强对流天气，区应急、水务、气象联合提醒加强防范。",
+    "longitude": 117.1839,
+    "latitude": 34.1929,
+    "type": "p0000003",
+    "title": "江苏省徐州市铜山区发布强对流黄色预警"
+  }
+}
+```
+
+## 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 预警唯一标识 |
+| `headline` | string | 预警标题行 |
+| `effective` | string | 生效时间 |
+| `description` | string | 预警详细描述 |
+| `longitude` | number | 经度 |
+| `latitude` | number | 纬度 |
+| `type` | string | 预警类型代码（如 p0000003） |
+| `title` | string | 预警标题 |
