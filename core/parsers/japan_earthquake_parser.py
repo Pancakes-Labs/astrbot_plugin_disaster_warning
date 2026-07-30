@@ -203,6 +203,7 @@ class JmaEarthquakeP2PParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
 
             return envelope
@@ -353,6 +354,7 @@ class JmaEarthquakeWolfxParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
 
             return envelope

@@ -128,6 +128,7 @@ class FssnCmtParser(BaseParser):
                 f"[灾害预警] FSSN CMT 地震解析成功: {domain_event.place_name} "
                 f"(主选 M {domain_event.magnitude or 0.0}), 关联事件: {event_id}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return envelope
 

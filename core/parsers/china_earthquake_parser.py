@@ -123,6 +123,7 @@ class CencEarthquakeParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {getattr(domain_event, 'place_name', '')} (M {getattr(domain_event, 'magnitude', None)}), 时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return envelope
         except Exception as exc:

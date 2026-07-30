@@ -123,6 +123,7 @@ class JmaEewFanStudioParser(BaseParser):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 收到取消报，跳过",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
                 return None
 
@@ -146,6 +147,7 @@ class JmaEewFanStudioParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] JMA地震预警解析成功: {getattr(domain_event, 'place_name', '')} (M {getattr(domain_event, 'magnitude', None)}), 时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return envelope
         except Exception as exc:
@@ -268,6 +270,7 @@ class JmaEewP2PParser(BaseParser):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 收到取消的EEW事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
 
             is_test = data.get("test", False)
@@ -275,6 +278,7 @@ class JmaEewP2PParser(BaseParser):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 收到测试模式的EEW事件",
                     is_event_linked=True,
+                    event_stream="earthquake",
                 )
 
             is_plum = earthquake_info.get("condition") == "仮定震源要素"
@@ -426,6 +430,7 @@ class JmaEewP2PParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震预警解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
 
             return envelope
@@ -663,6 +668,7 @@ class JmaEewWolfxParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震预警解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
 
             return envelope
