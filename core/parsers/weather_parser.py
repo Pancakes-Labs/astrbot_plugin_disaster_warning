@@ -35,9 +35,16 @@ class WeatherAlarmParser(BaseParser):
         """解析中国气象局气象预警数据。"""
         try:
             # OpenQuakeAPI RealtimeEvent 解包：外层有 source/type/action/payload
-            msg_data = self._extract_realtime_payload(data)
-            if msg_data is None:
-                # 回退到 FAN Studio 扁平/嵌套载荷提取
+            # 返回 (payload, is_realtime)；is_realtime=True 表示已确认是 RealtimeEvent
+            # 但被丢弃（如 action=remove / 非 weather 类型），此时不再回退到
+            # FAN Studio 扁平载荷提取，避免把 RealtimeEvent 外层当扁平预警误处理。
+            realtime_result = self._extract_realtime_payload(data)
+            if realtime_result is not None:
+                msg_data, is_realtime = realtime_result
+                if not is_realtime:
+                    return None
+            else:
+                # 非 RealtimeEvent 结构：回退到 FAN Studio 扁平/嵌套载荷提取
                 msg_data = self._extract_data(data)
             if not msg_data:
                 plugin_logger.debug(f"[灾害预警] {self.source_id} 消息中没有有效数据")
@@ -200,16 +207,21 @@ class WeatherAlarmParser(BaseParser):
             )
             return None
 
-    def _extract_realtime_payload(self, data: dict[str, Any]) -> dict[str, Any] | None:
+    def _extract_realtime_payload(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, bool] | None:
         """解包 OpenQuakeAPI RealtimeEvent 外层结构。
 
         RealtimeEvent 格式：
             {source, type, action, timestampMs, payload: {...}}
 
-        仅处理 type=weather 且 action=new 的气象预警事件；
-        其余 action（如 remove）返回 None 由上层丢弃。
-        非 RealtimeEvent 结构（无 payload 字段）也返回 None，
-        由调用方回退到 FAN Studio 扁平载荷提取。
+        返回 (payload, is_realtime)：
+        - 返回 None：非 RealtimeEvent 结构（无 payload 字段），
+          由调用方回退到 FAN Studio 扁平载荷提取。
+        - 返回 (None, True)：已确认是 RealtimeEvent 但被丢弃
+          （action=remove / 非 weather 类型 / payload 非 dict），
+          调用方不应回退到扁平载荷解析。
+        - 返回 (payload, True)：成功解包的气象预警载荷。
         """
         if not isinstance(data, dict):
             return None
@@ -222,16 +234,20 @@ class WeatherAlarmParser(BaseParser):
         msg_type = str(data.get("type") or "").strip().lower()
         action = str(data.get("action") or "").strip().lower()
 
-        # 仅处理气象预警新增事件
+        # 仅处理气象预警新增事件；其余情况确认是 RealtimeEvent 但直接丢弃
         if msg_type and msg_type != "weather":
-            return None
+            plugin_logger.debug(
+                f"[灾害预警] {self.source_id} 忽略非 weather 类型的 RealtimeEvent: "
+                f"{msg_type or '未知'}"
+            )
+            return None, True
         if action and action not in ("new", ""):
             plugin_logger.debug(
                 f"[灾害预警] {self.source_id} 忽略非 new 的气象 action: {action}"
             )
-            return None
+            return None, True
 
         payload = data.get("payload")
         if not isinstance(payload, dict):
-            return None
-        return payload
+            return None, True
+        return payload, True
