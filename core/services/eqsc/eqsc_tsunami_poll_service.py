@@ -233,7 +233,6 @@ class EqscTsunamiPollService:
 
         self._consecutive_failures = 0
         self._last_success_at = time.time()
-        self._notify_silence_fetch_completed(success=True)
 
         fingerprint = self._build_snapshot_fingerprint(raw)
 
@@ -242,29 +241,36 @@ class EqscTsunamiPollService:
             # 主动忽略训练报时仍提交指纹，避免每轮重复解析同一训练快照。
             self._last_payload_fingerprint = fingerprint
             logger.debug("[灾害预警] EQSC 海啸训练报已忽略")
+            self._notify_silence_fetch_completed(success=True)
             return raw
 
         if fingerprint == self._last_payload_fingerprint:
             logger.debug("[灾害预警] EQSC 海啸快照内容未变化，跳过推送")
+            self._notify_silence_fetch_completed(success=True)
             return raw
 
         if not emit_event:
             self._last_payload_fingerprint = fingerprint
+            self._notify_silence_fetch_completed(success=True)
             return raw
 
         message = json.dumps(raw, ensure_ascii=False)
         event = self.service.parse_event(self.SOURCE_ID, message)
         if event is None:
             # 解析失败不提交指纹，下一轮可重试（例如短暂脏数据）。
+            self._notify_silence_fetch_completed(success=True)
             return raw
 
         event_id = getattr(event, "id", None)
         # 仅在成功处理后提交指纹；_handle_disaster_event 吞异常并返回 False。
+        # 成功通知放在处理（含静默播种）完成之后，避免静默协调器提前 READY。
         handled = await self.service._handle_disaster_event(event)
         if not handled:
+            self._notify_silence_fetch_completed(success=True)
             return raw
         self._last_payload_fingerprint = fingerprint
         self._last_event_id = str(event_id) if event_id else None
+        self._notify_silence_fetch_completed(success=True)
         return raw
 
 

@@ -365,12 +365,16 @@ class EqscTyphoonPollService:
         # 这里仅在拿到可解析对象时记成功。
         self._consecutive_failures = 0
         self._last_success_at = time.time()
-        self._notify_silence_fetch_completed(success=True)
 
         if not emit_event:
+            # 非投递轮（如预热）无播种需求，直接通知抓取成功。
+            self._notify_silence_fetch_completed(success=True)
             return active_items
 
+        # 先完成事件投递（含静默期指纹播种），再通知抓取完成，
+        # 避免静默协调器提前 READY 导致首批台风指纹未播种而重复推送。
         emitted = await self._process_typhoon_updates(active_items)
+        self._notify_silence_fetch_completed(success=True)
         if emitted:
             plugin_logger.info(
                 f"[灾害预警] EQSC 台风轮询本轮推送 {emitted} 条更新",
