@@ -264,11 +264,14 @@ class SourceMessageRouter:
         # 遍历静态数据源配置中的所有 fan studio 定义，校验其解析器是否存在
         for source_name, source_id in FAN_STUDIO_PROVIDER_SOURCE_MAP.items():
             if source_id and not self._has_parser(source_id):
+                # FAN Studio 映射包含气象/台风/海啸等子源，按 source_id 解析事件流标签，
+                # 避免固定为 earthquake 绕过对应事件流的日志策略。
+                stream_tag = self._resolve_stream_by_source_id(source_id)
                 plugin_logger.warning(
                     f"[灾害预警] Source ID '{source_id}' (源: {source_name}) 未注册解析器，"
                     f"请检查 core/app/disaster_service.py 中的初始化。",
                     is_event_linked=True,
-                    event_stream="earthquake",
+                    event_stream=stream_tag,
                 )
         self._parser_map_checked = True
 

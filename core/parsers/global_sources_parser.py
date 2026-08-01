@@ -745,7 +745,7 @@ class UsgsEarthquakeParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude or 0.0}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
-                event_stream="global_quake",
+                event_stream=self._resolve_parser_event_stream(),
             )
 
             return envelope

@@ -169,9 +169,25 @@ class BaseParser:
         # 调用时间转换工具进行多格式兼容解析
         dt = TimeConverter.parse_datetime(time_str)
         if dt is None and time_str:
+            # 该工具同时服务天气、海啸、台风、地震等多类解析器，
+            # 按 source_id 解析事件流标签，避免非地震解析失败日志被误标为 earthquake。
+            stream = self._resolve_parser_event_stream()
             plugin_logger.warning(
                 f"[灾害预警] 时间解析失败: '{time_str}'",
                 is_event_linked=True,
-                event_stream="earthquake",
+                event_stream=stream,
             )
         return dt
+
+    def _resolve_parser_event_stream(self) -> str:
+        """根据数据源标识解析事件流标签，用于细粒度日志级别控制。"""
+        source_id = str(self.source_id or "").strip().lower()
+        if "weather" in source_id:
+            return "weather_alarm"
+        if "typhoon" in source_id:
+            return "typhoon"
+        if "tsunami" in source_id:
+            return "tsunami"
+        if "global_quake" in source_id:
+            return "global_quake"
+        return "earthquake"
