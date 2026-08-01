@@ -372,15 +372,20 @@ class EventDeduplicationService:
 
         existing_priority = int(existing.get("priority") or 0)
         existing_source = str(existing.get("source_id") or "")
-        log_fn = plugin_logger.info if log_level == "info" else plugin_logger.debug
         stream_tag = self._resolve_event_stream_by_source_id(source_id)
 
+        # plugin_logger.debug 不接受 is_event_linked / event_stream 关键字，
+        # 透传到底层 logger 会触发 TypeError 中断去重链路；仅 info 分支携带事件流参数。
+        def _log_filter(msg: str) -> None:
+            if log_level == "info":
+                plugin_logger.info(msg, is_event_linked=True, event_stream=stream_tag)
+            else:
+                plugin_logger.debug(msg)
+
         if priority < existing_priority:
-            log_fn(
+            _log_filter(
                 f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
-                f"过滤 {source_id} 推送 (event={event_id})",
-                is_event_linked=True,
-                event_stream=stream_tag,
+                f"过滤 {source_id} 推送 (event={event_id})"
             )
             return False
         if priority == existing_priority and existing_source == source_id:
@@ -391,20 +396,15 @@ class EventDeduplicationService:
                     f"{source_id} (事件 ID {event_id})"
                 )
                 return True
-            log_fn(
+            _log_filter(
                 f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
-                f"(event={event_id})",
-                is_event_linked=True,
-                event_stream=stream_tag,
+                f"(event={event_id})"
             )
             return False
         if priority == existing_priority and existing_source != source_id:
             # 同优先级不同源：先到先得
-            log_fn(
-                f"[灾害预警] {kind}内容与 {existing_source} 重复，"
-                f"过滤 {source_id} 推送",
-                is_event_linked=True,
-                event_stream=stream_tag,
+            _log_filter(
+                f"[灾害预警] {kind}内容与 {existing_source} 重复，过滤 {source_id} 推送"
             )
             return False
 
