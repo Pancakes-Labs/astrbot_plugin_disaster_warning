@@ -41,16 +41,25 @@ class FssnCmtParser(BaseParser):
             if self._is_heartbeat_message(msg_data):
                 return None
 
-            # 核心必要字段校验
+            # 核心必要字段校验：CMT 唯一 ID 为硬必填，关联事件 ID 为软必填。
+            # FAN Studio 可能会推送尚未关联 FSSN 事件的独立 CMT 解（eventId 缺失），
+            # 此时不应丢弃完整反演数据，而是用 CMT ID 兜底作为事件身份。
             cmt_id = str(msg_data.get("id") or "").strip()
-            event_id = str(msg_data.get("eventId") or "").strip()
+            raw_event_id = str(msg_data.get("eventId") or "").strip()
             shock_time_str = str(msg_data.get("shockTime") or "").strip()
 
-            if not cmt_id or not event_id:
+            if not cmt_id:
                 plugin_logger.warning(
-                    f"[灾害预警] {self.source_id} 缺少 CMT 唯一 ID 或事件 ID，跳过"
+                    f"[灾害预警] {self.source_id} 缺少 CMT 唯一 ID，跳过"
                 )
                 return None
+
+            event_id = raw_event_id or cmt_id
+            if not raw_event_id:
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 该 CMT 解未携带关联事件 ID "
+                    f"(cmt_id={cmt_id})，使用 CMT ID 兜底"
+                )
 
             # 规范化 metadata 携带的 CMT 附加信息
             source_entry = get_source_entry(self.source_id)
@@ -97,7 +106,9 @@ class FssnCmtParser(BaseParser):
                 if source_entry
                 else "fan_studio_fssn_cmt",
                 published_at=domain_event.occurred_at,
-                aliases=tuple(item for item in (event_id, cmt_id) if item),
+                aliases=tuple(
+                    dict.fromkeys(item for item in (raw_event_id, cmt_id) if item)
+                ),
                 attributes={
                     "parser_name": source_entry.parser_name
                     if source_entry
