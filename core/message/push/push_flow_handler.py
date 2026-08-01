@@ -303,9 +303,11 @@ class PushFlowHandler:
             )
         elif aggregated_session_count > 0:
             # 没有非聚合会话需要推送，且没有通过/拦截/失败记录：
-            # 全部目标会话都进入了聚合缓冲。
+            # 全部目标会话都进入了聚合缓冲，等待后续定时聚合推送。
             plugin_logger.info(
-                f"[灾害预警] 事件 {event.id} 会话筛选结果: {agg_prefix}",
+                f"[灾害预警] 事件 {event.id} 会话筛选结果: "
+                f"{aggregated_session_count} 个会话已进入聚合缓冲区，"
+                f"等待后续定时聚合推送",
                 is_event_linked=True,
                 event_stream=self._resolve_event_stream(event),
             )
