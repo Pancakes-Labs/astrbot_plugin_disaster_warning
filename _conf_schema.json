@@ -792,11 +792,11 @@
           "max_batch_size": {
             "description": "单批最大聚合条数",
             "type": "int",
-            "default": 20,
+            "default": 25,
             "hint": "单次合并推送最多包含的气象预警条数。超过此数量时分批发送。仅在启用合并转发时生效。",
             "slider": {
               "min": 1,
-              "max": 20,
+              "max": 25,
               "step": 1
             }
           },
