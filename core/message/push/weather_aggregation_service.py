@@ -3,21 +3,20 @@
 
 在时间窗口内积攒气象预警事件，到期后合并推送：
 - 支持合并转发的平台（如 QQ / aiocqhttp）打包为合并转发消息（Comp.Nodes）；
-  平台是否支持合并转发由框架层处理，插件统一尝试合并转发，
-  失败时自动降级为逐条文本发送。
-- 不支持合并转发的平台启用限流：在限流时间窗口内最多推送指定数量的消息，
-  优先推送高级别（红色 > 橙色 > 黄色 > 蓝色 > 白色）预警。
-  限流仅在合并转发失败降级为逐条发送时才生效，合并转发成功时不限流。
+  平台是否支持合并转发由框架层处理，插件统一尝试合并转发。
+- 合并转发失败时不自动降级限流：一次发送失败不代表平台不支持合并转发，
+  盲区降级会错误启用限流把大量预警直接丢弃。
 
 设计要点：
 1. 按会话维度独立缓冲，避免跨群混淆；
 2. 缓冲期间对同一预警 ID 去重，只保留最新；
-3. 触发推送条件：时间窗口到期 / 缓冲条数达上限 / 收到红色预警立即推送；
+3. 触发推送条件：时间窗口到期 / 收到红色预警立即推送；
+   （max_batch_size 仅控制推送时每批合并转发节点的最大条数，不作为提前触发条件）
    红色预警立即推送时仍需通过规则链复核，不绕过已有过滤配置；
    若红色预警触发推送时缓冲区仅有这一条事件，则直接走常规推送流，
    避免为单条事件构建合并转发节点的额外开销；
-4. 合并转发失败时降级为逐条文本发送，此时才启用限流；
-5. 限流平台按颜色级别排序，超出配额的低级别预警被丢弃并记录 debug 日志。
+4. 合并转发失败时记录错误、保留合并转发语义，本轮条目按可重试处理放回缓冲区
+   并重新排定定时刷新（受重试次数限制，避免停机时无限循环）。
 """
 
 from __future__ import annotations
@@ -66,13 +65,21 @@ class WeatherAggregationService:
         self._buffers: dict[str, dict[str, WeatherBufferEntry]] = {}
         # 按会话维度的定时推送器
         self._flush_timers: dict[str, asyncio.TimerHandle] = {}
-        # 按会话维度的限流计数器：session -> [(timestamp, ...)]
-        self._rate_limit_counters: dict[str, list[float]] = {}
+        # 后台刷新任务持有集合：防止任务在完成前被垃圾回收，并在结束时清理引用。
+        self._background_tasks: set[asyncio.Task] = set()
         # 推送回调，由 EventPipeline 注入
         self._flush_callback = None
+        # 发送失败后放回缓冲区的重试次数限制，避免停机/网络异常时无限循环
+        self._max_flush_retries = 3
+        # 各会话当前重试计数：session -> int
+        self._flush_retry_counts: dict[str, int] = {}
 
     def set_flush_callback(self, callback) -> None:
-        """注入推送回调，签名: async def callback(session, entries, config, *, mode) -> bool。"""
+        """注入推送回调。
+
+        签名: async def callback(session, entries, config, *, mode) -> None。
+        成功时返回 None；失败时抛异常（如 RuntimeError）由本服务捕获后回缓冲重试。
+        """
         self._flush_callback = callback
 
     def update_config(self, config: dict[str, Any]) -> None:
@@ -145,7 +152,20 @@ class WeatherAggregationService:
                 return True
             time_diff = (datetime.now(timezone.utc) - event_time).total_seconds() / 3600
             return time_diff <= max_age_hours
-        except Exception:
+        except (TypeError, ValueError, OverflowError, OSError) as exc:
+            # 时间解析/时区转换/时间比较异常时保守放行，并记录日志便于排障。
+            plugin_logger.debug(
+                f"[灾害预警] 气象预警时效检查解析失败，按时效内放行: {exc}",
+                event_stream="weather_alarm",
+            )
+            return True
+        except Exception as exc:
+            # 其他未知异常：仍按"时效内"放行交给规则链兜底，但记录 warning 便于发现。
+            plugin_logger.warning(
+                f"[灾害预警] 气象预警时效检查异常，按时效内放行: {exc}",
+                is_event_linked=True,
+                event_stream="weather_alarm",
+            )
             return True
 
     def should_aggregate(
@@ -240,7 +260,7 @@ class WeatherAggregationService:
                 is_event_linked=True,
                 event_stream="weather_alarm",
             )
-            asyncio.create_task(self._flush_session(session))
+            self._spawn_flush_task(session)
             return True
 
         # 设置定时推送（仅在尚未设置定时器时创建，不重置已有定时器）
@@ -267,7 +287,7 @@ class WeatherAggregationService:
 
         timer = loop.call_later(
             delay,
-            lambda: asyncio.create_task(self._flush_session(session)),
+            lambda: self._spawn_flush_task(session),
         )
         self._flush_timers[session] = timer
 
@@ -325,8 +345,13 @@ class WeatherAggregationService:
         # 再按 max_batch_size 切分合并转发节点，保证节点内条数尽量塞满上限，
         # 避免"先切批后复核"导致节点条数参差（如 4+4+12+1+10）。
         try:
-            # 先尝试合并转发，成功则不限流
+            # 先尝试合并转发，成功则不限流。
+            # 注：传入的 config 为全局配置兜底，回调（EventPipeline._flush_weather_buffer）
+            # 内部会通过 session_config_manager 重新解析会话级生效配置，
+            # 因此会话级差异配置（如 max_batch_size）在 flush 阶段仍能生效。
             await self._flush_callback(session, entries, self._config, mode="forward")
+            # 发送成功后清空该会话的重试计数
+            self._flush_retry_counts.pop(session, None)
         except Exception as e:
             # 合并转发失败：仅当平台确实不支持合并转发时，才允许降级为逐条发送。
             # 注意：不能仅凭一次发送异常就判定"平台不支持"——插件停止/网络瞬时
@@ -341,6 +366,44 @@ class WeatherAggregationService:
                 is_event_linked=True,
                 event_stream="weather_alarm",
             )
+            # 条目放回缓冲区并重新排定一次定时刷新，避免停机刷新场景整批预警永久丢失；
+            # 受重试次数限制，防止停机时无限循环。
+            self._requeue_entries(session, entries)
+
+    def _requeue_entries(self, session: str, entries: list[WeatherBufferEntry]) -> None:
+        """发送失败后把条目放回缓冲区并重新排定定时刷新。"""
+        retry_count = self._flush_retry_counts.get(session, 0) + 1
+        if retry_count > self._max_flush_retries:
+            plugin_logger.warning(
+                f"[灾害预警] 气象预警聚合推送重试超过 {self._max_flush_retries} 次 "
+                f"({session})，本轮 {len(entries)} 条预警已丢弃",
+                is_event_linked=True,
+                event_stream="weather_alarm",
+            )
+            self._flush_retry_counts.pop(session, None)
+            return
+
+        self._flush_retry_counts[session] = retry_count
+        buffer = self._buffers.setdefault(session, {})
+        for entry in entries:
+            event_id = str(entry.event.id or "")
+            if event_id:
+                buffer[event_id] = entry
+        # 重新排定一次定时刷新（默认 60 秒后重试）
+        if session not in self._flush_timers:
+            self._schedule_flush(session, 60.0)
+        plugin_logger.info(
+            f"[灾害预警] 气象预警聚合推送失败，已将 {len(entries)} 条放回缓冲区 "
+            f"({session})，重试 {retry_count}/{self._max_flush_retries}",
+            is_event_linked=True,
+            event_stream="weather_alarm",
+        )
+
+    def _spawn_flush_task(self, session: str) -> None:
+        """创建后台刷新任务并持有引用，任务结束时自动清理。"""
+        task = asyncio.create_task(self._flush_session(session))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def flush_all(self) -> None:
         """强制推送所有会话的缓冲区（用于插件关闭/重载）。"""
