@@ -105,6 +105,23 @@ class BaseParser:
 
         self._last_heartbeat_check[cache_key] = current_time
 
+        # 规则 0：天气源以"展示字段全部为空"作为心跳判定。
+        # 天气预警支持 headline 回退为 title 的归一化（见 weather_parser），
+        # 若用 title/description 的缺失比例判定心跳，会误过滤"仅有 headline"
+        # 的有效 CMA 预警；因此天气源放宽为任一展示字段有值即视为有效消息。
+        if self.source_id in ("china_weather_fanstudio", "china_weather_openquake"):
+            if not isinstance(msg_data, dict):
+                return True
+            display_values = [
+                msg_data.get(field)
+                for field in ("title", "headline", "description", "name")
+            ]
+            # 任一展示字段非空即视为有效业务内容
+            for value in display_values:
+                if value not in self._heartbeat_patterns["empty_fields"]:
+                    return False
+            return True
+
         # 规则 1：检查坐标值是否为 (0,0) 的空心跳包
         if "latitude" in msg_data and "longitude" in msg_data:
             lat = msg_data.get("latitude")
