@@ -31,6 +31,7 @@ from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
 from ..presenters.weather_alarm_code_map import (
     build_weather_icon_url,
+    resolve_p_code_color,
     resolve_weather_icon_code,
 )
 from ..render.beachball_renderer import BeachballRenderer
@@ -48,14 +49,6 @@ class MessageBuildService:
         "yellow": "resources/weatheralarm_logo/fallback_yellow.png",
         "orange": "resources/weatheralarm_logo/fallback_orange.png",
         "red": "resources/weatheralarm_logo/fallback_red.png",
-    }
-
-    # 旧 p 编码颜色映射（最后一位数字：1=红, 2=橙, 3=黄, 4=蓝）
-    _P_FORMAT_COLOR_MAP: dict[str, str] = {
-        "1": "red",
-        "2": "orange",
-        "3": "yellow",
-        "4": "blue",
     }
 
     # 紧凑 11B 编码末两位颜色映射（如 11B3102 / 11B2002）：
@@ -682,10 +675,12 @@ class MessageBuildService:
                 return (
                     color_key if color_key in cls._WEATHER_ICON_FALLBACK_MAP else None
                 )
-            if code.startswith("p") and len(code) >= 8:
+            if code.startswith("p"):
                 # 旧格式：p0002002，最后一位数字映射颜色。
+                # 与 weather_alarm_code_map.resolve_p_code_color 共用同一套映射，
+                # 避免跨文件重复维护且颜色判定口径不一致。
                 # 命中 p 格式后立即返回，保持与下划线格式互斥。
-                return cls._P_FORMAT_COLOR_MAP.get(code[-1])
+                return resolve_p_code_color(code)
             # 紧凑 11B 编码：仅当末两位明确是 01/02/03/04 时才认作颜色，
             # 避免把 11B31 这类类型码末位误判成颜色。
             if len(code) >= 2 and code[-2:] in cls._COMPACT_11B_COLOR_MAP:

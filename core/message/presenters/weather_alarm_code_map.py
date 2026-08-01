@@ -168,6 +168,30 @@ def _resolve_p_code_generic(code: str) -> str | None:
     return f"{base_11b}_{color_suffix}"
 
 
+def resolve_p_code_color(code: str) -> str | None:
+    """解析 p 编码的颜色关键词（red/orange/yellow/blue）。
+
+    与图标解析共用同一套颜色映射（_P_COLOR_DIGIT_TO_SUFFIX），
+    并感知 _P_CODE_SKIP_GENERIC 特殊短码列表，避免本地回退图标
+    与官方图标解析逻辑因各自独立维护而产生分歧。
+
+    Args:
+        code: CMA p 编码，如 "p0002003"。
+
+    Returns:
+        颜色关键词（"red"/"orange"/"yellow"/"blue"），
+        非法编码或命中特殊短码时返回 None。
+    """
+    code = (code or "").strip()
+    if not _is_p_code(code):
+        return None
+    # 特殊短码颜色与通用规则不符，交给调用方走标题兜底
+    if code in _P_CODE_SKIP_GENERIC:
+        return None
+    color_digit = code[-1]
+    return _P_COLOR_DIGIT_TO_SUFFIX.get(color_digit)
+
+
 def _resolve_from_title(title: str, headline: str) -> str | None:
     """从标题文本中提取灾害类型和颜色，组合成 11B 完整码。"""
     combined = f"{title or ''} {headline or ''}".strip()
