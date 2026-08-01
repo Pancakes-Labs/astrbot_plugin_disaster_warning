@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 import astrbot.api.message_components as Comp
@@ -13,6 +14,7 @@ from astrbot.api.event import MessageChain
 
 from ....utils.plugin_logger import plugin_logger
 from ...domain.event_models import EventEnvelope, WeatherEvent
+from ...message.push.weather_aggregation_service import WeatherBufferEntry
 
 
 class EventPipeline:
@@ -76,21 +78,40 @@ class EventPipeline:
 
             if non_aggregated_sessions:
                 # 未启用聚合的会话走常规推送路径
+                # aggregated_session_count 透传到日志汇总，用于在会话筛选结果中
+                # 区分"已进入聚合缓冲区"与"被规则链拦截"，避免误导为未产生任何推送。
                 push_result = await self.service.message_manager.push_event(
                     event,
                     target_sessions=non_aggregated_sessions,
                     session_config_getter=self.service.session_config_manager.get_effective_config,
+                    aggregated_session_count=len(aggregated_sessions),
                 )
                 if not push_result:
-                    logger.debug(
-                        f"[灾害预警] 事件未产生实际推送（非聚合会话）: {envelope.id}"
-                    )
+                    # 未产生推送有两种可能：
+                    # 1) 有会话已进入聚合缓冲（aggregated_sessions 非空）——属正常，预警稍后聚合发出；
+                    # 2) 没有任何会话缓冲且非聚合会话全部被过滤——事件整体未产生推送。
+                    # 区分信息已并入 _log_filter_summary 的汇总日志，此处仅 debug 兜底。
+                    if not aggregated_sessions:
+                        logger.debug(
+                            f"[灾害预警] 事件未产生实际推送（非聚合会话）: {envelope.id}"
+                        )
 
             if aggregated_sessions:
-                # 事件已进入聚合缓冲区，跳过这些会话的独立推送
+                # 事件已进入聚合缓冲区，跳过这些会话的独立推送。
+                # 汇总日志（会话筛选结果）已包含"已进入聚合缓冲区 N 个会话"，
+                # 这里仅保留 debug 级明细，避免与 INFO 汇总重复刷屏。
                 plugin_logger.debug(
                     f"[灾害预警] 气象预警 {envelope.id} 已进入聚合缓冲区，"
-                    f"跳过 {len(aggregated_sessions)} 个会话的独立推送",
+                    f"跳过 {len(aggregated_sessions)} 个会话的独立推送 "
+                    f"(缓冲会话: {', '.join(sorted(aggregated_sessions))})",
+                    event_stream="weather_alarm",
+                )
+            elif not non_aggregated_sessions:
+                # 没有会话进入聚合缓冲、也没有非聚合会话需要推送：
+                # 说明全部会话在 should_aggregate 阶段就被放行（非 WeatherEvent 不会走到这）
+                plugin_logger.debug(
+                    f"[灾害预警] 气象预警 {envelope.id} 无会话进入聚合缓冲区，"
+                    f"目标会话 {len(target_sessions)} 个",
                     event_stream="weather_alarm",
                 )
         else:
@@ -148,11 +169,16 @@ class EventPipeline:
 
         为每条气象预警构建含图标的完整消息链后发送。
         每条预警在构建消息前先通过规则链复核，未通过的不发送。
-        mode="forward" 时打包为合并转发消息；
-        mode="single" 时逐条发送。
-        """
-        from ...message.push.weather_aggregation_service import WeatherBufferEntry
 
+        设计约定（对齐"节点内条数尽量塞满、一轮内紧凑发送"）：
+        - 先对全部条目完成规则链复核与消息构建（并发）；
+        - 通过复核的条目再按 max_batch_size 切分为合并转发节点，
+          保证"≤上限时恰 1 个节点、超过上限时前 N-1 个节点塞满上限"；
+        - 各节点在短时间内连续发送，避免被串行构建/渲染拉散到数分钟。
+
+        mode="forward" 时打包为合并转发消息；
+        mode="single" 时逐条发送（降级路径）。
+        """
         if not entries:
             return
 
@@ -160,11 +186,22 @@ class EventPipeline:
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
 
-        # 为每条预警构建完整消息链（含图标），先通过规则链复核
-        built_messages: list[tuple[WeatherBufferEntry, MessageChain]] = []
-        for entry in entries:
+        # 聚合配置：单批节点上限（默认 20，对齐 schema 默认值）
+        agg_config = (runtime_config.get("push_frequency_control", {}) or {}).get(
+            "weather_aggregation", {}
+        )
+        if not isinstance(agg_config, dict):
+            agg_config = {}
+        max_batch = int(agg_config.get("max_batch_size", 20) or 20)
+        if max_batch < 1:
+            max_batch = 20
+
+        # 并发执行规则链复核与消息构建，避免大量条目串行 await 拉散发送节奏
+        async def _review_and_build(
+            entry: WeatherBufferEntry,
+        ) -> tuple[WeatherBufferEntry, MessageChain] | None:
             if not isinstance(entry, WeatherBufferEntry):
-                continue
+                return None
             try:
                 # 规则链复核：确保聚合推送也遵守过滤规则
                 decision = message_manager.evaluate_push_decision(
@@ -181,7 +218,7 @@ class EventPipeline:
                         + (f"（{decision.detail}）" if decision.detail else ""),
                         event_stream="weather_alarm",
                     )
-                    continue
+                    return None
 
                 # 复用消息构建服务构建含图标的完整消息
                 message = (
@@ -190,11 +227,17 @@ class EventPipeline:
                         runtime_config=runtime_config,
                     )
                 )
-                built_messages.append((entry, message))
+                return entry, message
             except Exception as e:
                 logger.error(
                     f"[灾害预警] 聚合推送构建消息失败: {e}, 事件: {entry.event.id}"
                 )
+                return None
+
+        results = await asyncio.gather(*[_review_and_build(entry) for entry in entries])
+        built_messages: list[tuple[WeatherBufferEntry, MessageChain]] = [
+            result for result in results if result is not None
+        ]
 
         if not built_messages:
             return
@@ -211,37 +254,68 @@ class EventPipeline:
                     pass
 
             bot_name = "灾害预警"
-            nodes = Comp.Nodes([])
 
-            # 添加头部节点
-            header = f"📋 气象预警聚合推送（共 {len(built_messages)} 条）"
-            nodes.nodes.append(
-                Comp.Node(uin=bot_id, name=bot_name, content=[Comp.Plain(header)])
-            )
+            # 按 max_batch_size 切分节点，前面的节点尽量塞满上限，
+            # 避免"一个多一个少"（如 4+4+12+1+10）。
+            # 每个节点独立构建一个合并转发消息链（含头部节点）。
+            total = len(built_messages)
+            node_count = (total + max_batch - 1) // max_batch
+            sent_nodes = 0
+            failed_nodes = 0
 
-            for entry, message in built_messages:
-                # 将每条消息链的组件作为节点内容
-                node_content = list(getattr(message, "chain", []))
-                if node_content:
-                    nodes.nodes.append(
-                        Comp.Node(uin=bot_id, name=bot_name, content=node_content)
+            for batch_idx in range(node_count):
+                batch = built_messages[
+                    batch_idx * max_batch : (batch_idx + 1) * max_batch
+                ]
+                nodes = Comp.Nodes([])
+
+                # 添加头部节点
+                header = f"📋 气象预警聚合推送（共 {len(batch)} 条）"
+                nodes.nodes.append(
+                    Comp.Node(uin=bot_id, name=bot_name, content=[Comp.Plain(header)])
+                )
+
+                for entry, message in batch:
+                    # 将每条消息链的组件作为节点内容
+                    node_content = list(getattr(message, "chain", []))
+                    if node_content:
+                        nodes.nodes.append(
+                            Comp.Node(uin=bot_id, name=bot_name, content=node_content)
+                        )
+
+                if len(nodes.nodes) <= 1:
+                    continue
+
+                chain = MessageChain([nodes])
+                try:
+                    await message_manager.session_sender.send(session, chain)
+                    sent_nodes += 1
+                except Exception as e:
+                    # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
+                    # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
+                    # 记录错误后继续发送剩余节点，避免触发无意义的降级限流。
+                    failed_nodes += 1
+                    logger.error(
+                        f"[灾害预警] 气象预警合并转发节点 {batch_idx + 1}/{node_count} "
+                        f"发送失败 ({session}): {e}"
                     )
 
-            if len(nodes.nodes) <= 1:
-                return
-
-            chain = MessageChain([nodes])
-            try:
-                await message_manager.session_sender.send(session, chain)
-                plugin_logger.debug(
-                    f"[灾害预警] 气象预警合并转发已发送到 {session}, "
-                    f"含 {len(built_messages)} 条预警",
-                    event_stream="weather_alarm",
+            if sent_nodes == 0 and failed_nodes > 0:
+                # 全部节点都发送失败：向上抛出，让调用方感知到平台当前不可用，
+                # 避免"假装成功"导致用户完全收不到任何预警。
+                raise RuntimeError(
+                    f"气象预警合并转发全部发送失败 ({session}): "
+                    f"{failed_nodes}/{node_count} 个节点失败"
                 )
-            except Exception as e:
-                raise e
+
+            plugin_logger.info(
+                f"[灾害预警] 气象预警合并转发已发送到 {session}, "
+                f"共 {total} 条预警，切为 {sent_nodes} 个节点（单批上限 {max_batch}）"
+                + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
+                event_stream="weather_alarm",
+            )
         else:
-            # 逐条发送
+            # 逐条发送（降级路径）
             for entry, message in built_messages:
                 try:
                     await message_manager.session_sender.send(session, message)
