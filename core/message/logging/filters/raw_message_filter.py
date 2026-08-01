@@ -44,6 +44,18 @@ class RawMessageFilter:
         self._is_connection_status_message = is_connection_status_message
         self._try_parse_binary_message = try_parse_binary_message
 
+    def _check_openquake_api_type(self, data: dict[str, Any], source_id: str) -> str:
+        """OpenQuakeAPI 聚合连接仅保留 earthquake（GQ）与 weather（CMA 气象）业务类型。
+
+        字符串与字典两个入口共用该检查，避免字符串形式的 tsunami/station/status
+        消息绕过过滤而增大日志存储与处理压力。
+        """
+        if "global_quake" in source_id.lower():
+            inner_type = str(data.get("type") or "").lower()
+            if inner_type not in ("earthquake", "weather"):
+                return f"OpenQuakeAPI 非地震/气象业务JSON消息过滤: {inner_type}"
+        return ""
+
     def should_filter_message(self, payload_data: Any, source_id: str = "") -> str:
         """判断是否应该过滤该消息，返回过滤原因。"""
         # 返回空字符串表示不过滤；返回原因文本则既用于统计也用于调试日志。
@@ -71,12 +83,9 @@ class RawMessageFilter:
                     # 对于无法成功解析出业务数据的二进制包（比如非地震业务的心跳握手或状态广播），选择不过滤直接拦截不记日志
                     return "未识别或不需要记录的二进制数据帧"
             if isinstance(payload_data, dict):
-                # 针对 JSON 结构的字典数据，如果是 OpenQuakeAPI 聚合连接，
-                # 仅保留 earthquake（GQ）和 weather（CMA 气象）业务类型，其余过滤。
-                if "global_quake" in source_id.lower():
-                    inner_type = str(payload_data.get("type") or "").lower()
-                    if inner_type not in ("earthquake", "weather"):
-                        return f"OpenQuakeAPI 非地震/气象业务JSON消息过滤: {inner_type}"
+                reason = self._check_openquake_api_type(payload_data, source_id)
+                if reason:
+                    return reason
                 return self._handle_dict_message(payload_data, source_id)
         except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             pass
@@ -97,6 +106,12 @@ class RawMessageFilter:
         logger.debug(
             f"[灾害预警] 消息记录器 - 检查消息过滤，来源: {source_id}, 类型: {msg_type}, 数据长度: {len(payload_data)}"
         )
+
+        # 字符串入口同样执行 OpenQuakeAPI 业务类型检查，
+        # 与字典入口保持一致，避免 tsunami/station/status 等字符串消息绕过过滤。
+        reason = self._check_openquake_api_type(data, source_id)
+        if reason:
+            return reason
 
         reason = self._handle_common_dict_checks(data, source_id)
         if reason:
