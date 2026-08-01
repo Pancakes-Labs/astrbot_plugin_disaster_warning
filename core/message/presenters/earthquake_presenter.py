@@ -1045,9 +1045,7 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
                             )
                             # detailed_jma_intensity=false 时仅展示最大震度档的地域，
                             # 与町丁目简略模式保持语义一致；true 时展示全部震度档。
-                            if not merged_options.get(
-                                "detailed_jma_intensity", False
-                            ):
+                            if not merged_options.get("detailed_jma_intensity", False):
                                 sorted_scales = sorted_scales[:1]
                             lines.append("📡各地震度详情：")
                             for scale_key in sorted_scales:
