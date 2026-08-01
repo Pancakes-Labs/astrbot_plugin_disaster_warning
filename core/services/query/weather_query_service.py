@@ -10,6 +10,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
+from ...message.presenters.weather_alarm_code_map import (
+    build_weather_icon_url,
+    resolve_weather_icon_code,
+)
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
@@ -291,6 +295,15 @@ async def query_weather_alarm_data(
             guideline_idx = body_text.find("防御指南")
             guideline_text = body_text[guideline_idx:].strip()
 
+        # CMA p 编码需先经统一映射转为 Fan Studio 图标接口兼容的 11B 码，
+        # 直接拼接原始 p 编码会导致图标接口返回“伪图片”错误页。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
         return {
             "success": True,
             "query_mode": "id",
@@ -305,11 +318,7 @@ async def query_weather_alarm_data(
                 "detected_color": detected_color,
                 "color_emoji": color_emoji,
                 "guideline_text": guideline_text,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": (build_weather_icon_url(icon_code) if icon_code else None),
             },
         }
 
@@ -405,6 +414,14 @@ async def query_weather_alarm_data(
         if not raw_real_event_id and "|" in raw_unique_id:
             display_alarm_id = raw_unique_id.split("|")[-1].strip()
 
+        # 与推送路径一致：p 编码先映射为 11B 码再拼图标 URL，避免 CMA 来源图标失效。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
         items.append(
             {
                 "issue_time": format_cn_time(entry["event_time_utc"]),
@@ -420,11 +437,7 @@ async def query_weather_alarm_data(
                 "title_text": title_text,
                 "headline_text": headline_text,
                 "weather_type_code": weather_type_code,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": (build_weather_icon_url(icon_code) if icon_code else None),
             }
         )
 
