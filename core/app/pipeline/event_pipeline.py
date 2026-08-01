@@ -58,6 +58,8 @@ class EventPipeline:
         # 按会话级配置独立判断：启用聚合的会话进入缓冲区，未启用的会话走常规推送。
         # 若任一会话缓冲了事件，则跳过这些会话的独立推送；
         # 未启用聚合的会话仍需通过常规推送路径发送。
+        # 本事件是否实际调用过常规推送：用于统计时避免把上一次推送的会话残留记入本次。
+        pushed_this_event = False
         if self._weather_aggregation is not None and isinstance(
             event.event, WeatherEvent
         ):
@@ -86,6 +88,7 @@ class EventPipeline:
                     session_config_getter=self.service.session_config_manager.get_effective_config,
                     aggregated_session_count=len(aggregated_sessions),
                 )
+                pushed_this_event = True
                 if not push_result:
                     # 未产生推送有两种可能：
                     # 1) 有会话已进入聚合缓冲（aggregated_sessions 非空）——属正常，预警稍后聚合发出；
@@ -117,12 +120,18 @@ class EventPipeline:
         else:
             # 非气象预警事件，走原有推送路径
             await self._push_event_normal(event, envelope)
+            pushed_this_event = True
 
         # 第三阶段：记录统计结果。
         # 统计记录与实际是否推送成功解耦，这样后续仍可分析规则过滤命中率、会话覆盖情况，以及"收到事件但未推送"的业务原因。
+        # 气象聚合分支若全部会话进入缓冲区，本事件未产生任何常规推送：
+        # 显式传入空列表，避免把上一次推送的会话残留记为本事件的推送目标。
+        stat_sessions = self.service.message_manager.last_success_sessions
+        if not pushed_this_event:
+            stat_sessions = []
         await self.service.statistics_manager.record_push(
             event,
-            pushed_sessions=self.service.message_manager.last_success_sessions,  # 上一次推送成功的会话列表
+            pushed_sessions=stat_sessions,
         )
 
         # 第四阶段：向管理端广播轻量摘要。
@@ -167,6 +176,10 @@ class EventPipeline:
     ) -> None:
         """聚合缓冲区推送回调。
 
+        与 WeatherAggregationService.set_flush_callback 约定一致：
+        成功时返回 None；全部节点发送失败时抛出 RuntimeError，
+        由聚合服务捕获后放回缓冲区重试。
+
         为每条气象预警构建含图标的完整消息链后发送。
         每条预警在构建消息前先通过规则链复核，未通过的不发送。
 
@@ -186,15 +199,15 @@ class EventPipeline:
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
 
-        # 聚合配置：单批节点上限（默认 20，对齐 schema 默认值）
+        # 聚合配置：单批节点上限（默认 25，对齐 schema 默认值）
         agg_config = (runtime_config.get("push_frequency_control", {}) or {}).get(
             "weather_aggregation", {}
         )
         if not isinstance(agg_config, dict):
             agg_config = {}
-        max_batch = int(agg_config.get("max_batch_size", 20) or 20)
+        max_batch = int(agg_config.get("max_batch_size", 25) or 25)
         if max_batch < 1:
-            max_batch = 20
+            max_batch = 25
 
         # 并发执行规则链复核与消息构建，避免大量条目串行 await 拉散发送节奏
         async def _review_and_build(
