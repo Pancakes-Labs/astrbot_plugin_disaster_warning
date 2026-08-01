@@ -485,6 +485,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         return
                     except Exception as text_error:
                         logger.warning(f"[灾害预警] 文本回退发送失败: {text_error}")
+                        # 全国分支发送与文本回退均已尝试且失败：直接结束，
+                        # 避免控制流继续落入下方单卡二次尝试造成重复发送。
+                        return
 
             # 正常区域搜索：结果较多时也走合并转发分批发送，避免单条消息过长
             if text_blocks and len(text_blocks) > 1:
