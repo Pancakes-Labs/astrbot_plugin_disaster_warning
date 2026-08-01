@@ -400,10 +400,25 @@ class WeatherAggregationService:
         )
 
     def _spawn_flush_task(self, session: str) -> None:
-        """创建后台刷新任务并持有引用，任务结束时自动清理。"""
+        """创建后台刷新任务并持有引用，任务结束时自动清理并记录异常。"""
         task = asyncio.create_task(self._flush_session(session))
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+
+        def _on_done(completed: asyncio.Task) -> None:
+            self._background_tasks.discard(completed)
+            # 任务被取消（如插件停止）属正常路径，不记录异常
+            if completed.cancelled():
+                return
+            exc = completed.exception()
+            if exc is not None:
+                # 注意：plugin_logger.error 不消费 is_event_linked/event_stream，
+                # 透传会触发底层 logger 的 TypeError，这里仅记录消息与异常信息。
+                plugin_logger.error(
+                    f"[灾害预警] 气象预警聚合刷新任务异常 ({session}): {exc}",
+                    exc_info=exc,
+                )
+
+        task.add_done_callback(_on_done)
 
     async def flush_all(self) -> None:
         """强制推送所有会话的缓冲区（用于插件关闭/重载）。"""
