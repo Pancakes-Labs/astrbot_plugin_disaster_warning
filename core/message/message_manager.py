@@ -275,6 +275,7 @@ class MessagePushManager:
         skip_dedup: bool = False,
         bypass_fusion: bool = False,
         return_details: bool = False,
+        aggregated_session_count: int = 0,
     ) -> bool | dict[str, Any]:
         """推送事件入口，由推送编排器统一调度。"""
         return await self._push_orchestrator.push_event(
@@ -285,6 +286,7 @@ class MessagePushManager:
             skip_dedup=skip_dedup,
             bypass_fusion=bypass_fusion,
             return_details=return_details,
+            aggregated_session_count=aggregated_session_count,
         )
 
     async def render_earthquake_list_card(
