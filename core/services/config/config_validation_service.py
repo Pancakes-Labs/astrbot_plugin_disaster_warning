@@ -1192,10 +1192,10 @@ class ConfigValidator:
             )
             agg["max_batch_size"] = int(
                 ConfigValidator._clamp_number(
-                    agg.get("max_batch_size", 20),
+                    agg.get("max_batch_size", 25),
                     minimum=1,
-                    maximum=50,
-                    default=20,
+                    maximum=25,
+                    default=25,
                     field_name="气象预警聚合单批最大条数",
                 )
             )
