@@ -628,13 +628,11 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         ),
         payload_predicates=("fssn_cmt",),
     ),
-    # sa_fanstudio: 美国 ShakeAlert - 来自 FAN Studio
-    # 推送频率较高，统计语义按地震事件（earthquake）处理，不参与 EEW 机构状态卡片
-    # （与 Global Quake 一致：无 institution_key / query_group）。
+    # sa_fanstudio: 美国 ShakeAlert 地震预警 - 来自 FAN Studio
     "sa_fanstudio": SourceEntry(
         source_id="sa_fanstudio",
         source_enum="fan_studio_sa",
-        source_type=SourceType.EARTHQUAKE_INFO,
+        source_type=SourceType.EARTHQUAKE_WARNING,
         provider_family=ProviderFamily.FAN_STUDIO,
         config_group="fan_studio",
         config_key="usa_shakealert",
@@ -645,7 +643,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         intensity_mode="magnitude",
         priority=1,
         display_name="美国 ShakeAlert",
-        description="美国 ShakeAlert - FAN Studio WebSocket（高频源，统计归入地震事件）",
+        description="美国 ShakeAlert 地震预警 - FAN Studio WebSocket",
         default_timezone="America/Los_Angeles",
         publish_time_field="shockTime",
         fingerprint_prefix="sa",
@@ -654,10 +652,14 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         connection_data_source="fan_studio_mixed",
         connection_url="wss://ws.fanstudio.tech/all",
         connection_backup_url="wss://ws.fanstudio.hk/all",
-        dispatch_family="fan_studio_report",
+        institution_key="usa_shakealert",
+        institution_display_name="美国 ShakeAlert 地震预警",
+        institution_active_name="美国 ShakeAlert",
+        query_group="eew",
+        dispatch_family="fan_studio_eew",
         provider_source_names=("sa",),
         provider_aliases=("fan_studio_sa", "sa", "shakealert", "usa_shakealert"),
-        routing_tags=("fan_studio", "usa", "report", "shakealert"),
+        routing_tags=("fan_studio", "usa", "eew", "shakealert"),
         # 与 USGS / FSSN 区分：ShakeAlert 无 url、infoTypeName、createTime、placeName_zh
         payload_signatures=(("placeName", "shockTime", "magnitude", "id"),),
         payload_exclusions=(

@@ -1320,10 +1320,10 @@ class ConfigValidator:
             if "china_typhoon" not in fan_studio_cfg:
                 fan_studio_cfg["china_typhoon"] = False
             ConfigValidator._ensure_bool(fan_studio_cfg, "china_typhoon", False)
-            # 旧配置可能没有新键；缺省跟随 schema（默认关闭，高频源）
+            # 旧配置可能没有新键；缺省按 schema 默认开启，避免静默丢弃 /sa
             if "usa_shakealert" not in fan_studio_cfg:
-                fan_studio_cfg["usa_shakealert"] = False
-            ConfigValidator._ensure_bool(fan_studio_cfg, "usa_shakealert", False)
+                fan_studio_cfg["usa_shakealert"] = True
+            ConfigValidator._ensure_bool(fan_studio_cfg, "usa_shakealert", True)
             if "fssn_cmt" not in fan_studio_cfg:
                 fan_studio_cfg["fssn_cmt"] = True
             ConfigValidator._ensure_bool(fan_studio_cfg, "fssn_cmt", True)
