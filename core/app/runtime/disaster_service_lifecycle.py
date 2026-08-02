@@ -15,12 +15,24 @@ from astrbot.api import logger
 class DisasterServiceLifecycleService:
     """灾害服务生命周期编排服务。"""
 
+    # 插件重载场景的静默硬超时：AstrBot 已就绪，但仍保留与默认一致的 30 秒兜底
+    # 确保数据源有充足时间完成建连/首包/首轮同步后再正常放行。
+    RELOAD_HARD_TIMEOUT_SECONDS = 30.0
+
     def __init__(self, service):
         # 这里只保存主服务引用；真正的状态与资源都仍由主服务统一持有。
         self.service = service  # 主服务 DisasterWarningService 实例
+        # 是否推迟静默武装（首次启动/进程重启时等待 AstrBot 加载完成钩子）
+        self._defer_arm = False
 
-    async def start(self) -> None:
-        """异步启动灾害预警服务。"""
+    async def start(self, *, defer_silence_arm: bool = False) -> None:
+        """异步启动灾害预警服务。
+
+        Args:
+            defer_silence_arm: 为 True 时推迟静默武装，等待 AstrBot 加载完成
+                钩子显式调用 arm_startup_silence()；用于首次启动/进程重启，
+                避免 30 秒硬超时被 AstrBot 加载耗时提前耗尽。
+        """
         # 启动过程必须串行化，避免重复启动导致连接、定时任务或缓存恢复被执行多次。
         async with self.service._start_lock:
             if self.service.running:
@@ -37,8 +49,22 @@ class DisasterServiceLifecycleService:
                 )  # 服务启动UTC时间戳
                 logger.info("[灾害预警] 正在启动灾害预警服务...")
 
-                # 武装启动静默：在真正建连/轮询前注册门闩
-                self._arm_startup_silence()
+                # 武装启动静默：在真正建连/轮询前注册门闩。
+                # 首次启动/进程重启时 AstrBot 尚未加载完成，静默武装推迟到
+                # on_astrbot_loaded 钩子触发，确保硬超时从 AstrBot 就绪时刻起算；
+                # 插件重载时 AstrBot 已就绪，立即武装（保留 30 秒兜底）。
+                if defer_silence_arm:
+                    self._defer_arm = True
+                    # 待武装期间协调器进入 PENDING：AstrBot 加载窗口内的事件
+                    # 仍被吸收播种，但不会开始计时/就绪判定。
+                    self._begin_deferred_silence()
+                    logger.info(
+                        "[灾害预警] 静默启动已推迟，等待 AstrBot 加载完成钩子触发"
+                    )
+                else:
+                    self._arm_startup_silence(
+                        hard_timeout_seconds=self.RELOAD_HARD_TIMEOUT_SECONDS
+                    )
 
                 # 启动顺序刻意遵循“先恢复状态，再开放接入”的原则：
                 # 1. 初始化统计存储；
@@ -129,7 +155,41 @@ class DisasterServiceLifecycleService:
                     )
                 raise
 
-    def _arm_startup_silence(self) -> None:
+    def arm_startup_silence(self, *, hard_timeout_seconds: float | None = None) -> None:
+        """正式武装启动静默（供 AstrBot 加载完成钩子调用）。
+
+        首次启动/进程重启时静默武装被推迟，需要等 AstrBot 真正加载完成后
+        由 on_astrbot_loaded 钩子显式触发，保证 30 秒硬超时从该时刻起算。
+        """
+        if not getattr(self.service, "running", False):
+            logger.warning("[灾害预警] 服务未运行，跳过静默启动")
+            return
+        self._defer_arm = False
+        self._arm_startup_silence(hard_timeout_seconds=hard_timeout_seconds)
+
+    def _begin_deferred_silence(self) -> None:
+        """让协调器进入待武装吸收模式（PENDING）。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        begin = getattr(coordinator, "begin_deferred", None)
+        if not callable(begin):
+            return
+        debug_config: dict = {}
+        config = getattr(self.service, "config", {}) or {}
+        if isinstance(config, dict):
+            raw_debug = config.get("debug_config", {})
+            if isinstance(raw_debug, dict):
+                debug_config = raw_debug
+        enabled = coordinator.resolve_enabled(debug_config)
+        try:
+            begin(enabled=enabled)
+        except Exception as exc:
+            logger.debug(f"[灾害预警] 进入待武装静默失败（已忽略）: {exc}")
+
+    def _arm_startup_silence(
+        self, *, hard_timeout_seconds: float | None = None
+    ) -> None:
         """根据配置与连接计划武装启动静默协调器。"""
         coordinator = getattr(self.service, "startup_silence", None)
         if coordinator is None:
@@ -181,6 +241,7 @@ class DisasterServiceLifecycleService:
             enabled=enabled,
             expected_ws=expected_ws,
             expected_polls=expected_polls,
+            hard_timeout_seconds=hard_timeout_seconds,
         )
 
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:

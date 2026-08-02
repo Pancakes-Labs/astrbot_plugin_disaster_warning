@@ -318,6 +318,12 @@ class DisasterWarningService:
             self.http_fetcher = HTTPDataFetcher(self.config)  # 初始化 HTTP 轮询拉取组件
             self._register_handlers()
             self._configure_connections()
+            # 装配启动静默回调到消息推送链（编排器 + 融合服务），
+            # 使融合分流路径在静默期统一走吸收分支，避免绕过静默闸口。
+            if self.message_manager is not None:
+                bind = getattr(self.message_manager, "set_silence_callbacks", None)
+                if callable(bind):
+                    bind(self.is_silencing, self._absorb_event_for_silence)
             # 就绪日志以真实轮询服务为准（catalog 组总闸 + typhoon_enrichment）
             typhoon_poll = getattr(self, "eqsc_typhoon_poll_service", None)
             poll_enabled = bool(typhoon_poll is not None and typhoon_poll.is_enabled())
@@ -384,6 +390,20 @@ class DisasterWarningService:
         )
         self.register_background_task(rebuild_task)
 
+    def _absorb_event_for_silence(self, event: EventEnvelope) -> None:
+        """静默期统一吸收事件：播种去重指纹并推进门闩计数。
+
+        供推送编排器与融合服务在静默期吸收事件时复用，
+        与主入口 _handle_disaster_event 的静默分支保持语义一致。
+        """
+        self._seed_event_for_silence(event)
+        coordinator = getattr(self, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_event_absorbed(event)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 静默吸收推进门闩失败（已忽略）: {exc}")
+
     def _register_handlers(self):
         """注册消息调度处理器。"""
         # 路由器会按不同数据源的接入类型，把消息分发到统一事件入口或旁路处理逻辑。
@@ -402,9 +422,24 @@ class DisasterWarningService:
         """根据数据源配置生成连接计划。"""
         self.connections = ConnectionPlanBuilder.build(self.config)
 
-    async def start(self):
-        """启动服务"""
-        await self.lifecycle_service.start()
+    async def start(self, *, defer_silence_arm: bool = False) -> None:
+        """启动服务。
+
+        Args:
+            defer_silence_arm: 首次启动/进程重启时推迟静默武装，
+                等待 AstrBot 加载完成钩子显式武装（避免硬超时被加载耗时耗尽）。
+        """
+        await self.lifecycle_service.start(defer_silence_arm=defer_silence_arm)
+
+    def arm_startup_silence(self, *, hard_timeout_seconds: float | None = None) -> None:
+        """正式武装启动静默（供 AstrBot 加载完成钩子调用）。"""
+        if hasattr(self, "lifecycle_service") and self.lifecycle_service is not None:
+            arm = getattr(self.lifecycle_service, "arm_startup_silence", None)
+            if callable(arm):
+                arm(hard_timeout_seconds=hard_timeout_seconds)
+                return
+        # 生命周期服务不可用时降级：直接按默认参数武装
+        logger.warning("[灾害预警] 生命周期服务不可用，无法推迟静默启动")
 
     async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""
