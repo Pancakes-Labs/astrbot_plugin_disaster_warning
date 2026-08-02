@@ -628,7 +628,9 @@ class SnetParser(BaseParser):
             f"震度: {scale_label or max_shindo}, 时间: {occurred_at}"
         )
         if max_shindo >= 0.5:
-            plugin_logger.info(log_message, is_event_linked=True)
+            plugin_logger.info(
+                log_message, is_event_linked=True, event_stream="earthquake"
+            )
         else:
             plugin_logger.debug(log_message)
 

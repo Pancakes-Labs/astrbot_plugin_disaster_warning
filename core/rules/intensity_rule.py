@@ -90,28 +90,44 @@ class EarthquakeThresholdRule(BaseRule):
         primary: tuple[str, str, Any, Any, bool],
         secondary: tuple[str, str, Any, Any, bool],
         accept_reason: str,
+        skip_primary: bool = False,
+        skip_secondary: bool = False,
     ) -> RuleDecision:
-        """评估双阈值过滤器（震级 + 烈度/震度）。"""
+        """评估双阈值过滤器（震级 + 烈度/震度）。
+
+        skip_primary / skip_secondary 用于跳过对应阈值检查项。
+        被跳过的检查项不会参与 any/all 组合判定，常用于 PLUM/假定震源等
+        震级为占位值（M1.0）的场景，此时震级阈值无意义，应仅按烈度/震度过滤
+        避免 all 模式误杀或 any 模式产生误导性失败描述。
+        """
         if not runtime_filter.get("enabled", True):
             return RuleDecision.accept(reason=accept_reason)
 
         combine_mode = normalize_combine_mode(runtime_filter.get("combine_mode"))
-        checks = [
-            self._build_threshold_check(
-                key=primary[0],
-                label=primary[1],
-                current=primary[2],
-                threshold=primary[3],
-                extra_pass=primary[4],
-            ),
-            self._build_threshold_check(
-                key=secondary[0],
-                label=secondary[1],
-                current=secondary[2],
-                threshold=secondary[3],
-                extra_pass=secondary[4],
-            ),
-        ]
+        checks: list[tuple[str, bool, str]] = []
+        if not skip_primary:
+            checks.append(
+                self._build_threshold_check(
+                    key=primary[0],
+                    label=primary[1],
+                    current=primary[2],
+                    threshold=primary[3],
+                    extra_pass=primary[4],
+                )
+            )
+        if not skip_secondary:
+            checks.append(
+                self._build_threshold_check(
+                    key=secondary[0],
+                    label=secondary[1],
+                    current=secondary[2],
+                    threshold=secondary[3],
+                    extra_pass=secondary[4],
+                )
+            )
+        # 所有检查项均被跳过时直接放行
+        if not checks:
+            return RuleDecision.accept(reason=accept_reason)
         decision = self._combine_checks(combine_mode, checks)
         if decision is not None:
             return decision
@@ -198,6 +214,16 @@ class EarthquakeThresholdRule(BaseRule):
         # 模式 3：震度过滤器（日本、台湾）
         if intensity_mode == "scale":
             runtime_filter = policy_state.get("scale_filter") or {}
+            # PLUM/假定震源下 M1.0 为占位震级，解析层已将其置空。
+            # 震级阈值检查应跳过，仅按震度过滤，避免 all 模式误杀 PLUM 报
+            # 或 any 模式产生「震级 无 ≥ 2.0」误导性失败描述。
+            eq_metadata = getattr(earthquake, "metadata", {}) or {}
+            if not isinstance(eq_metadata, dict):
+                eq_metadata = {}
+            skip_magnitude = bool(
+                eq_metadata.get("is_assumption", False)
+                or eq_metadata.get("magnitude_is_placeholder", False)
+            )
             return self._evaluate_dual_threshold_filter(
                 runtime_filter=runtime_filter
                 if isinstance(runtime_filter, dict)
@@ -220,7 +246,12 @@ class EarthquakeThresholdRule(BaseRule):
                     else 1.0,
                     True,
                 ),
-                accept_reason="震度规则通过",
+                accept_reason=(
+                    "震度规则通过（PLUM法占位震级，已跳过震级过滤）"
+                    if skip_magnitude
+                    else "震度规则通过"
+                ),
+                skip_primary=skip_magnitude,
             )
 
         # 模式 4：S-Net 海底震度监测（包含最大震度过滤与触发测站数过滤）

@@ -370,11 +370,15 @@ def format_fault_type_label(mechanism: Mapping[str, Any] | None) -> str:
 def resolve_fssn_cmt_event_ids(
     raw_payload: Mapping[str, Any] | None,
 ) -> tuple[str, str]:
-    """返回 (cmt_id, fssn_event_id)。"""
+    """返回 (cmt_id, fssn_event_id)。
+
+    eventId 为软必填：FAN Studio 可能推送尚未关联 FSSN 事件的独立 CMT 解，
+    此时用 cmt_id 兜底，保证事件身份与去重主键仍然稳定。
+    """
     payload = raw_payload if isinstance(raw_payload, Mapping) else {}
     cmt_id = str(payload.get("id") or "").strip()
     fssn_event_id = str(payload.get("eventId") or "").strip()
-    return cmt_id, fssn_event_id
+    return cmt_id, fssn_event_id or cmt_id
 
 
 def build_cmt_metadata(

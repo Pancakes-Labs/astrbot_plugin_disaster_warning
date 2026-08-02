@@ -353,6 +353,7 @@ function ConnectionsGrid() {
                 sa_fanstudio: '美国 ShakeAlert 地震预警',
                 fssn_cmt_fanstudio: 'FSSN 矩心矩张量解 (CMT)',
                 china_weather_fanstudio: '中国气象局: 气象预警',
+                china_weather_openquake: '中国气象局: 气象预警',
                 china_tsunami_fanstudio: '自然资源部海啸预警中心',
                 jma_fanstudio: '日本气象厅: 紧急地震速报',
             },
@@ -379,6 +380,8 @@ function ConnectionsGrid() {
             },
             OpenQuakeAPI: {
                 global_quake: 'Global Quake',
+                china_weather_alarm: '中国气象局: 气象预警',
+                china_weather_openquake: '中国气象局: 气象预警',
             },
             'EQSC API': {
                 china_typhoon: '中国气象局：实时活跃台风',

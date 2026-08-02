@@ -177,10 +177,23 @@ class EqscTyphoonPollService:
 
     async def _poll_loop(self) -> None:
         """后台轮询循环。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_started("eqsc_typhoon")
+            except Exception as exc:
+                logger.debug(
+                    f"[灾害预警] EQSC 台风轮询通知静默协调器抓取开始失败: {exc}"
+                )
         try:
             await self.fetch_once(emit_event=True)
         except Exception as exc:
             logger.error(f"[灾害预警] EQSC 台风首次抓取失败: {exc}")
+            if coordinator is not None:
+                try:
+                    coordinator.note_poll_fetch_completed("eqsc_typhoon", success=False)
+                except Exception:
+                    pass
 
         while getattr(self.service, "running", False):
             try:
@@ -279,10 +292,22 @@ class EqscTyphoonPollService:
             if self._last_fingerprints.get(typhoon_id) == fingerprint:
                 continue
 
-            # 启动静默期：不进入推送链路，但仍提交指纹，避免静默结束后整批误报。
+            # 启动静默期：提交轮询侧指纹（避免静默结束后整批误报），
+            # 并调用 _handle_disaster_event 让其内部的 _seed_event_for_silence
+            # 统一播种去重服务的 _typhoon_cache，避免静默结束后首次推送
+            # 因去重缓存为空而被误放行（重载后重复推送的根因）。
             is_silence = getattr(self.service, "is_silencing", None)
             if callable(is_silence) and is_silence():
                 self._last_fingerprints[typhoon_id] = fingerprint
+                try:
+                    # 静默期 _handle_disaster_event 会播种去重指纹并返回 True，
+                    # 不会真正推送；但仍提交轮询侧指纹防止静默结束后重推。
+                    await self.service._handle_disaster_event(envelope)
+                except Exception as exc:
+                    logger.debug(
+                        f"[灾害预警] EQSC 台风静默期播种去重指纹失败（已忽略）: "
+                        f"ID 为 {typhoon_id}, 错误信息：{exc}"
+                    )
                 continue
 
             try:
@@ -310,39 +335,51 @@ class EqscTyphoonPollService:
             self._last_fingerprints.pop(key, None)
         return emitted
 
+    def _notify_silence_fetch_completed(self, *, success: bool) -> None:
+        """通知静默协调器本轮抓取已结束（成功或失败）。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        try:
+            coordinator.note_poll_fetch_completed("eqsc_typhoon", success=success)
+        except Exception as exc:
+            logger.debug(f"[灾害预警] EQSC 台风轮询通知静默协调器失败: {exc}")
+
     async def fetch_once(self, *, emit_event: bool = True) -> list[dict[str, Any]]:
         """抓取一轮 EQSC 台风列表，可选投递变化事件。"""
         client = self._ensure_client()
         if client is None:
+            self._notify_silence_fetch_completed(success=False)
             return []
 
         # 轮询侧强制绕过短缓存，确保按间隔拿到最新列表。
         typhoon_list = await client.fetch_typhoon_list(use_cache=False)
         if not isinstance(typhoon_list, list):
             self._consecutive_failures += 1
+            self._notify_silence_fetch_completed(success=False)
             return []
 
         active_items = self._filter_active_items(typhoon_list)
 
-        # 客户端失败时常返回空列表；与“确实无台风”无法严格区分，
+        # 客户端失败时常返回空列表；与"确实无台风"无法严格区分，
         # 这里仅在拿到可解析对象时记成功。
         self._consecutive_failures = 0
         self._last_success_at = time.time()
-        coordinator = getattr(self.service, "startup_silence", None)
-        if coordinator is not None:
-            try:
-                coordinator.note_poll_fetch_completed("eqsc_typhoon", success=True)
-            except Exception as exc:
-                logger.debug(f"[灾害预警] EQSC 台风轮询通知静默协调器失败: {exc}")
 
         if not emit_event:
+            # 非投递轮（如预热）无播种需求，直接通知抓取成功。
+            self._notify_silence_fetch_completed(success=True)
             return active_items
 
+        # 先完成事件投递（含静默期指纹播种），再通知抓取完成，
+        # 避免静默协调器提前 READY 导致首批台风指纹未播种而重复推送。
         emitted = await self._process_typhoon_updates(active_items)
+        self._notify_silence_fetch_completed(success=True)
         if emitted:
             plugin_logger.info(
                 f"[灾害预警] EQSC 台风轮询本轮推送 {emitted} 条更新",
                 is_event_linked=True,
+                event_stream="typhoon",
             )
         else:
             plugin_logger.debug("[灾害预警] EQSC 台风轮询本轮无变化，跳过推送")

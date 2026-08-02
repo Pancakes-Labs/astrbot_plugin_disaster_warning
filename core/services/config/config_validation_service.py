@@ -1174,6 +1174,51 @@ class ConfigValidator:
         ConfigValidator._ensure_bool(cfg, "final_report_always_push", True)
         ConfigValidator._ensure_bool(cfg, "ignore_non_final_reports", False)
 
+        # 气象预警聚合推送配置校验
+        agg = cfg.get("weather_aggregation")
+        if isinstance(agg, dict):
+            ConfigValidator._ensure_bool(agg, "enabled", True)
+            ConfigValidator._ensure_bool(agg, "flush_on_red", True)
+            ConfigValidator._ensure_bool(agg, "rate_limit_enabled", True)
+
+            agg["time_window_seconds"] = int(
+                ConfigValidator._clamp_number(
+                    agg.get("time_window_seconds", 900),
+                    minimum=60,
+                    maximum=3600,
+                    default=900,
+                    field_name="气象预警聚合时间窗口",
+                )
+            )
+            agg["max_batch_size"] = int(
+                ConfigValidator._clamp_number(
+                    agg.get("max_batch_size", 25),
+                    minimum=1,
+                    maximum=25,
+                    default=25,
+                    field_name="气象预警聚合单批最大条数",
+                )
+            )
+            agg["rate_limit_max_messages"] = int(
+                ConfigValidator._clamp_number(
+                    agg.get("rate_limit_max_messages", 3),
+                    minimum=1,
+                    maximum=20,
+                    default=3,
+                    field_name="气象预警限流最大消息数",
+                )
+            )
+            agg["rate_limit_window_seconds"] = int(
+                ConfigValidator._clamp_number(
+                    agg.get("rate_limit_window_seconds", 900),
+                    minimum=60,
+                    maximum=3600,
+                    default=900,
+                    field_name="气象预警限流时间窗口",
+                )
+            )
+            cfg["weather_aggregation"] = agg
+
         return cfg
 
     @staticmethod
@@ -1234,7 +1279,7 @@ class ConfigValidator:
                     # 仅确保 enabled 为 bool，其他字段保持原样以支持扩展（如 API Key 等字符串配置）
                     ConfigValidator._ensure_bool(cfg[key], "enabled", True)
 
-        # OpenQuakeAPI：组总闸 + Global Quake 子源开关
+        # OpenQuakeAPI：组总闸 + Global Quake 子源开关 + CMA 气象预警子源开关
         # 旧配置仅有 enabled 时，将子源开关回填为 enabled 的值，避免升级后静默关闭。
         gq_cfg = cfg.get("global_quake")
         if isinstance(gq_cfg, dict):
@@ -1242,6 +1287,10 @@ class ConfigValidator:
             if "global_quake" not in gq_cfg:
                 gq_cfg["global_quake"] = bool(gq_cfg.get("enabled", True))
             ConfigValidator._ensure_bool(gq_cfg, "global_quake", True)
+            # CMA 气象预警子源：默认 true（高优先级源）
+            if "china_weather_alarm" not in gq_cfg:
+                gq_cfg["china_weather_alarm"] = bool(gq_cfg.get("enabled", True))
+            ConfigValidator._ensure_bool(gq_cfg, "china_weather_alarm", True)
 
         # S-Net 轮询间隔校验
         snet_cfg = cfg.get("snet")

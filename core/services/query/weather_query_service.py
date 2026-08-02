@@ -10,9 +10,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
+from ...message.presenters.weather_alarm_code_map import (
+    build_weather_icon_url,
+    resolve_weather_icon_code,
+)
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
+    extract_final_weather_color,
 )
 
 
@@ -104,6 +109,14 @@ def extract_weather_org(title_text: str, headline_text: str) -> str:
     if match:
         return match.group(1)
 
+    # 提取以气象台/气象局/气象站/气象中心结尾的机构名（如"康县气象台"）
+    # 覆盖"升级/降级"类预警 headline 无"发布"关键词的场景
+    org_match = re.search(
+        r"^(.+?(?:气象台|气象局|气象站|气象中心|气象分局))", candidate
+    )
+    if org_match:
+        return org_match.group(1)
+
     time_match = re.search(
         r"^(.*?)(?:\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分(?:\d{1,2}秒)?)$",
         candidate,
@@ -131,12 +144,13 @@ def detect_weather_type(title_text: str, weather_type_code: str | None) -> str:
 
 
 def detect_weather_color(level_text: str, title_text: str) -> str:
-    """识别预警颜色。"""
-    candidate = f"{level_text or ''} {title_text or ''}"
-    for color in COLOR_LEVEL_EMOJI:
-        if color in candidate:
-            return color
-    return "未知颜色"
+    """识别预警颜色。
+
+    对于"升级为/降级为"类预警，优先取变更后的最终颜色，
+    避免因红色优先匹配而返回变更前的旧颜色。
+    """
+    final_color = extract_final_weather_color(level_text, title_text)
+    return final_color if final_color else "未知颜色"
 
 
 def extract_weather_warning_core(title_text: str) -> str | None:
@@ -281,6 +295,15 @@ async def query_weather_alarm_data(
             guideline_idx = body_text.find("防御指南")
             guideline_text = body_text[guideline_idx:].strip()
 
+        # CMA p 编码需先经统一映射转为 Fan Studio 图标接口兼容的 11B 码，
+        # 直接拼接原始 p 编码会导致图标接口返回“伪图片”错误页。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
         return {
             "success": True,
             "query_mode": "id",
@@ -295,11 +318,7 @@ async def query_weather_alarm_data(
                 "detected_color": detected_color,
                 "color_emoji": color_emoji,
                 "guideline_text": guideline_text,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": (build_weather_icon_url(icon_code) if icon_code else None),
             },
         }
 
@@ -395,6 +414,14 @@ async def query_weather_alarm_data(
         if not raw_real_event_id and "|" in raw_unique_id:
             display_alarm_id = raw_unique_id.split("|")[-1].strip()
 
+        # 与推送路径一致：p 编码先映射为 11B 码再拼图标 URL，避免 CMA 来源图标失效。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
         items.append(
             {
                 "issue_time": format_cn_time(entry["event_time_utc"]),
@@ -410,11 +437,7 @@ async def query_weather_alarm_data(
                 "title_text": title_text,
                 "headline_text": headline_text,
                 "weather_type_code": weather_type_code,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": (build_weather_icon_url(icon_code) if icon_code else None),
             }
         )
 

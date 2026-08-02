@@ -1043,6 +1043,10 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
                             sorted_scales = sorted(
                                 region_scale_groups.keys(), reverse=True
                             )
+                            # detailed_jma_intensity=false 时仅展示最大震度档的地域，
+                            # 与町丁目简略模式保持语义一致；true 时展示全部震度档。
+                            if not merged_options.get("detailed_jma_intensity", False):
+                                sorted_scales = sorted_scales[:1]
                             lines.append("📡各地震度详情：")
                             for scale_key in sorted_scales:
                                 scale_disp = (
@@ -1090,6 +1094,9 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
 
         当 detailed_jma_intensity 开启时逐级展示所有震度的町丁目，
         否则仅展示最大震度的代表观测点。町丁目列表会做截断处理以控制文本长度。
+
+        该方法同时作为地域汇总模式的回退路径，detailed_jma_intensity 的
+        语义在此处与地域汇总分支保持一致：false 时仅保留最大震度档。
         """
         if merged_options.get("detailed_jma_intensity", False):
             # 详细模式下按震度从高到低逐级展开展示。

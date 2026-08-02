@@ -790,6 +790,36 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         payload_signatures=(("type",),),
         payload_predicates=("weather_alert",),
     ),
+    # china_weather_openquake: 中国气象局气象预警 - OpenQuakeAPI /ws/all (source=cma)
+    # 高优先级气象源（priority=3 > Fan=1），与 Fan 不做跨源去重，可双推。
+    # payload 直接透传 CMA 预警地图 API 字段（id/headline/effective/description/lon/lat/type/title）。
+    "china_weather_openquake": SourceEntry(
+        source_id="china_weather_openquake",
+        source_enum="openquake_cma_weather",
+        source_type=SourceType.WEATHER,
+        provider_family=ProviderFamily.GLOBAL_QUAKE,
+        config_group="global_quake",
+        config_key="china_weather_alarm",
+        parser_name="weather_alarm_parser",
+        presentation_type="weather",
+        text_presenter_key="weather_cn",
+        report_policy="none",
+        intensity_mode="none",
+        priority=3,
+        display_name="中国气象局",
+        description="中国气象局气象预警 - OpenQuakeAPI WebSocket（source=cma，高优先级）",
+        default_timezone="Asia/Shanghai",
+        publish_time_field="issue_time",
+        fingerprint_prefix="cn_weather_oq",
+        connection_group="global_quake",
+        connection_handler="global_quake",
+        connection_data_source="openquake_mixed",
+        connection_url="wss://api.aloys23.link/ws/all",
+        dispatch_family="openquake_weather",
+        provider_source_names=("cma",),
+        provider_aliases=("openquake_cma", "cma_weather", "cma"),
+        routing_tags=("openquake", "china", "weather", "cma"),
+    ),
     # typhoon_fanstudio: 实时活跃台风 - FAN Studio
     "typhoon_fanstudio": SourceEntry(
         source_id="typhoon_fanstudio",

@@ -171,10 +171,23 @@ class EqscCencIntensityPollService:
 
     async def _poll_loop(self) -> None:
         """后台轮询循环。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_poll_fetch_started("eqsc_cenc_ir")
+            except Exception as exc:
+                logger.debug(
+                    f"[灾害预警] EQSC CENC 烈度速报轮询通知静默协调器抓取开始失败: {exc}"
+                )
         try:
             await self.fetch_once(emit_event=True)
         except Exception as exc:
             logger.error(f"[灾害预警] EQSC CENC 烈度速报首次抓取失败: {exc}")
+            if coordinator is not None:
+                try:
+                    coordinator.note_poll_fetch_completed("eqsc_cenc_ir", success=False)
+                except Exception:
+                    pass
 
         while getattr(self.service, "running", False):
             try:
@@ -272,28 +285,33 @@ class EqscCencIntensityPollService:
         self._remember_event(event_id, list_fp)
         return True
 
+    def _notify_silence_fetch_completed(self, *, success: bool) -> None:
+        """通知静默协调器本轮抓取已结束（成功或失败）。"""
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is None:
+            return
+        try:
+            coordinator.note_poll_fetch_completed("eqsc_cenc_ir", success=success)
+        except Exception as exc:
+            logger.debug(f"[灾害预警] EQSC CENC 烈度速报轮询通知静默协调器失败: {exc}")
+
     async def fetch_once(self, *, emit_event: bool = True) -> list[dict[str, Any]]:
         """抓取一轮列表，并按差分拉取详情投递。"""
         client = self._ensure_client()
         if client is None:
+            self._notify_silence_fetch_completed(success=False)
             return []
 
         limit = self._resolve_list_limit()
         items = await client.fetch_list(limit=limit, use_cache=False)
         if not isinstance(items, list):
             self._consecutive_failures += 1
+            self._notify_silence_fetch_completed(success=False)
             return []
 
         self._consecutive_failures = 0
         self._last_success_at = time.time()
-        coordinator = getattr(self.service, "startup_silence", None)
-        if coordinator is not None:
-            try:
-                coordinator.note_poll_fetch_completed("eqsc_cenc_ir", success=True)
-            except Exception as exc:
-                logger.debug(
-                    f"[灾害预警] EQSC CENC 烈度速报轮询通知静默协调器失败: {exc}"
-                )
+        self._notify_silence_fetch_completed(success=True)
 
         is_silence = False
         silence_checker = getattr(self.service, "is_silencing", None)
@@ -340,6 +358,7 @@ class EqscCencIntensityPollService:
             plugin_logger.info(
                 f"[灾害预警] EQSC CENC 烈度速报轮询本轮推送 {emitted} 条",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
         else:
             plugin_logger.debug("[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送")

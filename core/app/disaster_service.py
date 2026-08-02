@@ -201,6 +201,15 @@ class DisasterWarningService:
         """装配灾害服务运行时子服务。"""
         # 以下服务分别承接事件流水线、生命周期、运行时调度、缓存、状态整理、通知、重连与接入旁路编排，主服务本身只保留高层协调职责。
         self.event_pipeline = EventPipeline(self)  # 事件流处理流水线
+        # 气象预警聚合推送服务，注入到事件流水线
+        from ..message.push.weather_aggregation_service import (
+            WeatherAggregationService,
+        )
+
+        self._weather_aggregation_service = WeatherAggregationService(self.config)
+        self.event_pipeline.set_weather_aggregation_service(
+            self._weather_aggregation_service
+        )
         self.lifecycle_service = DisasterServiceLifecycleService(
             self
         )  # 服务启停生命周期服务

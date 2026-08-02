@@ -295,7 +295,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             if not blocks:
                 return False
 
-            max_nodes_per_forward = 8
+            max_nodes_per_forward = 10
             total_blocks = len(blocks)
             batches = [
                 blocks[i : i + max_nodes_per_forward]
@@ -485,8 +485,51 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         return
                     except Exception as text_error:
                         logger.warning(f"[灾害预警] 文本回退发送失败: {text_error}")
+                        # 全国分支发送与文本回退均已尝试且失败：直接结束，
+                        # 避免控制流继续落入下方单卡二次尝试造成重复发送。
+                        return
 
-            # 正常区域搜索，组装文字概要
+            # 正常区域搜索：结果较多时也走合并转发分批发送，避免单条消息过长
+            if text_blocks and len(text_blocks) > 1:
+                try:
+                    ok = await _send_forward_batches(text_blocks)
+                    if ok:
+                        await self._track_command_feature(
+                            "command_weather_query",
+                            {
+                                "success": True,
+                                "query_mode": str(result.get("query_mode") or "search"),
+                                "is_nationwide": is_nationwide,
+                                "result_count": int(total or 0),
+                                "has_optional_type": bool(optional_a),
+                                "has_optional_level": bool(optional_b),
+                                "delivery_mode": "forward_batches",
+                            },
+                        )
+                        return
+                except Exception as forward_error:
+                    logger.warning(
+                        f"[灾害预警] 合并转发送失败，回退文本: {forward_error}"
+                    )
+                    try:
+                        await _send_text_blocks(text_blocks, total)
+                        await self._track_command_feature(
+                            "command_weather_query",
+                            {
+                                "success": True,
+                                "query_mode": str(result.get("query_mode") or "search"),
+                                "is_nationwide": is_nationwide,
+                                "result_count": int(total or 0),
+                                "has_optional_type": bool(optional_a),
+                                "has_optional_level": bool(optional_b),
+                                "delivery_mode": "text_blocks",
+                            },
+                        )
+                        return
+                    except Exception as text_error:
+                        logger.warning(f"[灾害预警] 文本回退发送失败: {text_error}")
+
+            # 结果较少时，组装文字概要
             lines = [f"📋 气象预警列表（共 {total} 条）"]
             for idx, item in enumerate(items):
                 lines.append(f"发布时间：{item.get('issue_time') or '未知时间'}")

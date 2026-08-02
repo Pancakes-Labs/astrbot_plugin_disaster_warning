@@ -235,6 +235,7 @@ class CwaReportParser(BaseParser):
                 f"时间: {getattr(domain_event, 'occurred_at', None)}, "
                 f"ID: {getattr(getattr(envelope, 'identity', None), 'event_id', '')}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return envelope
         except Exception as exc:

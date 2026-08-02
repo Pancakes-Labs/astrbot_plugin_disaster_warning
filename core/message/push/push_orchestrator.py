@@ -72,6 +72,7 @@ class PushOrchestrator:
         skip_dedup: bool = False,
         bypass_fusion: bool = False,
         return_details: bool = False,
+        aggregated_session_count: int = 0,
     ) -> bool | dict:
         """根据策略配置编排事件推送流程。"""
         source_id = event.source_id
@@ -108,4 +109,5 @@ class PushOrchestrator:
             commit_state=commit_state,
             skip_dedup=skip_dedup,
             return_details=return_details,
+            aggregated_session_count=aggregated_session_count,
         )

@@ -105,6 +105,23 @@ class BaseParser:
 
         self._last_heartbeat_check[cache_key] = current_time
 
+        # 规则 0：天气源以"展示字段全部为空"作为心跳判定。
+        # 天气预警支持 headline 回退为 title 的归一化（见 weather_parser），
+        # 若用 title/description 的缺失比例判定心跳，会误过滤"仅有 headline"
+        # 的有效 CMA 预警；因此天气源放宽为任一展示字段有值即视为有效消息。
+        if self.source_id in ("china_weather_fanstudio", "china_weather_openquake"):
+            if not isinstance(msg_data, dict):
+                return True
+            display_values = [
+                msg_data.get(field)
+                for field in ("title", "headline", "description", "name")
+            ]
+            # 任一展示字段非空即视为有效业务内容
+            for value in display_values:
+                if value not in self._heartbeat_patterns["empty_fields"]:
+                    return False
+            return True
+
         # 规则 1：检查坐标值是否为 (0,0) 的空心跳包
         if "latitude" in msg_data and "longitude" in msg_data:
             lat = msg_data.get("latitude")
@@ -122,6 +139,7 @@ class BaseParser:
             "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
             "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
             "china_weather_fanstudio": ["title", "description"],
+            "china_weather_openquake": ["title", "description"],
         }
 
         if self.source_id in critical_fields:
@@ -168,7 +186,25 @@ class BaseParser:
         # 调用时间转换工具进行多格式兼容解析
         dt = TimeConverter.parse_datetime(time_str)
         if dt is None and time_str:
+            # 该工具同时服务天气、海啸、台风、地震等多类解析器，
+            # 按 source_id 解析事件流标签，避免非地震解析失败日志被误标为 earthquake。
+            stream = self._resolve_parser_event_stream()
             plugin_logger.warning(
-                f"[灾害预警] 时间解析失败: '{time_str}'", is_event_linked=True
+                f"[灾害预警] 时间解析失败: '{time_str}'",
+                is_event_linked=True,
+                event_stream=stream,
             )
         return dt
+
+    def _resolve_parser_event_stream(self) -> str:
+        """根据数据源标识解析事件流标签，用于细粒度日志级别控制。"""
+        source_id = str(self.source_id or "").strip().lower()
+        if "weather" in source_id:
+            return "weather_alarm"
+        if "typhoon" in source_id:
+            return "typhoon"
+        if "tsunami" in source_id:
+            return "tsunami"
+        if "global_quake" in source_id:
+            return "global_quake"
+        return "earthquake"

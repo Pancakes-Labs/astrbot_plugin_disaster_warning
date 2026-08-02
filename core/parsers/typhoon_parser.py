@@ -222,6 +222,7 @@ class TyphoonParser(BaseParser):
                         f"[灾害预警] 台风解析成功: {envelope.event.name}({envelope.event.name_en}) "
                         f"ID: {envelope.event.typhoon_id}，类型为{envelope.event.typhoon_type}",
                         is_event_linked=True,
+                        event_stream="typhoon",
                     )
                     envelopes.append(envelope)
 

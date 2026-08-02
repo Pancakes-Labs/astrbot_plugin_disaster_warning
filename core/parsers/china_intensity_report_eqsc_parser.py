@@ -304,6 +304,7 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
                 f"Imax {getattr(domain_event, 'intensity', None)}), "
                 f"时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
+                event_stream="earthquake",
             )
             return envelope
         except Exception as exc:

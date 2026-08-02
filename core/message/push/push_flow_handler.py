@@ -34,6 +34,7 @@ class PushFlowHandler:
         commit_state: bool = True,
         skip_dedup: bool = False,
         return_details: bool = False,
+        aggregated_session_count: int = 0,
     ) -> bool | dict[str, Any]:
         """执行完整推送流程：去重、会话执行、后处理与异常遥测。"""
         plugin_logger.debug(f"[灾害预警] 执行事件推送流程: {event.id}")
@@ -52,7 +53,11 @@ class PushFlowHandler:
                 commit_state=commit_state,
             )
             # 执行完成后处理，例如发送分离地图、输出统计过滤摘要与上报指标
-            success = await self.handle_execution_result(event, execution_result)
+            success = await self.handle_execution_result(
+                event,
+                execution_result,
+                aggregated_session_count=aggregated_session_count,
+            )
             if return_details:
                 execution_result["success"] = bool(success)
                 return execution_result
@@ -70,6 +75,8 @@ class PushFlowHandler:
         self,
         event: EventEnvelope,
         execution_result: dict[str, Any],
+        *,
+        aggregated_session_count: int = 0,
     ) -> bool:
         """处理推送执行结果并返回最终是否有成功推送。"""
         push_success_count = int(execution_result.get("push_success_count", 0))
@@ -97,6 +104,7 @@ class PushFlowHandler:
             filter_reason_stats=filter_reason_stats,
             filter_reason_detail_stats=filter_reason_detail_stats,
             send_failure_stats=send_failure_stats,
+            aggregated_session_count=aggregated_session_count,
         )
 
         execution_result["final_failure_reason"] = self._build_failure_summary(
@@ -242,14 +250,24 @@ class PushFlowHandler:
         filter_reason_stats: dict[str, int],
         filter_reason_detail_stats: dict[str, int],
         send_failure_stats: dict[str, int],
+        aggregated_session_count: int = 0,
     ) -> None:
         """记录会话筛选结果摘要。"""
         # 这里把“规则拦截”和“发送失败”分开汇总，避免排障时混淆问题阶段。
+        # aggregated_session_count：本次事件已进入气象聚合缓冲区的会话数
+        # （这些会话不会走常规推送，因此不计入“通过/拦截”统计）。
         failure_summary = "，".join(
             f"{reason} {count} 个会话"
             for reason, count in sorted(send_failure_stats.items())
         )
         failure_suffix = f"，另有 {failure_summary} 发送失败" if failure_summary else ""
+
+        # 聚合缓冲会话并入同一句汇总日志，避免额外刷一条日志。
+        agg_prefix = (
+            f"{aggregated_session_count} 个会话已进入聚合缓冲区，"
+            if aggregated_session_count > 0
+            else ""
+        )
 
         if filter_reason_stats:
             summary = "，".join(
@@ -258,24 +276,57 @@ class PushFlowHandler:
             )
             if push_success_count > 0:
                 plugin_logger.info(
-                    f"[灾害预警] 事件 {event.id} 已完成会话筛选，{push_success_count} 个会话通过，另有 {summary} 被拦截{failure_suffix}",
+                    f"[灾害预警] 事件 {event.id} 会话筛选结果: {agg_prefix}"
+                    f"{push_success_count} 个会话通过，另有 {summary} 被拦截{failure_suffix}",
                     is_event_linked=True,
+                    event_stream=self._resolve_event_stream(event),
                 )
             else:
                 plugin_logger.info(
-                    f"[灾害预警] 事件 {event.id} 未通过任何会话的推送条件，拦截情况：{summary}{failure_suffix}",
+                    f"[灾害预警] 事件 {event.id} 会话筛选结果: {agg_prefix}拦截情况：{summary}{failure_suffix}",
                     is_event_linked=True,
+                    event_stream=self._resolve_event_stream(event),
                 )
         elif push_success_count > 0:
             plugin_logger.info(
-                f"[灾害预警] 事件 {event.id} 已通过全部会话的推送条件，共 {push_success_count} 个会话{failure_suffix}",
+                f"[灾害预警] 事件 {event.id} 会话筛选结果: {agg_prefix}"
+                f"{push_success_count} 个会话通过{failure_suffix}",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
         elif failure_summary:
             plugin_logger.info(
-                f"[灾害预警] 事件 {event.id} 已通过发送前筛选，但发送阶段全部失败：{failure_summary}",
+                f"[灾害预警] 事件 {event.id} 会话筛选结果: {agg_prefix}"
+                f"已通过发送前筛选，但发送阶段全部失败：{failure_summary}",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
+        elif aggregated_session_count > 0:
+            # 没有非聚合会话需要推送，且没有通过/拦截/失败记录：
+            # 全部目标会话都进入了聚合缓冲，等待后续定时聚合推送。
+            plugin_logger.info(
+                f"[灾害预警] 事件 {event.id} 会话筛选结果: "
+                f"{aggregated_session_count} 个会话已进入聚合缓冲区，"
+                f"等待后续定时聚合推送",
+                is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
+            )
+
+    @staticmethod
+    def _resolve_event_stream(event: EventEnvelope) -> str:
+        """根据事件类型解析事件流标签，用于细粒度日志级别控制。"""
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if event_type == "weather_alarm":
+            return "weather_alarm"
+        if event_type == "typhoon":
+            return "typhoon"
+        if event_type == "tsunami":
+            return "tsunami"
+        # 地震类事件统一归入 earthquake 流
+        source_id = str(getattr(event, "source_id", "") or "").strip()
+        if source_id == "global_quake":
+            return "global_quake"
+        return "earthquake"
 
     def _log_push_completion(
         self,
@@ -314,9 +365,11 @@ class PushFlowHandler:
             plugin_logger.info(
                 f"[灾害预警] 事件 {event.id} 推送完成，成功推送到 {push_success_count} 个会话",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
         elif send_failure_stats:
             plugin_logger.warning(
                 f"[灾害预警] 事件 {event.id} 推送完成，但没有任何会话发送成功",
                 is_event_linked=True,
+                event_stream=self._resolve_event_stream(event),
             )
