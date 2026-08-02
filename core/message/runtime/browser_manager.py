@@ -598,6 +598,7 @@ class BrowserManager:
         wait_until: str = "domcontentloaded",
         viewport: dict | None = None,
         render_label: str | None = None,
+        event_stream: str | None = None,
     ) -> str | None:
         """把 HTML 内容渲染为图片文件。
 
@@ -624,6 +625,7 @@ class BrowserManager:
                 selector,
                 viewport=resolved_viewport,
                 render_label=label,
+                event_stream=event_stream,
             )
 
         # 本地模式：使用 Playwright
@@ -844,6 +846,7 @@ class BrowserManager:
                         plugin_logger.info(
                             f"[灾害预警] {label}渲染成功，耗时 {elapsed:.3f}秒",
                             is_event_linked=True,
+                            event_stream=event_stream,
                         )
                         render_succeeded = True
                         return output_path
@@ -933,6 +936,7 @@ class BrowserManager:
         selector: str,
         viewport: dict[str, int] | None = None,
         render_label: str | None = None,
+        event_stream: str | None = None,
     ) -> str | None:
         """使用 browserless HTTP API 渲染卡片。
 
@@ -1058,8 +1062,10 @@ class BrowserManager:
                             f.write(image_data)
 
                         elapsed = time.time() - start_time
-                        logger.info(
-                            f"[灾害预警] {label}渲染成功（HTTP API），耗时 {elapsed:.3f}秒"
+                        plugin_logger.info(
+                            f"[灾害预警] {label}渲染成功（HTTP API），耗时 {elapsed:.3f}秒",
+                            is_event_linked=True,
+                            event_stream=event_stream,
                         )
                         return output_path
                     else:
@@ -1092,8 +1098,10 @@ class BrowserManager:
                                         with open(output_path, "wb") as f:
                                             f.write(image_data)
                                         elapsed = time.time() - start_time
-                                        logger.info(
-                                            f"[灾害预警] {label}渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒"
+                                        plugin_logger.info(
+                                            f"[灾害预警] {label}渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒",
+                                            is_event_linked=True,
+                                            event_stream=event_stream,
                                         )
                                         return output_path
                                     else:

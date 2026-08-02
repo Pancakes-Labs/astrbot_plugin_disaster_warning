@@ -337,6 +337,7 @@ class SnetMapRenderer:
                 wait_until="networkidle",
                 viewport=SNET_VIEWPORT,
                 render_label="S-Net 测站分布图",
+                event_stream="earthquake",
             )
             if result and os.path.exists(output_path):
                 return output_path

@@ -197,6 +197,11 @@ class PushExecutionService:
             typhoon_config = runtime_config.get("typhoon_config", {})
             if not isinstance(typhoon_config, dict):
                 typhoon_config = {}
+            # 本地监控开关与地点直接影响地震正文的本地预估展示，必须纳入缓存键，
+            # 否则本地监控开启的会话渲染出的含本地预估消息会被未开启的会话误复用。
+            local_monitoring_cfg = runtime_config.get("local_monitoring", {})
+            if not isinstance(local_monitoring_cfg, dict):
+                local_monitoring_cfg = {}
             data_sources = runtime_config.get("data_sources", {})
             if not isinstance(data_sources, dict):
                 data_sources = {}
@@ -257,6 +262,20 @@ class PushExecutionService:
                             "show_local_estimation", False
                         ),
                         "typhoon_enrichment": typhoon_enrichment,
+                    },
+                    # 本地监控配置差异会导致地震正文附带不同的本地预估，
+                    # 缺失时会使不同会话误共享同一份渲染结果。
+                    "local_monitoring": {
+                        "enabled": bool(local_monitoring_cfg.get("enabled", False)),
+                        "place_name": str(local_monitoring_cfg.get("place_name", "")),
+                        "latitude": local_monitoring_cfg.get("latitude", 0.0),
+                        "longitude": local_monitoring_cfg.get("longitude", 0.0),
+                        "strict_mode": bool(
+                            local_monitoring_cfg.get("strict_mode", False)
+                        ),
+                        "intensity_threshold": local_monitoring_cfg.get(
+                            "intensity_threshold", 2.0
+                        ),
                     },
                 },
                 sort_keys=True,

@@ -514,6 +514,7 @@ class TyphoonMapRenderer:
                 wait_until="domcontentloaded",
                 viewport=TYPHOON_VIEWPORT,
                 render_label="台风路径图",
+                event_stream="typhoon",
             )
             if result and os.path.exists(output_path):
                 return output_path

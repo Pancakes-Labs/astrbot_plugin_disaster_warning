@@ -68,6 +68,7 @@ class CardMessageBuilder:
                 image_path,
                 selector="#card-wrapper",
                 render_label="地震列表卡片",
+                event_stream="earthquake",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 渲染地震列表卡片失败: {e}")

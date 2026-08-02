@@ -116,6 +116,7 @@ class GlobalQuakeCardBuilder:
                     image_path,
                     selector="#card-wrapper",
                     render_label="GlobalQuake 卡片",
+                    event_stream="global_quake",
                 )
 
             result_path = await render_with_cache(card_cache_key, render_gq_card)
