@@ -7,9 +7,15 @@ Fan Studio 图标接口兼容的 11B 编码（如 11B03_yellow），
 
 设计原则：有什么图标用什么，不强行映射。
 匹配不到的返回 None，由调用方走本地颜色回退。
+
+图标路径策略（本地优先）：
+1. 优先使用本地 resources/weatheralarm_logo 目录下的图标文件；
+2. 本地文件缺失时再回退到 Fan Studio 官方图标接口。
 """
 
 from __future__ import annotations
+
+import os
 
 # ---------------------------------------------------------------------------
 # p 编码结构：p + 4位类型码 + 1位颜色码（1=红 2=橙 3=黄 4=蓝）
@@ -221,6 +227,84 @@ def _resolve_from_title(title: str, headline: str) -> str | None:
     return f"{base_11b}_{color_suffix}"
 
 
+# ---------------------------------------------------------------------------
+# 本地图标目录解析：将 11B 完整码映射为 resources/weatheralarm_logo 下的文件。
+# ---------------------------------------------------------------------------
+
+# 插件根目录（weather_alarm_code_map.py 位于 core/message/presenters/ 下，向上 4 层）
+_PLUGIN_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+# 本地气象预警图标目录
+_WEATHER_LOGO_DIR = os.path.join(_PLUGIN_ROOT, "resources", "weatheralarm_logo")
+
+# 本地图标文件名缓存：code -> (路径, 是否存在)，避免重复 stat
+_LOCAL_ICON_CACHE: dict[str, tuple[str, bool]] = {}
+
+
+def _resolve_local_icon_file(icon_code: str) -> tuple[str, bool]:
+    """解析本地图标文件路径，并缓存其是否存在。
+
+    文件名规则：11B 完整码直接作为文件名前缀（如 11B03_yellow.png、11E02_red.png）。
+    """
+    code = (icon_code or "").strip()
+    if not code:
+        return "", False
+
+    if code in _LOCAL_ICON_CACHE:
+        return _LOCAL_ICON_CACHE[code]
+
+    # 文件名直接使用 11B 完整码 + .png（如 11B03_yellow.png、11E02_red.png）
+    filename = f"{code}.png"
+    path = os.path.join(_WEATHER_LOGO_DIR, filename)
+    exists = os.path.isfile(path)
+    _LOCAL_ICON_CACHE[code] = (path, exists)
+    return path, exists
+
+
+def resolve_local_weather_icon_abs_path(icon_code: str) -> str | None:
+    """返回本地气象预警图标的绝对路径。
+
+    供推送侧直接读取本地文件转 Base64 使用（推送进程不一定能访问管理端
+    静态路由 /weatheralarm_logo/，因此不能依赖本地 URL 下载）。
+
+    Args:
+        icon_code: 11B 完整码，如 "11B03_yellow"。
+
+    Returns:
+        本地图标绝对路径；文件不存在时返回 None。
+    """
+    path, exists = _resolve_local_icon_file(icon_code)
+    return path if exists else None
+
+
+def build_local_weather_icon_url(icon_code: str) -> str | None:
+    """构建本地气象预警图标的 URL。
+
+    本地图标通过管理端静态路由 /weatheralarm_logo/ 对外提供访问，
+    仅当对应文件存在时返回 URL，否则返回 None 交由调用方回退。
+
+    Args:
+        icon_code: 11B 完整码，如 "11B03_yellow"。
+
+    Returns:
+        本地图标 URL（如 /weatheralarm_logo/11B03_yellow.png），
+        文件不存在时返回 None。
+    """
+    path, exists = _resolve_local_icon_file(icon_code)
+    if not exists:
+        return None
+    return f"/weatheralarm_logo/{os.path.basename(path)}"
+
+
 def build_weather_icon_url(icon_code: str) -> str:
-    """构建 Fan Studio 官方图标接口 URL。"""
+    """构建气象预警图标 URL（本地优先，缺失时回退 Fan Studio 官方接口）。
+
+    图标使用策略：
+    1. 本地 resources/weatheralarm_logo 目录存在对应文件 → 返回本地静态 URL；
+    2. 本地文件缺失 → 返回 Fan Studio 官方图标接口 URL。
+    """
+    local_url = build_local_weather_icon_url(icon_code)
+    if local_url:
+        return local_url
     return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={icon_code}"

@@ -31,6 +31,7 @@ from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
 from ..presenters.weather_alarm_code_map import (
     build_weather_icon_url,
+    resolve_local_weather_icon_abs_path,
     resolve_p_code_color,
     resolve_weather_icon_code,
 )
@@ -763,8 +764,26 @@ class MessageBuildService:
             headline=headline_text,
         )
 
+        # 1. 本地优先：优先读取本地具体预警图标（11B 码对应文件）转 Base64 附加。
+        #    本地缺失时才走 Fan Studio 官方接口下载，避免依赖外部服务与网络。
+        local_icon_path = (
+            resolve_local_weather_icon_abs_path(icon_code) if icon_code else None
+        )
+        if local_icon_path:
+            try:
+                with open(local_icon_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode()
+                chain.chain.append(Comp.Image.fromBase64(b64_data))
+                logger.debug(f"[灾害预警] 已附加本地气象预警图标: {local_icon_path}")
+                return
+            except Exception as e:
+                logger.warning(
+                    f"[灾害预警] 本地气象预警图标读取失败，回退官方接口: "
+                    f"{local_icon_path}, 错误信息: {e}"
+                )
+
         if icon_code:
-            # 组装 FAN Studio 官方图标接口链接。
+            # 组装 FAN Studio 官方图标接口链接（本地缺失时的兜底通道）。
             icon_url = build_weather_icon_url(icon_code)
             # 优先预下载官方图标转 Base64 附加，避免框架发送时因图标下载失败导致整条推送报错。
             appended = await self._append_remote_image_component(

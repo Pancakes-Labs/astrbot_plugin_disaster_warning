@@ -13,6 +13,10 @@ from astrbot.api import logger
 
 from .....utils.time_converter import TimeConverter
 from ....domain.typhoon import resolve_data_mode
+from ....message.presenters.weather_alarm_code_map import (
+    build_weather_icon_url,
+    resolve_weather_icon_code,
+)
 from ....storage.source_compat import format_event_source_name
 from ..payloads.api_response import ApiResponse
 
@@ -58,9 +62,18 @@ def _enrich_event_list(events: list[dict]) -> None:
         event_type = str(event.get("type") or "").strip()
         if event_type == "weather_alarm":
             weather_type_code = str(event.get("weather_type_code") or "").strip()
+            # 本地优先：p 编码经统一映射转为 11B 码
+            # 内部优先返回 /weatheralarm_logo/ 静态 URL，本地文件缺失时回退 Fan Studio 官方接口。
             if weather_type_code:
+                title_text = str(event.get("description") or "").strip()
+                headline_text = str(event.get("subtitle") or "").strip()
+                icon_code = resolve_weather_icon_code(
+                    weather_type_code,
+                    title=title_text,
+                    headline=headline_text,
+                )
                 event["icon_url"] = (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
+                    build_weather_icon_url(icon_code) if icon_code else None
                 )
             else:
                 event["icon_url"] = None
