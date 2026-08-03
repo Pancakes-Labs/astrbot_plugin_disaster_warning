@@ -879,8 +879,12 @@
         if (code.startsWith('p') && code.length >= 8) {
             return P_FORMAT_MAP[code.slice(-1)] || null;
         }
-        // 仅当末两位明确是 01/02/03/04 时才认作颜色，避免 11B31 这类类型码误判。
-        if (code.length >= 2) {
+        // 仅当编码是 11B/11E 格式且末两位明确是 01/02/03/04 时才认作颜色。
+        // 必须限定前缀，否则 p 码（如 p0000003）末两位 03 会被误判成橙色。
+        if (
+            (code.startsWith('11B') || code.startsWith('11E'))
+            && code.length >= 2
+        ) {
             const color = COMPACT_11B_MAP[code.slice(-2)];
             if (color) return color;
         }
@@ -914,15 +918,24 @@
         '4': 'blue',
     };
 
+    // 紧凑 11B 编码末两位颜色码 → 颜色关键词（与后端 _COMPACT_11B_COLOR_TO_SUFFIX 一致）
+    const COMPACT_11B_COLOR_MAP = {
+        '01': 'blue',
+        '02': 'yellow',
+        '03': 'orange',
+        '04': 'red',
+    };
+
     /**
      * 将气象预警编码解析为本地图标文件名对应的 11B 完整码（本地优先）。
      *
      * 与后端 weather_alarm_code_map.resolve_weather_icon_code 对齐：
      * - 11B/11E 完整码（含下划线新格式）直接规范化返回；
+     * - 紧凑 11B 编码（如 11B2001）标准化为 11B20_blue 后返回；
      * - p 编码按 4 位类型码 + 末位颜色数字转换为 11B 完整码。
      * 前端无标题/摘要上下文，因此不执行标题兜底解析。
      *
-     * @param {string} weatherTypeCode  气象预警编码，如 "p0002003" 或 "11B03_yellow"
+     * @param {string} weatherTypeCode  气象预警编码，如 "p0002003"、"11B03_yellow" 或 "11B2001"
      * @returns {string|null}           11B 完整码，如 "11B03_yellow"；无法解析返回 null
      */
     function resolveWeatherIconCode(weatherTypeCode) {
@@ -936,7 +949,14 @@
             if (base && normalizedColor) return `${base}_${normalizedColor}`;
         }
 
-        // 2. p 编码：4 位类型码 + 末位颜色数字
+        // 2. 紧凑 11B 编码（11B2001 → 11B20_blue）：末两位为颜色码
+        if (/^(11B|11E)\d{3,}$/.test(code) && code.length >= 4) {
+            const base = code.slice(0, -2);
+            const color = COMPACT_11B_COLOR_MAP[code.slice(-2)];
+            if (base && color) return `${base}_${color}`;
+        }
+
+        // 3. p 编码：4 位类型码 + 末位颜色数字
         if (code.startsWith('p') && code.length >= 8) {
             const digits = code.slice(1);
             const typePart = digits.slice(0, 4);

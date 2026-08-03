@@ -49,6 +49,16 @@ _P_COLOR_DIGIT_TO_SUFFIX: dict[str, str] = {
     "4": "blue",
 }
 
+# 紧凑 11B 编码末两位颜色码 → 颜色后缀（01=蓝 02=黄 03=橙 04=红）
+# 与事件 ID 尾部紧凑编码及 message_build_service._COMPACT_11B_COLOR_MAP 保持一致，
+# 用于把 11B2002 这类紧凑编码标准化为 11B20_yellow，便于命中本地图标文件。
+_COMPACT_11B_COLOR_TO_SUFFIX: dict[str, str] = {
+    "01": "blue",
+    "02": "yellow",
+    "03": "orange",
+    "04": "red",
+}
+
 # 特殊完整 p 编码直射（7位短码不遵循通用规则，需特殊处理）
 # 这些码在数据库中实际灾害类型与通用规则不符，走标题兜底
 _P_CODE_SKIP_GENERIC: frozenset[str] = frozenset(
@@ -90,6 +100,18 @@ _TITLE_TYPE_TO_11B_BASE: list[tuple[str, str]] = [
     ("霾", "11B19"),
 ]
 
+# 标题关键词匹配排除表：当标题命中某关键词时，若同时包含其复合排除词，跳过该关键词。
+# 解决"雷暴大风"被"大风"误匹配的问题：雷暴大风无专属图标，应走通用颜色 fallback。
+# 例如标题"发布雷暴大风黄色预警"会命中"大风"，但含"雷暴"前缀，应跳过"大风"匹配。
+_TITLE_KEYWORD_EXCLUSIONS: dict[str, tuple[str, ...]] = {
+    # "大风"不应命中"雷暴大风/雷雨大风/雷雨强风/海上大风/海区大风"等复合类型
+    "大风": ("雷暴大风", "雷雨大风", "雷雨强风", "海上大风", "海区大风"),
+    # "雷电"不应命中"海上雷电"
+    "雷电": ("海上雷电",),
+    # "大雾"不应命中"海上大雾/特强浓雾"
+    "大雾": ("海上大雾",),
+}
+
 # 标题颜色关键词 → 颜色后缀
 _TITLE_COLOR_TO_SUFFIX: list[tuple[str, str]] = [
     ("红色", "red"),
@@ -97,13 +119,6 @@ _TITLE_COLOR_TO_SUFFIX: list[tuple[str, str]] = [
     ("黄色", "yellow"),
     ("蓝色", "blue"),
 ]
-# 颜色后缀 → 中文颜色词（用于日志展示）
-_COLOR_SUFFIX_TO_CN: dict[str, str] = {
-    "red": "红色",
-    "orange": "橙色",
-    "yellow": "黄色",
-    "blue": "蓝色",
-}
 
 
 def _is_p_code(code: str) -> bool:
@@ -116,6 +131,29 @@ def _is_11b_code(code: str) -> bool:
     return code.startswith("11B") or code.startswith("11E")
 
 
+def _normalize_compact_11b_code(code: str) -> str | None:
+    """把紧凑 11B 编码标准化为下划线颜色格式。
+
+    紧凑格式形如 11B2001（末两位 01/02/03/04 表示蓝/黄/橙/红），
+    标准化后为 11B20_blue，便于命中本地图标文件（11B20_blue.png）
+    及向 Fan Studio 图标接口传递正确编码。
+
+    Args:
+        code: 紧凑 11B 编码，如 "11B2001"。
+
+    Returns:
+        标准化后的 11B 完整码（如 "11B20_blue"）；非紧凑格式返回 None。
+    """
+    if len(code) < 4:
+        return None
+    base = code[:-2]  # 去掉末两位颜色码，如 11B2001 → 11B20
+    color_digits = code[-2:]
+    color_suffix = _COMPACT_11B_COLOR_TO_SUFFIX.get(color_digits)
+    if not color_suffix:
+        return None
+    return f"{base}_{color_suffix}"
+
+
 def resolve_weather_icon_code(
     weather_type_code: str,
     *,
@@ -125,7 +163,8 @@ def resolve_weather_icon_code(
     """把气象预警编码解析为 Fan Studio 图标接口兼容的 11B 完整码。
 
     解析优先级：
-    1. 已有 11B 编码（含下划线新格式或紧凑格式）直接返回
+    1. 已有 11B 编码：下划线格式（11B20_yellow）直接使用，
+       紧凑格式（11B2001）标准化为 11B20_blue 后返回
     2. p 编码通用规则（4位类型码 + 末位颜色码）
     3. 标题文本兜底（灾害类型 + 颜色）
 
@@ -133,8 +172,14 @@ def resolve_weather_icon_code(
     """
     code = (weather_type_code or "").strip()
 
-    # 1. 已有 11B 编码直接返回
+    # 1. 已有 11B 编码：下划线格式直接返回，紧凑格式标准化后返回
     if code and _is_11b_code(code):
+        if "_" in code:
+            return code
+        normalized = _normalize_compact_11b_code(code)
+        if normalized:
+            return normalized
+        # 紧凑格式颜色码无法识别（如 11B20 无颜色），原样返回交上游兜底
         return code
 
     # 2. p 编码通用规则
@@ -207,9 +252,16 @@ def _resolve_from_title(title: str, headline: str) -> str | None:
     # 提取灾害类型
     base_11b = None
     for keyword, code in _TITLE_TYPE_TO_11B_BASE:
-        if keyword in combined:
-            base_11b = code
-            break
+        if keyword not in combined:
+            continue
+        # 排除规则：命中关键词但标题同时包含其复合排除词时跳过。
+        # 例如"雷暴大风黄色预警"命中"大风"，但含"雷暴"前缀，应跳过"大风"匹配，
+        # 让其走通用颜色 fallback（无专属图标不强行归类）。
+        excluded_keywords = _TITLE_KEYWORD_EXCLUSIONS.get(keyword)
+        if excluded_keywords and any(excl in combined for excl in excluded_keywords):
+            continue
+        base_11b = code
+        break
 
     if not base_11b:
         return None
