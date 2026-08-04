@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from astrbot.api import logger
+
 from ...domain.event_models import EventEnvelope
 from ...services.config.config_service import ConfigAccessor
 from ...sources.source_catalog import SOURCE_CATALOG
@@ -100,11 +102,19 @@ class PushOrchestrator:
             try:
                 if self._silence_checker():
                     if self._silence_handler is not None:
-                        self._silence_handler(event)
+                        try:
+                            self._silence_handler(event)
+                        except Exception as exc:
+                            # 吸收回调失败不应中断推送管线：记录日志后按非静默继续推送，
+                            # 避免静默协同配置损坏时所有灾害推送都被吞掉。
+                            logger.warning(
+                                f"[灾害预警] 静默吸收回调执行失败（已放行推送）: {exc}"
+                            )
+                            return False
                     return False
-            except Exception:
+            except Exception as exc:
                 # 判定异常时按不静默处理，避免静默判定故障导致推送完全中断。
-                pass
+                logger.warning(f"[灾害预警] 静默判定异常（已按非静默放行推送）: {exc}")
 
         source_id = event.source_id
         entry = SOURCE_CATALOG.get(source_id)
