@@ -99,9 +99,12 @@ class StartupSilenceCoordinator:
     # 待武装（PENDING）期间记录的连接/就绪进度，arm() 时迁移到正式门闩，
     # 避免连接在 AstrBot 加载窗口内就绪后，arm 后门闩永远等不到回调。
     # - _pending_connected: 已建连（WebSocket），用于恢复 connected 状态；
-    # - _pending_primed: 已收到首包/首轮成功（ws + poll 通用），用于恢复 primed。
+    # - _pending_primed: 已收到首包/首轮成功（ws + poll 通用），用于恢复 primed；
+    # - _pending_skipped: 已显式跳过（缺鉴权/熔断/轮询未启用），arm() 后恢复 skipped，
+    #   避免 PENDING 期间的跳过进度在 gates.clear() 后丢失而干等硬超时。
     _pending_connected: set[str] = field(default_factory=set)
     _pending_primed: set[str] = field(default_factory=set)
+    _pending_skipped: set[str] = field(default_factory=set)
     # 待武装（PENDING）开始时刻（单调钟），用于超时兜底判定
     _pending_started_mono: float | None = field(default=None, repr=False)
     _watchdog_task: asyncio.Task | None = field(default=None, repr=False)
@@ -141,7 +144,14 @@ class StartupSilenceCoordinator:
             age = self._try_mono() - self._pending_started_mono
             if age >= self.pending_timeout_seconds:
                 self._force_pending_escape()
-                return False
+                # 逃生可能成功重新武装（进入 ARMING/PRIMING），
+                # 此时当前事件仍应被静默吸收，不应绕过刚武装的门闩；
+                # 仅当逃生后状态为 READY/DISABLED 时才放行。
+                return self.state in {
+                    SilenceState.PENDING,
+                    SilenceState.ARMING,
+                    SilenceState.PRIMING,
+                }
         return self.state in {
             SilenceState.PENDING,
             SilenceState.ARMING,
@@ -193,6 +203,7 @@ class StartupSilenceCoordinator:
         self.gates.clear()
         self._pending_connected.clear()
         self._pending_primed.clear()
+        self._pending_skipped.clear()
         self._cancel_watchdog()
         self._start_watchdog()  # PENDING 阶段也启动 watchdog，提供超时逃生通道
         logger.debug("[灾害预警] 静默启动进入待武装状态（等待 AstrBot 加载完成钩子）")
@@ -218,11 +229,13 @@ class StartupSilenceCoordinator:
         self.absorbed_events = 0
         self.last_bootstrap_at = None
         self.gates.clear()
-        # 暂存待武装期间已建连/已就绪的连接，注册正式门闩后迁移，避免回调错过。
+        # 暂存待武装期间已建连/已就绪/已跳过的进度，注册正式门闩后迁移，避免回调错过。
         pending_connected = set(self._pending_connected)
         pending_primed = set(self._pending_primed)
+        pending_skipped = set(self._pending_skipped)
         self._pending_connected.clear()
         self._pending_primed.clear()
+        self._pending_skipped.clear()
         self._cancel_watchdog()
 
         if not self.enabled:
@@ -263,10 +276,20 @@ class StartupSilenceCoordinator:
                 gate.connected = True
                 gate.primed = True
                 gate.primed_at = now
-        if pending_connected or pending_primed:
+        for name in pending_skipped:
+            gate = self.gates.get(name)
+            if gate is None:
+                gate = self._ensure_ws_gate(name)
+            if gate is not None:
+                gate.skipped = True
+                gate.skip_reason = "skipped_in_pending"
+                gate.primed = True
+                gate.connected = True
+        if pending_connected or pending_primed or pending_skipped:
             logger.debug(
                 f"[灾害预警] 待武装期间数据源进度已迁移到正式门闩："
-                f"已建连 {len(pending_connected)} 个、已就绪 {len(pending_primed)} 个"
+                f"已建连 {len(pending_connected)} 个、已就绪 {len(pending_primed)} 个、"
+                f"已跳过 {len(pending_skipped)} 个"
             )
         if not self.gates:
             # 无任何上游门闩：最短静默后直接就绪
@@ -298,6 +321,7 @@ class StartupSilenceCoordinator:
         self.gates.clear()
         self._pending_connected.clear()
         self._pending_primed.clear()
+        self._pending_skipped.clear()
         self._pending_started_mono = None
         self.ready_reason = "disarmed"
         self.started_mono = None
@@ -333,6 +357,10 @@ class StartupSilenceCoordinator:
         gate.skip_reason = reason or "skipped"
         gate.primed = True
         gate.connected = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
         logger.debug(
             f"[灾害预警] 静默门闩已跳过: {gate.gate_id}"
             + (f" ({gate.skip_reason})" if gate.skip_reason else "")
@@ -415,6 +443,10 @@ class StartupSilenceCoordinator:
         gate.skipped = True
         gate.skip_reason = reason or "disabled"
         gate.primed = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
         self._evaluate_ready(reason_hint=f"poll_skipped:{gate_id}")
 
     def note_event_absorbed(
