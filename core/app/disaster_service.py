@@ -517,12 +517,11 @@ class DisasterWarningService:
         except Exception as e:
             logger.debug(f"[灾害预警] 更新 EEW 查询状态失败（已忽略）: {e}")
 
-        # 启动静默：不推送/不统计，但播种指纹并推进门闩
+        # 启动静默：不推送/不统计，但播种指纹并推进门闩。
+        # 复用 _absorb_event_for_silence 统一吸收逻辑（含门闩计数异常保护），
+        # 与推送编排器/融合服务的静默吸收语义保持一致。
         if self.is_silencing():
-            self._seed_event_for_silence(event)
-            coordinator = getattr(self, "startup_silence", None)
-            if coordinator is not None:
-                coordinator.note_event_absorbed(event)
+            self._absorb_event_for_silence(event)
             logger.debug(f"[灾害预警] 静默启动中，已吸收并播种事件: {event.id}")
             return True
 

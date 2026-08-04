@@ -160,9 +160,23 @@ class DisasterServiceLifecycleService:
 
         首次启动/进程重启时静默武装被推迟，需要等 AstrBot 真正加载完成后
         由 on_astrbot_loaded 钩子显式触发，保证 30 秒硬超时从该时刻起算。
+
+        若钩子在后台 start() 任务真正执行前触发（running 仍为 False），
+        会调度延迟重试，避免静默永久停在 PENDING。
         """
         if not getattr(self.service, "running", False):
-            logger.warning("[灾害预警] 服务未运行，跳过静默启动")
+            # 服务后台任务尚未真正开始：延迟重试，避免时序竞态导致静默永久停在 PENDING。
+            logger.warning("[灾害预警] 服务尚未运行，静默启动推迟重试")
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.call_later(
+                1.0,
+                lambda: self.arm_startup_silence(
+                    hard_timeout_seconds=hard_timeout_seconds
+                ),
+            )
             return
         self._defer_arm = False
         self._arm_startup_silence(hard_timeout_seconds=hard_timeout_seconds)

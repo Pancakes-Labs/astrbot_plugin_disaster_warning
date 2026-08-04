@@ -81,6 +81,9 @@ class StartupSilenceCoordinator:
     first_payload_timeout_seconds: float = 2.0
     # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
     first_poll_timeout_seconds: float = 8.0
+    # 待武装（PENDING）超时兜底：防止 on_astrbot_loaded 钩子丢失或时序竞态
+    # 导致静默永久停在 PENDING 无限吸收事件，超时后尝试强制武装，失败则直接放行。
+    pending_timeout_seconds: float = 180.0
 
     state: SilenceState = SilenceState.DISABLED
     enabled: bool = False
@@ -99,6 +102,8 @@ class StartupSilenceCoordinator:
     # - _pending_primed: 已收到首包/首轮成功（ws + poll 通用），用于恢复 primed。
     _pending_connected: set[str] = field(default_factory=set)
     _pending_primed: set[str] = field(default_factory=set)
+    # 待武装（PENDING）开始时刻（单调钟），用于超时兜底判定
+    _pending_started_mono: float | None = field(default=None, repr=False)
     _watchdog_task: asyncio.Task | None = field(default=None, repr=False)
     _service: Any = field(default=None, repr=False)
 
@@ -126,6 +131,16 @@ class StartupSilenceCoordinator:
             age = self._try_mono() - self.started_mono
             if age >= self.hard_timeout_seconds:
                 self._force_ready("hard_timeout_on_query")
+                return False
+        # 待武装（PENDING）超时兜底：即便 watchdog 未跑，查询时也强制退出，
+        # 避免 on_astrbot_loaded 钩子丢失后静默永久停在 PENDING 无限吸收事件。
+        if (
+            self.state == SilenceState.PENDING
+            and self._pending_started_mono is not None
+        ):
+            age = self._try_mono() - self._pending_started_mono
+            if age >= self.pending_timeout_seconds:
+                self._force_pending_escape()
                 return False
         return self.state in {
             SilenceState.PENDING,
@@ -170,6 +185,7 @@ class StartupSilenceCoordinator:
         self.state = SilenceState.PENDING
         self.started_at = self._now()
         self.started_mono = None  # 待武装期间不计时，不触发硬超时
+        self._pending_started_mono = self._try_mono()  # 记录 PENDING 起点用于超时兜底
         self.ready_at = None
         self.ready_reason = ""
         self.absorbed_events = 0
@@ -178,6 +194,7 @@ class StartupSilenceCoordinator:
         self._pending_connected.clear()
         self._pending_primed.clear()
         self._cancel_watchdog()
+        self._start_watchdog()  # PENDING 阶段也启动 watchdog，提供超时逃生通道
         logger.debug("[灾害预警] 静默启动进入待武装状态（等待 AstrBot 加载完成钩子）")
 
     def arm(
@@ -195,6 +212,7 @@ class StartupSilenceCoordinator:
             self.hard_timeout_seconds = float(hard_timeout_seconds)
         self.started_at = self._now()
         self.started_mono = self._try_mono()
+        self._pending_started_mono = None  # 已离开 PENDING，清理超时起点
         self.ready_at = None
         self.ready_reason = ""
         self.absorbed_events = 0
@@ -280,6 +298,7 @@ class StartupSilenceCoordinator:
         self.gates.clear()
         self._pending_connected.clear()
         self._pending_primed.clear()
+        self._pending_started_mono = None
         self.ready_reason = "disarmed"
         self.started_mono = None
 
@@ -566,6 +585,31 @@ class StartupSilenceCoordinator:
             reason = f"gates_ok:{reason_hint}"
         self._force_ready(reason)
 
+    def _force_pending_escape(self) -> None:
+        """PENDING 超时逃生：尝试正式武装，失败则直接放行。"""
+        self._cancel_watchdog()
+        # 若主服务已运行，尝试按当前连接计划正式武装；
+        # 否则直接放行，避免静默永久停在 PENDING 无限吸收事件。
+        service = self._service
+        if service is not None and getattr(service, "running", False):
+            lifecycle = getattr(service, "lifecycle_service", None)
+            if lifecycle is not None:
+                arm = getattr(lifecycle, "arm_startup_silence", None)
+                if callable(arm):
+                    try:
+                        arm()
+                    except Exception as exc:
+                        logger.debug(
+                            f"[灾害预警] PENDING 超时强制武装失败（已忽略）: {exc}"
+                        )
+        # 无论武装是否成功，都确保状态离开 PENDING，避免无限吸收。
+        if self.state == SilenceState.PENDING:
+            self._force_ready("pending_timeout_escape")
+        logger.warning(
+            "[灾害预警] 待武装静默超时（PENDING 超时兜底），已强制结束静默，"
+            "防止灾害事件被无限期吸收"
+        )
+
     def _force_ready(self, reason: str) -> None:
         if self.state == SilenceState.READY and self.enabled:
             return
@@ -646,6 +690,16 @@ class StartupSilenceCoordinator:
                             self._mark_primed(
                                 gate, bootstrap_kind="poll_first_fetch_timeout"
                             )
+                    # 待武装（PENDING）超时兜底：watchdog 循环内主动检查，
+                    # 即使 is_silencing 查询路径未被调用也能及时逃生。
+                    if (
+                        self.state == SilenceState.PENDING
+                        and self._pending_started_mono is not None
+                    ):
+                        age = now - self._pending_started_mono
+                        if age >= self.pending_timeout_seconds:
+                            self._force_pending_escape()
+                            break
                     # 硬超时（单调钟）
                     if self.started_mono is not None:
                         age = now - self.started_mono
