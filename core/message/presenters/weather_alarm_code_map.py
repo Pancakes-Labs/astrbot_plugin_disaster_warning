@@ -138,13 +138,20 @@ def _normalize_compact_11b_code(code: str) -> str | None:
     标准化后为 11B20_blue，便于命中本地图标文件（11B20_blue.png）
     及向 Fan Studio 图标接口传递正确编码。
 
+    仅接受 7 位紧凑格式（11B + 2 位类型码 + 2 位颜色码），
+    避免传统完整码（如 11B01）被误拆成 base=11B + 颜色码=01。
+
     Args:
         code: 紧凑 11B 编码，如 "11B2001"。
 
     Returns:
         标准化后的 11B 完整码（如 "11B20_blue"）；非紧凑格式返回 None。
     """
-    if len(code) < 4:
+    # 长度校验：仅接受 7 位紧凑格式（11Bxxyy，如 11B2001），
+    # 排除 11B01 这类无下划线的传统短码，避免 base 被误拆为 "11B"。
+    if not (
+        code and len(code) == 7 and code[:3] in ("11B", "11E") and code[3:].isdigit()
+    ):
         return None
     base = code[:-2]  # 去掉末两位颜色码，如 11B2001 → 11B20
     color_digits = code[-2:]

@@ -24,6 +24,7 @@ from ...core.domain.event_context import EarthquakeDisplayContext
 from ...core.message.presenters.earthquake_presenter import SnetPresenter
 from ...core.message.presenters.weather_alarm_code_map import (
     resolve_local_weather_icon_abs_path,
+    resolve_weather_icon_code,
 )
 from ...core.message.push.message_build_service import MessageBuildService
 from ...core.message.render.beachball_renderer import BeachballRenderer
@@ -77,7 +78,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         if not icon_url_str:
             return []
 
-        # 本地静态 URL（/weatheralarm_logo/...）或编码可解析出本地文件时直读 Base64
+        # 本地静态 URL（/weatheralarm_logo/...）时直读 Base64 文件。
+        # 非本地 URL（Fan Studio 官方接口等远程地址）时，按 11B 完整码尝试解析本地文件，
+        # 本地文件存在则优先本地发送，否则回退远程 URL 直发。
         local_path = None
         if icon_url_str.startswith("/weatheralarm_logo/"):
             local_path = os.path.join(
@@ -89,8 +92,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 os.path.basename(icon_url_str),
             )
         else:
-            # 尝试按 11B 编码解析本地文件（远程 URL 无对应本地文件时返回 None）
-            local_path = resolve_local_weather_icon_abs_path(weather_type_code)
+            # 先把 weather_type_code 统一解析为 11B 完整码（p 编码/紧凑码/标题兜底），
+            # 再按 11B 码映射本地文件；直接传 p 编码会导致本地文件永远找不到。
+            icon_code = resolve_weather_icon_code(weather_type_code)
+            if icon_code:
+                local_path = resolve_local_weather_icon_abs_path(icon_code)
 
         if local_path and os.path.isfile(local_path):
             try:
