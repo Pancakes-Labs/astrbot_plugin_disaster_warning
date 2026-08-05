@@ -307,8 +307,13 @@ class EEWQueryStateService:
             # 计算此预警发布至今已经过去了多少秒，以便前端显示
             elapsed = int((now_utc - issued_at).total_seconds())
             item["elapsed_seconds"] = max(0, elapsed)
-            # 根据当前系统绝对时间戳判断该预警的生效状态
-            item["status"] = "active" if now_utc < expires_at else "inactive"
+            # 防御：若 issued_at 明显晚于当前时间（超过 1 小时），说明该时间被错误时区
+            # 解析到了未来（例如历史事件被当成另一时区），此时不应渲染为正在生效。
+            if issued_at > now_utc + timedelta(seconds=3600):
+                item["status"] = "inactive"
+            else:
+                # 根据当前系统绝对时间戳判断该预警的生效状态
+                item["status"] = "active" if now_utc < expires_at else "inactive"
             institutions.append(item)
 
         return {

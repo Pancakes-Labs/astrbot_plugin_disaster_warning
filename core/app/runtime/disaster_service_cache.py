@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from astrbot.api import logger
+
+from ...services.identity.event_identity import ensure_utc_datetime
 
 
 class DisasterServiceCacheService:
@@ -85,13 +88,27 @@ class DisasterServiceCacheService:
                         )
                         supported_institutions = set(institutions.keys())
 
+                    # 当前 UTC 时间，用于剔除“被错误时区污染到未来”的历史状态
+                    now_utc = datetime.now(timezone.utc)
+
                     for key, value in data.items():
                         # 仅恢复当前仍受支持的机构键，避免历史版本缓存污染现有状态结构。
                         if supported_institutions and key not in supported_institutions:
                             continue
                         if not isinstance(value, dict):
                             continue
-                        if not value.get("issued_at"):
+                        issued_at_raw = str(value.get("issued_at") or "").strip()
+                        if not issued_at_raw:
+                            continue
+                        # 防御：若缓存中的发布时间被解析到未来（超过 1 小时），
+                        # 说明该记录曾被错误时区污染，直接丢弃避免复活脏状态。
+                        issued_dt = ensure_utc_datetime(
+                            issued_at_raw,
+                            source_id=str(value.get("source_id") or "").strip(),
+                        )
+                        if issued_dt is None or issued_dt > now_utc + timedelta(
+                            seconds=3600
+                        ):
                             continue
                         restored[key] = value  # 校验通过，载入缓存
             else:
@@ -133,6 +150,9 @@ class DisasterServiceCacheService:
             for source_id in meta.get("source_ids", []):
                 source_to_institution[str(source_id).strip()] = institution_key
 
+        # 当前 UTC 时间，用于剔除“被错误时区污染到未来”的历史状态
+        now_utc = datetime.now(timezone.utc)
+
         # 遍历近期推送，提取其中的地震预警(earthquake_warning)事件
         for record in recent_pushes:
             if not isinstance(record, dict):
@@ -148,6 +168,11 @@ class DisasterServiceCacheService:
                 continue
             issued_at = str(record.get("time") or "").strip()
             if not issued_at:
+                continue
+            # 防御：若恢复出的发布时间被解析到未来（超过 1 小时），
+            # 说明该记录的时间被错误时区污染，直接丢弃避免复活脏状态。
+            issued_dt = ensure_utc_datetime(issued_at, source_id=source_id)
+            if issued_dt is None or issued_dt > now_utc + timedelta(seconds=3600):
                 continue
             # 组装 EEW 查询状态字典
             state[institution_key] = {
@@ -195,6 +220,9 @@ class DisasterServiceCacheService:
             for source_id in meta.get("source_ids", []):
                 source_to_institution[str(source_id).strip()] = institution_key
 
+        # 当前 UTC 时间，用于剔除“被错误时区污染到未来”的历史状态
+        now_utc = datetime.now(timezone.utc)
+
         # 遍历数据库近期事件并填补状态
         for record in recent_events:
             if not isinstance(record, dict):
@@ -209,6 +237,11 @@ class DisasterServiceCacheService:
                 continue
             issued_at = str(record.get("time") or "").strip()
             if not issued_at:
+                continue
+            # 防御：若恢复出的发布时间被解析到未来（超过 1 小时），
+            # 说明该记录的时间被错误时区污染，直接丢弃避免复活脏状态。
+            issued_dt = ensure_utc_datetime(issued_at, source_id=source_id)
+            if issued_dt is None or issued_dt > now_utc + timedelta(seconds=3600):
                 continue
             # 组装状态元数据
             state[institution_key] = {

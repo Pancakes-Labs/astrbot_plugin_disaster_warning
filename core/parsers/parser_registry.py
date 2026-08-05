@@ -129,12 +129,17 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
 
 
 def validate_catalog_parser_names() -> None:
-    """校验数据源目录中引用的解析器名称都能被解析。"""
+    """校验数据源目录中引用的解析器名称都能被解析。
+
+    空 parser_name 表示该源不通过消息解析器接入（例如 EQSC 轮询源，
+    事件由轮询服务直接构建），属于合法状态，跳过校验。
+    """
     # 抽取静态数据源配置名录中所有引用的解析器名称，与已注册的解析器表做一致性对齐
     missing_names = {
         entry.parser_name
         for entry in SOURCE_CATALOG.values()
-        if entry.parser_name not in PARSER_CLASS_BY_NAME
+        if (entry.parser_name or "").strip()
+        and entry.parser_name not in PARSER_CLASS_BY_NAME
     }
     # 若存在名录中有定义，但实际上解析器静态字典内未注册的配置，强行抛出运行时异常
     if missing_names:
