@@ -76,11 +76,11 @@ class EqscTsunamiPollService:
         return bool(self._eqsc_config().get("jma_tsunami_include_training", False))
 
     def _get_shared_token_manager(self) -> EqscTokenManager | None:
-        """优先复用台风富化服务的 token_manager，避免双份鉴权状态。"""
-        enrichment = getattr(self.service, "typhoon_enrichment_service", None)
-        if enrichment is None:
+        """优先复用 EQSC 通道服务的 token_manager，避免双份鉴权状态。"""
+        channel = getattr(self.service, "eqsc_channel_service", None)
+        if channel is None:
             return None
-        token_manager = getattr(enrichment, "_token_manager", None)
+        token_manager = getattr(channel, "token_manager", None)
         if isinstance(token_manager, EqscTokenManager):
             return token_manager
         return None
