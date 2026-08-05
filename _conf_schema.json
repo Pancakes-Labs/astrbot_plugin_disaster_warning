@@ -108,7 +108,7 @@
           "usa_shakealert": {
             "description": "美国 ShakeAlert：地震预警",
             "type": "bool",
-            "default": false,
+            "default": true,
             "hint": "通过 FAN Studio WebSocket 接收美国 ShakeAlert 地震预警信息。"
           },
           "fssn_cmt": {

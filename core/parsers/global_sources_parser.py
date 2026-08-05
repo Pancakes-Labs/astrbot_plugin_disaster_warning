@@ -858,13 +858,12 @@ class ShakeAlertEewParser(BaseParser):
 
             source_entry = get_source_entry(self.source_id)
             raw_payload = dict(msg_data)
-            # 统计/入库语义按地震事件处理（与 Global Quake 一致），不计入 EEW 预警类型
             metadata = {
                 "source_family": "fan_studio",
                 "source_enum": source_entry.source_enum if source_entry else "",
                 "source_type": source_entry.source_type.value
                 if source_entry
-                else "earthquake_info",
+                else "earthquake_warning",
                 "event_id": str(event_raw_id),
                 "md5": data.get("md5") if isinstance(data, dict) else None,
             }
@@ -885,7 +884,7 @@ class ShakeAlertEewParser(BaseParser):
             identity = EventIdentity(
                 event_id=event_id,
                 source_id=self.source_id,
-                event_type="earthquake",
+                event_type="earthquake_warning",
                 provider_family=source_entry.provider_family.value
                 if source_entry
                 else "fan_studio",
@@ -919,7 +918,7 @@ class ShakeAlertEewParser(BaseParser):
             )
 
             plugin_logger.info(
-                f"[灾害预警] ShakeAlert 地震解析成功: {domain_event.place_name} (M {domain_event.magnitude or 0.0}), 时间: {domain_event.occurred_at}",
+                f"[灾害预警] ShakeAlert 预警解析成功: {domain_event.place_name} (M {domain_event.magnitude or 0.0}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream="earthquake",
             )

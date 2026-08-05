@@ -870,10 +870,15 @@ class ShakeAlertEewPresenter(BasePresenter):
         display_context: EarthquakeDisplayContext,
         options: dict | None = None,
     ) -> str:
-        """展示 ShakeAlert 预警（不附加本地预估）。"""
-        return cls.format_message(
+        """展示 ShakeAlert 预警，并按会话配置附加本地预估。"""
+        rendered = cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
+        if not _is_earthquake_view(display_context):
+            return rendered
+        lines = rendered.split("\n") if rendered else []
+        _append_local_estimation(lines, display_context)
+        return "\n".join(lines)
 
 
 class JmaEarthquakeInfoPresenter(BasePresenter):
@@ -1266,6 +1271,48 @@ class CencIntensityReportPresenter(BasePresenter):
     presenter_name = "cenc_ir_report_presenter"
     _TOP_N = 5
 
+    # 上游烈度速报正文常见格式问题处理：
+    # - 零宽/不可见格式字符（Word Joiner、ZWJ、BOM、不可见运算符等）
+    # - GB/T 标准号连字符缺失（GB/T177422020）与引号包裹
+    # - 英文标点混入中文正文
+    _INVISIBLE_CHARS_RE = re.compile(r"[\u200b-\u200f\u2060-\u2064\ufeff\u0361]")
+    _GB_T_STANDARD_RE = re.compile(r"GB/T\s*(\d+)\s*-?\s*(\d{4})")
+    _GB_T_BEFORE_CJK_RE = re.compile(r"([\u4e00-\u9fff])GB/T")
+    _GB_T_AFTER_YEAR_CJK_RE = re.compile(r"(GB/T\s*\d+-\d{4})([\u4e00-\u9fff])")
+    _QUOTE_CHARS_RE = re.compile(r"['\"“”‘’]")
+
+    @staticmethod
+    def _strip_invisible_chars(text: str) -> str:
+        """清理上游数据中混入的零宽/不可见格式字符。"""
+        return CencIntensityReportPresenter._INVISIBLE_CHARS_RE.sub("", str(text or ""))
+
+    @classmethod
+    def _normalize_intensity_text(cls, text: str) -> list[str]:
+        """把上游烈度概述文本规范化为多行正文。
+
+        处理内容：
+        1. 清理零宽/不可见格式字符；
+        2. 去除标准号周围引号、修正 GB/T 标准号为规范形式
+           （GB/T 17742-2020），并在标准号与相邻中文之间补空格；
+        3. 英文标点（, . ;）转中文标点（，。；），句点转句号时保留小数点；
+        4. 按句子切分为多行。
+        """
+        content = cls._strip_invisible_chars(text)
+        content = cls._QUOTE_CHARS_RE.sub("", content)
+        content = cls._GB_T_STANDARD_RE.sub(r"GB/T \1-\2", content)
+        content = cls._GB_T_BEFORE_CJK_RE.sub(r"\1 GB/T", content)
+        content = cls._GB_T_AFTER_YEAR_CJK_RE.sub(r"\1 \2", content)
+        content = content.replace(",", "，").replace(";", "；")
+        # 仅排除「小数点」情形（点前是数字），其余点号统一转句号。
+        # 例如「6度.5度区」→「6度。5度区」，而「M 4.8」「28.54°」不受影响。
+        content = re.sub(r"(?<!\d)\.", "。", content)
+        # 按句切分后，每段补回中文句号（原始句号已被切分符吞掉）。
+        return [
+            f"{segment.strip()}。"
+            for segment in re.split(r"[。；\n]+", content)
+            if segment.strip()
+        ]
+
     @classmethod
     def format_message(
         cls, data: EarthquakeDisplayContext, options: dict | None = None
@@ -1306,7 +1353,9 @@ class CencIntensityReportPresenter(BasePresenter):
             or ""
         ).strip()
         if intensity_info_text:
-            lines.append(f"📝烈度概述：{intensity_info_text}")
+            lines.append("")
+            lines.append("📝推测烈度说明：")
+            lines.extend(cls._normalize_intensity_text(intensity_info_text))
 
         stations = metadata.get("stations") or data.stations or []
         if isinstance(stations, dict):
@@ -1315,6 +1364,7 @@ class CencIntensityReportPresenter(BasePresenter):
             stations = []
         station_rows = [item for item in stations if isinstance(item, dict)]
         if station_rows:
+            lines.append("")
             lines.append(f"📡台站实测 Top{min(cls._TOP_N, len(station_rows))}：")
             for row in station_rows[: cls._TOP_N]:
                 name = str(row.get("name") or "未知台站").strip() or "未知台站"
@@ -1327,7 +1377,7 @@ class CencIntensityReportPresenter(BasePresenter):
                 except (TypeError, ValueError):
                     intensity_text = str(intensity)
                 emoji = _get_intensity_emoji(intensity, is_eew=False, is_shindo=False)
-                lines.append(f"  · {name}  烈度 {intensity_text} {emoji}".rstrip())
+                lines.append(f"{emoji}[烈度{intensity_text}] {name}")
 
         return "\n".join(lines)
 

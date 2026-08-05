@@ -122,6 +122,29 @@ class MessagePushManager:
             cwa_eew_fusion_service=self._cwa_eew_fusion_service,
         )
 
+    def set_silence_callbacks(self, checker, handler) -> None:
+        """注入启动静默回调到推送编排器与各融合服务。
+
+        Args:
+            checker: 无参回调，返回是否处于启动静默期（复用主服务 is_silencing）。
+            handler: 吸收回调，接收事件并完成播种/计数等吸收动作。
+        """
+        if self._push_orchestrator is not None:
+            self._push_orchestrator.set_silence_checker(checker)
+            self._push_orchestrator.set_silence_handler(handler)
+        for fusion_service in (
+            self._cenc_fusion_service,
+            self._cwa_eew_fusion_service,
+        ):
+            if fusion_service is None:
+                continue
+            set_checker = getattr(fusion_service, "set_silence_checker", None)
+            if callable(set_checker):
+                set_checker(checker)
+            set_handler = getattr(fusion_service, "set_silence_absorb_handler", None)
+            if callable(set_handler):
+                set_handler(handler)
+
     def set_telemetry(self, telemetry) -> None:
         """同步更新消息子系统遥测引用。"""
         # 浏览器管理器属于消息层中最容易出现外部依赖异常的组件之一，

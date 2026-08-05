@@ -31,6 +31,7 @@ from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
 from ..presenters.weather_alarm_code_map import (
     build_weather_icon_url,
+    resolve_local_weather_icon_abs_path,
     resolve_p_code_color,
     resolve_weather_icon_code,
 )
@@ -665,26 +666,38 @@ class MessageBuildService:
         - 旧格式 p0002002：最后一位数字表示颜色（1=红, 2=橙, 3=黄, 4=蓝）
         - 紧凑 11B 格式 11B3102 / 11B2002：末两位 01/02/03/04 表示蓝/黄/橙/红
         - 中文/英文颜色提示（标题、级别字段）
+
+        注意：编码解析失败时继续尝试 color_hint 兜底（不直接 return），
+        确保地质灾害/山洪等无专属图标、编码颜色无法识别的类型也能回退到通用颜色图标。
         """
         code = (weather_type_code or "").strip()
+        color_key = None
         if code:
             if "_" in code:
-                # 新格式：11B20_yellow。命中下划线格式后立即返回，
-                # 避免非法后缀继续回退到紧凑 11B 末两位造成误判。
-                color_key = code.rsplit("_", 1)[-1].lower()
-                return (
-                    color_key if color_key in cls._WEATHER_ICON_FALLBACK_MAP else None
-                )
-            if code.startswith("p"):
+                # 新格式：11B20_yellow。命中下划线格式后提取颜色关键词。
+                candidate = code.rsplit("_", 1)[-1].lower()
+                if candidate in cls._WEATHER_ICON_FALLBACK_MAP:
+                    color_key = candidate
+            elif code.startswith("p"):
                 # 旧格式：p0002002，最后一位数字映射颜色。
                 # 与 weather_alarm_code_map.resolve_p_code_color 共用同一套映射，
                 # 避免跨文件重复维护且颜色判定口径不一致。
-                # 命中 p 格式后立即返回，保持与下划线格式互斥。
-                return resolve_p_code_color(code)
-            # 紧凑 11B 编码：仅当末两位明确是 01/02/03/04 时才认作颜色，
-            # 避免把 11B31 这类类型码末位误判成颜色。
-            if len(code) >= 2 and code[-2:] in cls._COMPACT_11B_COLOR_MAP:
-                return cls._COMPACT_11B_COLOR_MAP[code[-2:]]
+                # 命中 SKIP 短码（如强对流 p0000003）时返回 None，继续走 color_hint 兜底。
+                color_key = resolve_p_code_color(code)
+            # 紧凑 11B 编码：仅当编码本身是 11B/11E 格式且末两位明确是
+            # 01/02/03/04 时才认作颜色。必须限定前缀，否则 p 码（如 p0000003）
+            # 的末两位 03 会被误判成紧凑颜色码 03=orange。
+            if (
+                not color_key
+                and code
+                and (code.startswith("11B") or code.startswith("11E"))
+                and len(code) >= 2
+                and code[-2:] in cls._COMPACT_11B_COLOR_MAP
+            ):
+                color_key = cls._COMPACT_11B_COLOR_MAP[code[-2:]]
+
+        if color_key:
+            return color_key
 
         raw_hint = (color_hint or "").strip()
         if raw_hint:
@@ -703,11 +716,18 @@ class MessageBuildService:
         cls,
         weather_type_code: str,
         *,
+        icon_code: str | None = None,
         color_hint: str | None = None,
     ) -> str | None:
-        """根据气象预警编码解析本地回退图标路径。"""
+        """根据气象预警编码解析本地回退图标路径。
+
+        优先使用标准化后的 11B 完整码（icon_code）解析颜色：
+        - 下划线格式（11B20_yellow）颜色后缀最可靠；
+        - 原始编码（如 p 码）解析失败时由 color_hint 兜底。
+        """
+        # icon_code 是标准化后的 11B 码（含下划线颜色后缀），解析颜色最可靠
         color_key = cls._resolve_weather_color_key(
-            weather_type_code,
+            icon_code or weather_type_code,
             color_hint=color_hint,
         )
         relative_path = (
@@ -763,21 +783,27 @@ class MessageBuildService:
             headline=headline_text,
         )
 
-        if icon_code:
-            # 组装 FAN Studio 官方图标接口链接。
-            icon_url = build_weather_icon_url(icon_code)
-            # 优先预下载官方图标转 Base64 附加，避免框架发送时因图标下载失败导致整条推送报错。
-            appended = await self._append_remote_image_component(
-                chain,
-                icon_url,
-                media_label="气象预警图标",
-                allow_url_fallback=False,
-            )
-            if appended:
-                logger.debug(f"[灾害预警] 已附加气象预警图标: {icon_url}")
+        # 1. 本地优先：优先读取本地具体预警图标（11B 码对应文件）转 Base64 附加。
+        #    本地缺失时才走后续回退通道，避免依赖外部服务与网络。
+        local_icon_path = (
+            resolve_local_weather_icon_abs_path(icon_code) if icon_code else None
+        )
+        if local_icon_path:
+            try:
+                with open(local_icon_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode()
+                chain.chain.append(Comp.Image.fromBase64(b64_data))
+                logger.debug(f"[灾害预警] 已附加本地气象预警图标: {local_icon_path}")
                 return
+            except Exception as e:
+                logger.warning(
+                    f"[灾害预警] 本地气象预警图标读取失败: "
+                    f"{local_icon_path}, 错误信息: {e}"
+                )
 
-        # 官方接口下载失败或无可用图标码时，根据颜色后缀/紧凑编码/标题颜色提示回退到本地通用图标。
+        # 2. 本地颜色回退：本地具体图标缺失时，优先按颜色后缀/紧凑编码/标题颜色提示
+        #    回退到本地通用图标（fallback_{color}.png）。这样即使 Fan Studio 接口
+        #    对某些编码返回"伪成功"（真实占位图）也不会吞掉颜色回退。
         color_hint_candidates = [
             metadata.get("severity_color"),
             metadata.get("level"),
@@ -793,6 +819,7 @@ class MessageBuildService:
         )
         fallback_path = self._resolve_weather_fallback_icon_path(
             raw_weather_code,
+            icon_code=icon_code,
             color_hint=color_hint or None,
         )
         if fallback_path:
@@ -801,14 +828,28 @@ class MessageBuildService:
                     b64_data = base64.b64encode(f.read()).decode()
                 chain.chain.append(Comp.Image.fromBase64(b64_data))
                 logger.debug(
-                    f"[灾害预警] 气象预警官方图标下载失败，已回退到本地通用图标: "
-                    f"预警编码为 {raw_weather_code}"
+                    f"[灾害预警] 本地具体图标缺失，已回退到本地通用颜色图标: "
+                    f"预警编码为 {raw_weather_code}, 解析码为 {icon_code}"
                 )
                 return
             except Exception as e:
                 logger.warning(
                     f"[灾害预警] 本地回退图标读取失败: {fallback_path}, 错误信息: {e}"
                 )
+
+        # 3. Fan Studio 官方接口兜底：本地图标与本地颜色回退均不可用时，
+        #    才请求外部图标接口（如 11B20_blue 这类本地与颜色回退均无匹配的类型）。
+        if icon_code:
+            icon_url = build_weather_icon_url(icon_code)
+            appended = await self._append_remote_image_component(
+                chain,
+                icon_url,
+                media_label="气象预警图标",
+                allow_url_fallback=False,
+            )
+            if appended:
+                logger.debug(f"[灾害预警] 已附加气象预警图标: {icon_url}")
+                return
 
         logger.debug(
             f"[灾害预警] 气象预警图标下载失败且无可用回退图标，已跳过: "

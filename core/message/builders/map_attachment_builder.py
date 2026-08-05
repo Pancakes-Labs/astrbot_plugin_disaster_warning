@@ -97,6 +97,7 @@ class MapAttachmentBuilder:
                 image_path,
                 selector="#card-wrapper",
                 render_label="地震震中地图",
+                event_stream="earthquake",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 渲染地图图片时出错: {e}")

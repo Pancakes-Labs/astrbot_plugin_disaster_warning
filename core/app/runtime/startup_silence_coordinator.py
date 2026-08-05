@@ -20,6 +20,8 @@ class SilenceState(str, Enum):
     """启动静默状态。"""
 
     DISABLED = "disabled"
+    # 待武装：AstrBot 加载完成前吸收事件并播种，但不开始计时/门闩
+    PENDING = "pending"
     ARMING = "arming"
     PRIMING = "priming"
     READY = "ready"
@@ -79,6 +81,9 @@ class StartupSilenceCoordinator:
     first_payload_timeout_seconds: float = 2.0
     # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
     first_poll_timeout_seconds: float = 8.0
+    # 待武装（PENDING）超时兜底：防止 on_astrbot_loaded 钩子丢失或时序竞态
+    # 导致静默永久停在 PENDING 无限吸收事件，超时后尝试强制武装，失败则直接放行。
+    pending_timeout_seconds: float = 180.0
 
     state: SilenceState = SilenceState.DISABLED
     enabled: bool = False
@@ -91,6 +96,17 @@ class StartupSilenceCoordinator:
     last_bootstrap_at: float | None = None
 
     gates: dict[str, GateState] = field(default_factory=dict)
+    # 待武装（PENDING）期间记录的连接/就绪进度，arm() 时迁移到正式门闩，
+    # 避免连接在 AstrBot 加载窗口内就绪后，arm 后门闩永远等不到回调。
+    # - _pending_connected: 已建连（WebSocket），用于恢复 connected 状态；
+    # - _pending_primed: 已收到首包/首轮成功（ws + poll 通用），用于恢复 primed；
+    # - _pending_skipped: 已显式跳过（缺鉴权/熔断/轮询未启用），arm() 后恢复 skipped，
+    #   避免 PENDING 期间的跳过进度在 gates.clear() 后丢失而干等硬超时。
+    _pending_connected: set[str] = field(default_factory=set)
+    _pending_primed: set[str] = field(default_factory=set)
+    _pending_skipped: set[str] = field(default_factory=set)
+    # 待武装（PENDING）开始时刻（单调钟），用于超时兜底判定
+    _pending_started_mono: float | None = field(default=None, repr=False)
     _watchdog_task: asyncio.Task | None = field(default=None, repr=False)
     _service: Any = field(default=None, repr=False)
 
@@ -112,13 +128,35 @@ class StartupSilenceCoordinator:
             return False
         if self.state in {SilenceState.DISABLED, SilenceState.READY}:
             return False
-        # 硬超时兜底：即使 watchdog 未跑，查询时也强制退出（单调钟）
+        # 硬超时兜底：即使 watchdog 未跑，查询时也强制退出（单调钟）。
+        # PENDING 状态 started_mono 为 None，不会触发超时。
         if self.started_mono is not None:
             age = self._try_mono() - self.started_mono
             if age >= self.hard_timeout_seconds:
                 self._force_ready("hard_timeout_on_query")
                 return False
-        return self.state in {SilenceState.ARMING, SilenceState.PRIMING}
+        # 待武装（PENDING）超时兜底：即便 watchdog 未跑，查询时也强制退出，
+        # 避免 on_astrbot_loaded 钩子丢失后静默永久停在 PENDING 无限吸收事件。
+        if (
+            self.state == SilenceState.PENDING
+            and self._pending_started_mono is not None
+        ):
+            age = self._try_mono() - self._pending_started_mono
+            if age >= self.pending_timeout_seconds:
+                self._force_pending_escape()
+                # 逃生可能成功重新武装（进入 ARMING/PRIMING），
+                # 此时当前事件仍应被静默吸收，不应绕过刚武装的门闩；
+                # 仅当逃生后状态为 READY/DISABLED 时才放行。
+                return self.state in {
+                    SilenceState.PENDING,
+                    SilenceState.ARMING,
+                    SilenceState.PRIMING,
+                }
+        return self.state in {
+            SilenceState.PENDING,
+            SilenceState.ARMING,
+            SilenceState.PRIMING,
+        }
 
     # 兼容旧名
     def is_in_silence_period(self) -> bool:
@@ -142,18 +180,62 @@ class StartupSilenceCoordinator:
             return float(legacy) > 0
         return True
 
-    def arm(
-        self, *, enabled: bool, expected_ws: list[str], expected_polls: list[str]
-    ) -> None:
-        """服务 start() 时武装静默期并注册门闩。"""
+    def begin_deferred(self, enabled: bool = True) -> None:
+        """进入待武装静默：吸收事件但不开始计时/门闩。
+
+        用于首次启动/进程重启场景：服务先以吸收模式运行，
+        等 AstrBot 加载完成钩子调用 arm() 后转入正式门闩流程，
+        避免 AstrBot 加载窗口内的启动快照事件直接推送。
+        """
         self.enabled = bool(enabled)
+        if not self.enabled:
+            self.state = SilenceState.DISABLED
+            logger.debug("[灾害预警] 静默启动已关闭，事件将立即进入推送链路")
+            return
+        self.state = SilenceState.PENDING
         self.started_at = self._now()
-        self.started_mono = self._try_mono()
+        self.started_mono = None  # 待武装期间不计时，不触发硬超时
+        self._pending_started_mono = self._try_mono()  # 记录 PENDING 起点用于超时兜底
         self.ready_at = None
         self.ready_reason = ""
         self.absorbed_events = 0
         self.last_bootstrap_at = None
         self.gates.clear()
+        self._pending_connected.clear()
+        self._pending_primed.clear()
+        self._pending_skipped.clear()
+        self._cancel_watchdog()
+        self._start_watchdog()  # PENDING 阶段也启动 watchdog，提供超时逃生通道
+        logger.debug("[灾害预警] 静默启动进入待武装状态（等待 AstrBot 加载完成钩子）")
+
+    def arm(
+        self,
+        *,
+        enabled: bool,
+        expected_ws: list[str],
+        expected_polls: list[str],
+        hard_timeout_seconds: float | None = None,
+    ) -> None:
+        """服务 start() 时武装静默期并注册门闩。"""
+        self.enabled = bool(enabled)
+        # 允许调用方按场景覆盖硬超时（如插件重载时缩短，避免等满默认 30 秒）
+        if hard_timeout_seconds is not None and hard_timeout_seconds > 0:
+            self.hard_timeout_seconds = float(hard_timeout_seconds)
+        self.started_at = self._now()
+        self.started_mono = self._try_mono()
+        self._pending_started_mono = None  # 已离开 PENDING，清理超时起点
+        self.ready_at = None
+        self.ready_reason = ""
+        self.absorbed_events = 0
+        self.last_bootstrap_at = None
+        self.gates.clear()
+        # 暂存待武装期间已建连/已就绪/已跳过的进度，注册正式门闩后迁移，避免回调错过。
+        pending_connected = set(self._pending_connected)
+        pending_primed = set(self._pending_primed)
+        pending_skipped = set(self._pending_skipped)
+        self._pending_connected.clear()
+        self._pending_primed.clear()
+        self._pending_skipped.clear()
         self._cancel_watchdog()
 
         if not self.enabled:
@@ -174,6 +256,41 @@ class StartupSilenceCoordinator:
             self.gates[gate_id] = GateState(gate_id=gate_id, kind="poll")
 
         self.state = SilenceState.ARMING
+        # 迁移待武装期间已建连/已就绪的门闩进度：
+        # - 已建连的 WebSocket → 恢复 connected（首包若也已到，则 primed 一并恢复）；
+        # - 已 primed（收到首包 / 首轮成功）→ 无论 ws/poll 均恢复 primed，
+        #   避免 PENDING 期间完成的首轮同步在 arm 后被丢弃而干等硬超时。
+        now = self._try_mono()
+        for name in pending_connected:
+            gate = self.gates.get(name)
+            if gate is None:
+                gate = self._ensure_ws_gate(name)
+            if gate is not None:
+                gate.connected = True
+                gate.connected_at = now
+        for name in pending_primed:
+            gate = self.gates.get(name)
+            if gate is None:
+                gate = self._ensure_ws_gate(name)
+            if gate is not None:
+                gate.connected = True
+                gate.primed = True
+                gate.primed_at = now
+        for name in pending_skipped:
+            gate = self.gates.get(name)
+            if gate is None:
+                gate = self._ensure_ws_gate(name)
+            if gate is not None:
+                gate.skipped = True
+                gate.skip_reason = "skipped_in_pending"
+                gate.primed = True
+                gate.connected = True
+        if pending_connected or pending_primed or pending_skipped:
+            logger.debug(
+                f"[灾害预警] 待武装期间数据源进度已迁移到正式门闩："
+                f"已建连 {len(pending_connected)} 个、已就绪 {len(pending_primed)} 个、"
+                f"已跳过 {len(pending_skipped)} 个"
+            )
         if not self.gates:
             # 无任何上游门闩：最短静默后直接就绪
             self.state = SilenceState.PRIMING
@@ -202,6 +319,10 @@ class StartupSilenceCoordinator:
         self.state = SilenceState.DISABLED
         self.enabled = False
         self.gates.clear()
+        self._pending_connected.clear()
+        self._pending_primed.clear()
+        self._pending_skipped.clear()
+        self._pending_started_mono = None
         self.ready_reason = "disarmed"
         self.started_mono = None
 
@@ -219,6 +340,9 @@ class StartupSilenceCoordinator:
         gate.connected_at = now
         if self.state == SilenceState.ARMING:
             self.state = SilenceState.PRIMING
+        # 待武装期间仅记录已建连连接，等 arm() 后迁移到正式门闩
+        if self.state == SilenceState.PENDING:
+            self._pending_connected.add(gate.gate_id)
         logger.debug(f"[灾害预警] 静默门闩已建连: {gate.gate_id}")
         self._evaluate_ready(reason_hint=f"ws_connected:{gate.gate_id}")
 
@@ -233,6 +357,10 @@ class StartupSilenceCoordinator:
         gate.skip_reason = reason or "skipped"
         gate.primed = True
         gate.connected = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
         logger.debug(
             f"[灾害预警] 静默门闩已跳过: {gate.gate_id}"
             + (f" ({gate.skip_reason})" if gate.skip_reason else "")
@@ -273,13 +401,21 @@ class StartupSilenceCoordinator:
             return
         gate = self.gates.get(gate_id)
         if gate is None:
-            gate = GateState(gate_id=gate_id, kind="poll")
+            # 待武装（PENDING）阶段不与正式门闩混用：仅记录抓取进度，
+            # 门闩标记为非强制，避免 PENDING 内创建的 required 门闩
+            # 在后续被误当作正式就绪门闩参与判定。
+            gate = GateState(
+                gate_id=gate_id,
+                kind="poll",
+                required=self.state != SilenceState.PENDING,
+            )
             self.gates[gate_id] = gate
         now = self._try_mono()
         gate.fetch_started_at = now
         gate.fetching = True
         if self.state == SilenceState.ARMING:
             self.state = SilenceState.PRIMING
+        # 待武装期间无需登记：首轮成功由 note_poll_fetch_completed → _mark_primed 登记
         self._evaluate_ready(reason_hint=f"poll_fetch_started:{gate_id}")
 
     def note_poll_fetch_completed(self, poll_id: str, *, success: bool = True) -> None:
@@ -291,7 +427,13 @@ class StartupSilenceCoordinator:
             return
         gate = self.gates.get(gate_id)
         if gate is None:
-            gate = GateState(gate_id=gate_id, kind="poll")
+            # 与 note_poll_fetch_started 对齐：PENDING 阶段创建的门闩不强制 required，
+            # 仅承载抓取进度记录，不参与正式就绪判定。
+            gate = GateState(
+                gate_id=gate_id,
+                kind="poll",
+                required=self.state != SilenceState.PENDING,
+            )
             self.gates[gate_id] = gate
         # 无论成功失败，都清除抓取中标志，允许 watchdog 超时判定。
         gate.fetching = False
@@ -314,6 +456,10 @@ class StartupSilenceCoordinator:
         gate.skipped = True
         gate.skip_reason = reason or "disabled"
         gate.primed = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
         self._evaluate_ready(reason_hint=f"poll_skipped:{gate_id}")
 
     def note_event_absorbed(
@@ -330,6 +476,9 @@ class StartupSilenceCoordinator:
         self.last_bootstrap_at = self._try_mono()
         if self.state == SilenceState.ARMING:
             self.state = SilenceState.PRIMING
+        # 待武装状态只吸收与播种，不做就绪判定；正式 arm() 后才进入门闩流程
+        if self.state == SilenceState.PENDING:
+            return
 
         meta = {}
         if event is not None and isinstance(getattr(event, "metadata", None), dict):
@@ -428,6 +577,9 @@ class StartupSilenceCoordinator:
         self.last_bootstrap_at = now
         if self.state == SilenceState.ARMING:
             self.state = SilenceState.PRIMING
+        # 待武装期间登记已就绪门闩，等 arm() 后迁移到正式门闩
+        if self.state == SilenceState.PENDING:
+            self._pending_primed.add(gate.gate_id)
         self._evaluate_ready(reason_hint=f"primed:{gate.gate_id}")
 
     def _all_gates_satisfied(self) -> bool:
@@ -463,6 +615,9 @@ class StartupSilenceCoordinator:
     def _evaluate_ready(self, *, reason_hint: str = "") -> None:
         if not self.enabled or self.state == SilenceState.READY:
             return
+        # 待武装状态不参与就绪判定，需等正式 arm() 后转入门闩流程
+        if self.state == SilenceState.PENDING:
+            return
         if not self._min_silence_elapsed():
             return
         if not self._all_gates_satisfied():
@@ -474,6 +629,31 @@ class StartupSilenceCoordinator:
         if reason_hint:
             reason = f"gates_ok:{reason_hint}"
         self._force_ready(reason)
+
+    def _force_pending_escape(self) -> None:
+        """PENDING 超时逃生：尝试正式武装，失败则直接放行。"""
+        self._cancel_watchdog()
+        # 若主服务已运行，尝试按当前连接计划正式武装；
+        # 否则直接放行，避免静默永久停在 PENDING 无限吸收事件。
+        service = self._service
+        if service is not None and getattr(service, "running", False):
+            lifecycle = getattr(service, "lifecycle_service", None)
+            if lifecycle is not None:
+                arm = getattr(lifecycle, "arm_startup_silence", None)
+                if callable(arm):
+                    try:
+                        arm()
+                    except Exception as exc:
+                        logger.debug(
+                            f"[灾害预警] PENDING 超时强制武装失败（已忽略）: {exc}"
+                        )
+        # 无论武装是否成功，都确保状态离开 PENDING，避免无限吸收。
+        if self.state == SilenceState.PENDING:
+            self._force_ready("pending_timeout_escape")
+        logger.warning(
+            "[灾害预警] 待武装静默超时（PENDING 超时兜底），已强制结束静默，"
+            "防止灾害事件被无限期吸收"
+        )
 
     def _force_ready(self, reason: str) -> None:
         if self.state == SilenceState.READY and self.enabled:
@@ -522,39 +702,56 @@ class StartupSilenceCoordinator:
                     ):
                         break
                     now = self._try_mono()
-                    # 建连后长时间无首包 → 视为空闲就绪
-                    for gate in list(self.gates.values()):
-                        if (
-                            gate.kind == "websocket"
-                            and gate.required
-                            and not gate.skipped
-                            and gate.connected
-                            and not gate.primed
-                            and gate.connected_at is not None
-                            and (now - gate.connected_at)
-                            >= self.first_payload_timeout_seconds
-                        ):
-                            self._mark_primed(
-                                gate, bootstrap_kind="first_payload_timeout"
-                            )
-                        # 轮询门闩：开始抓取后长时间无成功首轮 → 超时放行，避免拖满硬超时。
-                        # 超时从实际开始抓取时间起算（fetch_started_at），
-                        # 而非 arm 时间，避免初始化耗时被误计入。
-                        # fetching=True（正在抓取中）时不触发超时，避免首轮抓取
-                        # 耗时较长（如台风 HTTP + 渲染）时被误放行。
-                        if (
-                            gate.kind == "poll"
-                            and gate.required
-                            and not gate.skipped
-                            and not gate.primed
-                            and gate.fetch_started_at is not None
-                            and not gate.fetching
-                            and (now - gate.fetch_started_at)
-                            >= self.first_poll_timeout_seconds
-                        ):
-                            self._mark_primed(
-                                gate, bootstrap_kind="poll_first_fetch_timeout"
-                            )
+                    # 正式门闩超时放行仅限 ARMING/PRIMING 阶段：
+                    # PENDING 只吸收与播种、不做就绪判定，若在此阶段把「未成功首轮」
+                    # 的轮询门闩经超时标记为 primed，会被 _pending_primed 迁移到
+                    # arm() 后的正式门闩，导致没有成功首轮抓取就提前结束启动静默。
+                    # 只有真正成功首轮（note_poll_fetch_completed success=True）才应
+                    # 在 PENDING 中登记到 _pending_primed。
+                    if self.state != SilenceState.PENDING:
+                        # 建连后长时间无首包 → 视为空闲就绪
+                        for gate in list(self.gates.values()):
+                            if (
+                                gate.kind == "websocket"
+                                and gate.required
+                                and not gate.skipped
+                                and gate.connected
+                                and not gate.primed
+                                and gate.connected_at is not None
+                                and (now - gate.connected_at)
+                                >= self.first_payload_timeout_seconds
+                            ):
+                                self._mark_primed(
+                                    gate, bootstrap_kind="first_payload_timeout"
+                                )
+                            # 轮询门闩：开始抓取后长时间无成功首轮 → 超时放行，避免拖满硬超时。
+                            # 超时从实际开始抓取时间起算（fetch_started_at），
+                            # 而非 arm 时间，避免初始化耗时被误计入。
+                            # fetching=True（正在抓取中）时不触发超时，避免首轮抓取
+                            # 耗时较长（如台风 HTTP + 渲染）时被误放行。
+                            if (
+                                gate.kind == "poll"
+                                and gate.required
+                                and not gate.skipped
+                                and not gate.primed
+                                and gate.fetch_started_at is not None
+                                and not gate.fetching
+                                and (now - gate.fetch_started_at)
+                                >= self.first_poll_timeout_seconds
+                            ):
+                                self._mark_primed(
+                                    gate, bootstrap_kind="poll_first_fetch_timeout"
+                                )
+                    # 待武装（PENDING）超时兜底：watchdog 循环内主动检查，
+                    # 即使 is_silencing 查询路径未被调用也能及时逃生。
+                    if (
+                        self.state == SilenceState.PENDING
+                        and self._pending_started_mono is not None
+                    ):
+                        age = now - self._pending_started_mono
+                        if age >= self.pending_timeout_seconds:
+                            self._force_pending_escape()
+                            break
                     # 硬超时（单调钟）
                     if self.started_mono is not None:
                         age = now - self.started_mono

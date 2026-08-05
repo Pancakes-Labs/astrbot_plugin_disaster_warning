@@ -6,6 +6,10 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 
 from .core.app.disaster_service import get_disaster_service
+from .core.app.runtime.boot_marker import (
+    is_first_boot_in_process,
+    mark_astrbot_loaded,
+)
 from .core.network.admin.host.web_server import WebAdminServer
 from .core.services.telemetry.telemetry_service import TelemetryManager
 from .plugin.commands.plugin_admin_command_service import PluginAdminCommandService
@@ -58,8 +62,20 @@ class DisasterWarningPlugin(Star):
                 self.config, self.context
             )
 
+            # 区分首次启动/进程重启与插件重载：
+            # - 首次启动/进程重启：AstrBot 尚未加载完成，推迟静默武装，
+            #   等 on_astrbot_loaded 钩子触发后再武装，避免硬超时被加载耗时耗尽；
+            # - 插件重载：AstrBot 已就绪，立即武装（仍保留 30 秒兜底）。
+            first_boot = is_first_boot_in_process()
+            if first_boot:
+                logger.info(
+                    "[灾害预警] 检测到 AstrBot 首次启动/进程重启，"
+                    "静默启动将等待 AstrBot 加载完成钩子触发"
+                )
             # 启动服务使用后台 task 承载，这样插件 initialize() 不会长期阻塞 AstrBot 的启动流程。
-            self._service_task = asyncio.create_task(self.disaster_service.start())
+            self._service_task = asyncio.create_task(
+                self.disaster_service.start(defer_silence_arm=first_boot)
+            )
 
             # 遥测相关初始化放在 disaster_service 创建之后，确保能把 telemetry 引用回注到服务层。
             self._lifecycle_service.setup_telemetry()
@@ -407,4 +423,17 @@ class DisasterWarningPlugin(Star):
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
         """AstrBot加载完成时的钩子"""
-        logger.debug("[灾害预警] AstrBot已加载完成，灾害预警插件准备就绪")
+        # 记录本次进程内已完成 AstrBot 加载，供后续插件重载场景区分使用。
+        mark_astrbot_loaded()
+
+        service = getattr(self, "disaster_service", None)
+        if service is None:
+            logger.debug("[灾害预警] AstrBot 已加载完成，灾害预警服务尚未初始化")
+            return
+
+        # 首次启动/进程重启时静默武装被推迟，此刻正式武装：
+        # 静默硬超时从 AstrBot 真正加载完成时刻起算，避免被加载耗时提前耗尽。
+        arm = getattr(service, "arm_startup_silence", None)
+        if callable(arm):
+            arm()
+        logger.debug("[灾害预警] AstrBot 已加载完成，静默启动已正式武装")

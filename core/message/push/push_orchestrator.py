@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from astrbot.api import logger
+
 from ...domain.event_models import EventEnvelope
 from ...services.config.config_service import ConfigAccessor
 from ...sources.source_catalog import SOURCE_CATALOG
@@ -21,6 +23,8 @@ class PushOrchestrator:
         execute_push,
         cenc_fusion_service,
         cwa_eew_fusion_service,
+        silence_checker=None,
+        silence_handler=None,
     ):
         # 这里保存的都是编排阶段需要查询的静态配置与推送分支执行器。
         self.config = config
@@ -28,6 +32,19 @@ class PushOrchestrator:
         self._execute_push = execute_push
         self._cenc_fusion_service = cenc_fusion_service
         self._cwa_eew_fusion_service = cwa_eew_fusion_service
+        # 启动静默回调（由主服务注入）：
+        # - silence_checker: 无参回调，返回是否处于启动静默期（纯判定，无副作用）
+        # - silence_handler: 吸收回调，接收事件并完成播种/计数等吸收动作
+        self._silence_checker = silence_checker
+        self._silence_handler = silence_handler
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调（复用主服务 is_silencing）。"""
+        self._silence_checker = checker
+
+    def set_silence_handler(self, handler) -> None:
+        """注入启动静默吸收回调（播种去重指纹并计数）。"""
+        self._silence_handler = handler
 
     def _resolve_fusion_plan(
         self, source_id: str
@@ -74,7 +91,31 @@ class PushOrchestrator:
         return_details: bool = False,
         aggregated_session_count: int = 0,
     ) -> bool | dict:
-        """根据策略配置编排事件推送流程。"""
+        """根据策略配置编排事件推送流程。
+
+        启动静默期的事件统一在此吸收（播种去重指纹 + 计数），
+        不进入融合拦截或普通推送链，避免融合分流路径绕过静默闸口。
+        """
+        # 第一道静默闸口：覆盖所有进入推送链的事件（含融合分流路径）。
+        # 静默期事件不创建融合 pending、不发送，与主入口吸收语义保持一致。
+        if self._silence_checker is not None:
+            try:
+                if self._silence_checker():
+                    if self._silence_handler is not None:
+                        try:
+                            self._silence_handler(event)
+                        except Exception as exc:
+                            # 吸收回调失败不应中断推送管线：记录日志后按非静默继续推送，
+                            # 避免静默协同配置损坏时所有灾害推送都被吞掉。
+                            logger.warning(
+                                f"[灾害预警] 静默吸收回调执行失败（已放行推送）: {exc}"
+                            )
+                            return False
+                    return False
+            except Exception as exc:
+                # 判定异常时按不静默处理，避免静默判定故障导致推送完全中断。
+                logger.warning(f"[灾害预警] 静默判定异常（已按非静默放行推送）: {exc}")
+
         source_id = event.source_id
         entry = SOURCE_CATALOG.get(source_id)
         fusion_plan = None if bypass_fusion else self._resolve_fusion_plan(source_id)

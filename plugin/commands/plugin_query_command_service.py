@@ -22,6 +22,10 @@ from astrbot.api.event import MessageChain
 from ...core.app.services import format_earthquake_list_text, quoted_plain_result
 from ...core.domain.event_context import EarthquakeDisplayContext
 from ...core.message.presenters.earthquake_presenter import SnetPresenter
+from ...core.message.presenters.weather_alarm_code_map import (
+    resolve_local_weather_icon_abs_path,
+    resolve_weather_icon_code,
+)
 from ...core.message.push.message_build_service import MessageBuildService
 from ...core.message.render.beachball_renderer import BeachballRenderer
 from ...core.message.render.jma_hypo_renderer import JmaHypoRenderer
@@ -51,6 +55,62 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
     def __init__(self, plugin):
         self.plugin = plugin
+
+    def _build_weather_icon_components(
+        self,
+        icon_url: str,
+        weather_type_code: str,
+    ) -> list:
+        """构建气象预警图标消息组件（本地优先）。
+
+        命令发送进程无法访问管理端静态路由 /weatheralarm_logo/，
+        因此当图标是本地文件时，直接读取文件转 Base64 发送；
+        仅当是远程 URL 时才使用 Comp.Image.fromURL。
+
+        Args:
+            icon_url: 查询结果中的 icon_url（可能是本地静态 URL 或远程 URL）。
+            weather_type_code: 气象预警类型编码，用于本地文件解析兜底。
+
+        Returns:
+            图标消息组件列表；解析失败时返回空列表（不阻断文本发送）。
+        """
+        icon_url_str = str(icon_url or "").strip()
+        if not icon_url_str:
+            return []
+
+        # 本地静态 URL（/weatheralarm_logo/...）时直读 Base64 文件。
+        # 非本地 URL（Fan Studio 官方接口等远程地址）时，按 11B 完整码尝试解析本地文件，
+        # 本地文件存在则优先本地发送，否则回退远程 URL 直发。
+        local_path = None
+        if icon_url_str.startswith("/weatheralarm_logo/"):
+            local_path = os.path.join(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                ),
+                "resources",
+                "weatheralarm_logo",
+                os.path.basename(icon_url_str),
+            )
+        else:
+            # 先把 weather_type_code 统一解析为 11B 完整码（p 编码/紧凑码/标题兜底），
+            # 再按 11B 码映射本地文件；直接传 p 编码会导致本地文件永远找不到。
+            icon_code = resolve_weather_icon_code(weather_type_code)
+            if icon_code:
+                local_path = resolve_local_weather_icon_abs_path(icon_code)
+
+        if local_path and os.path.isfile(local_path):
+            try:
+                with open(local_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode()
+                return [Comp.Image.fromBase64(b64_data)]
+            except Exception as e:
+                logger.warning(
+                    f"[灾害预警] 本地气象预警图标读取失败，回退 URL 发送: "
+                    f"{local_path}, 错误信息: {e}"
+                )
+
+        # 远程 URL 直发
+        return [Comp.Image.fromURL(icon_url_str)]
 
     async def handle_generate_beachball(
         self,
@@ -413,6 +473,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
                 detail_text = "\n".join(lines)
                 icon_url = detail.get("icon_url")
+                weather_type_code = str(detail.get("weather_type_code") or "").strip()
                 await self._track_command_feature(
                     "command_weather_query",
                     {
@@ -428,7 +489,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                                 event,
                                 [
                                     Comp.Plain(detail_text),
-                                    Comp.Image.fromURL(str(icon_url)),
+                                    *self._build_weather_icon_components(
+                                        icon_url, weather_type_code
+                                    ),
                                 ],
                             )
                         )

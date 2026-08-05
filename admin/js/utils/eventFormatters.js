@@ -879,12 +879,109 @@
         if (code.startsWith('p') && code.length >= 8) {
             return P_FORMAT_MAP[code.slice(-1)] || null;
         }
-        // 仅当末两位明确是 01/02/03/04 时才认作颜色，避免 11B31 这类类型码误判。
-        if (code.length >= 2) {
+        // 仅当编码是 11B/11E 格式且末两位明确是 01/02/03/04 时才认作颜色。
+        // 必须限定前缀，否则 p 码（如 p0000003）末两位 03 会被误判成橙色。
+        if (
+            (code.startsWith('11B') || code.startsWith('11E'))
+            && code.length >= 2
+        ) {
             const color = COMPACT_11B_MAP[code.slice(-2)];
             if (color) return color;
         }
         return null;
+    }
+
+    // 与后端 weather_alarm_code_map._P_TYPE_TO_11B_BASE 对齐：p 编码 4 位类型前缀 → 11B 基础码
+    const P_TYPE_TO_11B_BASE = {
+        '0001': '11B01',  // 台风
+        '0002': '11B03',  // 暴雨
+        '0003': '11B09',  // 高温
+        '0004': '11B05',  // 寒潮
+        '0005': '11B17',  // 大雾
+        '0006': '11B04',  // 暴雪
+        '0007': '11B06',  // 大风
+        '0008': '11B07',  // 沙尘暴
+        '0009': '11B15',  // 冰雹
+        '0010': '11B22',  // 干旱
+        '0011': '11B21',  // 道路结冰
+        '0012': '11B14',  // 雷电
+        '0013': '11B16',  // 霜冻
+        '0014': '11B19',  // 霾
+        '0015': '11B20',  // 雷雨大风
+    };
+
+    // p 编码末位颜色数字 → 颜色关键词（与 resolveWeatherColor 内 P_FORMAT_MAP 一致）
+    const P_CODE_COLOR_MAP = {
+        '1': 'red',
+        '2': 'orange',
+        '3': 'yellow',
+        '4': 'blue',
+    };
+
+    // 紧凑 11B 编码末两位颜色码 → 颜色关键词（与后端 _COMPACT_11B_COLOR_TO_SUFFIX 一致）
+    const COMPACT_11B_COLOR_MAP = {
+        '01': 'blue',
+        '02': 'yellow',
+        '03': 'orange',
+        '04': 'red',
+    };
+
+    /**
+     * 将气象预警编码解析为本地图标文件名对应的 11B 完整码（本地优先）。
+     *
+     * 与后端 weather_alarm_code_map.resolve_weather_icon_code 对齐：
+     * - 11B/11E 完整码（含下划线新格式）直接规范化返回；
+     * - 紧凑 11B 编码（如 11B2001）标准化为 11B20_blue 后返回；
+     * - p 编码按 4 位类型码 + 末位颜色数字转换为 11B 完整码。
+     * 前端无标题/摘要上下文，因此不执行标题兜底解析。
+     *
+     * @param {string} weatherTypeCode  气象预警编码，如 "p0002003"、"11B03_yellow" 或 "11B2001"
+     * @returns {string|null}           11B 完整码，如 "11B03_yellow"；无法解析返回 null
+     */
+    function resolveWeatherIconCode(weatherTypeCode) {
+        const code = String(weatherTypeCode || '').trim();
+        if (!code) return null;
+
+        // 1. 已是 11B/11E 完整码（含下划线格式）：规范化颜色小写后直接返回
+        if (/^(11B|11E)\d+_[A-Za-z]+$/.test(code)) {
+            const base = code.slice(0, code.indexOf('_'));
+            const normalizedColor = code.slice(code.indexOf('_') + 1).toLowerCase();
+            if (base && normalizedColor) return `${base}_${normalizedColor}`;
+        }
+
+        // 2. 紧凑 11B 编码（11B2001 → 11B20_blue）：末两位为颜色码
+        if (/^(11B|11E)\d{3,}$/.test(code) && code.length >= 4) {
+            const base = code.slice(0, -2);
+            const color = COMPACT_11B_COLOR_MAP[code.slice(-2)];
+            if (base && color) return `${base}_${color}`;
+        }
+
+        // 3. p 编码：4 位类型码 + 末位颜色数字
+        if (code.startsWith('p') && code.length >= 8) {
+            const digits = code.slice(1);
+            const typePart = digits.slice(0, 4);
+            const colorDigit = digits.slice(-1);
+            const base = P_TYPE_TO_11B_BASE[typePart];
+            const color = P_CODE_COLOR_MAP[colorDigit];
+            if (base && color) return `${base}_${color}`;
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析本地具体预警图标 URL（本地优先核心）。
+     *
+     * 根据气象预警编码解析出 11B 完整码后，映射为本地静态资源 URL：
+     * /weatheralarm_logo/{11B码}.png（如 /weatheralarm_logo/11B03_yellow.png）。
+     * 无法解析编码时返回 null，由调用方回退到通用 fallback 图标。
+     *
+     * @param {string} weatherTypeCode  气象预警编码
+     * @returns {string|null}           本地图标 URL，如 /weatheralarm_logo/11B03_yellow.png
+     */
+    function resolveLocalWeatherIconUrl(weatherTypeCode) {
+        const iconCode = resolveWeatherIconCode(weatherTypeCode);
+        return iconCode ? `/weatheralarm_logo/${iconCode}.png` : null;
     }
 
     /**
@@ -906,12 +1003,13 @@
     }
 
     /**
-     * 构建气象预警图标 img onError 回退处理器。
+     * 构建气象预警图标 img onError 回退处理器（本地优先）。
      *
-     * 当官方图标接口（Fan Studio）返回 404 或加载失败时，
-     * 根据 weather_type_code 中的颜色后缀（如 _blue/_yellow/_orange/_red）
-     * 或旧 p 格式编码的最后一位数字（1=红, 2=橙, 3=黄, 4=蓝）
-     * 自动回退到本地通用图标；若本地也无匹配，则执行 finalCallback 兜底。
+     * 当图标加载失败（如官方接口 404 或服务端本地 URL 失效）时，按以下顺序回退：
+     * 1. 本地具体预警图标：/weatheralarm_logo/{11B码}.png（如 11B03_yellow.png）；
+     * 2. 本地通用回退图标：/weatheralarm_logo/fallback_{color}.png；
+     * 3. data-color-hint 提示色解析的本地通用回退图标；
+     * 4. finalCallback 最终兜底。
      *
      * @param {string} weatherTypeCode  气象预警编码，如 "11B20_yellow" 或 "p0002002"
      * @param {Function} finalCallback   最终兜底回调，接收事件对象 e
@@ -919,24 +1017,39 @@
      */
     function buildWeatherIconFallbackHandler(weatherTypeCode, finalCallback) {
         return function (e) {
+            const el = e.currentTarget;
             const code = String(weatherTypeCode || '').trim();
-            if (code && !e.currentTarget.dataset.fallbackTried) {
-                const fallbackUrl = resolveWeatherFallbackUrl(code);
-                if (fallbackUrl) {
-                    e.currentTarget.dataset.fallbackTried = 'true';
-                    e.currentTarget.src = fallbackUrl;
+
+            // 1. 本地具体预警图标（本地优先）
+            if (code && !el.dataset.localIconTried) {
+                const localUrl = resolveLocalWeatherIconUrl(code);
+                if (localUrl) {
+                    el.dataset.localIconTried = 'true';
+                    el.src = localUrl;
                     return;
                 }
             }
 
-            // 当 weatherTypeCode 无法解析颜色时，尝试从 data-color-hint 属性获取颜色回退
-            if (!e.currentTarget.dataset.fallbackTried) {
-                const colorHint = e.currentTarget.dataset.colorHint;
+            // 2. 本地通用回退图标（按编码解析颜色）
+            if (!el.dataset.fallbackTried) {
+                const fallbackUrl = code
+                    ? resolveWeatherFallbackUrl(code)
+                    : null;
+                if (fallbackUrl) {
+                    el.dataset.fallbackTried = 'true';
+                    el.src = fallbackUrl;
+                    return;
+                }
+            }
+
+            // 3. 当 weatherTypeCode 无法解析颜色时，尝试从 data-color-hint 属性获取颜色回退
+            if (!el.dataset.fallbackTried) {
+                const colorHint = el.dataset.colorHint;
                 if (colorHint) {
                     const fallbackUrl = resolveWeatherFallbackUrl(`_${colorHint}`);
                     if (fallbackUrl) {
-                        e.currentTarget.dataset.fallbackTried = 'true';
-                        e.currentTarget.src = fallbackUrl;
+                        el.dataset.fallbackTried = 'true';
+                        el.src = fallbackUrl;
                         return;
                     }
                 }
@@ -979,6 +1092,8 @@
         normalizeSourceOption,
         normalizeSourceOptions,
         resolveWeatherColor,
+        resolveWeatherIconCode,
+        resolveLocalWeatherIconUrl,
         resolveWeatherFallbackUrl,
         buildWeatherIconFallbackHandler,
     };

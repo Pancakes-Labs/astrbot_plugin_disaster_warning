@@ -31,6 +31,8 @@ function EventCard({
         getEarthquakeBadgeContent,
         buildWeatherIconFallbackHandler: _rawBuildHandler,
         resolveWeatherColor = () => null,
+        resolveWeatherIconCode = () => null,
+        resolveLocalWeatherIconUrl = () => null,
         resolveWeatherFallbackUrl = () => null,
         buildTsunamiTitle = null,
         buildTsunamiMeta = null,
@@ -124,9 +126,12 @@ function EventCard({
         badgeClass = 'badge-weather';
         const normalizedIconUrl = typeof evt.icon_url === 'string' ? evt.icon_url.trim() : '';
         const weatherTypeCode = String(evt.weather_type_code || '').trim();
-        // 优先使用服务端返回的 icon_url；若未传则委托共享函数解析颜色与本地回退路径
-        let fallbackUrl = resolveWeatherFallbackUrl(weatherTypeCode);
         colorHint = resolveWeatherColor(weatherTypeCode);
+        // 本地优先：先按 11B 码解析本地具体预警图标；无本地文件时再用服务端返回的 URL
+        const localIconUrl = resolveLocalWeatherIconUrl(weatherTypeCode);
+        const effectiveIconUrl = localIconUrl || normalizedIconUrl;
+        // 委托共享函数解析本地通用回退路径（按编码颜色 / 标题文本颜色）
+        let fallbackUrl = resolveWeatherFallbackUrl(weatherTypeCode);
 
         // 当编码无法解析颜色时，尝试从标题/级别文本中提取颜色关键词（如"黄色"、"红色"）
         if (!fallbackUrl) {
@@ -144,7 +149,7 @@ function EventCard({
             }
         }
 
-        weatherIconUrl = normalizedIconUrl || fallbackUrl || null;
+        weatherIconUrl = effectiveIconUrl || fallbackUrl || null;
     }
     // 4. 台风：使用专属旋风徽标；风速使用独立 wind_speed 字段（单位 m/s）。
     else if (isTyphoon) {

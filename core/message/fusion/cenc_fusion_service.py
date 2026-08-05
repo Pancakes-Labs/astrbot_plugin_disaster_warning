@@ -22,6 +22,40 @@ class CENCFusionService:
         # 融合服务通过主消息管理器访问融合状态仓储，并复用统一推送执行入口。
         self.manager = manager
         self._execute_push = execute_push
+        # 启动静默兜底判定回调：await future 之后、真正推送之前再检查一次，
+        # 防止启动快照跨静默期被融合唤醒后泄漏成真实推送。
+        self._silence_checker = None
+        # 静默期吸收回调（由主服务注入，统一执行播种与计数，避免依赖反向引用）
+        self._silence_absorb_handler = None
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调（复用主服务 is_silencing）。"""
+        self._silence_checker = checker
+
+    def set_silence_absorb_handler(self, handler) -> None:
+        """注入静默期吸收回调（播种去重指纹并计数）。"""
+        self._silence_absorb_handler = handler
+
+    def _absorb_if_silencing(self, event) -> bool:
+        """静默期吸收事件并返回 True（不真正推送）。
+
+        Returns:
+            True: 事件处于启动静默期，已吸收（播种与计数由上层处理）。
+            False: 未处于静默期，可继续推送。
+        """
+        checker = self._silence_checker
+        if checker is None:
+            return False
+        try:
+            if checker():
+                handler = self._silence_absorb_handler
+                if callable(handler):
+                    handler(event)
+                plugin_logger.debug(f"[灾害预警] 融合链静默兜底吸收事件: {event.id}")
+                return True
+        except Exception as exc:
+            plugin_logger.debug(f"[灾害预警] 融合链静默兜底判定异常（已忽略）: {exc}")
+        return False
 
     @staticmethod
     def _get_earthquake_data(
@@ -102,6 +136,8 @@ class CENCFusionService:
         """拦截 Fan 侧事件并等待 Wolfx 烈度补充。"""
         earthquake = self._get_earthquake_data(event)
         if earthquake is None:
+            if self._absorb_if_silencing(event):
+                return False
             return await self._execute_push(
                 event,
                 target_sessions=target_sessions,
@@ -136,6 +172,8 @@ class CENCFusionService:
                 is_event_linked=True,
                 event_stream="earthquake",
             )
+            if self._absorb_if_silencing(event):
+                return False
             return await self._execute_push(
                 event,
                 target_sessions=target_sessions,
@@ -184,6 +222,8 @@ class CENCFusionService:
                     is_event_linked=True,
                     event_stream="earthquake",
                 )
+                if self._absorb_if_silencing(event):
+                    return False
                 return await self._execute_push(
                     event,
                     target_sessions=target_sessions,
@@ -195,6 +235,8 @@ class CENCFusionService:
                     is_event_linked=True,
                     event_stream="earthquake",
                 )
+                if self._absorb_if_silencing(event):
+                    return False
                 return await self._execute_push(
                     event,
                     target_sessions=target_sessions,
@@ -202,6 +244,8 @@ class CENCFusionService:
                 )
         except Exception as e:
             logger.error(f"[灾害预警] CENC 融合策略处理异常: {e}")
+            if self._absorb_if_silencing(event):
+                return False
             return await self._execute_push(
                 event,
                 target_sessions=target_sessions,

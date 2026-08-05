@@ -82,8 +82,6 @@ class SourceMessageRouter:
         self._dispatch_service = service.event_ingress_dispatch_service
         self._side_effect_service = service.source_ingress_side_effect_service
         self._source_runtime_query = service.source_runtime_query
-        # 每个 FAN 连接只提示一次「启用了 SA 但 initial_all 无 sa」
-        self._sa_missing_warned_connections: set[str] = set()
 
     def register_all(self, ws_manager: WebSocketManager):
         """把各连接族处理器注册到 WebSocket 管理器。"""
@@ -193,7 +191,11 @@ class SourceMessageRouter:
                     if connection_name and not event.metadata.get("bootstrap_kind"):
                         event.metadata["bootstrap_kind"] = "conn_first_wave"
             log_label = parser_log_label or source_label or source_id
-            plugin_logger.debug(f"[灾害预警] {log_label} 解析成功: {event.id}")
+            plugin_logger.debug(
+                f"[灾害预警] {log_label} 解析成功: {event.id}",
+                is_event_linked=True,
+                event_stream=self._resolve_stream_by_source_id(source_id),
+            )
 
             # 将解析好的事件丢给分发流水线处理
             await self._dispatch_event(
@@ -292,9 +294,7 @@ class SourceMessageRouter:
         """判断是否为鉴权前半量 initial_all（仅 fssn / fssn-cmt）。
 
         FAN Studio 文档：未鉴权时 /all 仅放行这两路；鉴权成功后会再推完整快照。
-        若把半量包当正式 bootstrap 解析，会出现：
-        - fssn-cmt 解析日志刷两次
-        - SA 缺失警告在半量包上误报一次
+        若把半量包当正式 bootstrap 解析，会出现 fssn-cmt 解析日志刷两次。
         """
         if str(data.get("type") or "").strip() != "initial_all":
             return False
@@ -302,33 +302,6 @@ class SourceMessageRouter:
         if not source_keys:
             return False
         return all(key in _FAN_PREAUTH_FREE_SOURCE_NAMES for key in source_keys)
-
-    def _warn_sa_missing_once(
-        self,
-        *,
-        connection_name: str | None,
-        data: dict,
-    ) -> None:
-        """完整 initial_all 缺 sa 时，每个连接只警告一次。"""
-        conn = str(connection_name or "").strip() or "unknown"
-        if conn in self._sa_missing_warned_connections:
-            return
-        if "sa" in data:
-            return
-        try:
-            sa_enabled = self._source_runtime_query.is_source_enabled("sa_fanstudio")
-        except Exception:
-            sa_enabled = False
-        if not sa_enabled:
-            return
-        self._sa_missing_warned_connections.add(conn)
-        plugin_logger.warning(
-            "[灾害预警] 已启用美国 ShakeAlert 地震预警，"
-            "但本轮 FAN Studio 全量数据中未包含 sa 快照；"
-            "将等待后续更新推送，当前无需本地修复",
-            is_event_linked=True,
-            event_stream="earthquake",
-        )
 
     def _create_fan_studio_handler(self):
         """创建 FAN Studio 连接的消息处理器。"""
@@ -430,11 +403,6 @@ class SourceMessageRouter:
                             plugin_logger.debug(
                                 f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
                             )
-                    # 仅对完整 initial_all 做 SA 缺失诊断，且每连接一次
-                    self._warn_sa_missing_once(
-                        connection_name=connection_name,
-                        data=data,
-                    )
                 processed_count = 0
 
                 # 遍历被分配出来的数据源及负载，分别尝试分发
@@ -530,6 +498,15 @@ class SourceMessageRouter:
                 "551": "p2p_report",
                 "552": "p2p_tsunami",
             }.get(code or "")
+
+            # 识别到有效业务码即视为连接已进入业务流：
+            # 提前通知静默协调器记录首包（kind 按派发族区分），
+            # 覆盖首包无法解析出事件/无匹配数据源时 PENDING 不写 _pending_primed
+            # 导致 arm() 后门闩等不到回调而干等超时的情况。
+            if dispatch_family:
+                self._note_connection_bootstrap(
+                    connection_name, kind=f"p2p_first_payload:{code}"
+                )
 
             # 根据派发族获取所有关联的静态数据源候选 ID
             candidate_source_ids = (
