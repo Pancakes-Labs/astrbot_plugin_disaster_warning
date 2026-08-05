@@ -541,9 +541,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 - **日本气象厅地震情报 (`japan_jma_earthquake`)**: 接收 JMA 地震列表。
 - **中国地震台网地震测定 (`china_cenc_earthquake`)**: 接收 CENC 地震列表。
 
-#### 🔹 Global Quake (实时测算)
+#### 🔹 OpenQuakeAPI
 
-- **原理**: 连接到 OpenQuakeAPI 的 `/ws/all` 聚合端点，按 `source` 字段路由 Global Quake 等子源。这些数据是由全球数千个测站通过算法实时计算得出的。
+- **原理**: 连接到 OpenQuakeAPI 的 `/ws/all` 聚合端点，按 `source` 字段路由 Global Quake、中国气象局气象预警（CMA）等子源。这些数据是由全球数千个测站通过算法实时计算得出的。
 - **特点**: 在偏远地区或国际海域，由于官方机构反应时间较长，GQ 往往能最先提供初步数据，但震级和位置可能随报数更新而有较大波动。
 
 ---
@@ -2094,7 +2094,7 @@ graph TB
 ```text
 ===================================
 🕐 日志写入时间: 2026-02-27 14:28:19
-📡 来源: websocket_global_quake
+📡 来源: websocket_openquake_api
 📋 类型: websocket_message
 🔗 连接: URL: wss://api.aloys23.link/ws/all
 
