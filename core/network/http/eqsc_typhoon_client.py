@@ -126,7 +126,6 @@ class EqscTyphoonClient(EqscHttpClient):
         """查询 EQSC 台风列表（无参，至多约 20 个最新台风，含历史）。
 
         注意：该接口并非严格“仅活跃台风”，实际常返回最新历史编报集合。
-        兼容别名：`fetch_active_typhoons`。
 
         Args:
             use_cache: 为 False 时强制绕过列表缓存（轮询侧使用）。
@@ -164,17 +163,6 @@ class EqscTyphoonClient(EqscHttpClient):
                 f"[灾害预警] EQSC 查询台风列表异常: {type(e).__name__}: {e or repr(e)}"
             )
             return []
-
-    async def fetch_active_typhoons(
-        self,
-        access_token: str | None = None,
-        *,
-        use_cache: bool = True,
-    ) -> list[dict[str, Any]]:
-        """兼容旧名：实际返回 EQSC 无参台风列表（含历史）。"""
-        return await self.fetch_typhoon_list(
-            access_token=access_token, use_cache=use_cache
-        )
 
     def find_typhoon_by_name(
         self,
