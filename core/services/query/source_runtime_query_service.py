@@ -176,13 +176,24 @@ class SourceRuntimeQueryService:
         ):
             active += 1
 
-        connection_tasks = (
-            getattr(service, "connection_tasks", []) if service is not None else []
+        # OpenQuakeAPI 在线标记优先以实际连接状态为准：
+        # 建连失败/服务停止后任务名仍可能残留，无法代表真实连通性。
+        # actual_connections 由 ws_manager 实时维护 connected 状态，作为首选口径；
+        # 任务名检查仅作为连接状态缺失时的兜底。
+        oq_status = actual_connections.get("openquake_api")
+        openquake_connected = bool(
+            isinstance(oq_status, dict) and oq_status.get("connected")
         )
-        openquake_connected = any(
-            "openquake_api" in task.get_name() if hasattr(task, "get_name") else False
-            for task in connection_tasks
-        )
+        if not openquake_connected:
+            connection_tasks = (
+                getattr(service, "connection_tasks", []) if service is not None else []
+            )
+            openquake_connected = any(
+                "openquake_api" in task.get_name()
+                if hasattr(task, "get_name")
+                else False
+                for task in connection_tasks
+            )
         return {
             "active_websocket_connections": int(active),
             "openquake_connected": bool(openquake_connected),
