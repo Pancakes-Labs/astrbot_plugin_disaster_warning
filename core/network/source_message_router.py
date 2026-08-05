@@ -89,7 +89,7 @@ class SourceMessageRouter:
         ws_manager.register_handler("fan_studio", self._create_fan_studio_handler())
         ws_manager.register_handler("p2p", self._create_p2p_handler())
         ws_manager.register_handler("wolfx", self._create_wolfx_handler())
-        ws_manager.register_handler("global_quake", self._create_global_quake_handler())
+        ws_manager.register_handler("openquake_api", self._create_openquake_handler())
 
     async def _dispatch_event(
         self,
@@ -628,14 +628,14 @@ class SourceMessageRouter:
 
         return wolfx_handler
 
-    def _create_global_quake_handler(self):
+    def _create_openquake_handler(self):
         """创建 OpenQuakeAPI 聚合连接的消息处理器。
 
         连接挂在全量端点后，按 RealtimeEvent.source 分发到已注册子源；
         当前仅接入 Global Quake（gq），其余 source 先忽略以便后续继续接入。
         """
 
-        async def global_quake_handler(
+        async def openquake_handler(
             message, connection_name=None, connection_info=None
         ):
             self._log_received_message(
@@ -647,7 +647,7 @@ class SourceMessageRouter:
 
             # 任意入站帧都可推进静默门闩（含状态/心跳类），避免无震时干等 first_payload_timeout
             self._note_connection_bootstrap(
-                connection_name, kind="global_quake_first_payload"
+                connection_name, kind="openquake_first_payload"
             )
 
             try:
@@ -727,10 +727,10 @@ class SourceMessageRouter:
                 # 异常遥测
                 await self._track_router_error(
                     error,
-                    module="core.source_message_router.global_quake_handler",
+                    module="core.source_message_router.openquake_handler",
                 )
 
-        return global_quake_handler
+        return openquake_handler
 
 
 __all__ = ["SourceMessageRouter"]

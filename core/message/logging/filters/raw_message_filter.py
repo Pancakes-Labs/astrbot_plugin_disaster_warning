@@ -50,7 +50,7 @@ class RawMessageFilter:
         字符串与字典两个入口共用该检查，避免字符串形式的 tsunami/station/status
         消息绕过过滤而增大日志存储与处理压力。
         """
-        if "global_quake" in source_id.lower():
+        if "global_quake" in source_id.lower() or "openquake" in source_id.lower():
             inner_type = str(data.get("type") or "").lower()
             if inner_type not in ("earthquake", "weather"):
                 return f"OpenQuakeAPI 非地震/气象业务JSON消息过滤: {inner_type}"

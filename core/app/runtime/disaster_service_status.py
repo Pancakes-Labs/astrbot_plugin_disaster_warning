@@ -53,7 +53,7 @@ class DisasterServiceStatusService:
             message_logger_enabled=self.service.message_logger.enabled
             if self.service.message_logger
             else False,
-            global_quake_connected=bool(metrics.get("global_quake_connected")),
+            openquake_connected=bool(metrics.get("openquake_connected")),
         )
         # total_connections 已由 runtime snapshot 按 catalog 期望通道统计
         # （含 EQSC / S-Net / 已停用通道），此处不再二次累加。

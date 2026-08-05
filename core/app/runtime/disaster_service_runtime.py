@@ -64,7 +64,12 @@ class DisasterServiceRuntimeService:
         for conn_name, conn_config in ordered_items:
             # 这里只处理由连接计划生成的 WebSocket 连接；
             # 具体断线重连、备用地址切换等细节由连接管理器内部负责。
-            if conn_config["handler"] in ["fan_studio", "p2p", "wolfx", "global_quake"]:
+            if conn_config["handler"] in [
+                "fan_studio",
+                "p2p",
+                "wolfx",
+                "openquake_api",
+            ]:
                 # 这份连接附加信息会一路传入连接管理器，作为连接状态展示、重连通知、
                 # 管理端查询等场景的上下文信息。
                 connection_info = {
