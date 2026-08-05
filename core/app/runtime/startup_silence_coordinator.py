@@ -401,7 +401,14 @@ class StartupSilenceCoordinator:
             return
         gate = self.gates.get(gate_id)
         if gate is None:
-            gate = GateState(gate_id=gate_id, kind="poll")
+            # 待武装（PENDING）阶段不与正式门闩混用：仅记录抓取进度，
+            # 门闩标记为非强制，避免 PENDING 内创建的 required 门闩
+            # 在后续被误当作正式就绪门闩参与判定。
+            gate = GateState(
+                gate_id=gate_id,
+                kind="poll",
+                required=self.state != SilenceState.PENDING,
+            )
             self.gates[gate_id] = gate
         now = self._try_mono()
         gate.fetch_started_at = now
@@ -420,7 +427,13 @@ class StartupSilenceCoordinator:
             return
         gate = self.gates.get(gate_id)
         if gate is None:
-            gate = GateState(gate_id=gate_id, kind="poll")
+            # 与 note_poll_fetch_started 对齐：PENDING 阶段创建的门闩不强制 required，
+            # 仅承载抓取进度记录，不参与正式就绪判定。
+            gate = GateState(
+                gate_id=gate_id,
+                kind="poll",
+                required=self.state != SilenceState.PENDING,
+            )
             self.gates[gate_id] = gate
         # 无论成功失败，都清除抓取中标志，允许 watchdog 超时判定。
         gate.fetching = False
@@ -689,39 +702,46 @@ class StartupSilenceCoordinator:
                     ):
                         break
                     now = self._try_mono()
-                    # 建连后长时间无首包 → 视为空闲就绪
-                    for gate in list(self.gates.values()):
-                        if (
-                            gate.kind == "websocket"
-                            and gate.required
-                            and not gate.skipped
-                            and gate.connected
-                            and not gate.primed
-                            and gate.connected_at is not None
-                            and (now - gate.connected_at)
-                            >= self.first_payload_timeout_seconds
-                        ):
-                            self._mark_primed(
-                                gate, bootstrap_kind="first_payload_timeout"
-                            )
-                        # 轮询门闩：开始抓取后长时间无成功首轮 → 超时放行，避免拖满硬超时。
-                        # 超时从实际开始抓取时间起算（fetch_started_at），
-                        # 而非 arm 时间，避免初始化耗时被误计入。
-                        # fetching=True（正在抓取中）时不触发超时，避免首轮抓取
-                        # 耗时较长（如台风 HTTP + 渲染）时被误放行。
-                        if (
-                            gate.kind == "poll"
-                            and gate.required
-                            and not gate.skipped
-                            and not gate.primed
-                            and gate.fetch_started_at is not None
-                            and not gate.fetching
-                            and (now - gate.fetch_started_at)
-                            >= self.first_poll_timeout_seconds
-                        ):
-                            self._mark_primed(
-                                gate, bootstrap_kind="poll_first_fetch_timeout"
-                            )
+                    # 正式门闩超时放行仅限 ARMING/PRIMING 阶段：
+                    # PENDING 只吸收与播种、不做就绪判定，若在此阶段把「未成功首轮」
+                    # 的轮询门闩经超时标记为 primed，会被 _pending_primed 迁移到
+                    # arm() 后的正式门闩，导致没有成功首轮抓取就提前结束启动静默。
+                    # 只有真正成功首轮（note_poll_fetch_completed success=True）才应
+                    # 在 PENDING 中登记到 _pending_primed。
+                    if self.state != SilenceState.PENDING:
+                        # 建连后长时间无首包 → 视为空闲就绪
+                        for gate in list(self.gates.values()):
+                            if (
+                                gate.kind == "websocket"
+                                and gate.required
+                                and not gate.skipped
+                                and gate.connected
+                                and not gate.primed
+                                and gate.connected_at is not None
+                                and (now - gate.connected_at)
+                                >= self.first_payload_timeout_seconds
+                            ):
+                                self._mark_primed(
+                                    gate, bootstrap_kind="first_payload_timeout"
+                                )
+                            # 轮询门闩：开始抓取后长时间无成功首轮 → 超时放行，避免拖满硬超时。
+                            # 超时从实际开始抓取时间起算（fetch_started_at），
+                            # 而非 arm 时间，避免初始化耗时被误计入。
+                            # fetching=True（正在抓取中）时不触发超时，避免首轮抓取
+                            # 耗时较长（如台风 HTTP + 渲染）时被误放行。
+                            if (
+                                gate.kind == "poll"
+                                and gate.required
+                                and not gate.skipped
+                                and not gate.primed
+                                and gate.fetch_started_at is not None
+                                and not gate.fetching
+                                and (now - gate.fetch_started_at)
+                                >= self.first_poll_timeout_seconds
+                            ):
+                                self._mark_primed(
+                                    gate, bootstrap_kind="poll_first_fetch_timeout"
+                                )
                     # 待武装（PENDING）超时兜底：watchdog 循环内主动检查，
                     # 即使 is_silencing 查询路径未被调用也能及时逃生。
                     if (
