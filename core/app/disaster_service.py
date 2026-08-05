@@ -170,10 +170,7 @@ class DisasterWarningService:
         self.notification_center = NotificationCenter(self)
         # EQSC 通道服务：统一管理 EQSC 鉴权、健康状态与熔断器，
         # 台风富化、海啸轮询、CENC 烈度速报轮询共享该通道。
-        self.eqsc_channel_service = EqscChannelService(
-            config,
-            message_logger=self.message_logger,
-        )
+        self.eqsc_channel_service = EqscChannelService(config)
         # 台风 EQSC 富化服务，在台风事件进入流水线前按需拉取 EQSC 详细数据。
         # 注入 message_logger，使 EQSC HTTP 响应进入原始消息日志链路。
         self.typhoon_enrichment_service = TyphoonEnrichmentService(

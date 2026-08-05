@@ -27,19 +27,16 @@ class EqscChannelService:
     def __init__(
         self,
         config: dict[str, Any],
-        message_logger: Any | None = None,
     ):
         """初始化 EQSC 通道服务。
 
         Args:
             config: 插件全局配置字典。
-            message_logger: 可选原始消息记录器（保留签名，供子客户端注入使用）。
         """
         eqsc_config = config.get("data_sources", {}).get("eqsc", {})
         if not isinstance(eqsc_config, dict):
             eqsc_config = {}
         self._eqsc_config = eqsc_config
-        self._message_logger = message_logger
         channel_enabled, typhoon_enrichment = self.resolve_eqsc_flags(eqsc_config)
         # 组总闸：控制 EQSC 通道（鉴权/连通/后续子能力入口）
         self._channel_enabled = channel_enabled
@@ -95,6 +92,29 @@ class EqscChannelService:
     def token_manager(self) -> EqscTokenManager:
         """共享的 EQSC 令牌管理器（供子客户端复用）。"""
         return self._token_manager
+
+    @staticmethod
+    def resolve_shared_token_manager(service: Any) -> EqscTokenManager | None:
+        """从灾害主服务安全解析共享的 EQSC 令牌管理器。
+
+        供台风富化、海啸轮询、CENC 烈度速报轮询等 EQSC 子能力复用，
+        避免各自维护一份鉴权状态。
+
+        Args:
+            service: 灾害主服务（DisasterWarningService）实例。
+
+        Returns:
+            共享的 EqscTokenManager；服务缺失或类型不符时返回 None。
+        """
+        if service is None:
+            return None
+        channel = getattr(service, "eqsc_channel_service", None)
+        if channel is None:
+            return None
+        token_manager = getattr(channel, "token_manager", None)
+        if isinstance(token_manager, EqscTokenManager):
+            return token_manager
+        return None
 
     # ---------- 熔断器（通道级） ----------
 
@@ -260,8 +280,10 @@ class EqscChannelService:
             await task
         except asyncio.CancelledError:
             pass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                f"[灾害预警] 停止 EQSC token 保活任务异常: {type(exc).__name__}: {exc}"
+            )
 
     async def _token_keepalive_loop(self) -> None:
         """周期性确保内存 AccessToken 未过期。"""
@@ -287,10 +309,7 @@ class EqscChannelService:
                     # 在真正过期前 access_advance_seconds 触发续期；
                     # 再留一点缓冲，避免刚好踩在边界。
                     remaining = self._token_manager.seconds_until_expiry()
-                    advance = float(
-                        getattr(self._token_manager, "_access_advance_seconds", 60)
-                        or 60
-                    )
+                    advance = float(self._token_manager.access_advance_seconds or 60)
                     sleep_seconds = max(
                         self._token_keepalive_min_interval,
                         remaining - advance,

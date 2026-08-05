@@ -14,6 +14,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ....utils.plugin_logger import plugin_logger
+from ...app.services.eqsc_channel_service import EqscChannelService
 from ...domain.event_models import TyphoonEvent
 from ...domain.typhoon import (
     build_typhoon_event_envelope,
@@ -74,13 +75,7 @@ class EqscTyphoonPollService:
 
     def _get_shared_token_manager(self) -> EqscTokenManager | None:
         """优先复用 EQSC 通道服务的 token_manager，避免双份鉴权状态。"""
-        channel = getattr(self.service, "eqsc_channel_service", None)
-        if channel is None:
-            return None
-        token_manager = getattr(channel, "token_manager", None)
-        if isinstance(token_manager, EqscTokenManager):
-            return token_manager
-        return None
+        return EqscChannelService.resolve_shared_token_manager(self.service)
 
     def _get_shared_typhoon_client(self) -> EqscTyphoonClient | None:
         """优先复用台风富化服务内的台风客户端。"""

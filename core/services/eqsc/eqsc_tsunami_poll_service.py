@@ -15,6 +15,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...app.services.eqsc_channel_service import EqscChannelService
 from ...domain.tsunami.jma_tsunami_normalize import (
     build_jma_tsunami_content_fingerprint,
     coerce_bool,
@@ -77,13 +78,7 @@ class EqscTsunamiPollService:
 
     def _get_shared_token_manager(self) -> EqscTokenManager | None:
         """优先复用 EQSC 通道服务的 token_manager，避免双份鉴权状态。"""
-        channel = getattr(self.service, "eqsc_channel_service", None)
-        if channel is None:
-            return None
-        token_manager = getattr(channel, "token_manager", None)
-        if isinstance(token_manager, EqscTokenManager):
-            return token_manager
-        return None
+        return EqscChannelService.resolve_shared_token_manager(self.service)
 
     def _ensure_client(self) -> EqscTsunamiClient | None:
         """懒创建海啸客户端；共享 token_manager 时不接管其生命周期。"""
