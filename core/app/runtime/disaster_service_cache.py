@@ -19,6 +19,39 @@ from ...services.identity.event_identity import ensure_utc_datetime
 class DisasterServiceCacheService:
     """灾害服务缓存持久化服务。"""
 
+    # 未来时间容差窗口（秒）：历史记录被错误时区解析到“未来超过 1 小时”时视为污染。
+    # 统一在此维护，避免多个恢复路径各自硬编码导致行为漂移。
+    FUTURE_POLLUTION_TOLERANCE_SECONDS = 3600
+
+    @staticmethod
+    def _is_future_contaminated(
+        issued_at_raw: str,
+        source_id: str,
+        now_utc: datetime | None = None,
+    ) -> bool:
+        """判断发布时间是否被错误时区污染到未来（超过容差窗口）。
+
+        防御性工具：若恢复出的发布时间被解析到未来（超过 1 小时），
+        说明该记录的时间被错误时区污染，应直接丢弃避免复活脏状态。
+
+        Args:
+            issued_at_raw: 原始发布时间字符串。
+            source_id: 数据源 ID，用于时区解析。
+            now_utc: 当前 UTC 时间；不传时内部实时获取。
+
+        Returns:
+            True 表示该时间被污染到未来，应丢弃。
+        """
+        if not issued_at_raw:
+            return True
+        now = now_utc if now_utc is not None else datetime.now(timezone.utc)
+        issued_dt = ensure_utc_datetime(issued_at_raw, source_id=source_id)
+        if issued_dt is None:
+            return True
+        return issued_dt > now + timedelta(
+            seconds=DisasterServiceCacheService.FUTURE_POLLUTION_TOLERANCE_SECONDS
+        )
+
     def __init__(self, service):
         self.service = service  # 主服务 DisasterWarningService 实例
 
@@ -98,16 +131,10 @@ class DisasterServiceCacheService:
                         if not isinstance(value, dict):
                             continue
                         issued_at_raw = str(value.get("issued_at") or "").strip()
-                        if not issued_at_raw:
-                            continue
-                        # 防御：若缓存中的发布时间被解析到未来（超过 1 小时），
-                        # 说明该记录曾被错误时区污染，直接丢弃避免复活脏状态。
-                        issued_dt = ensure_utc_datetime(
+                        if self._is_future_contaminated(
                             issued_at_raw,
                             source_id=str(value.get("source_id") or "").strip(),
-                        )
-                        if issued_dt is None or issued_dt > now_utc + timedelta(
-                            seconds=3600
+                            now_utc=now_utc,
                         ):
                             continue
                         restored[key] = value  # 校验通过，载入缓存
@@ -167,12 +194,9 @@ class DisasterServiceCacheService:
             if not institution_key or institution_key in state:
                 continue
             issued_at = str(record.get("time") or "").strip()
-            if not issued_at:
-                continue
-            # 防御：若恢复出的发布时间被解析到未来（超过 1 小时），
-            # 说明该记录的时间被错误时区污染，直接丢弃避免复活脏状态。
-            issued_dt = ensure_utc_datetime(issued_at, source_id=source_id)
-            if issued_dt is None or issued_dt > now_utc + timedelta(seconds=3600):
+            if self._is_future_contaminated(
+                issued_at, source_id=source_id, now_utc=now_utc
+            ):
                 continue
             # 组装 EEW 查询状态字典
             state[institution_key] = {
@@ -236,12 +260,9 @@ class DisasterServiceCacheService:
             if not institution_key or institution_key in state:
                 continue
             issued_at = str(record.get("time") or "").strip()
-            if not issued_at:
-                continue
-            # 防御：若恢复出的发布时间被解析到未来（超过 1 小时），
-            # 说明该记录的时间被错误时区污染，直接丢弃避免复活脏状态。
-            issued_dt = ensure_utc_datetime(issued_at, source_id=source_id)
-            if issued_dt is None or issued_dt > now_utc + timedelta(seconds=3600):
+            if self._is_future_contaminated(
+                issued_at, source_id=source_id, now_utc=now_utc
+            ):
                 continue
             # 组装状态元数据
             state[institution_key] = {
