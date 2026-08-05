@@ -62,6 +62,7 @@ from .runtime.disaster_service_reconnect import DisasterServiceReconnectService
 from .runtime.disaster_service_runtime import DisasterServiceRuntimeService
 from .runtime.disaster_service_status import DisasterServiceStatusService
 from .runtime.startup_silence_coordinator import StartupSilenceCoordinator
+from .services.eqsc_channel_service import EqscChannelService
 from .services.typhoon_enrichment_service import TyphoonEnrichmentService
 from .services.typhoon_history_rebuild_service import TyphoonHistoryRebuildService
 
@@ -167,10 +168,17 @@ class DisasterWarningService:
         )
         # 通知中心独立维护远端通知同步、本地缓存和已读状态，供管理端前端复用。
         self.notification_center = NotificationCenter(self)
+        # EQSC 通道服务：统一管理 EQSC 鉴权、健康状态与熔断器，
+        # 台风富化、海啸轮询、CENC 烈度速报轮询共享该通道。
+        self.eqsc_channel_service = EqscChannelService(
+            config,
+            message_logger=self.message_logger,
+        )
         # 台风 EQSC 富化服务，在台风事件进入流水线前按需拉取 EQSC 详细数据。
         # 注入 message_logger，使 EQSC HTTP 响应进入原始消息日志链路。
         self.typhoon_enrichment_service = TyphoonEnrichmentService(
             config,
+            self.eqsc_channel_service,
             message_logger=self.message_logger,
         )
         # 冷启动历史重建编排独立服务，避免主服务继续堆叠台风业务细节。
@@ -324,13 +332,13 @@ class DisasterWarningService:
                 bind = getattr(self.message_manager, "set_silence_callbacks", None)
                 if callable(bind):
                     bind(self.is_silencing, self._absorb_event_for_silence)
-            # 就绪日志以真实轮询服务为准（catalog 组总闸 + typhoon_enrichment）
+            # 就绪日志以真实轮询服务为准
             typhoon_poll = getattr(self, "eqsc_typhoon_poll_service", None)
             poll_enabled = bool(typhoon_poll is not None and typhoon_poll.is_enabled())
-            enrichment = self.typhoon_enrichment_service
+            channel = self.eqsc_channel_service
             if poll_enabled:
                 logger.info("[灾害预警] EQSC 台风轮询服务已就绪")
-            elif getattr(enrichment, "is_channel_enabled", False):
+            elif getattr(channel, "is_channel_enabled", False):
                 logger.info(
                     "[灾害预警] EQSC 通道已启用，但台风轮询子开关关闭；"
                     "实时台风推送将不可用"
@@ -358,14 +366,14 @@ class DisasterWarningService:
         AccessToken（约 1 小时）过期后会长期显示“鉴权失效”。
         """
         # 通道级预热：只要组总闸开启且 token 已配置即可，不依赖台风富化子开关
-        enrichment = self.typhoon_enrichment_service
-        if not getattr(enrichment, "is_channel_enabled", enrichment.is_enabled):
+        channel = self.eqsc_channel_service
+        if not channel.is_channel_enabled:
             return
 
         async def _warmup_and_keepalive() -> None:
-            await enrichment.warm_up_access_token()
+            await channel.warm_up_access_token()
             # 预热成功与否都启动保活：失败时循环会按重试间隔继续尝试
-            start_keepalive = getattr(enrichment, "start_token_keepalive", None)
+            start_keepalive = getattr(channel, "start_token_keepalive", None)
             if callable(start_keepalive):
                 start_keepalive(register_task=self.register_background_task)
 
@@ -527,11 +535,12 @@ class DisasterWarningService:
 
         try:
             # 台风事件：
-            # 1) FAN 遗留触发：多台风共舞时会整包重推，富化前先只读去重；
+            # 1) FAN 触发路径：多台风共舞时会整包重推，富化前先只读去重；
+            #    该路径数据仅有单值风圈，需 EQSC 富化补充轨迹与四象限风圈；
             # 2) EQSC 独立轮询：事件已含完整轨迹，跳过二次富化。
             if event.event_type == "typhoon":
                 source_id = str(getattr(event, "source_id", "") or "").strip()
-                if source_id != "typhoon_eqsc":
+                if source_id == "typhoon_fanstudio":
                     deduplicator = getattr(
                         getattr(self, "message_manager", None), "deduplicator", None
                     )
