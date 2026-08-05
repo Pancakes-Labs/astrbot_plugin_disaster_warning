@@ -411,7 +411,9 @@ class TyphoonEnrichmentService:
             if result:
                 self._channel_service.record_success()
                 return result
-            self._channel_service.record_failure()
+            # 空结果属于正常业务情况（编号不存在 / 不在 EQSC 列表中），
+            # 此时 HTTP 请求本身成功，不应计入通道级熔断失败；
+            # 仅异常路径（下方 except）才累积熔断计数。
             return None
         except Exception as e:
             self._channel_service.record_failure()
