@@ -208,9 +208,9 @@ class PushExecutionService:
             eqsc_cfg = data_sources.get("eqsc", {})
             if not isinstance(eqsc_cfg, dict):
                 eqsc_cfg = {}
-            # 会话级 typhoon_enrichment 影响台风正文是否展示 EQSC 富化字段。
-            if "typhoon_enrichment" in eqsc_cfg:
-                typhoon_enrichment = bool(eqsc_cfg.get("typhoon_enrichment"))
+            # 会话级 typhoon 开关影响台风正文是否展示 EQSC 富化字段。
+            if "typhoon" in eqsc_cfg:
+                typhoon_enrichment = bool(eqsc_cfg.get("typhoon"))
             else:
                 typhoon_enrichment = bool(eqsc_cfg.get("enabled", True))
             cache_key = json.dumps(
@@ -261,7 +261,7 @@ class PushExecutionService:
                         "show_local_estimation": typhoon_config.get(
                             "show_local_estimation", False
                         ),
-                        "typhoon_enrichment": typhoon_enrichment,
+                        "typhoon": typhoon_enrichment,
                     },
                     # 本地监控配置差异会导致地震正文附带不同的本地预估，
                     # 缺失时会使不同会话误共享同一份渲染结果。

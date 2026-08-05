@@ -1876,6 +1876,59 @@ function computeTrackBoundsRaw() {
     };
 }
 
+/**
+ * 用风圈半径扩展路径四至，保证风圈（含最大半径方向）完整可见。
+ *
+ * 策略：对每个含风圈数据的节点，取 r7/r10/r12 四象限中的最大半径（km），
+ * 换算成经纬度扩展量（纬度 1°≈111.32km；经度按该纬度余弦折算），
+ * 与该节点的经纬度合成一个“风圈包围盒”，再与路径四至取并集。
+ *
+ * 这样当预报点很少或台风几乎不动时，视图由风圈范围兜底，
+ * 不会出现“风圈比视图还大、看不全”的情况。
+ */
+function expandBoundsForRadii(bounds) {
+    if (!bounds || !bounds.fromTrack) return bounds;
+    var la = bounds.la;
+    var ha = bounds.ha;
+    var lo = bounds.lo;
+    var hi = bounds.hi;
+    var changed = false;
+
+    function expandFor(node) {
+        if (!node) return;
+        var maxR = 0;
+        [node.r7, node.r10, node.r12].forEach(function(c) {
+            if (!c) return;
+            ['NE', 'SE', 'SW', 'NW'].forEach(function(k) {
+                var v = c[k];
+                if (v != null && v > maxR) maxR = v;
+            });
+        });
+        if (!(maxR > 0)) return;
+
+        var latPad = maxR / 111.32;
+        var cosLat = Math.cos(node.lat * Math.PI / 180);
+        // 高纬地区 cos 趋 0 时给一个兜底上限，避免扩展量爆炸
+        var lonPad = cosLat > 0.05
+            ? maxR / (111.32 * cosLat)
+            : Math.min(maxR / (111.32 * 0.05), 20);
+
+        var nLa = node.lat - latPad;
+        var nHa = node.lat + latPad;
+        var nLo = node.lon - lonPad;
+        var nHi = node.lon + lonPad;
+        if (nLa < la) { la = nLa; changed = true; }
+        if (nHa > ha) { ha = nHa; changed = true; }
+        if (nLo < lo) { lo = nLo; changed = true; }
+        if (nHi > hi) { hi = nHi; changed = true; }
+    }
+
+    PAST.forEach(expandFor);
+    FCST.forEach(expandFor);
+    if (!changed) return bounds;
+    return { la: la, ha: ha, lo: lo, hi: hi, fromTrack: true };
+}
+
 /** Web Mercator Y（0~1，北小南大的补：这里用标准 0 北→南 递增） */
 function mercatorY(lat) {
     var rad = lat * Math.PI / 180;
@@ -1916,10 +1969,13 @@ function applyMapView() {
         return;
     }
 
-    var la = raw.la;
-    var ha = raw.ha;
-    var lo = raw.lo;
-    var hi = raw.hi;
+    // 风圈半径参与视图取值：路径四至与各节点风圈包围盒取并集，
+    // 保证有风圈时（尤其预报点少/台风近乎静止）风圈也能完整显示
+    var ext = expandBoundsForRadii(raw);
+    var la = ext.la;
+    var ha = ext.ha;
+    var lo = ext.lo;
+    var hi = ext.hi;
 
     var lonSpan0 = Math.max(hi - lo, 0.05);
     var latSpan0 = Math.max(ha - la, 0.05);

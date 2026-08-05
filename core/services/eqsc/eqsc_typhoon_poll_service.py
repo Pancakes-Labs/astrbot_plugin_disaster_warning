@@ -14,6 +14,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ....utils.plugin_logger import plugin_logger
+from ...app.services.eqsc_channel_service import EqscChannelService
 from ...domain.event_models import TyphoonEvent
 from ...domain.typhoon import (
     build_typhoon_event_envelope,
@@ -52,7 +53,7 @@ class EqscTyphoonPollService:
         return self._task is not None and not self._task.done()
 
     def is_enabled(self) -> bool:
-        """数据源是否启用（组总闸 + typhoon_enrichment 子开关）。"""
+        """数据源是否启用。"""
         return self._source_runtime_query.is_source_enabled(self.SOURCE_ID)
 
     def _eqsc_config(self) -> dict[str, Any]:
@@ -73,17 +74,11 @@ class EqscTyphoonPollService:
         return max(self.MIN_INTERVAL_SECONDS, min(interval, self.MAX_INTERVAL_SECONDS))
 
     def _get_shared_token_manager(self) -> EqscTokenManager | None:
-        """优先复用台风富化服务的 token_manager，避免双份鉴权状态。"""
-        enrichment = getattr(self.service, "typhoon_enrichment_service", None)
-        if enrichment is None:
-            return None
-        token_manager = getattr(enrichment, "_token_manager", None)
-        if isinstance(token_manager, EqscTokenManager):
-            return token_manager
-        return None
+        """优先复用 EQSC 通道服务的 token_manager，避免双份鉴权状态。"""
+        return EqscChannelService.resolve_shared_token_manager(self.service)
 
     def _get_shared_typhoon_client(self) -> EqscTyphoonClient | None:
-        """优先复用富化服务内的台风客户端。"""
+        """优先复用台风富化服务内的台风客户端。"""
         enrichment = getattr(self.service, "typhoon_enrichment_service", None)
         if enrichment is None:
             return None

@@ -51,8 +51,9 @@ class EventIngressDispatchService:
 
         dispatch_family = (entry.dispatch_family or "").strip()
 
-        # 台风事件需要同步等待 EQSC 富化查询（可能阻塞数分钟），
-        # 必须转为后台异步分发，避免阻塞 FAN Studio WS 接收线程
+        # FAN 台风路径：富化查询可能同步阻塞较久（EQSC 重试链最长约 5 分钟），
+        # 必须转为后台异步分发，避免阻塞 FAN Studio WS 接收线程。
+        # 注意：EQSC 独立轮询路径不经过此分发，直接由轮询协程驱动。
         if dispatch_family == "fan_studio_typhoon":
             return True
 

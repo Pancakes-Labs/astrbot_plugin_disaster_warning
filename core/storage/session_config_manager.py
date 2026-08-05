@@ -52,7 +52,7 @@ class SessionConfigManager:
 
     # 仅允许全局配置修改的嵌套路径（会话 override 写入时强制剥离）。
     # S-Net 轮询间隔、EQSC 通道鉴权/轮询参数影响全局运行态；
-    # typhoon_enrichment / jma_tsunami 允许会话差异（部分会话可单独关闭推送）。
+    # typhoon / jma_tsunami 允许会话差异（部分会话可单独关闭推送）。
     GLOBAL_ONLY_NESTED_PATHS: tuple[tuple[str, ...], ...] = (
         ("data_sources", "snet", "poll_interval_seconds"),
         ("data_sources", "eqsc", "enabled"),

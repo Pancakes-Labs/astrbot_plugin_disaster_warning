@@ -159,15 +159,15 @@ def build_typhoon_display_context(projection: dict, options: dict | None = None)
         typhoon_config = {}
     show_local_estimation = bool(typhoon_config.get("show_local_estimation", False))
 
-    # 会话级 typhoon_enrichment：关闭时展示层回退 Fan 字段，不暴露 EQSC 轨迹/四象限风圈。
+    # 会话级 typhoon 开关：关闭时展示层回退 Fan 字段，不暴露 EQSC 轨迹/四象限风圈。
     data_sources = display_options.get("data_sources", {})
     if not isinstance(data_sources, dict):
         data_sources = {}
     eqsc_cfg = data_sources.get("eqsc", {})
     if not isinstance(eqsc_cfg, dict):
         eqsc_cfg = {}
-    if "typhoon_enrichment" in eqsc_cfg:
-        allow_eqsc_enrichment = bool(eqsc_cfg.get("typhoon_enrichment"))
+    if "typhoon" in eqsc_cfg:
+        allow_eqsc_enrichment = bool(eqsc_cfg.get("typhoon"))
     else:
         # 兼容旧配置：缺省时跟随通道 enabled
         allow_eqsc_enrichment = bool(eqsc_cfg.get("enabled", True))

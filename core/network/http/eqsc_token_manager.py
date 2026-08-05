@@ -56,6 +56,11 @@ class EqscTokenManager:
         """当前缓存 AccessToken 的过期时间戳（epoch 秒）；无缓存时为 0。"""
         return float(self._access_token_expires_at or 0.0)
 
+    @property
+    def access_advance_seconds(self) -> float:
+        """令牌过期前的提前刷新窗口（秒），供保活等外部逻辑只读复用。"""
+        return float(self._access_advance_seconds or 0)
+
     def seconds_until_expiry(self) -> float:
         """距离 AccessToken 真正过期的剩余秒数；无缓存或已过期时返回 0。"""
         if not self._access_token:

@@ -197,7 +197,7 @@ class MessageLogger:
         conn_type = (connection_info or {}).get("connection_type", "")
         if message_type != "websocket_message" and conn_type != "websocket":
             return None
-        if "global_quake" not in source.lower():
+        if "global_quake" not in source.lower() and "openquake" not in source.lower():
             return None
 
         try:

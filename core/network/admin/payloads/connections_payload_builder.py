@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from ....app.services.typhoon_enrichment_service import TyphoonEnrichmentService
+from ....app.services.eqsc_channel_service import EqscChannelService
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -70,21 +70,19 @@ class ConnectionsPayloadBuilder:
             if isinstance(raw, dict):
                 eqsc_cfg = raw
 
-        channel_enabled, typhoon_enrichment = (
-            TyphoonEnrichmentService.resolve_eqsc_flags(eqsc_cfg)
+        channel_enabled, typhoon_enrichment = EqscChannelService.resolve_eqsc_flags(
+            eqsc_cfg
         )
         config_enabled = channel_enabled
         token_configured = bool(str(eqsc_cfg.get("refresh_token", "") or "").strip())
         latency = self.latency_cache.get("eqsc")
 
         health: dict[str, Any] = {}
-        enrichment = None
+        eqsc_channel = None
         if self.disaster_service is not None:
-            enrichment = getattr(
-                self.disaster_service, "typhoon_enrichment_service", None
-            )
-        if enrichment is not None:
-            getter = getattr(enrichment, "get_health_status", None)
+            eqsc_channel = getattr(self.disaster_service, "eqsc_channel_service", None)
+        if eqsc_channel is not None:
+            getter = getattr(eqsc_channel, "get_health_status", None)
             if callable(getter):
                 try:
                     maybe_health = getter()
@@ -104,9 +102,7 @@ class ConnectionsPayloadBuilder:
         )
         # 子数据源展示只看子开关本身，不与总闸/服务状态做 AND
         effective_typhoon_enrichment = bool(
-            health.get("typhoon_enrichment", typhoon_enrichment)
-            if health
-            else typhoon_enrichment
+            health.get("typhoon", typhoon_enrichment) if health else typhoon_enrichment
         )
         if "jma_tsunami" in eqsc_cfg:
             jma_tsunami_cfg = bool(eqsc_cfg.get("jma_tsunami"))
@@ -176,7 +172,7 @@ class ConnectionsPayloadBuilder:
             "circuit_open": circuit_open,
             "token_configured": bool(health.get("token_configured", token_configured)),
             "config_enabled": effective_config_enabled,
-            "typhoon_enrichment": effective_typhoon_enrichment,
+            "typhoon": effective_typhoon_enrichment,
             "access_token_valid": access_token_valid,
         }
 

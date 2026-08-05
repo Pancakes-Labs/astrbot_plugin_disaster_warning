@@ -80,17 +80,22 @@ function EewStatusCard() {
                 continue;
             }
 
-            // C. 正在发布地震预警
+            // C. 正在发布地震预警（双保险：若后端下发的 expires_at 已过期则视为无生效预警）
             if (statusText === 'active') {
-                const magnitude = item?.magnitude;
-                const place = item?.place || '未知地点';
-                let magText = '?';
-                if (magnitude !== null && magnitude !== undefined) {
-                    const num = Number(magnitude);
-                    magText = Number.isFinite(num) ? num.toFixed(1) : String(magnitude);
+                const expiresAt = parseDateSafe(item?.expires_at);
+                const isExpired = expiresAt && tickNowMs > expiresAt.getTime();
+                if (!isExpired) {
+                    const magnitude = item?.magnitude;
+                    const place = item?.place || '未知地点';
+                    let magText = '?';
+                    if (magnitude !== null && magnitude !== undefined) {
+                        const num = Number(magnitude);
+                        magText = Number.isFinite(num) ? num.toFixed(1) : String(magnitude);
+                    }
+                    activeLines.push(`[${activeName}] 当前正在发布地震预警：M ${magText} ${place}`);
+                    continue;
                 }
-                activeLines.push(`[${activeName}] 当前正在发布地震预警：M ${magText} ${place}`);
-                continue;
+                // 已过期：回落到下方“无生效预警”统计分支
             }
 
             // D. 安全无预警状态下：根据发震时间 issued_at 与本地跳表累加秒数

@@ -10,7 +10,7 @@
 
     // 仅允许全局配置修改的嵌套路径（会话模式隐藏且保存时剥离）
     // S-Net 轮询间隔、EQSC 通道鉴权参数影响全局运行态；
-    // typhoon_enrichment 允许会话差异（部分会话只要 Fan，部分要 EQSC 富化）。
+    // eqsc.typhoon 允许会话差异（部分会话只要 Fan，部分要 EQSC 富化）。
     const CONFIG_SESSION_GLOBAL_ONLY_PATHS = [
         ['data_sources', 'snet', 'poll_interval_seconds'],
         ['data_sources', 'eqsc', 'enabled'],

@@ -1267,8 +1267,19 @@ class ConfigValidator:
         if not isinstance(cfg, dict):
             return cfg
 
+        # OpenQuakeAPI 配置组更名：旧 key "global_quake" → 新 key "openquake_api"。
+        # 仅做复制迁移，保留旧 key 避免破坏未知扩展；新 key 优先。
+        if "openquake_api" not in cfg and "global_quake" in cfg:
+            cfg["openquake_api"] = cfg["global_quake"]
+
         # 确保主要分类存在且为字典，规避非字典类型在运行时发生键提取错误
-        for key in ["fan_studio", "p2p_earthquake", "wolfx", "global_quake", "snet"]:
+        for key in [
+            "fan_studio",
+            "p2p_earthquake",
+            "wolfx",
+            "openquake_api",
+            "snet",
+        ]:
             if key in cfg:
                 if not isinstance(cfg[key], dict):
                     logger.warning(
@@ -1281,7 +1292,7 @@ class ConfigValidator:
 
         # OpenQuakeAPI：组总闸 + Global Quake 子源开关 + CMA 气象预警子源开关
         # 旧配置仅有 enabled 时，将子源开关回填为 enabled 的值，避免升级后静默关闭。
-        gq_cfg = cfg.get("global_quake")
+        gq_cfg = cfg.get("openquake_api")
         if isinstance(gq_cfg, dict):
             ConfigValidator._ensure_bool(gq_cfg, "enabled", True)
             if "global_quake" not in gq_cfg:
@@ -1372,10 +1383,10 @@ class ConfigValidator:
         eqsc_cfg = cfg.get("eqsc")
         if isinstance(eqsc_cfg, dict):
             ConfigValidator._ensure_bool(eqsc_cfg, "enabled", False)
-            # 兼容旧配置：缺少 typhoon_enrichment 时，回退为 enabled 的值
-            if "typhoon_enrichment" not in eqsc_cfg:
-                eqsc_cfg["typhoon_enrichment"] = bool(eqsc_cfg.get("enabled", False))
-            ConfigValidator._ensure_bool(eqsc_cfg, "typhoon_enrichment", False)
+            # 台风子开关：缺省时跟随通道总闸，便于旧配置平滑启用
+            if "typhoon" not in eqsc_cfg:
+                eqsc_cfg["typhoon"] = bool(eqsc_cfg.get("enabled", False))
+            ConfigValidator._ensure_bool(eqsc_cfg, "typhoon", False)
             # 海啸子开关：缺省时跟随通道总闸，便于旧配置平滑启用
             if "jma_tsunami" not in eqsc_cfg:
                 eqsc_cfg["jma_tsunami"] = bool(eqsc_cfg.get("enabled", False))

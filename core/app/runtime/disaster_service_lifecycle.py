@@ -369,12 +369,15 @@ class DisasterServiceLifecycleService:
                 if eqsc_cenc_ir_poll is not None:
                     await eqsc_cenc_ir_poll.stop()
 
-                # 关闭台风 EQSC 富化服务的 HTTP 会话与令牌管理器资源
+                # 先关闭台风富化服务，最后关闭 EQSC 通道服务（停止保活并释放令牌管理器资源）。
                 typhoon_enrichment = getattr(
                     self.service, "typhoon_enrichment_service", None
                 )
                 if typhoon_enrichment:
                     await typhoon_enrichment.close()
+                eqsc_channel = getattr(self.service, "eqsc_channel_service", None)
+                if eqsc_channel:
+                    await eqsc_channel.close()
 
                 # 统计数据库只在已初始化时关闭，避免访问尚未建立的数据库句柄。
                 if (

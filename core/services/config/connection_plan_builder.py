@@ -100,7 +100,7 @@ class ConnectionPlanBuilder:
                 logger.info("[灾害预警] 已配置 P2P 地震情报连接")
             elif group_key == "wolfx_all":
                 logger.info("[灾害预警] 已配置 Wolfx 全量数据连接")
-            elif group_key == "global_quake":
+            elif group_key == "openquake_api":
                 logger.info("[灾害预警] 已配置 OpenQuakeAPI 全量数据连接")
             else:
                 logger.info(f"[灾害预警] 已配置数据连接，连接分组为 {group_key}")

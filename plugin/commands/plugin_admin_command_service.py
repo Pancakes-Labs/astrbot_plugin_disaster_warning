@@ -13,7 +13,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import logger
 
 from ...core.app.services import quoted_plain_result
-from ...core.app.services.typhoon_enrichment_service import TyphoonEnrichmentService
+from ...core.app.services.eqsc_channel_service import EqscChannelService
 from ...utils.version import get_plugin_version
 from .telemetry_mixin import CommandTelemetryMixin
 
@@ -118,7 +118,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     ("fan_studio_cenc_ir", "FAN Studio 烈度速报"),
                     ("p2p_main", "P2P地震情報"),
                     ("wolfx_all", "Wolfx"),
-                    ("global_quake", "OpenQuakeAPI"),
+                    ("openquake_api", "OpenQuakeAPI"),
                 ]
             )
             source_group_label_map = OrderedDict(
@@ -126,7 +126,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     ("fan_studio", "FAN Studio"),
                     ("p2p_earthquake", "P2P地震情報"),
                     ("wolfx", "Wolfx"),
-                    ("global_quake", "OpenQuakeAPI"),
+                    ("openquake_api", "OpenQuakeAPI"),
                     ("eqsc", "EQSC API"),
                     ("snet", "NIED S-Net"),
                 ]
@@ -178,7 +178,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "china_weather_alarm": "中国气象局: 气象预警",
                 },
                 "EQSC API": {
-                    "typhoon_enrichment": "中国气象局：实时活跃台风",
+                    "typhoon": "中国气象局：实时活跃台风",
                     "jma_tsunami": "日本气象厅: 海啸予报",
                     "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
                 },
@@ -215,11 +215,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # EQSC / S-Net 为 HTTP 通道，不在 ws_manager 连接表中，单独补充
             # 注意：get_service_status() 已把 EQSC、S-Net 计入 active/total，这里只负责展示详情
             eqsc_health: dict = {}
-            enrichment = getattr(
-                self.plugin.disaster_service, "typhoon_enrichment_service", None
+            eqsc_channel = getattr(
+                self.plugin.disaster_service, "eqsc_channel_service", None
             )
-            if enrichment is not None:
-                getter = getattr(enrichment, "get_health_status", None)
+            if eqsc_channel is not None:
+                getter = getattr(eqsc_channel, "get_health_status", None)
                 if callable(getter):
                     try:
                         maybe_health = getter()
@@ -229,7 +229,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                         eqsc_health = {}
 
             if not eqsc_health:
-                # 富化服务不可用时，回退到配置层判定
+                # 通道服务不可用时，回退到配置层判定
                 eqsc_cfg = (
                     (self.plugin.config.get("data_sources", {}) or {}).get("eqsc", {})
                     if isinstance(self.plugin.config, dict)
@@ -238,7 +238,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 if not isinstance(eqsc_cfg, dict):
                     eqsc_cfg = {}
                 config_enabled, typhoon_enrichment = (
-                    TyphoonEnrichmentService.resolve_eqsc_flags(eqsc_cfg)
+                    EqscChannelService.resolve_eqsc_flags(eqsc_cfg)
                 )
                 token_configured = bool(
                     str(eqsc_cfg.get("refresh_token", "") or "").strip()
@@ -246,7 +246,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 eqsc_health = {
                     "enabled": config_enabled and token_configured,
                     "config_enabled": config_enabled,
-                    "typhoon_enrichment": typhoon_enrichment,
+                    "typhoon": typhoon_enrichment,
                     "token_configured": token_configured,
                     "access_token_valid": False,
                     "circuit_open": False,

@@ -236,10 +236,13 @@ function ConnectionsGrid() {
                 displayName: 'OpenQuakeAPI',
                 matcher: (key) => {
                     const k = String(key || '').toLowerCase();
+                    // OpenQuakeAPI 连接组 key 为 openquake_api；兼容历史 global_quake / gq
                     return (
-                        k.includes('global')
-                        || k.includes('openquake')
+                        k === 'openquake_api'
+                        || k === 'global_quake'
                         || k === 'gq'
+                        || k.includes('openquake')
+                        || k.includes('global_quake')
                     ) && !k.includes('eqsc');
                 },
                 compact: true,

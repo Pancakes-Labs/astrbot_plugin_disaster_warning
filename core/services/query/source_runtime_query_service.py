@@ -17,7 +17,7 @@ _CONNECTION_GROUP_ALIAS: dict[str, str] = {
     ProviderFamily.FAN_STUDIO.value: "fan_studio_all",
     ProviderFamily.P2P.value: "p2p_main",
     ProviderFamily.WOLFX.value: "wolfx_all",
-    ProviderFamily.GLOBAL_QUAKE.value: "global_quake",
+    ProviderFamily.GLOBAL_QUAKE.value: "openquake_api",
     ProviderFamily.DIRECT_HTTP.value: "snet_msil",
 }
 
@@ -27,7 +27,7 @@ _CONNECTION_DISPLAY_NAME: dict[str, str] = {
     "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
     "p2p_main": "P2P地震情報",
     "wolfx_all": "Wolfx",
-    "global_quake": "OpenQuakeAPI",
+    "openquake_api": "OpenQuakeAPI",
     "snet_msil": "NIED S-Net",
     # EQSC 为 HTTP 通道；展示名必须与 ConnectionsPayloadBuilder.EQSC_DISPLAY_NAME
     # 完全一致，否则 catalog 占位会以原始键 "eqsc" 残留，前端误显示“未连接”。
@@ -159,11 +159,9 @@ class SourceRuntimeQueryService:
         )
 
         # 延迟导入，避免 query 层与 app 层形成硬循环依赖。
-        from ...app.services.typhoon_enrichment_service import TyphoonEnrichmentService
+        from ...app.services.eqsc_channel_service import EqscChannelService
 
-        eqsc_active, _eqsc_total = TyphoonEnrichmentService.resolve_connection_counts(
-            service
-        )
+        eqsc_active, _eqsc_total = EqscChannelService.resolve_connection_counts(service)
         active += int(eqsc_active or 0)
 
         snet_poll = getattr(service, "snet_poll_service", None) if service else None
@@ -178,16 +176,27 @@ class SourceRuntimeQueryService:
         ):
             active += 1
 
-        connection_tasks = (
-            getattr(service, "connection_tasks", []) if service is not None else []
+        # OpenQuakeAPI 在线标记优先以实际连接状态为准：
+        # 建连失败/服务停止后任务名仍可能残留，无法代表真实连通性。
+        # actual_connections 由 ws_manager 实时维护 connected 状态，作为首选口径；
+        # 任务名检查仅作为连接状态缺失时的兜底。
+        oq_status = actual_connections.get("openquake_api")
+        openquake_connected = bool(
+            isinstance(oq_status, dict) and oq_status.get("connected")
         )
-        global_quake_connected = any(
-            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
-            for task in connection_tasks
-        )
+        if not openquake_connected:
+            connection_tasks = (
+                getattr(service, "connection_tasks", []) if service is not None else []
+            )
+            openquake_connected = any(
+                "openquake_api" in task.get_name()
+                if hasattr(task, "get_name")
+                else False
+                for task in connection_tasks
+            )
         return {
             "active_websocket_connections": int(active),
-            "global_quake_connected": bool(global_quake_connected),
+            "openquake_connected": bool(openquake_connected),
         }
 
     def build_runtime_snapshot(
@@ -200,7 +209,7 @@ class SourceRuntimeQueryService:
         uptime: str = "未运行",
         active_websocket_connections: int = 0,
         message_logger_enabled: bool = False,
-        global_quake_connected: bool = False,
+        openquake_connected: bool = False,
     ) -> dict[str, Any]:
         """构建统一运行态快照。
 
@@ -244,7 +253,7 @@ class SourceRuntimeQueryService:
             "running": running,
             "uptime": uptime,
             "active_websocket_connections": active_websocket_connections,
-            "global_quake_connected": global_quake_connected,
+            "openquake_connected": openquake_connected,
             "total_connections": len(expected_groups),
             "connection_details": actual_connections,
             "connections": connections,
