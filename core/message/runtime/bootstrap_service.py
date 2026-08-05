@@ -12,6 +12,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...app.services.eqsc_channel_service import EqscChannelService
 from ...services.config.config_service import ConfigAccessor
 from ...services.identity.event_deduplication_service import EventDeduplicationService
 from ..builders.card_message_builder import CardMessageBuilder
@@ -110,8 +111,7 @@ class MessageManagerBootstrapService:
             )
             or bool(
                 isinstance(eqsc_cfg, dict)
-                and eqsc_cfg.get("enabled", False)
-                and eqsc_cfg.get("typhoon", False)
+                and EqscChannelService.resolve_eqsc_flags(eqsc_cfg) == (True, True)
             )
         )
         if playwright_mode == "local" and need_browser:

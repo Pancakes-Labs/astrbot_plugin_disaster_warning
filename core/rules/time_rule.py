@@ -33,12 +33,13 @@ class EventTimeRule(BaseRule):
         """判断当前事件是否为产出较慢的地震补充产品（烈度速报 / CMT）。"""
         try:
             envelope = context.envelope
-        except TypeError:
+        except (TypeError, AttributeError):
             return False
-        source_id = str(context.source_id or "").strip()
+        source_id = str(getattr(context, "source_id", "") or "").strip()
         # 从领域事件 metadata 与信封 metadata 双渠道提取 info_type
         info_type = ""
-        domain_meta = getattr(envelope.event, "metadata", None)
+        event_obj = getattr(envelope, "event", None)
+        domain_meta = getattr(event_obj, "metadata", None)
         if isinstance(domain_meta, dict):
             info_type = str(domain_meta.get("info_type") or "").strip()
         if not info_type:
