@@ -51,7 +51,7 @@ class TextMessageBuilder:
             "local_monitoring": active_config.get("local_monitoring", {}),
             # 台风展示是否暴露本地距离/逼近信息，对齐地震 local_monitoring.enabled。
             "typhoon_config": active_config.get("typhoon_config", {}),
-            # 会话级 data_sources（如 eqsc.typhoon_enrichment）影响台风展示是否使用 EQSC 富化字段。
+            # 会话级 data_sources（如 eqsc.typhoon）影响台风展示是否使用 EQSC 富化字段。
             "data_sources": active_config.get("data_sources", {}),
         }
 

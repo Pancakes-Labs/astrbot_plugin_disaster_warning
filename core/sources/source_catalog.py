@@ -327,7 +327,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         source_enum="global_quake",
         source_type=SourceType.EARTHQUAKE_WARNING,
         provider_family=ProviderFamily.GLOBAL_QUAKE,
-        config_group="global_quake",
+        config_group="openquake_api",
         config_key="global_quake",
         parser_name="global_quake_parser",
         presentation_type="global_quake",
@@ -341,8 +341,8 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         publish_time_field="update_time",
         report_num_field="report_num",
         fingerprint_prefix="gq",
-        connection_group="global_quake",
-        connection_handler="global_quake",
+        connection_group="openquake_api",
+        connection_handler="openquake_api",
         connection_data_source="openquake_mixed",
         connection_url="wss://api.aloys23.link/ws/all",
         dispatch_family="global_quake",
@@ -644,7 +644,9 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         priority=1,
         display_name="美国 ShakeAlert",
         description="美国 ShakeAlert 地震预警 - FAN Studio WebSocket",
-        default_timezone="America/Los_Angeles",
+        # FAN Studio 文档明确：/sa 的 shockTime 一律为 UTC+8（北京时间），
+        # 并非美国本地时区；误配会导致历史事件被解析到未来、EEW 状态悬挂。
+        default_timezone="Asia/Shanghai",
         publish_time_field="shockTime",
         fingerprint_prefix="sa",
         connection_group="fan_studio_all",
@@ -800,7 +802,7 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         source_enum="openquake_cma_weather",
         source_type=SourceType.WEATHER,
         provider_family=ProviderFamily.GLOBAL_QUAKE,
-        config_group="global_quake",
+        config_group="openquake_api",
         config_key="china_weather_alarm",
         parser_name="weather_alarm_parser",
         presentation_type="weather",
@@ -813,8 +815,8 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         default_timezone="Asia/Shanghai",
         publish_time_field="issue_time",
         fingerprint_prefix="cn_weather_oq",
-        connection_group="global_quake",
-        connection_handler="global_quake",
+        connection_group="openquake_api",
+        connection_handler="openquake_api",
         connection_data_source="openquake_mixed",
         connection_url="wss://api.aloys23.link/ws/all",
         dispatch_family="openquake_weather",
@@ -855,14 +857,19 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
     ),
     # typhoon_eqsc: 实时活跃台风 - EQSC HTTP 独立轮询
     # 不挂 WebSocket 连接计划：connection_url 留空，由 EqscTyphoonPollService 独立轮询。
+    # 不走解析器（parser_name 留空）：事件由 EqscTyphoonPollService 直接
+    # 通过 build_typhoon_event_envelope 构建；parser_name 原指向 typhoon_parser
+    # 是历史残留（该解析器仅服务 FAN 路径 typhoon_fanstudio）。
+    # config_key 为 typhoon：对应 data_sources.eqsc.typhoon 开关
+    # （原 typhoon_enrichment 键名已随台风功能上线前的重构迁移为 typhoon）。
     "typhoon_eqsc": SourceEntry(
         source_id="typhoon_eqsc",
         source_enum="eqsc_typhoon",
         source_type=SourceType.TYPHOON,
         provider_family=ProviderFamily.EQSC,
         config_group="eqsc",
-        config_key="typhoon_enrichment",
-        parser_name="typhoon_parser",
+        config_key="typhoon",
+        parser_name="",
         presentation_type="typhoon",
         text_presenter_key="typhoon",
         report_policy="none",

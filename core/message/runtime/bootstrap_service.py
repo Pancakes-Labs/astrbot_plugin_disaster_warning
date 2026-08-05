@@ -111,7 +111,7 @@ class MessageManagerBootstrapService:
             or bool(
                 isinstance(eqsc_cfg, dict)
                 and eqsc_cfg.get("enabled", False)
-                and eqsc_cfg.get("typhoon_enrichment", False)
+                and eqsc_cfg.get("typhoon", False)
             )
         )
         if playwright_mode == "local" and need_browser:

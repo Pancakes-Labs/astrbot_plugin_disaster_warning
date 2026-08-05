@@ -209,7 +209,7 @@
           }
         }
       },
-      "global_quake": {
+      "openquake_api": {
         "description": "OpenQuakeAPI 数据源",
         "type": "object",
         "hint": "OpenQuakeAPI 连接组数据源总开关。",
@@ -258,7 +258,7 @@
             "hint": "从 EQuake 设置界面获取的访问令牌（以 ARh. 开头），用于创建 AccessToken。请妥善保管，不要泄露。",
             "hidden": true
           },
-          "typhoon_enrichment": {
+          "typhoon": {
             "description": "启用台风轮询",
             "type": "bool",
             "default": true,

@@ -4,18 +4,20 @@
 负责在收到 FAN Studio 台风推送后，向 EQSC API 拉取台风详细数据
 （历史轨迹、预测路径、四象限风圈），并合并到事件中供展示使用。
 
+EQSC 通道级能力（鉴权、保活、健康、熔断）由 EqscChannelService 统一提供，
+本服务只保留台风业务相关逻辑：Fan 触发路径的富化合并与台风查询入口。
+
 核心策略：
 1. 同步阻塞等待 EQSC 查询完成才推送，只有一直匹配不上才回退到 FAN Studio 基础数据。
 2. 指数退避重试，最多约5分钟。
 3. 最大等待上限：300秒后强制放弃，以 FAN Studio 基础数据回退。
-4. 熔断器：连续失败后短路，5分钟内跳过 EQSC 查询直接回退。
+4. 熔断器：连续失败后短路（通道级，由 EqscChannelService 维护）。
 5. 按台风 ID 缓存 EQSC 结果（5分钟 TTL），避免重复请求。
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from ....utils.plugin_logger import plugin_logger as logger
@@ -25,41 +27,41 @@ from ...domain.typhoon import (
     constrain_wind_circle_by_fan_radius,
     to_eqsc_id,
 )
-from ...network.http.eqsc_token_manager import EqscTokenManager
 from ...network.http.eqsc_typhoon_client import EqscTyphoonClient
+from .eqsc_channel_service import EqscChannelService
 
 
 class TyphoonEnrichmentService:
-    """台风 EQSC 富化服务。"""
+    """台风 EQSC 富化服务（FAN 触发路径的遗留兼容 + 台风查询入口）。"""
 
     def __init__(
         self,
         config: dict[str, Any],
+        eqsc_channel_service: EqscChannelService,
         message_logger: Any | None = None,
     ):
         """初始化富化服务。
 
         Args:
             config: 插件全局配置字典。
+            eqsc_channel_service: EQSC 通道服务（提供共享令牌与熔断状态）。
             message_logger: 可选原始消息记录器，用于落盘 EQSC HTTP 响应。
         """
         eqsc_config = config.get("data_sources", {}).get("eqsc", {})
         if not isinstance(eqsc_config, dict):
             eqsc_config = {}
-        # 保留原始 EQSC 配置，供健康面板读取海啸等子开关
-        self._eqsc_config = eqsc_config
-        channel_enabled, typhoon_enrichment = self.resolve_eqsc_flags(eqsc_config)
-        # 组总闸：控制 EQSC 通道（鉴权/连通/后续子能力入口）
-        self._channel_enabled = channel_enabled
-        # 子能力：台风富化（可独立关闭）
-        self._typhoon_enrichment_enabled = typhoon_enrichment
-        # 兼容旧属性名：历史代码可能读取 _enabled 表示“服务是否工作”
-        self._enabled = self._channel_enabled
-        self._token_manager = EqscTokenManager(eqsc_config)
+        self._channel_service = eqsc_channel_service
+        # 台风富化子开关（通道总闸由 EqscChannelService 维护）
+        self._typhoon_enrichment_enabled = (
+            eqsc_channel_service.is_typhoon_enrichment_enabled
+        )
+        # 复用通道服务的 token_manager（不拥有；关闭由通道服务负责）
+        self._token_manager = eqsc_channel_service.token_manager
         self._typhoon_client = EqscTyphoonClient(
             self._token_manager,
             eqsc_config,
             message_logger=message_logger,
+            owns_token_manager=False,
         )
 
         # 重试参数（硬编码，降低使用门槛）
@@ -69,44 +71,10 @@ class TyphoonEnrichmentService:
         self._max_delay = 180  # 指数退避延迟上限（秒）
         self._max_total_wait = 300  # 后台重试总等待上限（秒）
 
-        # 熔断器参数（硬编码）
-        self._circuit_failure_threshold = 5  # 连续失败此次数后开启熔断器
-        self._circuit_cooldown = 300  # 熔断器冷却时间（秒）
-        self._circuit_failures = 0
-        self._circuit_open_until: float = 0.0
-
-        # AccessToken 后台保活：状态面板只读 has_valid_access_token，
-        # 若仅启动预热、无业务请求触发 get_access_token，约 1 小时后会误显示“鉴权失效”。
-        self._token_keepalive_task: asyncio.Task | None = None
-        self._token_keepalive_stop = asyncio.Event()
-        # 最短检查间隔，避免异常情况下 tight loop
-        self._token_keepalive_min_interval = 30.0
-        # 无有效 token 时的重试间隔
-        self._token_keepalive_retry_interval = 120.0
-
-    @staticmethod
-    def resolve_eqsc_flags(eqsc_config: dict[str, Any] | None) -> tuple[bool, bool]:
-        """解析 EQSC 组总闸与台风富化子开关。
-
-        Returns:
-            (channel_enabled, typhoon_enrichment_enabled)
-
-        兼容旧配置：若缺少 typhoon_enrichment 字段，则回退使用 enabled 的值
-        （旧语义下 enabled 同时表示通道与台风富化）。
-        """
-        if not isinstance(eqsc_config, dict):
-            return False, False
-        channel_enabled = bool(eqsc_config.get("enabled", False))
-        if "typhoon_enrichment" in eqsc_config:
-            typhoon_enrichment = bool(eqsc_config.get("typhoon_enrichment"))
-        else:
-            typhoon_enrichment = channel_enabled
-        return channel_enabled, typhoon_enrichment
-
     @property
     def is_channel_enabled(self) -> bool:
-        """EQSC 通道是否可用：组总闸开启且 refresh_token 已配置。"""
-        return self._channel_enabled and self._token_manager.is_configured
+        """EQSC 通道是否可用（委托通道服务）。"""
+        return self._channel_service.is_channel_enabled
 
     @property
     def is_typhoon_enrichment_enabled(self) -> bool:
@@ -117,215 +85,6 @@ class TyphoonEnrichmentService:
     def is_enabled(self) -> bool:
         """台风富化是否可实际工作：通道可用 + 子开关开启。"""
         return self.is_channel_enabled and self._typhoon_enrichment_enabled
-
-    def get_health_status(self) -> dict[str, Any]:
-        """返回 EQSC 通道健康快照，供管理端连接状态面板使用。"""
-        circuit_open = self._is_circuit_open()
-        # config_enabled：组总闸（不混入 token）
-        config_enabled = bool(self._channel_enabled)
-        typhoon_enrichment = bool(self._typhoon_enrichment_enabled)
-        access_token_valid = bool(self._token_manager.has_valid_access_token)
-        # 海啸子开关：缺省跟随通道总闸（与配置校验语义一致）
-        raw_eqsc = self._eqsc_config if isinstance(self._eqsc_config, dict) else {}
-        if "jma_tsunami" in raw_eqsc:
-            jma_tsunami = bool(raw_eqsc.get("jma_tsunami"))
-        else:
-            jma_tsunami = config_enabled
-        if "china_cenc_intensity_report" in raw_eqsc:
-            cenc_ir = bool(raw_eqsc.get("china_cenc_intensity_report"))
-        else:
-            cenc_ir = config_enabled
-        return {
-            # enabled：通道可工作（组总闸 + token 已配置）
-            "enabled": self.is_channel_enabled,
-            "config_enabled": config_enabled,
-            "typhoon_enrichment": typhoon_enrichment,
-            # 台风富化实际可工作
-            "typhoon_enrichment_active": self.is_enabled,
-            "jma_tsunami": jma_tsunami,
-            "china_cenc_intensity_report": cenc_ir,
-            "token_configured": bool(self._token_manager.is_configured),
-            "access_token_valid": access_token_valid,
-            "circuit_open": circuit_open,
-            "circuit_failures": int(self._circuit_failures),
-            "connection_type": "http",
-            "provider": "eqsc",
-            # EQSC 子数据源：台风 → 海啸 → CENC 烈度速报
-            "sub_sources": {
-                "china_typhoon": typhoon_enrichment,
-                "jma_tsunami": jma_tsunami,
-                "china_cenc_intensity_report": cenc_ir,
-            },
-        }
-
-    def get_connection_counts(self) -> tuple[int, int]:
-        """返回 EQSC 对活跃/总连接数的贡献 (active, total)。
-
-        - total：组总闸开启且 refresh_token 已配置时计 1
-        - active：当前内存 AccessToken 仍有效时计 1
-        """
-        health = self.get_health_status()
-        total = 1 if bool(health.get("enabled")) else 0
-        active = 1 if bool(health.get("access_token_valid")) else 0
-        return active, total
-
-    async def warm_up_access_token(self) -> bool:
-        """启动后主动预热 AccessToken，避免状态面板长期显示鉴权失效。
-
-        仅在 EQSC 通道已启用且 token 已配置时请求；不触发业务查询。
-        成功返回 True，未启用/失败返回 False。
-        """
-        if not self.is_channel_enabled:
-            return False
-        try:
-            access_token = await self._token_manager.get_access_token()
-            if access_token:
-                logger.info("[灾害预警] EQSC AccessToken 预热成功")
-                return True
-            logger.warning("[灾害预警] EQSC AccessToken 预热失败：未拿到有效令牌")
-            return False
-        except Exception as exc:
-            logger.warning(
-                f"[灾害预警] EQSC AccessToken 预热异常: {type(exc).__name__}: {exc}"
-            )
-            return False
-
-    def start_token_keepalive(self, *, register_task=None) -> None:
-        """启动 AccessToken 后台保活循环（幂等）。
-
-        在过期前提前调用 get_access_token 续期，保证状态面板在无台风业务时
-        也不会因内存 token 过期而长期显示“鉴权失效”。
-
-        Args:
-            register_task: 可选回调，用于把保活任务登记到服务级后台任务集合，
-                便于停机时统一回收（例如 DisasterService.register_background_task）。
-        """
-        if not self.is_channel_enabled:
-            return
-        if (
-            self._token_keepalive_task is not None
-            and not self._token_keepalive_task.done()
-        ):
-            return
-        self._token_keepalive_stop.clear()
-        self._token_keepalive_task = asyncio.create_task(
-            self._token_keepalive_loop(),
-            name="dw_eqsc_token_keepalive",
-        )
-        if callable(register_task):
-            try:
-                register_task(self._token_keepalive_task)
-            except Exception as exc:
-                logger.debug(
-                    f"[灾害预警] 注册 EQSC token 保活任务失败: {type(exc).__name__}: {exc}"
-                )
-
-    async def stop_token_keepalive(self) -> None:
-        """停止 AccessToken 后台保活循环。"""
-        self._token_keepalive_stop.set()
-        task = self._token_keepalive_task
-        self._token_keepalive_task = None
-        if task is None:
-            return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
-
-    async def _token_keepalive_loop(self) -> None:
-        """周期性确保内存 AccessToken 未过期。"""
-        logger.debug("[灾害预警] EQSC AccessToken 保活循环已启动")
-        try:
-            while not self._token_keepalive_stop.is_set():
-                if not self.is_channel_enabled:
-                    break
-
-                # 先尝试获取/续期（内部会在提前刷新窗口内真正打网络）
-                try:
-                    token = await self._token_manager.get_access_token()
-                except Exception as exc:
-                    logger.debug(
-                        f"[灾害预警] EQSC AccessToken 保活刷新异常: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                    token = None
-
-                if not token:
-                    sleep_seconds = self._token_keepalive_retry_interval
-                else:
-                    # 在真正过期前 access_advance_seconds 触发续期；
-                    # 再留一点缓冲，避免刚好踩在边界。
-                    remaining = self._token_manager.seconds_until_expiry()
-                    advance = float(
-                        getattr(self._token_manager, "_access_advance_seconds", 60)
-                        or 60
-                    )
-                    sleep_seconds = max(
-                        self._token_keepalive_min_interval,
-                        remaining - advance,
-                    )
-                    # 上限避免极端有效期导致长时间不检查配置变更
-                    sleep_seconds = min(sleep_seconds, 1800.0)
-
-                try:
-                    await asyncio.wait_for(
-                        self._token_keepalive_stop.wait(),
-                        timeout=sleep_seconds,
-                    )
-                    break
-                except asyncio.TimeoutError:
-                    continue
-        except asyncio.CancelledError:
-            raise
-        finally:
-            logger.debug("[灾害预警] EQSC AccessToken 保活循环已停止")
-
-    @staticmethod
-    def resolve_connection_counts(service: Any) -> tuple[int, int]:
-        """从灾害主服务安全解析 EQSC 连接计数，供状态/实时载荷复用。"""
-        if service is None:
-            return 0, 0
-        enrichment = getattr(service, "typhoon_enrichment_service", None)
-        if enrichment is None:
-            return 0, 0
-        getter = getattr(enrichment, "get_connection_counts", None)
-        if not callable(getter):
-            return 0, 0
-        try:
-            result = getter()
-        except Exception:
-            return 0, 0
-        if not isinstance(result, tuple) or len(result) != 2:
-            return 0, 0
-        try:
-            return int(result[0] or 0), int(result[1] or 0)
-        except (TypeError, ValueError):
-            return 0, 0
-
-    def _is_circuit_open(self) -> bool:
-        """检查熔断器是否处于开启状态。"""
-        if self._circuit_failures >= self._circuit_failure_threshold:
-            if time.time() < self._circuit_open_until:
-                return True
-            # 冷却期已过，重置熔断器
-            self._circuit_failures = 0
-        return False
-
-    def _record_success(self) -> None:
-        """记录一次成功，重置熔断器。"""
-        self._circuit_failures = 0
-
-    def _record_failure(self) -> None:
-        """记录一次失败，可能触发熔断器。"""
-        self._circuit_failures += 1
-        if self._circuit_failures >= self._circuit_failure_threshold:
-            self._circuit_open_until = time.time() + self._circuit_cooldown
-            logger.warning(
-                f"[灾害预警] EQSC 熔断器已开启，{self._circuit_cooldown}秒内跳过 EQSC 查询"
-            )
 
     def _extract_eqsc_track_data(
         self,
@@ -552,7 +311,7 @@ class TyphoonEnrichmentService:
             return envelope
 
         # 熔断器开启时直接回退
-        if self._is_circuit_open():
+        if self._channel_service.is_circuit_open():
             logger.debug("[灾害预警] EQSC 熔断器开启中，跳过富化直接回退")
             return envelope
 
@@ -568,7 +327,7 @@ class TyphoonEnrichmentService:
                 timeout=float(self._initial_timeout),
             )
             if result:
-                self._record_success()
+                self._channel_service.record_success()
                 logger.info(f"[灾害预警] 台风 {typhoon_id} EQSC 富化成功（首次查询）")
                 return self._merge_eqsc_into_event(envelope, result)
         except Exception as e:
@@ -586,7 +345,7 @@ class TyphoonEnrichmentService:
                 break
 
             # 检查熔断器
-            if self._is_circuit_open():
+            if self._channel_service.is_circuit_open():
                 logger.info(f"[灾害预警] 台风 {typhoon_id} EQSC 重试因熔断器开启而中止")
                 break
 
@@ -600,7 +359,7 @@ class TyphoonEnrichmentService:
             try:
                 result = await self._try_fetch_eqsc(typhoon_id, name, name_en)
                 if result:
-                    self._record_success()
+                    self._channel_service.record_success()
                     logger.info(
                         f"[灾害预警] 台风 {typhoon_id} EQSC 富化成功（第 {attempt} 次重试）"
                     )
@@ -614,7 +373,7 @@ class TyphoonEnrichmentService:
             delay = min(delay * 2, float(self._max_delay))
 
         # 所有重试均失败，回退到 FAN Studio 基础数据
-        self._record_failure()
+        self._channel_service.record_failure()
         logger.warning(
             f"[灾害预警] 台风 {typhoon_id} EQSC 富化失败，已用 FAN Studio 基础数据回退"
         )
@@ -638,7 +397,7 @@ class TyphoonEnrichmentService:
         """
         if not self.is_enabled:
             return None
-        if self._is_circuit_open():
+        if self._channel_service.is_circuit_open():
             logger.debug("[灾害预警] EQSC 熔断器开启中，跳过台风详情查询")
             return None
 
@@ -650,12 +409,12 @@ class TyphoonEnrichmentService:
                 use_cache=use_cache,
             )
             if result:
-                self._record_success()
+                self._channel_service.record_success()
                 return result
-            self._record_failure()
+            self._channel_service.record_failure()
             return None
         except Exception as e:
-            self._record_failure()
+            self._channel_service.record_failure()
             logger.error(f"[灾害预警] EQSC 台风详情查询异常: {e}")
             return None
 
@@ -674,7 +433,7 @@ class TyphoonEnrichmentService:
         if not self.is_enabled:
             return []
 
-        if self._is_circuit_open():
+        if self._channel_service.is_circuit_open():
             logger.debug("[灾害预警] EQSC 熔断器开启中，跳过历史台风列表查询")
             return []
 
@@ -691,23 +450,18 @@ class TyphoonEnrichmentService:
                 use_cache=use_cache,
             )
             if typhoon_list:
-                self._record_success()
+                self._channel_service.record_success()
                 logger.info(
                     f"[灾害预警] EQSC 历史台风列表查询成功，共 {len(typhoon_list)} 个台风"
                 )
             return typhoon_list
         except Exception as e:
-            self._record_failure()
+            self._channel_service.record_failure()
             logger.error(f"[灾害预警] EQSC 获取历史台风列表异常: {e}")
             return []
 
-    async def fetch_active_typhoons(self) -> list[dict[str, Any]]:
-        """兼容旧名：实际返回 EQSC 无参台风列表（含历史）。"""
-        return await self.fetch_history_typhoons()
-
     async def close(self) -> None:
-        """关闭富化服务，释放资源。"""
-        await self.stop_token_keepalive()
+        """关闭富化服务，释放 HTTP 会话（token 由通道服务负责）。"""
         await self._typhoon_client.close()
 
 
