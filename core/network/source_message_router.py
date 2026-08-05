@@ -499,6 +499,15 @@ class SourceMessageRouter:
                 "552": "p2p_tsunami",
             }.get(code or "")
 
+            # 识别到有效业务码即视为连接已进入业务流：
+            # 提前通知静默协调器记录首包（kind 按派发族区分），
+            # 覆盖首包无法解析出事件/无匹配数据源时 PENDING 不写 _pending_primed
+            # 导致 arm() 后门闩等不到回调而干等超时的情况。
+            if dispatch_family:
+                self._note_connection_bootstrap(
+                    connection_name, kind=f"p2p_first_payload:{code}"
+                )
+
             # 根据派发族获取所有关联的静态数据源候选 ID
             candidate_source_ids = (
                 get_source_ids_by_dispatch_family(dispatch_family)
