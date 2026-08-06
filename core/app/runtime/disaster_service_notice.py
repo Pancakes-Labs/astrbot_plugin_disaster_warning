@@ -23,6 +23,22 @@ class DisasterServiceNoticeService:
         "stop": "停止重连",
     }
 
+    # 连接内部数据源代号 -> 用户可读的展示名称。
+    # 与 SourceRuntimeQueryService._CONNECTION_DISPLAY_NAME 的展示口径保持一致，
+    # 避免把 openquake_mixed 这类内部代号直接暴露给用户。
+    _SOURCE_DISPLAY_MAP: dict[str, str] = {
+        "fan_studio_mixed": "FAN Studio",
+        "wolfx_mixed": "Wolfx",
+        "openquake_mixed": "OpenQuakeAPI",
+        "jma_p2p": "P2P地震情報",
+        "jma_p2p_info": "P2P地震情報",
+        "jma_tsunami_p2p": "P2P地震情報",
+        "jma_tsunami_eqsc": "EQSC API",
+        "cenc_ir_eqsc": "EQSC API",
+        "typhoon_eqsc": "EQSC API",
+        "snet_msil": "NIED S-Net",
+    }
+
     def __init__(self, service):
         # 与生命周期服务类似，这里只保留主服务引用，便于共享配置、状态与消息发送能力。
         self.service = service  # 主服务 DisasterWarningService 实例
@@ -120,6 +136,8 @@ class DisasterServiceNoticeService:
         """构建具体展示的离线通知富文本消息。"""
         # 阶段文案、重试次数和下一次重试时间会一起展示，
         # 目的是让使用者能在一条通知里快速判断当前处于“短时抖动”还是“长期离线”。
+        # 数据源代号先映射为展示名，避免把内部标识暴露给用户。
+        source_display = self._SOURCE_DISPLAY_MAP.get(data_source, data_source)
         stage_text = self._OFFLINE_STAGE_MAP.get(stage, stage)
         retry_part = (
             f"短时重试: {retry_count}" if retry_count is not None else "短时重试: 未知"
@@ -134,9 +152,8 @@ class DisasterServiceNoticeService:
         )
 
         message_lines = [
-            "⚠️ 数据源离线通知",
-            f"📡 连接: {connection_name}",
-            f"🧩 数据源: {data_source}",
+            f"⚠️ {source_display} 离线通知",
+            "",
             f"⛔ 状态: {stage_text}",
             f"📝 原因: {reason}",
             f"🔁 {retry_part}",
