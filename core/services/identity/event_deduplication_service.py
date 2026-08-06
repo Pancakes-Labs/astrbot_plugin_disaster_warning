@@ -453,6 +453,7 @@ class EventDeduplicationService:
                 f"(event={event_id})",
                 is_event_linked=True,
                 event_stream="tsunami",
+                is_silent_window=True,
             )
             return False
 
