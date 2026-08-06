@@ -236,6 +236,7 @@ class TsunamiParser(BaseParser):
                 f"[灾害预警] 海啸预警解析成功: {getattr(envelope.event, 'title', '')} ({getattr(envelope.event, 'level', '')}), 发布时间: {getattr(envelope.event, 'issued_at', None)}",
                 is_event_linked=True,
                 event_stream="tsunami",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -407,6 +408,7 @@ class JmaTsunamiP2PParser(BaseParser):
                 f"[灾害预警] JMA海啸预报解析成功(P2P): {title}, 时间: {issue_time}",
                 is_event_linked=True,
                 event_stream="tsunami",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -676,6 +678,7 @@ class JmaTsunamiEqscParser(BaseParser):
                 f"是否为训练报：{is_training}, 最高级别：{max_grade})",
                 is_event_linked=True,
                 event_stream="tsunami",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:

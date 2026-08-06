@@ -160,7 +160,7 @@ def _load_icons_base64(icon_dir: str) -> dict[str, str]:
                     ).decode()
             except Exception as e:
                 logger.error(f"[灾害预警] 加载 {fname} 失败: {e}")
-    logger.info(f"[灾害预警] SVG 图标加载: {len(result)}/{len(_SNET_ICON_FILES)}")
+    logger.debug(f"[灾害预警] SVG 图标加载: {len(result)}/{len(_SNET_ICON_FILES)}")
     return result
 
 

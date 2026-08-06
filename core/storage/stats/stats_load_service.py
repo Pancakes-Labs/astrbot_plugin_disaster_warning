@@ -53,7 +53,7 @@ class StatsLoadService:
             rebuild_events = await self.manager.db.get_statistics_rebuild_events()
             if db_events:
                 # 数据库是当前版本的主要历史来源，命中后优先以数据库结果覆盖近期事件缓存。
-                logger.info(f"[灾害预警] 从数据库加载了 {len(db_events)} 条历史记录")
+                logger.debug(f"[灾害预警] 从数据库加载了 {len(db_events)} 条历史记录")
                 self.manager.stats["recent_pushes"] = db_events
                 self._restore_recorded_ids_from_db(db_events)
                 self._restore_time_series_counts(time_series_counts)

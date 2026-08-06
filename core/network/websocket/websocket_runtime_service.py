@@ -91,7 +91,7 @@ class WebSocketRuntimeService:
                 total=self.manager.config.get("http_timeout", 30)
             )
             self.manager.session = aiohttp.ClientSession(timeout=timeout)
-            logger.info("[灾害预警] WebSocket 管理器已启动")
+            logger.debug("[灾害预警] WebSocket 管理器已启动")
 
         if not self.manager.message_handlers:
             logger.warning("[灾害预警] 没有注册任何消息处理器")
@@ -105,7 +105,7 @@ class WebSocketRuntimeService:
                 return
             self.manager._stopping = True
             try:
-                logger.info("[灾害预警] WebSocket 管理器正在停止...")
+                logger.debug("[灾害预警] WebSocket 管理器正在停止...")
                 self.manager.running = False
 
                 # 1. 优先关闭所有重连等待任务，防止在停止期间因为连接关闭而触发重连，陷入恶性循环
@@ -146,6 +146,6 @@ class WebSocketRuntimeService:
                 self.manager.fallback_retry_counts.clear()
                 self.manager.last_heartbeat_time.clear()
 
-                logger.info("[灾害预警] WebSocket 管理器已停止")
+                logger.debug("[灾害预警] WebSocket 管理器已停止")
             finally:
                 self.manager._stopping = False

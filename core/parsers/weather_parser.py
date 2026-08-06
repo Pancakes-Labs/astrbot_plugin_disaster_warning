@@ -198,6 +198,7 @@ class WeatherAlarmParser(BaseParser):
                 f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 生效时间: {issue_time}",
                 is_event_linked=True,
                 event_stream="weather_alarm",
+                is_silent_window=True,
             )
 
             return envelope

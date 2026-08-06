@@ -295,7 +295,7 @@ class EqscTokenManager:
 
             self._access_token = access_token
             self._access_token_expires_at = time.time() + expires_seconds
-            logger.info(
+            logger.debug(
                 f"[灾害预警] EQSC AccessToken 创建成功，"
                 f"masked={self._mask_token(access_token)}，有效期 {expires_seconds} 秒"
             )

@@ -144,7 +144,7 @@ class EqscCencIntensityPollService:
             return
         self._task = asyncio.create_task(self._poll_loop(), name="dw_eqsc_cenc_ir_poll")
         self.service.scheduled_tasks.append(self._task)
-        logger.info("[灾害预警] EQSC CENC 烈度速报轮询任务已启动")
+        logger.debug("[灾害预警] EQSC CENC 烈度速报轮询任务已启动")
 
     async def stop(self) -> None:
         """停止后台轮询并释放客户端 HTTP 会话。
@@ -271,6 +271,18 @@ class EqscCencIntensityPollService:
         if event is None:
             return False
 
+        # 去重只读预判：与流水线 should_push_event 的跨源优先级判定
+        # （_should_push_cenc_intensity_report）完全对齐，但不写缓存。
+        # 被过滤（低优先级被高优先级源占用 / 同优先级先到先得）的事件
+        # 不计入本轮推送统计，仅提交列表指纹避免下轮重复拉详情。
+        deduplicator = getattr(
+            getattr(self.service, "message_manager", None), "deduplicator", None
+        )
+        peek = getattr(deduplicator, "peek_cenc_intensity_should_push", None)
+        if callable(peek) and not peek(event):
+            self._remember_event(event_id, list_fp)
+            return False
+
         # _handle_disaster_event 内部吞掉异常并返回 False；
         # 仅成功处理后才提交指纹，避免“失败当完成”导致漏重试。
         handled = await self.service._handle_disaster_event(event)
@@ -354,6 +366,7 @@ class EqscCencIntensityPollService:
                 f"[灾害预警] EQSC CENC 烈度速报轮询本轮推送 {emitted} 条",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
         else:
             plugin_logger.debug("[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送")

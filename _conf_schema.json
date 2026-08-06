@@ -1147,6 +1147,12 @@
             "hint": "开启后忽略已停止编报的台风。",
             "default": true
           },
+          "typhoon_deactivate_notify": {
+            "description": "台风停编通知",
+            "type": "bool",
+            "hint": "开启后，台风首次停止编报时即使核心参数未变化也会推送一条停编通知。不受时间规则以外的规则链控制。",
+            "default": true
+          },
           "combine_mode": {
             "description": "基础条件组合方式",
             "type": "string",
@@ -1570,6 +1576,12 @@
         "type": "bool",
         "hint": "开启后，插件在建连与首轮数据同步完成前自动忽略事件推送、原始日志与统计，用于过滤启动噪音。关闭后事件立即进入正常推送链路。",
         "default": true
+      },
+      "silent_startup_mute_event_logs": {
+        "description": "静默启动期间丢弃事件流日志",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，处于启动静默期的事件流日志将被整体丢弃，不打印到控制台。静默期结束后恢复正常。"
       }
     }
   },

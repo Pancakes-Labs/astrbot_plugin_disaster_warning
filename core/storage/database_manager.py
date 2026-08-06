@@ -85,7 +85,7 @@ class DatabaseManager:
             cursor = await self.connection.cursor()
             await self._ensure_schema(cursor)
             await self.connection.commit()
-            logger.info(f"[灾害预警] 数据库初始化完成: {self.db_path}")
+            logger.debug(f"[灾害预警] 数据库初始化完成: {self.db_path}")
         except Exception as e:
             logger.error(f"[灾害预警] 数据库初始化失败: {e}")
             raise
@@ -2280,7 +2280,7 @@ class DatabaseManager:
         if self.connection:
             await self.connection.close()
             self.connection = None
-            logger.info("[灾害预警] 数据库连接已关闭")
+            logger.debug("[灾害预警] 数据库连接已关闭")
 
     async def __aenter__(self):
         """异步上下文管理器入口"""

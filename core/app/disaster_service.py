@@ -11,6 +11,7 @@
 import asyncio
 import os
 import traceback
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from astrbot.api import logger
@@ -103,6 +104,8 @@ class DisasterWarningService:
         self.config = config  # 插件的全局配置字典
         self.context = context  # 框架上下文环境
         self.running = False  # 运行状态标识
+        # 服务初始化起点（启动耗时统计用），在 initialize() 开始时记录。
+        self.init_started_at = None
         # 启停锁用于避免重复启动或并发停止时出现状态竞争。
         self._start_lock = asyncio.Lock()
         self._stop_lock = asyncio.Lock()
@@ -200,6 +203,14 @@ class DisasterWarningService:
         self.startup_silence = StartupSilenceCoordinator()
         self.startup_silence.bind_service(self)
         self.message_logger.set_silence_checker(self.is_silencing)
+        # 静默期事件流日志抑制也需要感知"当前是否处于静默期"，
+        # 这样静默结束后事件流日志能立即恢复打印，不会被永久屏蔽。
+        from ...utils.plugin_logger import plugin_logger
+
+        plugin_logger.set_silence_checker(self.is_silencing)
+        # WebSocket 连接成功日志同样复用静默判定：启动静默期降级为 DEBUG，
+        # 静默结束后恢复 INFO，避免建连阶段刷屏同时保留重连成功反馈。
+        self.ws_manager.set_silence_checker(self.is_silencing)
         self._setup_runtime_services()
 
     def _setup_runtime_services(self) -> None:
@@ -310,7 +321,8 @@ class DisasterWarningService:
     async def initialize(self):
         """初始化服务。"""
         try:
-            logger.info("[灾害预警] 正在初始化灾害预警服务...")
+            self.init_started_at = datetime.now(timezone.utc)
+            logger.debug("[灾害预警] 正在初始化灾害预警服务...")
             # 初始化阶段只做“静态装配”：校验注册表、加载基础数据、注册解析器调度、生成连接计划。
             validate_catalog_parser_names()
             self._check_registry_integrity()
@@ -334,7 +346,7 @@ class DisasterWarningService:
             poll_enabled = bool(typhoon_poll is not None and typhoon_poll.is_enabled())
             channel = self.eqsc_channel_service
             if poll_enabled:
-                logger.info("[灾害预警] EQSC 台风轮询服务已就绪")
+                logger.debug("[灾害预警] EQSC 台风轮询服务已就绪")
             elif getattr(channel, "is_channel_enabled", False):
                 logger.info(
                     "[灾害预警] EQSC 通道已启用，但台风轮询子开关关闭；"
@@ -342,7 +354,7 @@ class DisasterWarningService:
                 )
             else:
                 logger.debug("[灾害预警] EQSC 数据源未启用，相关数据源将不可用")
-            logger.info("[灾害预警] 灾害预警服务初始化完成")
+            logger.debug("[灾害预警] 灾害预警服务初始化完成")
 
             # 注意：EQSC 历史台风重建不得在 initialize() 中同步/阻塞执行。
             # 该阶段会阻塞后续 start()，而 token 网络请求可能长达数十秒。

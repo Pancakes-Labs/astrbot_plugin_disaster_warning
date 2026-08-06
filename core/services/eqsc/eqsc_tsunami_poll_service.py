@@ -133,7 +133,7 @@ class EqscTsunamiPollService:
         # 每轮会自行判断并跳过。
         self._task = asyncio.create_task(self._poll_loop(), name="dw_eqsc_tsunami_poll")
         self.service.scheduled_tasks.append(self._task)
-        logger.info("[灾害预警] EQSC 海啸轮询任务已启动")
+        logger.debug("[灾害预警] EQSC 海啸轮询任务已启动")
 
     async def stop(self) -> None:
         """停止后台轮询并释放客户端。"""

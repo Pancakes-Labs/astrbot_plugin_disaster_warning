@@ -25,10 +25,20 @@ class PluginLogger:
 
     def __init__(self) -> None:
         self._config: dict[str, Any] | None = None
+        self._silence_checker = None
 
     def set_config(self, config: dict[str, Any]) -> None:
         """注入最新的插件配置。"""
         self._config = config
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调（通常绑定主服务的 is_silencing）。
+
+        静默期事件流日志抑制依赖该回调动态判断当前是否仍在静默期：
+        只有“配置开启 且 当前确实处于静默期”才会丢弃日志，
+        静默结束后立即恢复事件流日志打印。
+        """
+        self._silence_checker = checker
 
     def _resolve_stream_action(self, event_stream: str | None) -> str | None:
         """解析事件流日志级别覆盖，返回 "debug" / "mute" / None。
@@ -65,14 +75,55 @@ class PluginLogger:
 
         return None
 
+    def _is_currently_silencing(self) -> bool:
+        """当前是否处于启动静默期（委托主服务 is_silencing 回调）。"""
+        checker = self._silence_checker
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+
+    def _should_suppress_for_silence(self) -> bool:
+        """静默启动期间是否丢弃事件流日志。
+
+        两个条件必须同时满足才丢弃：
+        1. 配置 debug_config.silent_startup_mute_event_logs 开启（默认 true）；
+        2. 当前确实处于启动静默期（动态查询 is_silencing）。
+
+        静默结束后第 2 条自动变为 False，事件流日志立即恢复打印，
+        不会出现“静默结束后日志永远消失”的问题。
+        """
+        if not self._config or not hasattr(self._config, "get"):
+            return False
+        debug_config = self._config.get("debug_config", {})
+        if not hasattr(debug_config, "get"):
+            debug_config = {}
+        if not bool(debug_config.get("silent_startup_mute_event_logs", True)):
+            return False
+        return self._is_currently_silencing()
+
     def _should_suppress_or_downgrade(
-        self, is_event_linked: bool, event_stream: str | None = None
+        self,
+        is_event_linked: bool,
+        event_stream: str | None = None,
+        is_silent_window: bool | None = None,
     ) -> tuple[bool, str]:
         """
         判断是否需要对当前日志进行处理。
         返回 (是否拦截/降级, 具体行为: "debug" | "mute" | "none")
         """
-        if not is_event_linked or not self._config:
+        if not self._config:
+            return False, "none"
+
+        # 静默期抑制：仅对显式标记 is_silent_window=True 的事件流日志生效，
+        # 开启配置 且 当前确实处于静默期时整体丢弃（mute），不降级为 DEBUG。
+        # 静默结束后 _should_suppress_for_silence() 返回 False，日志立即恢复。
+        if is_silent_window is True and self._should_suppress_for_silence():
+            return True, "mute"
+
+        if not is_event_linked:
             return False, "none"
 
         # 优先检查事件流级别覆盖（独立于 log_mode 总开关）
@@ -107,6 +158,7 @@ class PluginLogger:
         *args: Any,
         is_event_linked: bool = False,
         event_stream: str | None = None,
+        is_silent_window: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """记录 INFO 级别日志。
@@ -115,9 +167,11 @@ class PluginLogger:
             is_event_linked: 标记为事件流相关日志，受日志降级控制。
             event_stream: 事件流类型标签（如 "weather_alarm"、"global_quake"），
                 用于细粒度日志级别覆盖。仅在 is_event_linked=True 时生效。
+            is_silent_window: 标记当前处于启动静默期。配合配置项
+                silent_startup_mute_event_logs 使用：开启后静默期事件流日志整体丢弃。
         """
         should_process, action = self._should_suppress_or_downgrade(
-            is_event_linked, event_stream
+            is_event_linked, event_stream, is_silent_window
         )
         if should_process:
             if action == "debug":
@@ -132,15 +186,17 @@ class PluginLogger:
         *args: Any,
         is_event_linked: bool = False,
         event_stream: str | None = None,
+        is_silent_window: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """记录 WARNING 级别日志。"""
         should_process, action = self._should_suppress_or_downgrade(
-            is_event_linked, event_stream
+            is_event_linked, event_stream, is_silent_window
         )
         if should_process:
             if action == "debug":
                 logger.debug(msg, *args, **kwargs)
+            # action == "mute" 则直接屏蔽
         else:
             logger.warning(msg, *args, **kwargs)
 
@@ -148,9 +204,32 @@ class PluginLogger:
         """记录 ERROR 级别日志。错误日志由于其关键性，不受简洁模式限制。"""
         logger.error(msg, *args, **kwargs)
 
-    def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        """记录 DEBUG 级别日志。"""
-        logger.debug(msg, *args, **kwargs)
+    def debug(
+        self,
+        msg: str,
+        *args: Any,
+        is_event_linked: bool = False,
+        event_stream: str | None = None,
+        is_silent_window: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """记录 DEBUG 级别日志。
+
+        支持事件流覆盖参数（is_event_linked / event_stream / is_silent_window）：
+        与 info/warning 共用 _should_suppress_or_downgrade 判定，使事件流日志
+        即使在 DEBUG 级别下也能被"事件流屏蔽"（完全丢弃）控制。
+        默认情况（is_event_linked=False）行为与原先一致：直接打印 debug。
+        """
+        should_process, action = self._should_suppress_or_downgrade(
+            is_event_linked, event_stream, is_silent_window
+        )
+        if should_process:
+            # action == "mute" 时整体丢弃（插件自处理屏蔽）；
+            # action == "debug" 时保持 debug 级别输出。
+            if action != "mute":
+                logger.debug(msg, *args, **kwargs)
+        else:
+            logger.debug(msg, *args, **kwargs)
 
 
 # 全局单例对象

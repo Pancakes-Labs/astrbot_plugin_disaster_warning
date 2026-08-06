@@ -67,6 +67,9 @@ class WeatherAggregationService:
         self._flush_timers: dict[str, asyncio.TimerHandle] = {}
         # 后台刷新任务持有集合：防止任务在完成前被垃圾回收，并在结束时清理引用。
         self._background_tasks: set[asyncio.Task] = set()
+        # 最后一次成功推送的条数与目标会话（停机时用于汇总大屏"最后转发"指标）。
+        self.last_flushed_count: int | None = None
+        self.last_flushed_session: str | None = None
         # 推送回调，由 EventPipeline 注入
         self._flush_callback = None
         # 发送失败后放回缓冲区的重试次数限制，避免停机/网络异常时无限循环
@@ -259,6 +262,7 @@ class WeatherAggregationService:
                 f"({session}), 缓冲 {len(buffer)} 条",
                 is_event_linked=True,
                 event_stream="weather_alarm",
+                is_silent_window=True,
             )
             self._spawn_flush_task(session)
             return True
@@ -352,6 +356,9 @@ class WeatherAggregationService:
             await self._flush_callback(session, entries, self._config, mode="forward")
             # 发送成功后清空该会话的重试计数
             self._flush_retry_counts.pop(session, None)
+            # 记录最后一批成功推送的条数与目标会话，供停止汇总大屏展示。
+            self.last_flushed_count = len(entries)
+            self.last_flushed_session = session
         except Exception as e:
             # 合并转发失败：仅当平台确实不支持合并转发时，才允许降级为逐条发送。
             # 注意：不能仅凭一次发送异常就判定"平台不支持"——插件停止/网络瞬时

@@ -167,7 +167,7 @@ class ConnectionHealthService:
         except Exception as exc:
             logger.warning(f"[灾害预警] 连接健康可用性重算失败: {exc}")
         self._task = asyncio.create_task(self._loop())
-        logger.info("[灾害预警] 连接健康采样服务已启动")
+        logger.debug("[灾害预警] 连接健康采样服务已启动")
 
     async def stop(self) -> None:
         """停止后台采样循环。"""
@@ -182,7 +182,7 @@ class ConnectionHealthService:
                 pass
             except Exception as exc:
                 logger.warning(f"[灾害预警] 连接健康采样停止时异常: {exc}")
-        logger.info("[灾害预警] 连接健康采样服务已停止")
+        logger.debug("[灾害预警] 连接健康采样服务已停止")
 
     async def _hydrate_open_incidents(self) -> None:
         """从数据库恢复各连接组未关闭事故到内存 tracker。"""

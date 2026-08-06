@@ -47,7 +47,7 @@ class DisasterServiceLifecycleService:
                 self.service.start_time = datetime.now(
                     timezone.utc
                 )  # 服务启动UTC时间戳
-                logger.info("[灾害预警] 正在启动灾害预警服务...")
+                logger.debug("[灾害预警] 正在启动灾害预警服务...")
 
                 # 武装启动静默：在真正建连/轮询前注册门闩。
                 # 首次启动/进程重启时 AstrBot 尚未加载完成，静默武装推迟到
@@ -58,7 +58,7 @@ class DisasterServiceLifecycleService:
                     # 待武装期间协调器进入 PENDING：AstrBot 加载窗口内的事件
                     # 仍被吸收播种，但不会开始计时/就绪判定。
                     self._begin_deferred_silence()
-                    logger.info(
+                    logger.debug(
                         "[灾害预警] 静默启动已推迟，等待 AstrBot 加载完成钩子触发"
                     )
                 else:
@@ -141,7 +141,7 @@ class DisasterServiceLifecycleService:
                 if hasattr(self.service, "schedule_typhoon_db_rebuild"):
                     self.service.schedule_typhoon_db_rebuild()
 
-                logger.info("[灾害预警] 灾害预警服务已启动")
+                logger.debug("[灾害预警] 灾害预警服务已启动")
             except Exception as e:
                 # 启动失败时必须回滚运行标记，避免外部误判服务已可用。
                 logger.error(f"[灾害预警] 启动服务失败: {e}")
@@ -281,7 +281,9 @@ class DisasterServiceLifecycleService:
                 return
             self.service._stopping = True
             try:
-                logger.info("[灾害预警] 正在停止灾害预警服务...")
+                # 记录停止流程起始时间，供停止汇总大屏统计停机耗时。
+                self.service.stop_started_at = datetime.now(timezone.utc)
+                logger.debug("[灾害预警] 正在停止灾害预警服务...")
                 was_running = self.service.running
                 # 提前将运行标记切为 False，阻止新任务继续按“服务运行中”路径工作。
                 self.service.running = False
@@ -390,7 +392,7 @@ class DisasterServiceLifecycleService:
                     # 重载插件后需要允许统计管理器重新建库/重载，否则会保留“已初始化”假状态。
                     self.service.statistics_manager._db_initialized = False
 
-                logger.info("[灾害预警] 灾害预警服务已停止")
+                logger.debug("[灾害预警] 灾害预警服务已停止")
             except Exception as e:
                 logger.error(f"[灾害预警] 停止服务时出错: {e}")
                 if self.service._telemetry and self.service._telemetry.enabled:

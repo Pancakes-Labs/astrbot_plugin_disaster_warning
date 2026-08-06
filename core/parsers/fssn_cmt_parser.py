@@ -148,6 +148,7 @@ class FssnCmtParser(BaseParser):
                 f"(主选 M {domain_event.magnitude or 0.0}), {linked_desc}",
                 is_event_linked=is_event_linked,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
 
