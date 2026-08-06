@@ -414,6 +414,7 @@ class GlobalQuakeParser(BaseParser):
                 f"时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream="global_quake",
+                is_silent_window=True,
             )
 
             return envelope

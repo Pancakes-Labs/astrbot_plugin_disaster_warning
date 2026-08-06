@@ -1104,6 +1104,7 @@ class BrowserManager:
                                             f"[灾害预警] {label}渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒",
                                             is_event_linked=True,
                                             event_stream=event_stream,
+                                            is_silent_window=True,
                                         )
                                         return output_path
                                     else:
