@@ -37,6 +37,11 @@ class WebSocketManager:
         self.message_logger = message_logger
         self._telemetry = telemetry
 
+        # 启动静默期日志抑制回调（由主服务注入 is_silencing）：
+        # 静默期间连接成功日志降级为 DEBUG，静默结束后恢复 INFO，
+        # 避免启动建连阶段刷屏，同时保留运行期重连成功反馈。
+        self._silence_checker = None
+
         # 共享状态维护
         self.connections: dict[str, ClientWebSocketResponse] = {}
         self.message_handlers: dict[str, Callable] = {}
@@ -65,6 +70,31 @@ class WebSocketManager:
         """注册指定连接前缀对应的消息处理器。"""
         self.message_handlers[connection_name] = handler
         logger.debug(f"[灾害预警] 注册处理器: {connection_name}")
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调。
+
+        静默期间连接成功日志降级为 DEBUG，静默结束后恢复 INFO，
+        避免启动建连阶段刷屏，同时保留运行期重连成功反馈。
+        """
+        self._silence_checker = checker
+
+    def _is_silencing(self) -> bool:
+        """当前是否处于启动静默期（委托主服务回调）。"""
+        checker = self._silence_checker
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+
+    def _log_connection_success(self, name: str) -> None:
+        """记录连接成功日志：启动静默期降级为 DEBUG，静默结束后恢复 INFO。"""
+        if self._is_silencing():
+            logger.debug(f"[灾害预警] WebSocket 连接成功: {name}")
+        else:
+            logger.info(f"[灾害预警] WebSocket 连接成功: {name}")
 
     async def connect(
         self,
@@ -166,7 +196,7 @@ class WebSocketManager:
                 self.connection_info[name].pop("short_retry_notified", None)
                 self.connection_info[name].pop("quota_hit", None)
                 self.connection_info[name].pop("quota_deferred", None)
-                logger.info(f"[灾害预警] WebSocket 连接成功: {name}")
+                self._log_connection_success(name)
                 on_established = getattr(self, "on_connection_established", None)
                 if callable(on_established):
                     try:
@@ -230,7 +260,7 @@ class WebSocketManager:
 
         except asyncio.CancelledError:
             # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出
-            logger.info(f"[灾害预警] WebSocket 连接任务被取消: {name}")
+            logger.debug(f"[灾害预警] WebSocket 连接任务被取消: {name}")
             await self._release_existing_connection(
                 name,
                 reason="连接任务取消",
