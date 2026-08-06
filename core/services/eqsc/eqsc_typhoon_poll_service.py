@@ -20,7 +20,6 @@ from ...domain.typhoon import (
     build_typhoon_event_envelope,
     clean_text,
     normalize_typhoon_id,
-    to_float,
 )
 from ...network.http.eqsc_token_manager import EqscTokenManager
 from ...network.http.eqsc_typhoon_client import EqscTyphoonClient
@@ -39,7 +38,10 @@ class EqscTyphoonPollService:
         self.service = service
         self._source_runtime_query = SourceRuntimeQueryService(service.config)
         self._task: asyncio.Task | None = None
-        self._last_fingerprints: dict[str, str] = {}
+        # 上一轮轮询中处于活跃态的台风 ID 集合。
+        # 用于识别"上一轮活跃 → 本轮停编"的台风，放行一次以推送停编通知；
+        # 早已停编的历史台风不在集合中，不会进入投递，避免每轮刷屏。
+        self._last_active_ids: set[str] = set()
         self._last_success_at: float | None = None
         self._consecutive_failures = 0
         self._client: EqscTyphoonClient | None = None
@@ -131,12 +133,17 @@ class EqscTyphoonPollService:
 
     def get_runtime_status(self) -> dict[str, Any]:
         """供健康面板读取的轻量运行态。"""
+        deduplicator = getattr(
+            getattr(self.service, "message_manager", None), "deduplicator", None
+        )
+        typhoon_cache = getattr(deduplicator, "_typhoon_cache", None)
+        tracked_typhoons = len(typhoon_cache) if isinstance(typhoon_cache, dict) else 0
         return {
             "running": self.running,
             "enabled": self.is_enabled(),
             "last_success_at": self._last_success_at,
             "consecutive_failures": int(self._consecutive_failures),
-            "tracked_typhoons": len(self._last_fingerprints),
+            "tracked_typhoons": tracked_typhoons,
             "poll_interval_seconds": self._resolve_interval(),
         }
 
@@ -213,31 +220,6 @@ class EqscTyphoonPollService:
         # 缺省字段时保守视为活跃，避免漏推
         return True
 
-    @staticmethod
-    def _build_fingerprint_from_event(typhoon: TyphoonEvent) -> str:
-        """与去重服务一致的核心参数指纹。"""
-        return "|".join(
-            [
-                str(typhoon.typhoon_type or "").strip(),
-                EqscTyphoonPollService._normalize_value(typhoon.latitude),
-                EqscTyphoonPollService._normalize_value(typhoon.longitude),
-                EqscTyphoonPollService._normalize_value(typhoon.wind_speed),
-                EqscTyphoonPollService._normalize_value(typhoon.pressure),
-                str(typhoon.move_direction or "").strip(),
-                EqscTyphoonPollService._normalize_value(typhoon.move_speed),
-                EqscTyphoonPollService._normalize_value(typhoon.radius7),
-                EqscTyphoonPollService._normalize_value(typhoon.radius10),
-                "1" if bool(typhoon.is_active) else "0",
-            ]
-        )
-
-    @staticmethod
-    def _normalize_value(value: Any) -> str:
-        number = to_float(value)
-        if number is None:
-            return ""
-        return f"{number:.4f}"
-
     def _build_live_envelope(self, raw: dict[str, Any]):
         """从 EQSC 原始对象构建实时推送事件。"""
         envelope = build_typhoon_event_envelope(
@@ -256,21 +238,43 @@ class EqscTyphoonPollService:
         return envelope
 
     def _filter_active_items(self, typhoon_list: list[Any]) -> list[dict[str, Any]]:
-        """从列表中筛出可处理的活跃台风对象。"""
-        active_items: list[dict[str, Any]] = []
+        """筛出本轮可处理的台风对象：活跃台风 + 刚停编台风。
+
+        EQSC 台风列表同时包含活跃与历史台风（客户端文档已注明）：
+        - 活跃台风（isActive=True）始终进入投递；
+        - 上一轮活跃、本轮停编（isActive=False）的台风放行一次，
+          用于推送"停编通知"（停编时即使核心参数未变化也应推一条）；
+        - 早已停编的历史台风不在 _last_active_ids 中，不进入投递，
+          由 time_rule 兜底过滤，避免冷启动/每轮刷屏。
+        """
+        current_active_ids: set[str] = set()
+        candidates: list[dict[str, Any]] = []
         for item in typhoon_list:
             if not isinstance(item, dict):
                 continue
-            if not clean_text(item.get("id")):
+            typhoon_id = clean_text(item.get("id"))
+            if not typhoon_id:
                 continue
-            if not self._is_active_typhoon(item):
-                continue
-            active_items.append(item)
-        return active_items
+            if self._is_active_typhoon(item):
+                current_active_ids.add(typhoon_id)
+                candidates.append(item)
+            elif typhoon_id in self._last_active_ids:
+                # 刚停编：放行一次以推送停编通知
+                candidates.append(item)
+
+        # 记录本轮活跃集合，供下一轮识别"刚停编"台风。
+        self._last_active_ids = current_active_ids
+        return candidates
 
     async def _process_typhoon_updates(self, active_items: list[dict[str, Any]]) -> int:
-        """按指纹去重后投递变化事件；单事件失败不中断整批。"""
-        seen_ids: set[str] = set()
+        """投递活跃台风事件；单事件失败不中断整批。
+
+        去重判定与 FAN 触发路径及事件流水线完全统一：
+        统一使用去重服务的只读判定 peek_typhoon_should_push
+        （基于 _typhoon_cache 与 _generate_typhoon_fingerprint），
+        不再在轮询侧自建指纹缓存，避免「去重器判定过滤、
+        轮询侧却统计为推送」的口径矛盾。
+        """
         emitted = 0
         for raw in active_items:
             envelope = self._build_live_envelope(raw)
@@ -281,22 +285,13 @@ class EqscTyphoonPollService:
             typhoon_id = normalize_typhoon_id(typhoon.typhoon_id)
             if not typhoon_id:
                 continue
-            seen_ids.add(typhoon_id)
 
-            fingerprint = self._build_fingerprint_from_event(typhoon)
-            if self._last_fingerprints.get(typhoon_id) == fingerprint:
-                continue
-
-            # 启动静默期：提交轮询侧指纹（避免静默结束后整批误报），
-            # 并调用 _handle_disaster_event 让其内部的 _seed_event_for_silence
-            # 统一播种去重服务的 _typhoon_cache，避免静默结束后首次推送
-            # 因去重缓存为空而被误放行（重载后重复推送的根因）。
+            # 启动静默期：不推送、不统计，仅调用 _handle_disaster_event
+            # 让其内部的 _seed_event_for_silence 播种去重服务的 _typhoon_cache，
+            # 避免静默结束后首次推送因去重缓存为空而被误放行（重载后重复推送的根因）。
             is_silence = getattr(self.service, "is_silencing", None)
             if callable(is_silence) and is_silence():
-                self._last_fingerprints[typhoon_id] = fingerprint
                 try:
-                    # 静默期 _handle_disaster_event 会播种去重指纹并返回 True，
-                    # 不会真正推送；但仍提交轮询侧指纹防止静默结束后重推。
                     await self.service._handle_disaster_event(envelope)
                 except Exception as exc:
                     logger.debug(
@@ -305,11 +300,21 @@ class EqscTyphoonPollService:
                     )
                 continue
 
+            # 统一去重判定：与 _handle_disaster_event 内 FAN 触发路径一致，
+            # 使用去重服务的只读判定（不写缓存；真正写入由流水线
+            # should_push_event 在放行时完成）。被过滤者不计入本轮推送统计。
+            deduplicator = getattr(
+                getattr(self.service, "message_manager", None), "deduplicator", None
+            )
+            peek = getattr(deduplicator, "peek_typhoon_should_push", None)
+            if callable(peek) and not peek(envelope):
+                continue
+
             try:
                 handled = await self.service._handle_disaster_event(envelope)
             except Exception as exc:
                 # 单台风软失败：记录后继续处理其余活跃台风；
-                # 不提交指纹，下一轮可重试该台风。
+                # 去重缓存未被写入，下一轮可重试该台风。
                 logger.error(
                     f"[灾害预警] EQSC 台风事件推送失败，已跳过并继续本轮: "
                     f"ID 为 {typhoon_id}, 错误信息：{exc}"
@@ -321,13 +326,8 @@ class EqscTyphoonPollService:
                     f"ID 为 {typhoon_id}"
                 )
                 continue
-            self._last_fingerprints[typhoon_id] = fingerprint
             emitted += 1
 
-        # 清理已消亡台风的指纹缓存，避免无限增长。
-        stale_ids = [key for key in self._last_fingerprints if key not in seen_ids]
-        for key in stale_ids:
-            self._last_fingerprints.pop(key, None)
         return emitted
 
     def _notify_silence_fetch_completed(self, *, success: bool) -> None:

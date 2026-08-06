@@ -713,6 +713,8 @@ class ConfigValidator:
 
         ConfigValidator._ensure_bool(typhoon_filter, "enabled", False)
         ConfigValidator._ensure_bool(typhoon_filter, "only_active", True)
+        # 台风停编通知开关：默认开启，停编时即使核心参数未变化也推送一条。
+        ConfigValidator._ensure_bool(typhoon_filter, "typhoon_deactivate_notify", True)
 
         valid_levels = [
             "热带低压",

@@ -59,12 +59,33 @@ class TyphoonRule(BaseRule):
         }
 
         # 1) 活跃状态
-        if typhoon_filter.get("only_active", True) and not bool(domain_event.is_active):
-            return RuleDecision.reject(
-                reason="台风活跃状态过滤",
-                detail="该台风已停止编报，且仅推送活跃台风",
-                context=decision_context,
+        if not bool(domain_event.is_active):
+            # 停编通知：typhoon_filter.typhoon_deactivate_notify 开启时直接放行，
+            # 不受名称/强度/距离等过滤约束（停编即视为值得通知）。
+            # 早已停编的历史台风由前置 time_rule 按事件时效过滤，避免刷屏。
+            deactivate_notify = bool(
+                typhoon_filter.get("typhoon_deactivate_notify", True)
             )
+            if deactivate_notify:
+                # 仍尽量补充本地距离信息供展示复用。
+                estimation = self._build_location_estimation(
+                    domain_event,
+                    typhoon_filter,
+                    context.runtime_config,
+                )
+                if estimation:
+                    context.extras["typhoon_local_estimation"] = estimation
+                return RuleDecision.accept(
+                    reason="台风停编通知",
+                    detail="该台风已停止编报",
+                    context=decision_context,
+                )
+            if typhoon_filter.get("only_active", True):
+                return RuleDecision.reject(
+                    reason="台风活跃状态过滤",
+                    detail="该台风已停止编报，且仅推送活跃台风",
+                    context=decision_context,
+                )
 
         # 2) 名称黑白名单
         name_decision = self._evaluate_name_lists(domain_event, typhoon_filter)
