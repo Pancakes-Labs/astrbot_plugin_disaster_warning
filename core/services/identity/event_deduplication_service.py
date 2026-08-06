@@ -185,6 +185,10 @@ class EventDeduplicationService:
                 cls._normalize_fingerprint_value(typhoon.move_speed),
                 cls._normalize_fingerprint_value(typhoon.radius7),
                 cls._normalize_fingerprint_value(typhoon.radius10),
+                # 活跃状态参与指纹：停编（isActive 翻转）即使核心参数未变化
+                # 也视为变化放行，用于推送停编通知。FAN 数据不含活跃状态，
+                # 事件 is_active 恒为 True，不受影响。
+                "1" if bool(typhoon.is_active) else "0",
             ]
         )
 
@@ -330,6 +334,74 @@ class EventDeduplicationService:
             event_id=event_id,
         )
 
+    def _peek_priority_fingerprint(
+        self,
+        *,
+        cache: dict[str, dict[str, Any]],
+        fingerprint: str,
+        source_id: str,
+        event_id: str,
+        kind: str,
+        log_level: str = "info",
+        filter_same_source: bool = True,
+    ) -> bool:
+        """跨源优先级去重只读预判（不写缓存）。
+
+        判定规则与 _should_push_by_priority_fingerprint 完全一致，
+        但不会写入 cache，供轮询侧在投递前提前过滤并准确统计，
+        避免预判写缓存污染下游二次判定（如报次/指纹被提前消耗）。
+
+        规则：
+        1. 指纹未见过 → 放行
+        2. 指纹相同且来源优先级更低 → 过滤
+        3. 指纹相同且同优先级不同源 → 过滤（先到先得）
+        4. 指纹相同且同优先级同源 → 由 filter_same_source 决定
+        5. 指纹相同但来源优先级更高 → 放行（升级由下游真实判定完成）
+        """
+        priority = self._resolve_source_priority(source_id)
+        existing = cache.get(fingerprint)
+        if existing is None:
+            return True
+
+        existing_priority = int(existing.get("priority") or 0)
+        existing_source = str(existing.get("source_id") or "")
+        stream_tag = self._resolve_event_stream_by_source_id(source_id)
+
+        def _log_filter(msg: str) -> None:
+            if log_level == "info":
+                plugin_logger.info(msg, is_event_linked=True, event_stream=stream_tag)
+            else:
+                plugin_logger.debug(msg)
+
+        if priority < existing_priority:
+            _log_filter(
+                f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
+                f"过滤 {source_id} 推送 (event={event_id})"
+            )
+            return False
+        if priority == existing_priority and existing_source == source_id:
+            if not filter_same_source:
+                # 粗软指纹：同源更新交给下游 _should_allow_update 判定
+                plugin_logger.debug(
+                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定: "
+                    f"{source_id} (事件 ID {event_id})"
+                )
+                return True
+            _log_filter(
+                f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
+                f"(事件 ID {event_id})"
+            )
+            return False
+        if priority == existing_priority and existing_source != source_id:
+            # 同优先级不同源：先到先得
+            _log_filter(
+                f"[灾害预警] {kind}内容与 {existing_source} 重复，过滤 {source_id} 推送"
+            )
+            return False
+
+        # 更高优先级源后到：放行（缓存升级由下游真实判定完成）
+        return True
+
     def _should_push_by_priority_fingerprint(
         self,
         *,
@@ -398,7 +470,7 @@ class EventDeduplicationService:
                 return True
             _log_filter(
                 f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
-                f"(event={event_id})"
+                f"(事件 ID {event_id})"
             )
             return False
         if priority == existing_priority and existing_source != source_id:
@@ -551,6 +623,34 @@ class EventDeduplicationService:
         return self._should_push_by_priority_fingerprint(
             cache=self._cenc_ir_cache,
             max_size=self._cenc_ir_cache_max_size,
+            fingerprint=fingerprint,
+            source_id=source_id,
+            event_id=str(event.id or ""),
+            kind="烈度速报",
+            log_level="debug",
+            filter_same_source=False,
+        )
+
+    def peek_cenc_intensity_should_push(self, event: EventEnvelope) -> bool:
+        """CENC 烈度速报跨源去重只读预判（不写缓存）。
+
+        与 _should_push_cenc_intensity_report 判定规则一致，但不会写入
+        _cenc_ir_cache，供轮询侧在投递前提前过滤并准确统计，
+        避免预判写缓存污染下游二次判定。
+        """
+        domain_eq = self._get_domain_earthquake(event)
+        if domain_eq is None:
+            return True
+        source_id = self._get_source_id(event)
+        if not self._is_cenc_intensity_report_source(source_id):
+            return True
+
+        fingerprint = self._build_cenc_ir_soft_fingerprint(event, domain_eq, source_id)
+        if not fingerprint:
+            return True
+
+        return self._peek_priority_fingerprint(
+            cache=self._cenc_ir_cache,
             fingerprint=fingerprint,
             source_id=source_id,
             event_id=str(event.id or ""),
