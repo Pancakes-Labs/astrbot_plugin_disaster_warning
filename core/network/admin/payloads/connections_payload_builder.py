@@ -12,13 +12,16 @@ from urllib.parse import urlparse
 
 from ....app.services.eqsc_channel_service import EqscChannelService
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
+from ....sources.display_registry import CONNECTION_DISPLAY_NAMES
 
 
 class ConnectionsPayloadBuilder:
     """连接状态载荷构建器。"""
 
-    EQSC_DISPLAY_NAME = "EQSC API"
-    SNET_DISPLAY_NAME = "NIED S-Net"
+    # EQSC / S-Net 展示名统一从 display_registry 连接组展示名表派生，
+    # 避免与管理端 / 健康监控模块各自维护导致口径漂移。
+    EQSC_DISPLAY_NAME = CONNECTION_DISPLAY_NAMES["eqsc"]
+    SNET_DISPLAY_NAME = CONNECTION_DISPLAY_NAMES["snet_msil"]
     SNET_GROUP_KEY = "snet_msil"
 
     def __init__(

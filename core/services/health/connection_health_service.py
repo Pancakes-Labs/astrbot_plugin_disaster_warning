@@ -23,42 +23,17 @@ from ....utils.time_converter import TimeConverter
 from ...network.admin.payloads.connections_payload_builder import (
     ConnectionsPayloadBuilder,
 )
+from ...sources.display_registry import (
+    CONNECTION_DISPLAY_NAMES,
+    CONNECTION_GROUP_ORDER,
+    DISPLAY_NAME_ALIASES,
+)
 from ...storage.connection_health_repository import ConnectionHealthRepository
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
 
-# 连接组展示顺序（与 ConnectionsGrid 列语义对齐）
-COMPONENT_ORDER: tuple[str, ...] = (
-    "fan_studio_all",
-    "fan_studio_cenc_ir",
-    "p2p_main",
-    "wolfx_all",
-    "openquake_api",
-    "snet_msil",
-    "eqsc",
-)
-
-COMPONENT_DISPLAY_NAMES: dict[str, str] = {
-    "fan_studio_all": "FAN Studio",
-    "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
-    "p2p_main": "P2P地震情報",
-    "wolfx_all": "Wolfx",
-    "openquake_api": "OpenQuakeAPI",
-    "snet_msil": "NIED S-Net",
-    "eqsc": "EQSC API",
-}
-
-# ConnectionsPayloadBuilder / SourceRuntimeQuery 可能使用的展示名别名
-DISPLAY_NAME_ALIASES: dict[str, str] = {
-    "FAN Studio": "fan_studio_all",
-    "FAN Studio 烈度速报": "fan_studio_cenc_ir",
-    "FAN Studio（烈度速报）": "fan_studio_cenc_ir",
-    "Fan Studio（烈度速报）": "fan_studio_cenc_ir",
-    "P2P地震情報": "p2p_main",
-    "Wolfx": "wolfx_all",
-    "OpenQuakeAPI": "openquake_api",
-    "NIED S-Net": "snet_msil",
-    "EQSC API": "eqsc",
-}
+# 连接组展示顺序 / 展示名 / 展示名反向别名已统一收编至
+# core/sources/display_registry.py（CONNECTION_GROUP_ORDER /
+# CONNECTION_DISPLAY_NAMES / DISPLAY_NAME_ALIASES），此处直接引用事实层常量。
 
 STATE_LABELS_ZH: dict[str, str] = {
     "operational": "正常",
@@ -189,7 +164,7 @@ class ConnectionHealthService:
         repo = self._ensure_repo()
         if repo is None:
             return
-        for group_key in COMPONENT_ORDER:
+        for group_key in CONNECTION_GROUP_ORDER:
             open_inc = await repo.get_open_incident(group_key)
             if open_inc is None:
                 continue
@@ -342,8 +317,8 @@ class ConnectionHealthService:
 
         # 第一遍：只收集 enabled/connected，用于提前结束建连宽限
         prelim: list[dict[str, Any]] = []
-        for group_key in COMPONENT_ORDER:
-            display_name = COMPONENT_DISPLAY_NAMES.get(group_key, group_key)
+        for group_key in CONNECTION_GROUP_ORDER:
+            display_name = CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
             info = by_group.get(group_key) or by_display.get(display_name) or {}
             raw = raw_ws.get(group_key) or {}
 
@@ -656,7 +631,7 @@ class ConnectionHealthService:
         group_key = comp["group_key"]
         state = comp["state"]
         enabled = bool(comp["enabled"])
-        display_name = comp.get("display_name") or COMPONENT_DISPLAY_NAMES.get(
+        display_name = comp.get("display_name") or CONNECTION_DISPLAY_NAMES.get(
             group_key, group_key
         )
 
@@ -860,7 +835,7 @@ class ConnectionHealthService:
                 {
                     "group_key": group_key,
                     "name": comp.get("display_name")
-                    or COMPONENT_DISPLAY_NAMES.get(group_key, group_key),
+                    or CONNECTION_DISPLAY_NAMES.get(group_key, group_key),
                     "current_state": state,
                     "current_label": comp.get("status_label")
                     or STATE_LABELS_ZH.get(state, state),
@@ -931,7 +906,7 @@ class ConnectionHealthService:
                 try:
                     day_rows = await repo.list_day_aggregates(
                         days=days,
-                        group_keys=list(COMPONENT_ORDER),
+                        group_keys=list(CONNECTION_GROUP_ORDER),
                         since_day=start_day,
                     )
                 except Exception as exc:
@@ -978,10 +953,10 @@ class ConnectionHealthService:
         components_out: list[dict[str, Any]] = []
         monitored_states: list[str] = []
 
-        for group_key in COMPONENT_ORDER:
+        for group_key in CONNECTION_GROUP_ORDER:
             live = live_by_key.get(group_key) or {
                 "group_key": group_key,
-                "display_name": COMPONENT_DISPLAY_NAMES.get(group_key, group_key),
+                "display_name": CONNECTION_DISPLAY_NAMES.get(group_key, group_key),
                 "enabled": False,
                 "connected": False,
                 "state": "not_monitored",
@@ -1022,7 +997,7 @@ class ConnectionHealthService:
                 {
                     "group_key": group_key,
                     "name": live.get("display_name")
-                    or COMPONENT_DISPLAY_NAMES.get(group_key, group_key),
+                    or CONNECTION_DISPLAY_NAMES.get(group_key, group_key),
                     "current_state": current_state,
                     "current_label": live.get("status_label")
                     or STATE_LABELS_ZH.get(current_state, current_state),
@@ -1163,7 +1138,7 @@ class ConnectionHealthService:
         return {
             "id": inc.get("id"),
             "group_key": group_key,
-            "component_name": COMPONENT_DISPLAY_NAMES.get(group_key, group_key),
+            "component_name": CONNECTION_DISPLAY_NAMES.get(group_key, group_key),
             "severity": inc.get("severity"),
             "severity_label": STATE_LABELS_ZH.get(
                 str(inc.get("severity") or ""), str(inc.get("severity") or "")
