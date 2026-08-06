@@ -595,14 +595,61 @@ class StopSummaryPanel:
         else:
             data["last_forward_session"] = None
 
-        # 停止流程中各资源的确定性回收状态。
-        data["health_stopped"] = True
-        data["notification_stopped"] = True
-        data["db_closed"] = True
-        data["browser_closed"] = True
-        data["monitor_stopped"] = True
-        data["web_stopped"] = True
-        data["cache_saved"] = True
+        # 停止流程中各资源的真实回收状态（基于运行态推导，避免无条件显示已停止）。
+        # 注意：浏览器、后台延迟检测与 Web 管理端并不在本停止流程内回收，
+        # 它们由 main.terminate() 在生命周期 stop() 之后执行，此处如实反映运行态。
+        health_service = getattr(service, "connection_health_service", None)
+        if health_service is not None:
+            data["health_stopped"] = not bool(
+                getattr(health_service, "_running", False)
+            )
+        else:
+            data["health_stopped"] = None
+
+        notification_center = getattr(service, "notification_center", None)
+        if notification_center is not None:
+            poll_task = getattr(notification_center, "_poll_task", None)
+            data["notification_stopped"] = poll_task is None or bool(
+                getattr(poll_task, "done", lambda: True)()
+            )
+        else:
+            data["notification_stopped"] = None
+
+        stats_mgr = getattr(service, "statistics_manager", None)
+        if stats_mgr is not None:
+            data["db_closed"] = not bool(getattr(stats_mgr, "_db_initialized", False))
+        else:
+            data["db_closed"] = None
+
+        message_manager = getattr(service, "message_manager", None)
+        browser = (
+            getattr(message_manager, "browser_manager", None)
+            if message_manager is not None
+            else None
+        )
+        if browser is not None:
+            data["browser_closed"] = bool(getattr(browser, "_closed", False))
+        else:
+            data["browser_closed"] = None
+
+        web_server = getattr(service, "web_admin_server", None)
+        if web_server is not None and getattr(web_server, "server", None) is not None:
+            ping_task = getattr(web_server, "_ping_task", None)
+            data["monitor_stopped"] = ping_task is None or bool(
+                getattr(ping_task, "done", lambda: True)()
+            )
+            server_task = getattr(web_server, "_server_task", None)
+            data["web_stopped"] = server_task is None or bool(
+                getattr(server_task, "done", lambda: True)()
+            )
+        else:
+            data["monitor_stopped"] = None
+            data["web_stopped"] = None
+
+        # 缓存保存：停止流程仅在服务曾真正运行（was_running）时执行落盘，
+        # 用 start_time 是否存在近似推导 was_running。
+        was_running = getattr(service, "start_time", None) is not None
+        data["cache_saved"] = was_running
 
         return data
 
@@ -673,13 +720,24 @@ class StopSummaryPanel:
                 f"✅ 已停止 · {data.get('ws_disconnected', 0)}/{ws_total} 已断开",
             )
         )
-        detail_rows.append(("🩺 连接健康采样", "✅ 已停止"))
-        detail_rows.append(("🔔 通知系统", "✅ 已停止"))
-        detail_rows.append(("💾 数据库", "✅ 已关闭"))
-        detail_rows.append(("🌍 浏览器", "✅ 已关闭"))
-        detail_rows.append(("🔍 后台延迟检测", "✅ 已停止"))
-        detail_rows.append(("🌐 Web 管理端", "✅ 已停止"))
-        detail_rows.append(("📦 缓存已保存", "✅ 已保存"))
+
+        def state_text(stopped: bool | None) -> str:
+            """把资源回收状态渲染为面板文案（None 表示未启用/无该组件）。"""
+            if stopped is None:
+                return "⚪ 未启用"
+            return "✅ 已完成" if stopped else "⚠️ 未完成"
+
+        detail_rows.append(("🩺 连接健康采样", state_text(data.get("health_stopped"))))
+        detail_rows.append(
+            ("🔔 通知系统", state_text(data.get("notification_stopped")))
+        )
+        detail_rows.append(("💾 数据库", state_text(data.get("db_closed"))))
+        detail_rows.append(("🌍 浏览器", state_text(data.get("browser_closed"))))
+        detail_rows.append(("🔍 后台延迟检测", state_text(data.get("monitor_stopped"))))
+        detail_rows.append(("🌐 Web 管理端", state_text(data.get("web_stopped"))))
+        detail_rows.append(
+            ("📦 缓存已保存", "✅ 已保存" if data.get("cache_saved") else "⚪ 未保存")
+        )
 
         key_width = max(_display_width(k) for k, _ in detail_rows)
         value_width = inner - 1 - key_width - 2 - 1
