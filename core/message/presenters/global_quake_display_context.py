@@ -68,38 +68,78 @@ class GlobalQuakeDisplayContextBuilder:
             stations_used = stations.get("used", 0)
             stations_total = stations.get("total", 0)
 
+        # 质量指标（数据拟合 / 定位误差）的提取顺序：
+        # 1. metadata["quality"]：解析器已统一规范化的 dict（含 pct / err_origin 等）
+        # 2. metadata["quality_pct"] / metadata["location_error"]：历史扁平键兼容
+        # 3. 原始载荷 event_payload：JSON 新协议平铺在 data / payload 外层，
+        #    protobuf 历史路径则封装在 raw["data"]["quality"] 中
         quality_pct = "N/A"
         location_error = "N/A"
+
+        quality = {}
         if isinstance(metadata, dict):
-            if metadata.get("quality_pct") is not None:
-                quality_pct = f"{metadata.get('quality_pct')}%"
-            if isinstance(metadata.get("location_error"), (int, float)):
-                location_error = f"{metadata.get('location_error'):.1f} km"
-            elif isinstance(metadata.get("location_error_km"), (int, float)):
-                location_error = f"{metadata.get('location_error_km'):.1f} km"
+            _quality = metadata.get("quality")
+            if isinstance(_quality, dict):
+                quality = _quality
+
+        # 解析器已在 metadata["quality"] 中规范化好质量指标，优先消费。
+        if quality:
+            pct = quality.get("pct")
+            if pct is not None:
+                quality_pct = f"{pct}%"
+            err_origin = quality.get("errOrigin") or quality.get("err_origin")
+            if err_origin is not None:
+                location_error = f"{err_origin:.1f} km"
+
+        if quality_pct == "N/A" or location_error == "N/A":
+            # 兼容历史扁平元数据键（早期实现写入的字段）。
+            if isinstance(metadata, dict):
+                if quality_pct == "N/A" and metadata.get("quality_pct") is not None:
+                    quality_pct = f"{metadata.get('quality_pct')}%"
+                if location_error == "N/A" and isinstance(
+                    metadata.get("location_error"), (int, float)
+                ):
+                    location_error = f"{metadata.get('location_error'):.1f} km"
+                elif location_error == "N/A" and isinstance(
+                    metadata.get("location_error_km"), (int, float)
+                ):
+                    location_error = f"{metadata.get('location_error_km'):.1f} km"
 
         if quality_pct == "N/A" or location_error == "N/A":
             # 一些质量字段可能存在于更内层的原始数据结构中，这里继续向下兼容提取。
             data_inner = (
                 event_payload.get("data", {}) if isinstance(event_payload, dict) else {}
             )
-            quality = (
+            inner_quality = (
                 data_inner.get("quality", {}) if isinstance(data_inner, dict) else {}
             )
-            if isinstance(quality, dict):
+            if not isinstance(inner_quality, dict):
+                inner_quality = {}
+            # JSON 新协议 payload 平铺在外层时，quality 也可能直接挂在 event_payload 上。
+            if not inner_quality and isinstance(event_payload, dict):
+                outer_quality = event_payload.get("quality")
+                if isinstance(outer_quality, dict):
+                    inner_quality = outer_quality
+            if inner_quality:
                 if quality_pct == "N/A":
-                    pct = quality.get("pct")
+                    pct = inner_quality.get("pct")
                     if pct is not None:
                         quality_pct = f"{pct}%"
 
                 if location_error == "N/A":
-                    err_origin = quality.get("errOrigin") or quality.get("err_origin")
+                    err_origin = inner_quality.get("errOrigin") or inner_quality.get(
+                        "err_origin"
+                    )
                     if err_origin is not None:
                         location_error = f"{err_origin:.1f} km"
             if location_error == "N/A" and isinstance(
                 data_inner.get("locationError"), (int, float)
             ):
                 location_error = f"{data_inner.get('locationError'):.1f} km"
+            if location_error == "N/A" and isinstance(
+                event_payload.get("locationError"), (int, float)
+            ):
+                location_error = f"{event_payload.get('locationError'):.1f} km"
 
         # 返回的字段名直接面向卡片模板，因此保持扁平、稳定且尽量避免模板层再做业务判断。
         is_final = (
