@@ -198,6 +198,8 @@ class EventPipeline:
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
+        # 统一会话日志字符串（私聊/群聊 ID (备注名)），与推送执行链保持一致。
+        session_log = message_manager._get_session_log_str(session)
 
         # 聚合配置：单批节点上限（默认 25，对齐 schema 默认值）
         agg_config = (runtime_config.get("push_frequency_control", {}) or {}).get(
@@ -226,7 +228,7 @@ class EventPipeline:
                 )
                 if not decision.accepted:
                     plugin_logger.debug(
-                        f"[灾害预警] 聚合推送事件 {entry.event.id} 在 {session} "
+                        f"[灾害预警] 聚合推送事件 {entry.event.id} 在 {session_log} "
                         f"规则链复核未通过: {decision.reason}"
                         + (f"（{decision.detail}）" if decision.detail else ""),
                         event_stream="weather_alarm",
@@ -310,22 +312,23 @@ class EventPipeline:
                     failed_nodes += 1
                     logger.error(
                         f"[灾害预警] 气象预警合并转发节点 {batch_idx + 1}/{node_count} "
-                        f"发送失败 ({session}): {e}"
+                        f"发送失败 ({session_log}): {e}"
                     )
 
             if sent_nodes == 0 and failed_nodes > 0:
                 # 全部节点都发送失败：向上抛出，让调用方感知到平台当前不可用，
                 # 避免"假装成功"导致用户完全收不到任何预警。
                 raise RuntimeError(
-                    f"气象预警合并转发全部发送失败 ({session}): "
+                    f"气象预警合并转发全部发送失败 ({session_log}): "
                     f"{failed_nodes}/{node_count} 个节点失败"
                 )
 
             plugin_logger.info(
-                f"[灾害预警] 气象预警合并转发已发送到 {session}, "
+                f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
                 f"共 {total} 条预警，切为 {sent_nodes} 个节点（单批上限 {max_batch}）"
                 + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
                 event_stream="weather_alarm",
+                is_silent_window=True,
             )
         else:
             # 逐条发送（降级路径）
