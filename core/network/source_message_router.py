@@ -414,6 +414,7 @@ class SourceMessageRouter:
                         f"[灾害预警] 处理 {source} 数据 ({_resolve_config_key(source_id)})",
                         is_event_linked=True,
                         event_stream=self._resolve_stream_by_source_id(source_id),
+                        is_silent_window=True,
                     )
                     dispatched = await self._parse_and_dispatch(
                         source_id=source_id,
@@ -488,6 +489,7 @@ class SourceMessageRouter:
                         "[灾害预警] P2P 处理器收到紧急地震速报，业务码为 556，准备解析",
                         is_event_linked=True,
                         event_stream="earthquake",
+                        is_silent_window=True,
                     )
             except (json.JSONDecodeError, AttributeError, TypeError):
                 data = {}

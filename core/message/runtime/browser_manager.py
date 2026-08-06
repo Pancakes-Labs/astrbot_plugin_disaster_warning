@@ -475,7 +475,7 @@ class BrowserManager:
                     self._initialized = True
                     return
 
-                logger.info(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
+                logger.debug(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
                 start_time = time.time()
 
                 # 启动 Playwright
@@ -485,14 +485,14 @@ class BrowserManager:
                 self._browser = await self._playwright.chromium.launch(
                     args=["--no-sandbox", "--disable-setuid-sandbox"]
                 )
-                logger.info("[灾害预警] 本地浏览器启动成功")
+                logger.debug("[灾害预警] 本地浏览器启动成功")
 
                 # 本地模式：直接创建页面池
                 await self._initialize_local_page_pool()
 
                 elapsed = time.time() - start_time
                 self._initialized = True
-                logger.info(
+                logger.debug(
                     f"[灾害预警] 浏览器启动完成，耗时 {elapsed:.2f}秒，页面池大小: {self.pool_size}"
                 )
 
@@ -847,6 +847,7 @@ class BrowserManager:
                             f"[灾害预警] {label}渲染成功，耗时 {elapsed:.3f}秒",
                             is_event_linked=True,
                             event_stream=event_stream,
+                            is_silent_window=True,
                         )
                         render_succeeded = True
                         return output_path
@@ -1066,6 +1067,7 @@ class BrowserManager:
                             f"[灾害预警] {label}渲染成功（HTTP API），耗时 {elapsed:.3f}秒",
                             is_event_linked=True,
                             event_stream=event_stream,
+                            is_silent_window=True,
                         )
                         return output_path
                     else:
@@ -1137,10 +1139,10 @@ class BrowserManager:
                 logger.debug("[灾害预警] 浏览器已关闭，跳过")
                 return
 
-            logger.info("[灾害预警] 正在关闭浏览器...")
+            logger.debug("[灾害预警] 正在关闭浏览器...")
             self._closed = True
             await self._cleanup()
-            logger.info("[灾害预警] 浏览器已关闭")
+            logger.debug("[灾害预警] 浏览器已关闭")
 
     async def _cleanup(self):
         """清理资源，确保前一步失败也不影响后续步骤继续执行。"""

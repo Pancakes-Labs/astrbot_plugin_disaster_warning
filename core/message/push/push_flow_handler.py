@@ -366,6 +366,7 @@ class PushFlowHandler:
                 f"[灾害预警] 事件 {event.id} 推送完成，成功推送到 {push_success_count} 个会话",
                 is_event_linked=True,
                 event_stream=self._resolve_event_stream(event),
+                is_silent_window=True,
             )
         elif send_failure_stats:
             plugin_logger.warning(
