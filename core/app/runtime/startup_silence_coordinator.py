@@ -15,6 +15,8 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ....utils.banner import print_startup_summary
+
 
 class SilenceState(str, Enum):
     """启动静默状态。"""
@@ -305,7 +307,7 @@ class StartupSilenceCoordinator:
             if poll_n:
                 parts.append(f"{poll_n} 路轮询")
             scope = "、".join(parts) if parts else f"{len(self.gates)} 路数据源"
-            logger.info(
+            logger.debug(
                 f"[灾害预警] 静默启动已开启，等待 {scope}完成首轮同步"
                 f"（超时时间 {self.hard_timeout_seconds:.0f} 秒）"
             )
@@ -677,12 +679,21 @@ class StartupSilenceCoordinator:
                 f"已忽略启动快照 {absorbed} 条，开始正常推送"
             )
         elif absorbed > 0:
-            logger.info(
+            logger.debug(
                 f"[灾害预警] 静默启动结束（{why}），"
                 f"已忽略启动快照 {absorbed} 条，开始正常推送"
             )
         else:
-            logger.info(f"[灾害预警] 静默启动结束（{why}），开始正常推送")
+            logger.debug(f"[灾害预警] 静默启动结束（{why}），开始正常推送")
+
+        # 静默真正结束时（WS 连接、ready_at 均已落定）打印启动汇总大屏。
+        # 此前在 start() 末尾打印会拿到未建立的连接与未落定的耗时，导致统计失真。
+        service = self._service
+        if service is not None:
+            try:
+                print_startup_summary(service)
+            except Exception as banner_err:
+                logger.debug(f"[灾害预警] 启动汇总大屏打印失败（已忽略）: {banner_err}")
 
     def _start_watchdog(self) -> None:
         self._cancel_watchdog()
