@@ -11,32 +11,48 @@ const JST_SOURCE_KEYWORDS = ['jma', 'p2p', 'wolfx_jma', 'japan'];
  * 属于既有展示设计，勿与后端强行对齐。
  */
 let __SOURCE_DISPLAY_META__ = null;
-let __SOURCE_DISPLAY_META_LOADING__ = false;
+let __SOURCE_DISPLAY_META_PROMISE__ = null;
+let __SOURCE_DISPLAY_META_LAST_ATTEMPT__ = 0;
+// 拉取失败后的最小重试间隔，避免网络抖动时对后端接口密集请求。
+const SOURCE_DISPLAY_META_RETRY_MS = 30 * 1000;
 
 /**
- * 从后端拉取数据源展示元数据（幂等）。
- * 失败时静默置空；展示名/别名会回退为原始输入，不影响功能。
- * 首次调用后缓存结果；并发调用会被 loading 标志去重。
+ * 从后端拉取数据源展示元数据（幂等，并发去重）。
+ * 成功结果会缓存；失败时保持缓存为空并节流重试，展示名/别名会回退为原始输入，
+ * 待下次触发（如组件渲染或手动调用）再尝试拉取，不影响功能。
+ * 进行中的请求会被所有并发调用方共享同一个 Promise，只发出一次 fetch。
  * @returns {Promise<object>}
  */
 function loadSourceDisplayMeta() {
-    if (__SOURCE_DISPLAY_META__ !== null || __SOURCE_DISPLAY_META_LOADING__) {
+    // 已有缓存：直接返回。
+    if (__SOURCE_DISPLAY_META__ !== null) {
         return Promise.resolve(__SOURCE_DISPLAY_META__);
     }
-    __SOURCE_DISPLAY_META_LOADING__ = true;
-    return fetch('/api/sources/meta', { headers: { 'Accept': 'application/json' } })
+    // 已有进行中的请求：所有并发调用方共享同一个 in-flight Promise。
+    if (__SOURCE_DISPLAY_META_PROMISE__) {
+        return __SOURCE_DISPLAY_META_PROMISE__;
+    }
+    // 失败后的重试节流：距上次尝试不足间隔则不再发起请求。
+    if (Date.now() - __SOURCE_DISPLAY_META_LAST_ATTEMPT__ < SOURCE_DISPLAY_META_RETRY_MS) {
+        return Promise.resolve(__SOURCE_DISPLAY_META__);
+    }
+    __SOURCE_DISPLAY_META_LAST_ATTEMPT__ = Date.now();
+    __SOURCE_DISPLAY_META_PROMISE__ = fetch('/api/sources/meta', { headers: { 'Accept': 'application/json' } })
         .then((resp) => (resp && resp.ok) ? resp.json() : {})
         .then((data) => {
             __SOURCE_DISPLAY_META__ = (data && typeof data === 'object') ? data : {};
             return __SOURCE_DISPLAY_META__;
         })
         .catch(() => {
-            __SOURCE_DISPLAY_META__ = {};
+            // 失败不写入缓存（保持 null）：ensureSourceDisplayMetaLoaded
+            // 会在节流间隔后再次触发加载，避免整个会话回退显示原始 key。
+            __SOURCE_DISPLAY_META__ = null;
             return __SOURCE_DISPLAY_META__;
         })
         .finally(() => {
-            __SOURCE_DISPLAY_META_LOADING__ = false;
+            __SOURCE_DISPLAY_META_PROMISE__ = null;
         });
+    return __SOURCE_DISPLAY_META_PROMISE__;
 }
 
 /**
@@ -46,9 +62,20 @@ function loadSourceDisplayMeta() {
  * 避免整个会话都回退显示原始 key。
  */
 function ensureSourceDisplayMetaLoaded() {
-    if (__SOURCE_DISPLAY_META__ === null && !__SOURCE_DISPLAY_META_LOADING__) {
+    if (__SOURCE_DISPLAY_META__ === null && !__SOURCE_DISPLAY_META_PROMISE__) {
         loadSourceDisplayMeta();
     }
+}
+
+/**
+ * 仅读取对象自身的属性值，避免命中 Object.prototype 上继承的键
+ * （如 toString / constructor / __proto__），并消除裸下标读取的静态分析告警。
+ * @param {object} obj
+ * @param {string} key
+ * @returns {*}
+ */
+function pickOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
 }
 
 // 页面加载时预热一次：管理端与后端同源部署，meta 为本地小体积接口，
@@ -267,7 +294,7 @@ function normalizeSourceName(source) {
 
     const lowerSource = rawSource.toLowerCase();
     const metaAliasMap = (__SOURCE_DISPLAY_META__ && __SOURCE_DISPLAY_META__.source_alias_map) || {};
-    return metaAliasMap[rawSource] || metaAliasMap[lowerSource] || lowerSource;
+    return pickOwn(metaAliasMap, rawSource) || pickOwn(metaAliasMap, lowerSource) || lowerSource;
 }
 
 /**
@@ -349,8 +376,8 @@ function formatSourceName(source) {
     ensureSourceDisplayMetaLoaded();
     const normalizedSource = normalizeSourceName(source);
     const metaDisplayMap = (__SOURCE_DISPLAY_META__ && __SOURCE_DISPLAY_META__.source_display_map) || {};
-    return SOURCE_DISPLAY_OVERRIDES[normalizedSource]
-        || metaDisplayMap[normalizedSource]
+    return pickOwn(SOURCE_DISPLAY_OVERRIDES, normalizedSource)
+        || pickOwn(metaDisplayMap, normalizedSource)
         || String(source || '').trim() || '未知来源';
 }
 
