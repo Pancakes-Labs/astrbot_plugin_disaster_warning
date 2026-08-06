@@ -30,6 +30,8 @@ class DisasterServiceNoticeService:
     # （用户只需知道哪个通道离线，无需细分到子源），保留在此处。
     _SOURCE_GROUP_KEY_MAP: dict[str, str] = {
         "fan_studio_mixed": "fan_studio_all",
+        # cenc_ir_fanstudio 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
+        "cenc_ir_fanstudio": "fan_studio_cenc_ir",
         "wolfx_mixed": "wolfx_all",
         "openquake_mixed": "openquake_api",
         "jma_p2p": "p2p_main",
@@ -42,10 +44,18 @@ class DisasterServiceNoticeService:
     }
 
     def _resolve_source_display(self, data_source: str) -> str:
-        """按离线通知场景把内部数据源代号解析为用户可读的通道展示名。"""
+        """按离线通知场景把内部数据源代号解析为用户可读的通道展示名。
+
+        折叠规则命中时返回通道级展示名；未命中则防御性地尝试直接按
+        data_source 查一次连接组展示名（覆盖未来新增的“连接级别” key），
+        最后才回退原始代号。
+        """
         group_key = self._SOURCE_GROUP_KEY_MAP.get(data_source)
-        if group_key:
+        if group_key is not None:
             return CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
+        direct_display = CONNECTION_DISPLAY_NAMES.get(data_source)
+        if direct_display is not None:
+            return direct_display
         return data_source
 
     def __init__(self, service):
