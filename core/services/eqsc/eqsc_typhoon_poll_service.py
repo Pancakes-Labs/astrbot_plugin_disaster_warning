@@ -42,6 +42,10 @@ class EqscTyphoonPollService:
         # 用于识别"上一轮活跃 → 本轮停编"的台风，放行一次以推送停编通知；
         # 早已停编的历史台风不在集合中，不会进入投递，避免每轮刷屏。
         self._last_active_ids: set[str] = set()
+        # 刚停编但尚未确认投递成功的台风 ID 集合。
+        # 若 _handle_disaster_event 返回失败，停编通知仍保留在此集合，
+        # 下一轮轮询会继续放行重试，直到投递成功才移除，避免停编通知永久丢失。
+        self._pending_deactivate_ids: set[str] = set()
         self._last_success_at: float | None = None
         self._consecutive_failures = 0
         self._client: EqscTyphoonClient | None = None
@@ -244,7 +248,9 @@ class EqscTyphoonPollService:
         - 活跃台风（isActive=True）始终进入投递；
         - 上一轮活跃、本轮停编（isActive=False）的台风放行一次，
           用于推送"停编通知"（停编时即使核心参数未变化也应推一条）；
-        - 早已停编的历史台风不在 _last_active_ids 中，不进入投递，
+        - 上一轮停编但投递失败的台风（在 _pending_deactivate_ids 中）继续放行重试，
+          直到投递成功后才从该集合移除，避免停编通知因瞬时失败永久丢失；
+        - 早已停编的历史台风不在上述两个集合中，不进入投递，
           由 time_rule 兜底过滤，避免冷启动/每轮刷屏。
         """
         current_active_ids: set[str] = set()
@@ -257,12 +263,18 @@ class EqscTyphoonPollService:
                 continue
             if self._is_active_typhoon(item):
                 current_active_ids.add(typhoon_id)
+                # 台风重新活跃：若之前处于待确认停编集合中则清理，避免残留导致误放行。
+                self._pending_deactivate_ids.discard(typhoon_id)
                 candidates.append(item)
-            elif typhoon_id in self._last_active_ids:
-                # 刚停编：放行一次以推送停编通知
+            elif (
+                typhoon_id in self._last_active_ids
+                or typhoon_id in self._pending_deactivate_ids
+            ):
+                # 刚停编 或 停编投递失败待重试：放行以推送/重试停编通知
                 candidates.append(item)
 
         # 记录本轮活跃集合，供下一轮识别"刚停编"台风。
+        # 注意：此处覆盖的是活跃集合，不影响 _pending_deactivate_ids 的待重试保留。
         self._last_active_ids = current_active_ids
         return candidates
 
@@ -276,6 +288,7 @@ class EqscTyphoonPollService:
         轮询侧却统计为推送」的口径矛盾。
         """
         emitted = 0
+        filtered = 0
         for raw in active_items:
             envelope = self._build_live_envelope(raw)
             if envelope is None or not isinstance(envelope.event, TyphoonEvent):
@@ -286,6 +299,9 @@ class EqscTyphoonPollService:
             if not typhoon_id:
                 continue
 
+            # 停编标记：用于决定投递失败时是否保留待重试集合。
+            deactivated = not bool(getattr(typhoon, "is_active", True))
+
             # 启动静默期：不推送、不统计，仅调用 _handle_disaster_event
             # 让其内部的 _seed_event_for_silence 播种去重服务的 _typhoon_cache，
             # 避免静默结束后首次推送因去重缓存为空而被误放行（重载后重复推送的根因）。
@@ -293,6 +309,8 @@ class EqscTyphoonPollService:
             if callable(is_silence) and is_silence():
                 try:
                     await self.service._handle_disaster_event(envelope)
+                    # 静默期播种成功同样视为已处理，清理待重试停编 ID。
+                    self._pending_deactivate_ids.discard(typhoon_id)
                 except Exception as exc:
                     logger.debug(
                         f"[灾害预警] EQSC 台风静默期播种去重指纹失败（已忽略）: "
@@ -308,6 +326,10 @@ class EqscTyphoonPollService:
             )
             peek = getattr(deduplicator, "peek_typhoon_should_push", None)
             if callable(peek) and not peek(envelope):
+                # 去重判定已通过（内容有变化）才会走到这里；被过滤意味着
+                # 该停编通知此前已成功推送过，无需再保留待重试。
+                self._pending_deactivate_ids.discard(typhoon_id)
+                filtered += 1
                 continue
 
             try:
@@ -319,16 +341,24 @@ class EqscTyphoonPollService:
                     f"[灾害预警] EQSC 台风事件推送失败，已跳过并继续本轮: "
                     f"ID 为 {typhoon_id}, 错误信息：{exc}"
                 )
+                if deactivated:
+                    # 停编通知投递失败：保留 ID，下一轮继续放行重试，
+                    # 避免该停编通知永久丢失。
+                    self._pending_deactivate_ids.add(typhoon_id)
                 continue
             if not handled:
                 logger.error(
                     f"[灾害预警] EQSC 台风事件处理未成功，已跳过并继续本轮: "
                     f"ID 为 {typhoon_id}"
                 )
+                if deactivated:
+                    self._pending_deactivate_ids.add(typhoon_id)
                 continue
+            # 投递成功：停编通知已送达，从待重试集合中移除。
+            self._pending_deactivate_ids.discard(typhoon_id)
             emitted += 1
 
-        return emitted
+        return emitted, filtered
 
     def _notify_silence_fetch_completed(self, *, success: bool) -> None:
         """通知静默协调器本轮抓取已结束（成功或失败）。"""
@@ -368,11 +398,15 @@ class EqscTyphoonPollService:
 
         # 先完成事件投递（含静默期指纹播种），再通知抓取完成，
         # 避免静默协调器提前 READY 导致首批台风指纹未播种而重复推送。
-        emitted = await self._process_typhoon_updates(active_items)
+        emitted, filtered = await self._process_typhoon_updates(active_items)
         self._notify_silence_fetch_completed(success=True)
-        if emitted:
-            plugin_logger.info(
-                f"[灾害预警] EQSC 台风轮询本轮推送 {emitted} 条更新",
+        # 轮询汇总默认 DEBUG，避免每轮轮询都刷 INFO；
+        # 有推送价值的事件进入流水线后，会由事件级"会话筛选/推送完成"汇总
+        # （INFO 级）提供可观测性。需要查看轮询明细时开启 DEBUG 级别。
+        if emitted or filtered:
+            plugin_logger.debug(
+                f"[灾害预警] EQSC 台风轮询汇总：推送 {emitted} 条更新，"
+                f"跳过 {filtered} 条未变化",
                 is_event_linked=True,
                 event_stream="typhoon",
                 is_silent_window=True,
