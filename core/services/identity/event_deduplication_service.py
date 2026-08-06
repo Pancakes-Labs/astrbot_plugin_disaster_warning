@@ -209,7 +209,9 @@ class EventDeduplicationService:
         fingerprint = self._generate_typhoon_fingerprint(typhoon)
         cached_fingerprint = self._typhoon_cache.get(typhoon_id)
         if cached_fingerprint is not None and cached_fingerprint == fingerprint:
-            plugin_logger.info(
+            # 与 push_flow_handler 其他事件流的去重过滤日志保持一致：
+            # 单条过滤仅 DEBUG 级，避免轮询特性导致每轮 INFO 刷屏；
+            plugin_logger.debug(
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
                 event_stream="typhoon",
@@ -236,7 +238,9 @@ class EventDeduplicationService:
         cached_fingerprint = self._typhoon_cache.get(typhoon_id)
 
         if cached_fingerprint is not None and cached_fingerprint == fingerprint:
-            plugin_logger.info(
+            # 单条过滤仅 DEBUG 级，与 push_flow_handler 其他事件流对齐，
+            # 避免轮询特性导致每轮 INFO 刷屏；汇总由轮询侧日志承担。
+            plugin_logger.debug(
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
                 event_stream="typhoon",

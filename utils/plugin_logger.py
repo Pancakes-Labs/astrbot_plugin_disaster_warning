@@ -204,9 +204,32 @@ class PluginLogger:
         """记录 ERROR 级别日志。错误日志由于其关键性，不受简洁模式限制。"""
         logger.error(msg, *args, **kwargs)
 
-    def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        """记录 DEBUG 级别日志。"""
-        logger.debug(msg, *args, **kwargs)
+    def debug(
+        self,
+        msg: str,
+        *args: Any,
+        is_event_linked: bool = False,
+        event_stream: str | None = None,
+        is_silent_window: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """记录 DEBUG 级别日志。
+
+        支持事件流覆盖参数（is_event_linked / event_stream / is_silent_window）：
+        与 info/warning 共用 _should_suppress_or_downgrade 判定，使事件流日志
+        即使在 DEBUG 级别下也能被"事件流屏蔽"（完全丢弃）控制。
+        默认情况（is_event_linked=False）行为与原先一致：直接打印 debug。
+        """
+        should_process, action = self._should_suppress_or_downgrade(
+            is_event_linked, event_stream, is_silent_window
+        )
+        if should_process:
+            # action == "mute" 时整体丢弃（插件自处理屏蔽）；
+            # action == "debug" 时保持 debug 级别输出。
+            if action != "mute":
+                logger.debug(msg, *args, **kwargs)
+        else:
+            logger.debug(msg, *args, **kwargs)
 
 
 # 全局单例对象
