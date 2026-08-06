@@ -145,6 +145,7 @@ class CwaEewParser(BaseParser):
                 f"[灾害预警] 地震预警解析成功: {getattr(domain_event, 'place_name', '')} (M {getattr(domain_event, 'magnitude', None)}), 时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -304,6 +305,7 @@ class CwaEewWolfxParser(BaseParser):
                 f"[灾害预警] 地震预警解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
 
             return envelope

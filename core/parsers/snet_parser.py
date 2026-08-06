@@ -629,7 +629,10 @@ class SnetParser(BaseParser):
         )
         if max_shindo >= 0.5:
             plugin_logger.info(
-                log_message, is_event_linked=True, event_stream="earthquake"
+                log_message,
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
         else:
             plugin_logger.debug(log_message)

@@ -223,6 +223,7 @@ class TyphoonParser(BaseParser):
                         f"ID: {envelope.event.typhoon_id}，类型为{envelope.event.typhoon_type}",
                         is_event_linked=True,
                         event_stream="typhoon",
+                        is_silent_window=True,
                     )
                     envelopes.append(envelope)
 

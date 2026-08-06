@@ -349,6 +349,7 @@ class CencIntensityReportParser(BaseParser):
                 f"时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:

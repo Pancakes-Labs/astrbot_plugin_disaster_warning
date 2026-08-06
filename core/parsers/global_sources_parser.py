@@ -228,6 +228,7 @@ class GlobalQuakeParser(BaseParser):
                 f"[灾害预警] Global Quake 收到地震取消广播: ID={event_id}",
                 is_event_linked=True,
                 event_stream="global_quake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -255,6 +256,7 @@ class GlobalQuakeParser(BaseParser):
                 f"[灾害预警] Global Quake 收到地震取消广播 (JSON): ID={event_id}",
                 is_event_linked=True,
                 event_stream="global_quake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -572,6 +574,7 @@ class GlobalQuakeParser(BaseParser):
                 f"时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream="global_quake",
+                is_silent_window=True,
             )
 
             return envelope
@@ -746,6 +749,7 @@ class UsgsEarthquakeParser(BaseParser):
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude or 0.0}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream=self._resolve_parser_event_stream(),
+                is_silent_window=True,
             )
 
             return envelope
@@ -921,6 +925,7 @@ class ShakeAlertEewParser(BaseParser):
                 f"[灾害预警] ShakeAlert 预警解析成功: {domain_event.place_name} (M {domain_event.magnitude or 0.0}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:

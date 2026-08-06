@@ -236,6 +236,7 @@ class CwaReportParser(BaseParser):
                 f"ID: {getattr(getattr(envelope, 'identity', None), 'event_id', '')}",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
