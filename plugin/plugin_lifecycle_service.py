@@ -15,6 +15,7 @@ from astrbot.api import logger
 
 from ..core.services.config.config_validation_service import ConfigValidator
 from ..core.services.telemetry.telemetry_service import TelemetryManager
+from ..utils.banner import print_stop_summary
 from ..utils.version import get_plugin_version
 
 
@@ -181,6 +182,15 @@ class PluginLifecycleService:
         if self.plugin.web_server:
             # 最后停止管理端 Web 服务器，避免外部仍尝试进行网络交互
             await self.plugin.web_server.stop()
+
+        # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
+        # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。
+        # 该大屏原先在 DisasterServiceLifecycle.stop() 内打印，彼时浏览器与
+        # Web 管理端尚未回收（由本方法在 stop() 之后执行），会显示 ⚠️ 未完成。
+        try:
+            print_stop_summary(self.plugin.disaster_service)
+        except Exception as banner_err:
+            logger.debug(f"[灾害预警] 停止汇总大屏打印失败（已忽略）: {banner_err}")
 
     def handle_asyncio_exception(self, loop, context) -> None:
         """事件循环未处理异步异常拦截入口，判断来源若为本插件则执行遥测收集上报。"""

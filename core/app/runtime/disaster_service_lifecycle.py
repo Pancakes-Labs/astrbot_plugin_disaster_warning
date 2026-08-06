@@ -11,8 +11,6 @@ from datetime import datetime, timezone
 
 from astrbot.api import logger
 
-from ....utils.banner import print_stop_summary
-
 
 class DisasterServiceLifecycleService:
     """灾害服务生命周期编排服务。"""
@@ -395,14 +393,6 @@ class DisasterServiceLifecycleService:
                     self.service.statistics_manager._db_initialized = False
 
                 logger.debug("[灾害预警] 灾害预警服务已停止")
-
-                # 停止流程收尾时打印停止汇总大屏（替代逐行 INFO 流水）。
-                try:
-                    print_stop_summary(self.service)
-                except Exception as banner_err:
-                    logger.debug(
-                        f"[灾害预警] 停止汇总大屏打印失败（已忽略）: {banner_err}"
-                    )
             except Exception as e:
                 logger.error(f"[灾害预警] 停止服务时出错: {e}")
                 if self.service._telemetry and self.service._telemetry.enabled:
