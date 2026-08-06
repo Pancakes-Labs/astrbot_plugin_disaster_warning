@@ -215,6 +215,7 @@ class EventDeduplicationService:
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
                 event_stream="typhoon",
+                is_silent_window=True,
             )
             return False
         return True
@@ -244,13 +245,17 @@ class EventDeduplicationService:
                 f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
                 is_event_linked=True,
                 event_stream="typhoon",
+                is_silent_window=True,
             )
             return False
 
         # 参数有变化（或首次出现），更新缓存并放行
         self._typhoon_cache[typhoon_id] = fingerprint
         plugin_logger.debug(
-            f"[灾害预警] 台风 {typhoon_id} 核心参数已更新，允许推送 (指纹: {fingerprint})"
+            f"[灾害预警] 台风 {typhoon_id} 核心参数已更新，允许推送 (指纹: {fingerprint})",
+            is_event_linked=True,
+            event_stream="typhoon",
+            is_silent_window=True,
         )
         return True
 
