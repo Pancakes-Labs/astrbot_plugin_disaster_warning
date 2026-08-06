@@ -155,7 +155,7 @@ class SourceHealthMonitor:
                 await asyncio.sleep(interval_seconds)
 
             except asyncio.CancelledError:
-                logger.info("[灾害预警] 后台延迟检测任务已停止")
+                logger.debug("[灾害预警] 后台延迟检测任务已停止")
                 break
             except Exception as e:
                 logger.error(f"[灾害预警] 后台延迟检测出错: {e}")

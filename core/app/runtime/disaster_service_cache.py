@@ -91,7 +91,7 @@ class DisasterServiceCacheService:
             else:
                 os.rename(temp_file, self.service.cache_file)
 
-            logger.info("[灾害预警] Wolfx 地震列表缓存已保存")
+            logger.debug("[灾害预警] Wolfx 地震列表缓存已保存")
         except Exception as e:
             logger.error(f"[灾害预警] 保存 Wolfx 地震列表缓存失败: {e}")
             if os.path.exists(temp_file):

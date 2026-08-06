@@ -134,7 +134,7 @@ class MessageLogger:
         self._raw_message_logging_service = RawMessageLoggingService(self)
         self._earthquake_list_summary_service = EarthquakeListSummaryService(self)
 
-        logger.info("[灾害预警] 消息记录器初始化完成")
+        logger.debug("[灾害预警] 消息记录器初始化完成")
         if self.filter_heartbeat:
             logger.debug("[灾害预警] 消息过滤配置已启用:")
             logger.debug(f"[灾害预警] - 基础类型过滤: {self.filter_types}")

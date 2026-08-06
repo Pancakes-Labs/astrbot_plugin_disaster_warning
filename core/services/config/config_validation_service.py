@@ -51,7 +51,7 @@ class ConfigValidator:
         返回值：
         - 校验并修正后的配置字典
         """
-        logger.info("[灾害预警] 正在进行配置校验...")
+        logger.debug("[灾害预警] 正在进行配置校验...")
 
         # 按配置分组依次处理，确保每一类配置都在进入运行态前完成基础修正。
 
@@ -172,7 +172,7 @@ class ConfigValidator:
         if "enabled" in config and not isinstance(config["enabled"], bool):
             config["enabled"] = True
 
-        logger.info("[灾害预警] 配置校验完成")
+        logger.debug("[灾害预警] 配置校验完成")
         return config
 
     @staticmethod

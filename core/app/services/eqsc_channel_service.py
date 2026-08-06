@@ -228,7 +228,7 @@ class EqscChannelService:
         try:
             access_token = await self._token_manager.get_access_token()
             if access_token:
-                logger.info("[灾害预警] EQSC AccessToken 预热成功")
+                logger.debug("[灾害预警] EQSC AccessToken 预热成功")
                 return True
             logger.warning("[灾害预警] EQSC AccessToken 预热失败：未拿到有效令牌")
             return False
