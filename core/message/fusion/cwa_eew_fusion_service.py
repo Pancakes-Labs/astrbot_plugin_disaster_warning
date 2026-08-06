@@ -159,6 +159,7 @@ class CWAEewFusionService:
             f"[灾害预警] 融合策略：已拦截 Fan CWA EEW 事件 {event.id}，事件标识为 {event_key}，报数为 {report_num}，等待 Wolfx 在 {timeout} 秒内补充最大震度",
             is_event_linked=True,
             event_stream="earthquake",
+            is_silent_window=True,
         )
 
         loop = asyncio.get_running_loop()
@@ -193,6 +194,7 @@ class CWAEewFusionService:
                     "[灾害预警] 融合策略：CWA EEW 等待超时，推送原始 Fan 事件",
                     is_event_linked=True,
                     event_stream="earthquake",
+                    is_silent_window=True,
                 )
                 if self._absorb_if_silencing(event):
                     return False
@@ -206,6 +208,7 @@ class CWAEewFusionService:
                     "[灾害预警] 融合策略：CWA EEW 融合完成，推送补充最大震度后的 Fan 事件",
                     is_event_linked=True,
                     event_stream="earthquake",
+                    is_silent_window=True,
                 )
                 if self._absorb_if_silencing(event):
                     return False

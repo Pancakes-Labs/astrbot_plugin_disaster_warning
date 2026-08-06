@@ -184,6 +184,7 @@ class CENCFusionService:
             f"[灾害预警] 融合策略: 拦截 Fan CENC 事件 {event.id}，事件标识为 {event_key}，兼容槽位序号为 {report_num}，测定类型为 {measurement_type}，等待 Wolfx 补充（{timeout} 秒）...",
             is_event_linked=True,
             event_stream="earthquake",
+            is_silent_window=True,
         )
 
         loop = asyncio.get_running_loop()
