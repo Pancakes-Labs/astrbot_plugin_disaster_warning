@@ -278,7 +278,9 @@ class EqscTyphoonPollService:
         self._last_active_ids = current_active_ids
         return candidates
 
-    async def _process_typhoon_updates(self, active_items: list[dict[str, Any]]) -> int:
+    async def _process_typhoon_updates(
+        self, active_items: list[dict[str, Any]]
+    ) -> tuple[int, int]:
         """投递活跃台风事件；单事件失败不中断整批。
 
         去重判定与 FAN 触发路径及事件流水线完全统一：
@@ -286,6 +288,9 @@ class EqscTyphoonPollService:
         （基于 _typhoon_cache 与 _generate_typhoon_fingerprint），
         不再在轮询侧自建指纹缓存，避免「去重器判定过滤、
         轮询侧却统计为推送」的口径矛盾。
+
+        Returns:
+            (emitted, filtered)：成功推送条数与被去重过滤条数。
         """
         emitted = 0
         filtered = 0
@@ -308,14 +313,20 @@ class EqscTyphoonPollService:
             is_silence = getattr(self.service, "is_silencing", None)
             if callable(is_silence) and is_silence():
                 try:
-                    await self.service._handle_disaster_event(envelope)
-                    # 静默期播种成功同样视为已处理，清理待重试停编 ID。
-                    self._pending_deactivate_ids.discard(typhoon_id)
+                    handled = await self.service._handle_disaster_event(envelope)
                 except Exception as exc:
                     logger.debug(
                         f"[灾害预警] EQSC 台风静默期播种去重指纹失败（已忽略）: "
                         f"ID 为 {typhoon_id}, 错误信息：{exc}"
                     )
+                    handled = False
+                # 仅播种成功（返回 True）时才视为已处理并清理待重试停编 ID；
+                # 返回 False 或抛出异常时保留（停编台风重新加入）待重试集合，
+                # 避免先前投递失败的停编通知在静默期被误清理而永久丢失。
+                if handled:
+                    self._pending_deactivate_ids.discard(typhoon_id)
+                elif deactivated:
+                    self._pending_deactivate_ids.add(typhoon_id)
                 continue
 
             # 统一去重判定：与 _handle_disaster_event 内 FAN 触发路径一致，
@@ -412,7 +423,12 @@ class EqscTyphoonPollService:
                 is_silent_window=True,
             )
         else:
-            plugin_logger.debug("[灾害预警] EQSC 台风轮询本轮无变化，跳过推送")
+            plugin_logger.debug(
+                "[灾害预警] EQSC 台风轮询本轮无变化，跳过推送",
+                is_event_linked=True,
+                event_stream="typhoon",
+                is_silent_window=True,
+            )
         return active_items
 
 
