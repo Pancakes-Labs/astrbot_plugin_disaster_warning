@@ -148,6 +148,9 @@ def print_banner() -> None:
 # 启动汇总大屏生成
 # ---------------------------------------------------------------------------
 # 连接分组名 -> 展示名（大屏连接明细用）
+# 场景投影：启动大屏为排版对齐做了微调（追加"数据源"后缀、空格分隔），
+# 与 display_registry.CONNECTION_DISPLAY_NAMES（管理端口径）存在有意差异，
+# 此处保留大屏专用文案，修改展示名时请同时检查两处。
 _CONNECTION_LABELS: dict[str, str] = {
     "fan_studio_all": "FAN Studio 数据源",
     "fan_studio_cenc_ir": "FAN Studio 烈度速报",

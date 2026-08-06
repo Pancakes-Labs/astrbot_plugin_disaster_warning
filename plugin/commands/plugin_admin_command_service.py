@@ -111,7 +111,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             bot_id = event.get_self_id() or "0"
             bot_name = "灾害预警"
 
-            # 对应展示名称映射
+            # 对应展示名称映射（命令文本场景投影）。
+            # connection_label_map / source_group_label_map 的多数值与
+            # display_registry.CONNECTION_DISPLAY_NAMES 一致，但命令文本保留了两处
+            # 有意差异：fan_studio_cenc_ir 用空格（"FAN Studio 烈度速报"）而非括号；
+            # snet_msil 用"日本海沟 S-Net 海底震度计"。
+            # 修改展示名时请同时核对 display_registry.py 与下方各投影表。
             connection_label_map = OrderedDict(
                 [
                     ("fan_studio_all", "FAN Studio"),

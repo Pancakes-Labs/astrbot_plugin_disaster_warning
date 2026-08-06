@@ -323,7 +323,9 @@ function ConnectionsGrid() {
     };
 
     /**
-     * 内部子数据源 ID => 中文可读机构对照字典
+     * 内部子数据源 ID => 中文可读机构对照字典（子源列表场景投影）。
+     * 注意：这是连接面板子源明细的专用展示口径，与后端命令文本存在既有差异，属有意设计，
+     * 修改展示名时请同时核对 display_registry.py 与 plugin_admin_command_service.py 的投影表。
      */
     const getScopedSourceName = (sourceKey, connectionName) => {
         const rawKey = String(sourceKey || '').trim();
