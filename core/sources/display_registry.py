@@ -28,6 +28,8 @@
 
 from __future__ import annotations
 
+from .source_entry import ProviderFamily
+
 # ---------------------------------------------------------------------------
 # 1. 数据源历史别名归一化表
 # ---------------------------------------------------------------------------
@@ -195,12 +197,13 @@ CONNECTION_GROUP_ORDER: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # 供 SourceRuntimeQueryService 在数据源未显式声明 connection_group 时，
 # 按 provider_family 解析默认连接分组。
+# key 直接取自 ProviderFamily 枚举值，避免与枚举定义静默漂移。
 CONNECTION_GROUP_ALIAS: dict[str, str] = {
-    "fan_studio": "fan_studio_all",
-    "p2p": "p2p_main",
-    "wolfx": "wolfx_all",
-    "global_quake": "openquake_api",
-    "direct_http": "snet_msil",
+    ProviderFamily.FAN_STUDIO.value: "fan_studio_all",
+    ProviderFamily.P2P.value: "p2p_main",
+    ProviderFamily.WOLFX.value: "wolfx_all",
+    ProviderFamily.GLOBAL_QUAKE.value: "openquake_api",
+    ProviderFamily.DIRECT_HTTP.value: "snet_msil",
 }
 
 # ---------------------------------------------------------------------------
