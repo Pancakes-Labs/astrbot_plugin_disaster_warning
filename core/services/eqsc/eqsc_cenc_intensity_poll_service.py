@@ -144,7 +144,7 @@ class EqscCencIntensityPollService:
             return
         self._task = asyncio.create_task(self._poll_loop(), name="dw_eqsc_cenc_ir_poll")
         self.service.scheduled_tasks.append(self._task)
-        logger.info("[灾害预警] EQSC CENC 烈度速报轮询任务已启动")
+        logger.debug("[灾害预警] EQSC CENC 烈度速报轮询任务已启动")
 
     async def stop(self) -> None:
         """停止后台轮询并释放客户端 HTTP 会话。
@@ -354,6 +354,7 @@ class EqscCencIntensityPollService:
                 f"[灾害预警] EQSC CENC 烈度速报轮询本轮推送 {emitted} 条",
                 is_event_linked=True,
                 event_stream="earthquake",
+                is_silent_window=True,
             )
         else:
             plugin_logger.debug("[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送")

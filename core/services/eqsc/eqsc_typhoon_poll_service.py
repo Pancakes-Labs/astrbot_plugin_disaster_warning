@@ -149,7 +149,7 @@ class EqscTyphoonPollService:
             return
         self._task = asyncio.create_task(self._poll_loop(), name="dw_eqsc_typhoon_poll")
         self.service.scheduled_tasks.append(self._task)
-        logger.info("[灾害预警] EQSC 台风轮询任务已启动")
+        logger.debug("[灾害预警] EQSC 台风轮询任务已启动")
 
     async def stop(self) -> None:
         """停止后台轮询；仅关闭本服务自己创建的客户端。
@@ -375,6 +375,7 @@ class EqscTyphoonPollService:
                 f"[灾害预警] EQSC 台风轮询本轮推送 {emitted} 条更新",
                 is_event_linked=True,
                 event_stream="typhoon",
+                is_silent_window=True,
             )
         else:
             plugin_logger.debug("[灾害预警] EQSC 台风轮询本轮无变化，跳过推送")
