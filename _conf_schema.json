@@ -1570,6 +1570,12 @@
         "type": "bool",
         "hint": "开启后，插件在建连与首轮数据同步完成前自动忽略事件推送、原始日志与统计，用于过滤启动噪音。关闭后事件立即进入正常推送链路。",
         "default": true
+      },
+      "silent_startup_mute_event_logs": {
+        "description": "静默启动期间丢弃事件流日志",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，处于启动静默期的事件流日志将被整体丢弃，不打印到控制台。静默期结束后恢复正常。"
       }
     }
   },
