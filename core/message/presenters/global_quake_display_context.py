@@ -7,8 +7,26 @@ Global Quake 展示上下文构建器。
 
 from __future__ import annotations
 
+from typing import Any
+
 from ....utils.time_converter import TimeConverter
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
+
+
+def _coerce_location_error(value: Any) -> float | None:
+    """把 errOrigin / err_origin 归一化为 float，无法转换时返回 None。
+
+    兼容两类脏数据：
+    - 合法数值 0（不能被 or 误判为缺失）；
+    - JSON 原始路径以字符串下发数值（如 "3.2"），直接 f"{v:.1f}" 会抛 TypeError。
+    """
+    if value is None:
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return num
 
 
 def _format_coordinates(latitude: float, longitude: float) -> str:
@@ -87,7 +105,14 @@ class GlobalQuakeDisplayContextBuilder:
             pct = quality.get("pct")
             if pct is not None:
                 quality_pct = f"{pct}%"
-            err_origin = quality.get("errOrigin") or quality.get("err_origin")
+            # 按键是否存在取 errOrigin / err_origin（不能依赖 or：合法值 0 会被误判缺失），
+            # 并先 float() 归一化：JSON 原始路径可能以字符串下发数值。
+            err_origin = (
+                quality.get("errOrigin")
+                if "errOrigin" in quality
+                else quality.get("err_origin")
+            )
+            err_origin = _coerce_location_error(err_origin)
             if err_origin is not None:
                 location_error = f"{err_origin:.1f} km"
 
@@ -127,9 +152,12 @@ class GlobalQuakeDisplayContextBuilder:
                         quality_pct = f"{pct}%"
 
                 if location_error == "N/A":
-                    err_origin = inner_quality.get("errOrigin") or inner_quality.get(
-                        "err_origin"
+                    err_origin = (
+                        inner_quality.get("errOrigin")
+                        if "errOrigin" in inner_quality
+                        else inner_quality.get("err_origin")
                     )
+                    err_origin = _coerce_location_error(err_origin)
                     if err_origin is not None:
                         location_error = f"{err_origin:.1f} km"
             if location_error == "N/A" and isinstance(
