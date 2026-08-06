@@ -8,31 +8,16 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from ...sources.display_registry import CONNECTION_DISPLAY_NAMES, CONNECTION_GROUP_ALIAS
 from ...sources.source_catalog import SOURCE_CATALOG
-from ...sources.source_entry import ProviderFamily, SourceEntry
+from ...sources.source_entry import SourceEntry
 from ..config.config_service import ConfigAccessor
 
-# 物理连接到连接分组的键映射，统一在此集中配置，消除魔法硬编码字符串
-_CONNECTION_GROUP_ALIAS: dict[str, str] = {
-    ProviderFamily.FAN_STUDIO.value: "fan_studio_all",
-    ProviderFamily.P2P.value: "p2p_main",
-    ProviderFamily.WOLFX.value: "wolfx_all",
-    ProviderFamily.GLOBAL_QUAKE.value: "openquake_api",
-    ProviderFamily.DIRECT_HTTP.value: "snet_msil",
-}
-
-# 物理连接的友好展示名称，供管理后台和 API 使用
-_CONNECTION_DISPLAY_NAME: dict[str, str] = {
-    "fan_studio_all": "FAN Studio",
-    "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
-    "p2p_main": "P2P地震情報",
-    "wolfx_all": "Wolfx",
-    "openquake_api": "OpenQuakeAPI",
-    "snet_msil": "NIED S-Net",
-    # EQSC 为 HTTP 通道；展示名必须与 ConnectionsPayloadBuilder.EQSC_DISPLAY_NAME
-    # 完全一致，否则 catalog 占位会以原始键 "eqsc" 残留，前端误显示“未连接”。
-    "eqsc": "EQSC API",
-}
+# 物理连接到连接分组的键映射、物理连接的友好展示名称
+# 已统一收编至 core/sources/display_registry.py（CONNECTION_GROUP_ALIAS /
+# CONNECTION_DISPLAY_NAMES），此处直接引用事实层常量。
+# EQSC / S-Net 等 HTTP 通道展示名同样来自 CONNECTION_DISPLAY_NAMES，
+# 与 ConnectionsPayloadBuilder 派生自同一事实源，天然保持一致。
 
 
 class SourceRuntimeQueryService:
@@ -110,7 +95,7 @@ class SourceRuntimeQueryService:
         if explicit_group:
             return explicit_group
         # 降级使用静态定义的全局家族别名列表
-        return _CONNECTION_GROUP_ALIAS.get(
+        return CONNECTION_GROUP_ALIAS.get(
             entry.provider_family.value, entry.provider_family.value
         )
 
@@ -119,7 +104,7 @@ class SourceRuntimeQueryService:
         groups: dict[str, str] = {}
         for entry in SOURCE_CATALOG.values():
             group_key = self.get_connection_group_key(entry)
-            groups[group_key] = _CONNECTION_DISPLAY_NAME.get(group_key, group_key)
+            groups[group_key] = CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
         return groups
 
     def get_connection_group_source_map(self) -> dict[str, list[str]]:

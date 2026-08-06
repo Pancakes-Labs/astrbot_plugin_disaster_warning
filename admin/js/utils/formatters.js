@@ -1,6 +1,92 @@
 const JST_SOURCE_KEYWORDS = ['jma', 'p2p', 'wolfx_jma', 'japan'];
 
 /**
+ * 数据源展示元数据（唯一事实源）缓存。
+ * 由后端 /api/sources/meta 动态拉取，数据源别名与展示名的完整映射
+ * 只维护在后端 core/sources/display_registry.py（SOURCE_ALIAS_MAP /
+ * SOURCE_DISPLAY_MAP），前端不再复制完整映射表，新增/改名数据源时只需改后端一处。
+ *
+ * 前端仅保留极小的 SOURCE_DISPLAY_OVERRIDES 场景投影覆盖表：
+ * 子源列表口径有意剥掉通道后缀、以及后端未注册的前端专属文案，
+ * 属于既有展示设计，勿与后端强行对齐。
+ */
+let __SOURCE_DISPLAY_META__ = null;
+let __SOURCE_DISPLAY_META_PROMISE__ = null;
+let __SOURCE_DISPLAY_META_LAST_ATTEMPT__ = 0;
+// 拉取失败后的最小重试间隔，避免网络抖动时对后端接口密集请求。
+const SOURCE_DISPLAY_META_RETRY_MS = 30 * 1000;
+
+/**
+ * 从后端拉取数据源展示元数据（幂等，并发去重）。
+ * 成功结果会缓存；失败时保持缓存为空并节流重试，展示名/别名会回退为原始输入，
+ * 待下次触发（如组件渲染或手动调用）再尝试拉取，不影响功能。
+ * 进行中的请求会被所有并发调用方共享同一个 Promise，只发出一次 fetch。
+ * @returns {Promise<object>}
+ */
+function loadSourceDisplayMeta() {
+    // 已有缓存：直接返回。
+    if (__SOURCE_DISPLAY_META__ !== null) {
+        return Promise.resolve(__SOURCE_DISPLAY_META__);
+    }
+    // 已有进行中的请求：所有并发调用方共享同一个 in-flight Promise。
+    if (__SOURCE_DISPLAY_META_PROMISE__) {
+        return __SOURCE_DISPLAY_META_PROMISE__;
+    }
+    // 失败后的重试节流：距上次尝试不足间隔则不再发起请求。
+    if (Date.now() - __SOURCE_DISPLAY_META_LAST_ATTEMPT__ < SOURCE_DISPLAY_META_RETRY_MS) {
+        return Promise.resolve(__SOURCE_DISPLAY_META__);
+    }
+    __SOURCE_DISPLAY_META_LAST_ATTEMPT__ = Date.now();
+    __SOURCE_DISPLAY_META_PROMISE__ = fetch('/api/sources/meta', { headers: { 'Accept': 'application/json' } })
+        .then((resp) => (resp && resp.ok) ? resp.json() : {})
+        .then((data) => {
+            __SOURCE_DISPLAY_META__ = (data && typeof data === 'object') ? data : {};
+            return __SOURCE_DISPLAY_META__;
+        })
+        .catch(() => {
+            // 失败不写入缓存（保持 null）：ensureSourceDisplayMetaLoaded
+            // 会在节流间隔后再次触发加载，避免整个会话回退显示原始 key。
+            __SOURCE_DISPLAY_META__ = null;
+            return __SOURCE_DISPLAY_META__;
+        })
+        .finally(() => {
+            __SOURCE_DISPLAY_META_PROMISE__ = null;
+        });
+    return __SOURCE_DISPLAY_META_PROMISE__;
+}
+
+/**
+ * 确保展示元数据已触发加载（懒加载兜底）。
+ * 页面加载时的预加载通常已就绪；若因网络抖动未完成，组件渲染时
+ * 调用 formatSourceName / normalizeSourceName 会再次触发加载，
+ * 避免整个会话都回退显示原始 key。
+ */
+function ensureSourceDisplayMetaLoaded() {
+    if (__SOURCE_DISPLAY_META__ === null && !__SOURCE_DISPLAY_META_PROMISE__) {
+        loadSourceDisplayMeta();
+    }
+}
+
+/**
+ * 仅读取对象自身的属性值，避免命中 Object.prototype 上继承的键
+ * （如 toString / constructor / __proto__），并消除裸下标读取的静态分析告警。
+ * @param {object} obj
+ * @param {string} key
+ * @returns {*}
+ */
+function pickOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
+// 页面加载时预热一次：管理端与后端同源部署，meta 为本地小体积接口，
+// 通常在首帧数据（status/events）返回前完成，供 formatSourceName /
+// normalizeSourceName 使用。
+if (typeof window !== 'undefined' && typeof fetch === 'function') {
+    window.__loadSourceDisplayMeta = loadSourceDisplayMeta;
+    loadSourceDisplayMeta();
+}
+
+/**
  * 判断数据源是否属于 UTC+9 (JST) 体系
  * @param {string} source - 数据源标识
  * @returns {boolean}
@@ -193,104 +279,22 @@ function getWeatherColorClass(description) {
 
 /**
  * 统一规范化后端重构后的数据源标识
- * - 新命名(source/source_id) 作为主体系
- * - 旧命名仅作为输入别名折叠到同一规范名
+ * 唯一事实源：后端 /api/sources/meta 的 source_alias_map
+ * （对应 core/sources/display_registry.py 的 SOURCE_ALIAS_MAP）。
+ * meta 未就绪或拉取失败时回退为小写标准形态，与历史行为一致。
  * @param {string} source
  * @returns {string}
  */
 function normalizeSourceName(source) {
+    ensureSourceDisplayMetaLoaded();
     if (!source) return 'unknown';
 
     const rawSource = String(source).trim();
     if (!rawSource) return 'unknown';
 
     const lowerSource = rawSource.toLowerCase();
-    const aliasMap = {
-        // 旧前端 key -> 新规范 key
-        'fan_studio_cenc': 'cenc_fanstudio',
-        'fan_studio_cenc_ir': 'cenc_ir_fanstudio',
-        'fan_studio_cea': 'cea_fanstudio',
-        'fan_studio_cea_pr': 'cea_pr_fanstudio',
-        'fan_studio_cwa': 'cwa_fanstudio',
-        'fan_studio_cwa_report': 'cwa_fanstudio_report',
-        'fan_studio_usgs': 'usgs_fanstudio',
-        'fan_studio_sa': 'sa_fanstudio',
-        'fan_studio_fssn_cmt': 'fssn_cmt_fanstudio',
-        'fan_studio_jma': 'jma_fanstudio',
-        'fan_studio_weather': 'china_weather_fanstudio',
-        'fan_studio_tsunami': 'china_tsunami_fanstudio',
-        'p2p_eew': 'jma_p2p',
-        'p2p_earthquake': 'jma_p2p_info',
-        'p2p_tsunami': 'jma_tsunami_p2p',
-        'eqsc_tsunami': 'jma_tsunami_eqsc',
-        'wolfx_jma_eew': 'jma_wolfx',
-        'wolfx_cenc_eew': 'cea_wolfx',
-        'wolfx_cwa_eew': 'cwa_wolfx',
-        'wolfx_cenc_eq': 'cenc_wolfx',
-        'wolfx_jma_eq': 'jma_wolfx_info',
-
-        // 配置项 / 子数据源 key -> 新规范展示 key
-        'china_earthquake_warning': 'cea_fanstudio',
-        'china_earthquake_warning_provincial': 'cea_pr_fanstudio',
-        'taiwan_cwa_earthquake': 'cwa_fanstudio',
-        'taiwan_cwa_report': 'cwa_fanstudio_report',
-        'china_cenc_earthquake': 'cenc_fanstudio',
-        'china_cenc_intensity_report': 'cenc_ir_fanstudio',
-        'cenc-ir': 'cenc_ir_fanstudio',
-        'cenc_ir': 'cenc_ir_fanstudio',
-        'usgs_earthquake': 'usgs_fanstudio',
-        'usa_shakealert': 'sa_fanstudio',
-        'sa': 'sa_fanstudio',
-        'shakealert': 'sa_fanstudio',
-        'fssn_cmt': 'fssn_cmt_fanstudio',
-        'fssn-cmt': 'fssn_cmt_fanstudio',
-        'china_weather_alarm': 'china_weather_fanstudio',
-        'openquake_cma': 'china_weather_openquake',
-        'cma_weather': 'china_weather_openquake',
-        'cma': 'china_weather_openquake',
-        'china_tsunami': 'china_tsunami_fanstudio',
-        'japan_jma_eew': 'jma_p2p',
-        'japan_jma_earthquake': 'jma_p2p_info',
-        'japan_jma_tsunami': 'jma_tsunami_p2p',
-        'china_cenc_eew': 'cea_wolfx',
-        'taiwan_cwa_eew': 'cwa_wolfx',
-
-        // 中文标签 -> 新规范 key
-        '中国气象局：气象预警': 'china_weather_fanstudio',
-        '中国气象局: 气象预警': 'china_weather_fanstudio',
-        '台湾中央气象署：强震即时警报': 'cwa_fanstudio',
-        '台湾中央气象署: 强震即时警报': 'cwa_fanstudio',
-        '台湾中央气象署：地震报告': 'cwa_fanstudio_report',
-        '台湾中央气象署: 地震报告': 'cwa_fanstudio_report',
-        '中国地震台网（cenc）': 'cenc_fanstudio',
-        '中国地震台网(cenc)': 'cenc_fanstudio',
-        '中国地震台网（cenc）：地震测定': 'cenc_fanstudio',
-        '中国地震台网(cenc)：地震测定': 'cenc_fanstudio',
-        '中国地震台网（cenc）：烈度速报': 'cenc_ir_fanstudio',
-        '中国地震台网(cenc)：烈度速报': 'cenc_ir_fanstudio',
-        '中国地震台网烈度速报': 'cenc_ir_fanstudio',
-        '中国地震预警网（cea）': 'cea_fanstudio',
-        '中国地震预警网(cea)': 'cea_fanstudio',
-        '中国地震预警网（省级）': 'cea_pr_fanstudio',
-        '中国地震预警网(省级)': 'cea_pr_fanstudio',
-        '日本气象厅：紧急地震速报': 'jma_fanstudio',
-        '日本气象厅: 紧急地震速报': 'jma_fanstudio',
-        '日本气象厅：地震情报': 'jma_p2p_info',
-        '日本气象厅: 地震情报': 'jma_p2p_info',
-        // 中文冒号全角/半角 + 预报/予报 历史写法都兼容
-        '日本气象厅：海啸预报': 'jma_tsunami_p2p',
-        '日本气象厅: 海啸预报': 'jma_tsunami_p2p',
-        '日本气象厅：海啸予报': 'jma_tsunami_p2p',
-        '日本气象厅: 海啸予报': 'jma_tsunami_p2p',
-        '日本气象厅：海啸予报 - P2P': 'jma_tsunami_p2p',
-        '日本气象厅: 海啸予报 - P2P': 'jma_tsunami_p2p',
-        '日本气象厅：海啸予报 - EQSC': 'jma_tsunami_eqsc',
-        '日本气象厅: 海啸予报 - EQSC': 'jma_tsunami_eqsc',
-        '日本气象厅：海啸预报 - EQSC': 'jma_tsunami_eqsc',
-        '日本气象厅: 海啸预报 - EQSC': 'jma_tsunami_eqsc',
-    };
-
-    return aliasMap[rawSource] || aliasMap[lowerSource] || lowerSource;
+    const metaAliasMap = (__SOURCE_DISPLAY_META__ && __SOURCE_DISPLAY_META__.source_alias_map) || {};
+    return pickOwn(metaAliasMap, rawSource) || pickOwn(metaAliasMap, lowerSource) || lowerSource;
 }
 
 /**
@@ -348,58 +352,33 @@ function formatSessionDisplayLabel(sessionOrUmo) {
 }
 
 /**
+ * 数据源展示名场景投影覆盖表（唯一真源之外的少量有意差异）。
+ * 前端仅在此覆盖个别场景展示口径：
+ * - cenc_ir_fanstudio：子源列表展示口径有意剥掉通道后缀 "- Fan"，
+ *   与后端完整通道名存在既有差异，勿强行对齐；
+ * - snet_msil：后端 SOURCE_DISPLAY_MAP 未注册该键，保留前端既有文案，
+ *   避免回退显示原始内部 key。
+ * 其余 key 全部由 meta 提供，新增/改名数据源只需改后端一处。
+ */
+const SOURCE_DISPLAY_OVERRIDES = {
+    'cenc_ir_fanstudio': '中国地震台网 (CENC) - 烈度速报',
+    'snet_msil': '日本海沟 S-Net 海底震度计',
+};
+
+/**
  * 将数据源代码转换为用户友好的显示名称
+ * 唯一事实源：后端 /api/sources/meta 的 source_display_map；
+ * 场景投影覆盖见 SOURCE_DISPLAY_OVERRIDES。
  * @param {string} source - 数据源代码
  * @returns {string} 友好的中文名称
  */
 function formatSourceName(source) {
+    ensureSourceDisplayMetaLoaded();
     const normalizedSource = normalizeSourceName(source);
-    const sourceMap = {
-        // Fan Studio (新规范)
-        'cenc_fanstudio': '中国地震台网 (CENC) - Fan',
-        'cenc_ir_fanstudio': '中国地震台网 (CENC) - 烈度速报',
-        'cea_fanstudio': '中国地震预警网 (CEA)',
-        'cea_pr_fanstudio': '中国地震预警网 (省级)',
-        'cwa_fanstudio': '台湾中央气象署: 强震即时警报 - Fan',
-        'cwa_fanstudio_report': '台湾中央气象署: 地震报告',
-        'usgs_fanstudio': '美国地质调查局 (USGS)',
-        'sa_fanstudio': '美国 ShakeAlert 地震预警',
-        'fssn_cmt_fanstudio': 'FSSN 矩心矩张量解 (CMT)',
-        'jma_fanstudio': '日本气象厅: 紧急地震速报 - Fan',
-        'china_weather_fanstudio': '中国气象局: 气象预警 - Fan',
-        'china_weather_openquake': '中国气象局: 气象预警 - OQ',
-        'china_tsunami_fanstudio': '自然资源部海啸预警中心',
-        // 贡献榜中性名：实时通道（fan + enriched）不强制带 - Fan
-        'typhoon_fanstudio': '中国气象局：实时活跃台风',
-        // EQSC 历史重建在贡献统计中单独成源
-        'typhoon_eqsc_rebuild': '中国气象局：台风历史 - EQSC',
-
-        // P2P (新规范)
-        'jma_p2p': '日本气象厅: 紧急地震速报 - P2P',
-        'jma_p2p_info': '日本气象厅: 地震情报 - P2P',
-        'jma_tsunami_p2p': '日本气象厅: 海啸予报 - P2P',
-
-        // EQSC (HTTP 海啸补充源)
-        'jma_tsunami_eqsc': '日本气象厅: 海啸予报 - EQSC',
-
-        // Wolfx (新规范)
-        'jma_wolfx': '日本气象厅: 紧急地震速报 - Wolfx',
-        'cea_wolfx': '中国地震预警网 (CEA) - Wolfx',
-        'cwa_wolfx': '台湾中央气象署: 强震即时警报 - Wolfx',
-        'cenc_wolfx': '中国地震台网地震测定 - Wolfx',
-        'jma_wolfx_info': '日本气象厅地震情报 - Wolfx',
-
-        // 其他
-        'global_quake': 'Global Quake',
-        'snet_msil': '日本海沟 S-Net 海底震度计',
-        'sc_eew': '四川地震局',
-        'fj_eew': '福建地震局',
-        'kma_earthquake': '韩国气象厅 (KMA)',
-        'emsc_earthquake': '欧洲地中海地震中心 (EMSC)',
-        'gfz_earthquake': '德国地学研究中心 (GFZ)',
-        'unknown': '未知来源'
-    };
-    return sourceMap[normalizedSource] || String(source || '').trim() || '未知来源';
+    const metaDisplayMap = (__SOURCE_DISPLAY_META__ && __SOURCE_DISPLAY_META__.source_display_map) || {};
+    return pickOwn(SOURCE_DISPLAY_OVERRIDES, normalizedSource)
+        || pickOwn(metaDisplayMap, normalizedSource)
+        || String(source || '').trim() || '未知来源';
 }
 
 /**

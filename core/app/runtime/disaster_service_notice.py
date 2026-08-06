@@ -11,6 +11,7 @@ from typing import Any
 
 from ...services.config.config_service import ConfigAccessor
 from ...services.config.config_validation_service import ConfigValidator
+from ...sources.display_registry import CONNECTION_DISPLAY_NAMES
 
 
 class DisasterServiceNoticeService:
@@ -23,21 +24,39 @@ class DisasterServiceNoticeService:
         "stop": "停止重连",
     }
 
-    # 连接内部数据源代号 -> 用户可读的展示名称。
-    # 与 SourceRuntimeQueryService._CONNECTION_DISPLAY_NAME 的展示口径保持一致，
-    # 避免把 openquake_mixed 这类内部代号直接暴露给用户。
-    _SOURCE_DISPLAY_MAP: dict[str, str] = {
-        "fan_studio_mixed": "FAN Studio",
-        "wolfx_mixed": "Wolfx",
-        "openquake_mixed": "OpenQuakeAPI",
-        "jma_p2p": "P2P地震情報",
-        "jma_p2p_info": "P2P地震情報",
-        "jma_tsunami_p2p": "P2P地震情報",
-        "jma_tsunami_eqsc": "EQSC API",
-        "cenc_ir_eqsc": "EQSC API",
-        "typhoon_eqsc": "EQSC API",
-        "snet_msil": "NIED S-Net",
+    # 离线通知场景投影：内部数据源代号折叠到"物理通道"粒度。
+    # 展示名统一从 display_registry.CONNECTION_DISPLAY_NAMES 派生，
+    # 避免通道展示名在各模块重复维护；折叠规则本身属于通知场景的有意设计
+    # （用户只需知道哪个通道离线，无需细分到子源），保留在此处。
+    _SOURCE_GROUP_KEY_MAP: dict[str, str] = {
+        "fan_studio_mixed": "fan_studio_all",
+        # cenc_ir_fanstudio 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
+        "cenc_ir_fanstudio": "fan_studio_cenc_ir",
+        "wolfx_mixed": "wolfx_all",
+        "openquake_mixed": "openquake_api",
+        "jma_p2p": "p2p_main",
+        "jma_p2p_info": "p2p_main",
+        "jma_tsunami_p2p": "p2p_main",
+        "jma_tsunami_eqsc": "eqsc",
+        "cenc_ir_eqsc": "eqsc",
+        "typhoon_eqsc": "eqsc",
+        "snet_msil": "snet_msil",
     }
+
+    def _resolve_source_display(self, data_source: str) -> str:
+        """按离线通知场景把内部数据源代号解析为用户可读的通道展示名。
+
+        折叠规则命中时返回通道级展示名；未命中则防御性地尝试直接按
+        data_source 查一次连接组展示名（覆盖未来新增的“连接级别” key），
+        最后才回退原始代号。
+        """
+        group_key = self._SOURCE_GROUP_KEY_MAP.get(data_source)
+        if group_key is not None:
+            return CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
+        direct_display = CONNECTION_DISPLAY_NAMES.get(data_source)
+        if direct_display is not None:
+            return direct_display
+        return data_source
 
     def __init__(self, service):
         # 与生命周期服务类似，这里只保留主服务引用，便于共享配置、状态与消息发送能力。
@@ -137,7 +156,7 @@ class DisasterServiceNoticeService:
         # 阶段文案、重试次数和下一次重试时间会一起展示，
         # 目的是让使用者能在一条通知里快速判断当前处于“短时抖动”还是“长期离线”。
         # 数据源代号先映射为展示名，避免把内部标识暴露给用户。
-        source_display = self._SOURCE_DISPLAY_MAP.get(data_source, data_source)
+        source_display = self._resolve_source_display(data_source)
         stage_text = self._OFFLINE_STAGE_MAP.get(stage, stage)
         retry_part = (
             f"短时重试: {retry_count}" if retry_count is not None else "短时重试: 未知"

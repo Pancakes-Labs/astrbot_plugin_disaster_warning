@@ -3,6 +3,14 @@
 统一导出数据源目录、来源注册项与路由辅助能力。
 """
 
+from .display_registry import (
+    CONNECTION_DISPLAY_NAMES,
+    CONNECTION_GROUP_ALIAS,
+    CONNECTION_GROUP_ORDER,
+    DISPLAY_NAME_ALIASES,
+    SOURCE_ALIAS_MAP,
+    SOURCE_DISPLAY_MAP,
+)
 from .source_catalog import (
     SOURCE_CATALOG,
     get_source_entries,
@@ -30,6 +38,12 @@ __all__ = [
     "SourceEntry",
     "SourceType",
     "SOURCE_CATALOG",
+    "SOURCE_ALIAS_MAP",
+    "SOURCE_DISPLAY_MAP",
+    "CONNECTION_DISPLAY_NAMES",
+    "CONNECTION_GROUP_ALIAS",
+    "CONNECTION_GROUP_ORDER",
+    "DISPLAY_NAME_ALIASES",
     "get_source_entry",
     "get_source_entries",
     "get_source_ids_by_config_group",
