@@ -14,132 +14,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from ..domain.typhoon.typhoon_modes import resolve_data_mode
+from ..sources.display_registry import SOURCE_ALIAS_MAP, SOURCE_DISPLAY_MAP
 
-# 历史别名映射表：把旧来源名、展示名和外部兼容名统一折叠到规范 source_id
-# 包含各种历史插件版本产生的 key 以及 WebSocket 连接中发送的 label
-_ALIAS_MAP: dict[str, str] = {
-    "fan_studio_cenc": "cenc_fanstudio",
-    "fan_studio_cenc_ir": "cenc_ir_fanstudio",
-    "fan_studio_cea": "cea_fanstudio",
-    "fan_studio_cea_pr": "cea_pr_fanstudio",
-    "fan_studio_cwa": "cwa_fanstudio",
-    "fan_studio_cwa_report": "cwa_fanstudio_report",
-    "fan_studio_usgs": "usgs_fanstudio",
-    "fan_studio_fssn_cmt": "fssn_cmt_fanstudio",
-    "fssn-cmt": "fssn_cmt_fanstudio",
-    "fssn_cmt": "fssn_cmt_fanstudio",
-    "fan_studio_sa": "sa_fanstudio",
-    "fan_studio_jma": "jma_fanstudio",
-    "fan_studio_weather": "china_weather_fanstudio",
-    "fan_studio_tsunami": "china_tsunami_fanstudio",
-    "p2p_eew": "jma_p2p",
-    "p2p_earthquake": "jma_p2p_info",
-    "p2p_tsunami": "jma_tsunami_p2p",
-    "eqsc_tsunami": "jma_tsunami_eqsc",
-    "eqsc_typhoon": "typhoon_eqsc",
-    "eqsc_cenc_ir": "cenc_ir_eqsc",
-    "cenc_ir_eqsc": "cenc_ir_eqsc",
-    "eqsc_intensity_report": "cenc_ir_eqsc",
-    "fan_studio_typhoon": "typhoon_fanstudio",
-    "wolfx_jma_eew": "jma_wolfx",
-    "wolfx_cenc_eew": "cea_wolfx",
-    "wolfx_cwa_eew": "cwa_wolfx",
-    "wolfx_cenc_eq": "cenc_wolfx",
-    "wolfx_jma_eq": "jma_wolfx_info",
-    "china_earthquake_warning": "cea_fanstudio",
-    "china_earthquake_warning_provincial": "cea_pr_fanstudio",
-    "taiwan_cwa_earthquake": "cwa_fanstudio",
-    "taiwan_cwa_report": "cwa_fanstudio_report",
-    "china_cenc_earthquake": "cenc_fanstudio",
-    "china_cenc_intensity_report": "cenc_ir_fanstudio",
-    "cenc-ir": "cenc_ir_fanstudio",
-    "cenc_ir": "cenc_ir_fanstudio",
-    "usgs_earthquake": "usgs_fanstudio",
-    "usa_shakealert": "sa_fanstudio",
-    "sa": "sa_fanstudio",
-    "shakealert": "sa_fanstudio",
-    "china_weather_alarm": "china_weather_fanstudio",
-    "openquake_cma": "china_weather_openquake",
-    "cma_weather": "china_weather_openquake",
-    "cma": "china_weather_openquake",
-    "china_tsunami": "china_tsunami_fanstudio",
-    "japan_jma_eew": "jma_p2p",
-    "japan_jma_earthquake": "jma_p2p_info",
-    "japan_jma_tsunami": "jma_tsunami_p2p",
-    "china_cenc_eew": "cea_wolfx",
-    "taiwan_cwa_eew": "cwa_wolfx",
-    "中国气象局：气象预警": "china_weather_fanstudio",
-    "中国气象局: 气象预警": "china_weather_fanstudio",
-    "台湾中央气象署：强震即时警报": "cwa_fanstudio",
-    "台湾中央气象署: 强震即时警报": "cwa_fanstudio",
-    "台湾中央气象署：地震报告": "cwa_fanstudio_report",
-    "台湾中央气象署: 地震报告": "cwa_fanstudio_report",
-    "中国地震台网（cenc）": "cenc_fanstudio",
-    "中国地震台网(cenc)": "cenc_fanstudio",
-    "中国地震台网（cenc）：地震测定": "cenc_fanstudio",
-    "中国地震台网(cenc)：地震测定": "cenc_fanstudio",
-    "中国地震台网（cenc）：烈度速报": "cenc_ir_fanstudio",
-    "中国地震台网(cenc)：烈度速报": "cenc_ir_fanstudio",
-    "中国地震台网烈度速报": "cenc_ir_fanstudio",
-    "中国地震预警网（cea）": "cea_fanstudio",
-    "中国地震预警网(cea)": "cea_fanstudio",
-    "中国地震预警网（省级）": "cea_pr_fanstudio",
-    "中国地震预警网(省级)": "cea_pr_fanstudio",
-    "日本气象厅：紧急地震速报": "jma_fanstudio",
-    "日本气象厅: 紧急地震速报": "jma_fanstudio",
-    "日本气象厅：地震情报": "jma_p2p_info",
-    "日本气象厅: 地震情报": "jma_p2p_info",
-    # 中文冒号全角/半角 + 预报/予报 历史写法都兼容
-    "日本气象厅：海啸预报": "jma_tsunami_p2p",
-    "日本气象厅: 海啸预报": "jma_tsunami_p2p",
-    "日本气象厅：海啸予报": "jma_tsunami_p2p",
-    "日本气象厅: 海啸予报": "jma_tsunami_p2p",
-    "日本气象厅：海啸予报 - P2P": "jma_tsunami_p2p",
-    "日本气象厅: 海啸予报 - P2P": "jma_tsunami_p2p",
-    "日本气象厅：海啸予报 - EQSC": "jma_tsunami_eqsc",
-    "日本气象厅: 海啸予报 - EQSC": "jma_tsunami_eqsc",
-    "日本气象厅：海啸预报 - EQSC": "jma_tsunami_eqsc",
-    "日本气象厅: 海啸预报 - EQSC": "jma_tsunami_eqsc",
-}
-
-# 展示名称映射表：用于把内部规范 key 转回更友好的前端展示标签。
-_DISPLAY_MAP: dict[str, str] = {
-    "cenc_fanstudio": "中国地震台网 (CENC) - Fan",
-    "cenc_ir_fanstudio": "中国地震台网 (CENC) - 烈度速报 - Fan",
-    "cenc_ir_eqsc": "中国地震台网 (CENC) - 烈度速报 - EQSC",
-    "cea_fanstudio": "中国地震预警网 (CEA)",
-    "cea_pr_fanstudio": "中国地震预警网 (省级)",
-    "cwa_fanstudio": "台湾中央气象署: 强震即时警报 - Fan",
-    "cwa_fanstudio_report": "台湾中央气象署: 地震报告",
-    "usgs_fanstudio": "美国地质调查局 (USGS)",
-    "fssn_cmt_fanstudio": "FSSN 矩心矩张量解 (CMT)",
-    "sa_fanstudio": "美国 ShakeAlert 地震预警",
-    "jma_fanstudio": "日本气象厅: 紧急地震速报 - Fan",
-    "china_weather_fanstudio": "中国气象局: 气象预警 - Fan",
-    "china_weather_openquake": "中国气象局: 气象预警 - OQ",
-    "china_tsunami_fanstudio": "自然资源部海啸预警中心",
-    # 贡献榜默认中性名：实时通道不强制带后缀
-    "typhoon_fanstudio": "中国气象局：实时活跃台风",
-    "typhoon_eqsc": "中国气象局：实时活跃台风 - EQSC",
-    # 仅 EQSC 历史重建在贡献统计中单独成源
-    "typhoon_eqsc_rebuild": "中国气象局：台风历史 - EQSC",
-    "jma_p2p": "日本气象厅: 紧急地震速报 - P2P",
-    "jma_p2p_info": "日本气象厅: 地震情报 - P2P",
-    "jma_tsunami_p2p": "日本气象厅: 海啸予报 - P2P",
-    "jma_tsunami_eqsc": "日本气象厅: 海啸予报 - EQSC",
-    "jma_wolfx": "日本气象厅: 紧急地震速报 - Wolfx",
-    "cea_wolfx": "中国地震预警网 (CEA) - Wolfx",
-    "cwa_wolfx": "台湾中央气象署: 强震即时警报 - Wolfx",
-    "cenc_wolfx": "中国地震台网地震测定 - Wolfx",
-    "jma_wolfx_info": "日本气象厅地震情报 - Wolfx",
-    "global_quake": "Global Quake",
-    "sc_eew": "四川地震局",
-    "fj_eew": "福建地震局",
-    "kma_earthquake": "韩国气象厅 (KMA)",
-    "emsc_earthquake": "欧洲地中海地震中心 (EMSC)",
-    "gfz_earthquake": "德国地学研究中心 (GFZ)",
-    "unknown": "未知来源",
-}
+# 历史别名映射表与展示名称映射表已统一收编至
+# core/sources/display_registry.py（SOURCE_ALIAS_MAP / SOURCE_DISPLAY_MAP），
+# 本兼容层直接引用事实层常量，后续修改请前往 display_registry.py。
 
 
 def normalize_source_name(source: str) -> str:
@@ -150,14 +29,18 @@ def normalize_source_name(source: str) -> str:
         return "unknown"
     lower_source = raw_source.lower()
     # 先按原值匹配，再按小写匹配历史别名；若都未命中，则回退为小写标准形态。
-    return _ALIAS_MAP.get(raw_source) or _ALIAS_MAP.get(lower_source) or lower_source
+    return (
+        SOURCE_ALIAS_MAP.get(raw_source)
+        or SOURCE_ALIAS_MAP.get(lower_source)
+        or lower_source
+    )
 
 
 def format_source_name(source: str) -> str:
     """把来源标识格式化为更适合展示的中文标签。"""
     normalized = normalize_source_name(source)
     # 如果映射字典里找不到对应的漂亮展示名，则使用归一化后的去重字符串作为兜底
-    return _DISPLAY_MAP.get(normalized) or str(source or "").strip() or "未知来源"
+    return SOURCE_DISPLAY_MAP.get(normalized) or str(source or "").strip() or "未知来源"
 
 
 def is_cenc_intensity_report(
@@ -207,7 +90,7 @@ def is_earthquake_supplement_product(
 def fssn_cmt_report_source_keys() -> tuple[str, ...]:
     """返回可识别为 FSSN CMT 的 source/source_id 键集合。"""
     keys: set[str] = {"fssn_cmt_fanstudio"}
-    for alias, target in _ALIAS_MAP.items():
+    for alias, target in SOURCE_ALIAS_MAP.items():
         if target == "fssn_cmt_fanstudio":
             keys.add(str(alias).strip().lower())
     return tuple(sorted(keys))
@@ -252,7 +135,7 @@ def cenc_intensity_report_source_keys() -> tuple[str, ...]:
     统一折叠为 strip + lower 形态，避免大小写/空白导致 SQL 与 Python 分叉。
     """
     keys: set[str] = {"cenc_ir_fanstudio", "cenc_ir_eqsc"}
-    for alias, target in _ALIAS_MAP.items():
+    for alias, target in SOURCE_ALIAS_MAP.items():
         if target in {"cenc_ir_fanstudio", "cenc_ir_eqsc"}:
             keys.add(str(alias).strip().lower())
     return tuple(sorted(keys))
@@ -379,7 +262,7 @@ def expand_source_aliases(sources: Iterable[str]) -> list[str]:
         expanded.add(canonical)
         expanded.add(format_source_name(raw))
 
-    for alias, canonical in _ALIAS_MAP.items():
+    for alias, canonical in SOURCE_ALIAS_MAP.items():
         # 第二轮反向补全所有历史别名，尽量覆盖旧数据库中的遗留写法。
         if canonical in canonical_keys:
             expanded.add(alias)
