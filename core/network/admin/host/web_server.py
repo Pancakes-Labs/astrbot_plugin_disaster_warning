@@ -220,13 +220,24 @@ class WebAdminServer:
         host = web_config.get("host", "0.0.0.0")
         port = web_config.get("port", 8089)
 
+        # 记录访问地址，供启动汇总大屏等场景展示。
+        self.url = f"http://{host}:{port}"
+
         # 构造 Uvicorn 运行配置
         config = uvicorn.Config(
-            self.app, host=host, port=port, log_level="warning", access_log=False
+            self.app,
+            host=host,
+            port=port,
+            log_level="warning",
+            access_log=False,
+            # 优雅关闭时内部最多等待 10 秒（默认 None 会对长连接无限等待）。
+            # 超时后 uvicorn 会取消残留后台任务并继续执行 lifespan.shutdown()，
+            # 配合 stop() 的外部超时兜底，双保险确保端口最终能释放。
+            timeout_graceful_shutdown=10,
         )
         self.server = uvicorn.Server(config)
 
-        logger.info(f"[灾害预警] Web 管理端已启动: http://{host}:{port}")
+        logger.debug(f"[灾害预警] Web 管理端已启动: {self.url}")
 
         async def _serve():
             try:
@@ -277,17 +288,35 @@ class WebAdminServer:
 
         # 5. 退出 Uvicorn Web 服务器实例并等待服务 Task 彻底终止
         if self.server:
+            # 优雅关闭优先：由 uvicorn 正常执行 lifespan.shutdown()，让
+            # LifespanOn.main() 协程收到关闭事件后自行退出，避免其成为孤儿
+            # pending 任务（否则事件循环 GC 会打印 "Task was destroyed but it
+            # is pending!" 噪音）。内部超时由 timeout_graceful_shutdown=10 兜底，
+            # 外部超时 15 秒作为第二道保险，确保端口最终必然释放。
             self.server.should_exit = True
-            # 强制退出：避免存在未关闭的长连接（如 WebSocket）时优雅关闭
-            # 永久挂起，确保监听 socket 能被释放，防止热重载时端口冲突。
-            self.server.force_exit = True
+            # 仅在外部超时降级时才启用强制退出，确保监听 socket 能被释放，
+            # 防止热重载时端口冲突。
+            force_fallback = False
             if self._server_task:
                 try:
-                    await asyncio.wait_for(self._server_task, timeout=5.0)
+                    await asyncio.wait_for(self._server_task, timeout=15.0)
                 except asyncio.TimeoutError:
                     logger.warning(
-                        "[灾害预警] Web 管理端未在 5 秒内停止，正在强制取消以释放端口。"
+                        "[灾害预警] Web 管理端未在 15 秒内优雅停止，降级为强制退出以释放端口。"
                     )
+                    force_fallback = True
+                except asyncio.CancelledError:
+                    # 若是 stop() 协程本身被外部取消，需放行以保持取消语义。
+                    raise
+                except Exception as e:
+                    logger.warning(f"[灾害预警] 停止 Web 管理端时出现异常: {e!r}")
+
+            if force_fallback:
+                # 降级路径：先强制退出并取消残留任务，让 serve() 尽快返回，
+                # 再从事件循环层面回收 lifespan 协程，避免其成为孤儿任务挂起
+                # 在 receive_queue.get() 上。
+                self.server.force_exit = True
+                if self._server_task:
                     self._server_task.cancel()
                     # 等待取消真正完成，确保 stop 返回前监听 socket 已释放，
                     # 避免热重载时新实例绑定同端口失败。
@@ -303,6 +332,19 @@ class WebAdminServer:
                         logger.debug(
                             f"[灾害预警] 等待 Web 管理端任务取消时出现异常: {e!r}"
                         )
-                except Exception as e:
-                    logger.warning(f"[灾害预警] 停止 Web 管理端时出现异常: {e!r}")
-            logger.info("[灾害预警] Web 管理端已停止")
+                # 兜底回收 lifespan：主动发送关闭事件，让 LifespanOn.main()
+                # 协程正常退出（重复调用 shutdown 由 Starlette 幂等处理，安全）。
+                lifespan = getattr(self.server, "lifespan", None)
+                if lifespan is not None:
+                    try:
+                        # 内部有超时保护，最多等待 10 秒。
+                        await asyncio.wait_for(lifespan.shutdown(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[灾害预警] lifespan 关闭未在 10 秒内完成，跳过等待。"
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            f"[灾害预警] lifespan 关闭时出现异常（已忽略）: {e!r}"
+                        )
+            logger.debug("[灾害预警] Web 管理端已停止")
