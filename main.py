@@ -16,6 +16,7 @@ from .plugin.commands.plugin_admin_command_service import PluginAdminCommandServ
 from .plugin.commands.plugin_query_command_service import PluginQueryCommandService
 from .plugin.plugin_command_support_service import PluginCommandSupportService
 from .plugin.plugin_lifecycle_service import PluginLifecycleService
+from .utils.banner import print_banner
 from .utils.plugin_logger import plugin_logger
 
 
@@ -44,7 +45,9 @@ class DisasterWarningPlugin(Star):
     async def initialize(self):
         """初始化插件"""
         try:
-            logger.info("[灾害预警] 正在初始化灾害预警插件...")
+            # 插件一重载即打印组织 ASCII art 横幅（bold_cyan 配色，终端不支持颜色时回退纯文本）。
+            print_banner()
+            logger.debug("[灾害预警] 正在初始化灾害预警插件...")
 
             plugin_logger.set_config(self.config)
 
@@ -108,14 +111,14 @@ class DisasterWarningPlugin(Star):
     async def terminate(self):
         """插件销毁时调用"""
         try:
-            logger.info("[灾害预警] 正在停止灾害预警插件...")
+            logger.debug("[灾害预警] 正在停止灾害预警插件...")
 
             await self._lifecycle_service.stop_heartbeat_task()
             self._lifecycle_service.restore_asyncio_exception_handler()
             await self._cleanup_telemetry_tasks()
             await self._lifecycle_service.shutdown_plugin_resources()
 
-            logger.info("[灾害预警] 灾害预警插件已停止")
+            logger.debug("[灾害预警] 灾害预警插件已停止")
 
         except Exception as e:
             logger.error(f"[灾害预警] 插件停止时出错: {e}")
