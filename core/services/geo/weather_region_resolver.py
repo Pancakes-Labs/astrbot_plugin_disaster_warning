@@ -233,47 +233,62 @@ class WeatherRegionResolver:
             self._cache_expire[place_name] = now + self._failure_ttl
             return None
 
+        # 顶层类型校验：ResAPI 正常返回 dict，但网关错误/错误页等场景
+        # 可能解析出数组、字符串或标量；此时 payload.get 会抛 AttributeError，
+        # 而该异常位于 try 块之外，会逃逸到历史统计重建路径导致中断。
+        # 将非 dict 响应一律视为失败查询，写入失败缓存后返回 None。
+        if not isinstance(payload, dict):
+            logger.debug(
+                f"[灾害预警] ResAPI 行政区划响应顶层类型异常 "
+                f"({type(payload).__name__})，地点为 {place_name}"
+            )
+            self._location_province_cache[place_name] = None
+            self._cache_expire[place_name] = now + self._failure_ttl
+            return None
+
         records = payload.get("data") or []
         if not isinstance(records, list):
             records = []
 
         # 匹配策略：
-        # 1. 优先"名称与查询词完全相同"的精确命中；
-        # 2. 同精确命中中，优先 district（区县级）记录，避免命中乡镇村等低层级；
-        # 3. 从命中记录的 full_name 首段解析省份。
-        def score(record: dict) -> int:
-            name = str(record.get("name") or "")
-            level = str(record.get("level") or "")
-            # 名称精确匹配加分最高
-            exact_bonus = 100 if name == place_name else 0
-            # 层级优先级：district(区县)=60, city(市)=40, province(省)=20,
-            # town/village 等更低层级不额外加分
-            level_bonus = {
-                "district": 60,
-                "city": 40,
-                "province": 20,
-                "town": 0,
-                "village": 0,
-            }.get(level, 10)
-            return exact_bonus + level_bonus
-
-        best_record: dict | None = None
-        best_score = -1
+        # 1. 仅接受 name 与查询词完全相同的精确命中，或以查询词开头的合理扩展命中
+        #（如"五台山"→"五台山风景名胜区"），避免把模糊结果误判为精确命中；
+        # 2. 扩展命中仅统计 province/city/district 等行政区划层级，
+        # 排除 town/village 等低层级记录，防止 full_name 中碰巧含查询词的乡镇村干扰省份判定；
+        # 3. 多个精确命中同名跨省时，省份集合不唯一则不猜测，返回 None；
+        # 4. 从命中记录的 full_name 首段解析省份。
+        matched_records: list[dict] = []
         for record in records:
+            if not isinstance(record, dict):
+                continue
+            name = str(record.get("name") or "").strip()
             full_name = str(record.get("full_name") or "")
+            level = str(record.get("level") or "")
             if not full_name:
                 continue
-            s = score(record)
-            if s > best_score:
-                best_score = s
-                best_record = record
+            if name == place_name:
+                matched_records.append(record)
+            elif (
+                name.startswith(place_name)
+                and level in ("province", "city", "district")
+            ):
+                # 扩展命中仅限省市区级，避免乡镇村干扰
+                matched_records.append(record)
 
-        if best_record is not None:
-            full_name = str(best_record.get("full_name") or "")
-            # full_name 形如"甘肃省/陇南市/康县"，首段即省级名称
-            province_part = full_name.split("/", 1)[0].strip()
-            province = self._normalize_province_name(province_part)
-            if province:
+        if matched_records:
+            # 取命中记录的省份集合，归一化后去重
+            province_set: set[str] = set()
+            for record in matched_records:
+                full_name = str(record.get("full_name") or "")
+                # full_name 形如"甘肃省/陇南市/康县"，首段即省级名称
+                province_part = full_name.split("/", 1)[0].strip()
+                province = self._normalize_province_name(province_part)
+                if province:
+                    province_set.add(province)
+
+            # 命中记录归一化后得到唯一省份时才采纳，避免同名跨省时任意猜测
+            if len(province_set) == 1:
+                province = province_set.pop()
                 self._location_province_cache[place_name] = province
                 return province
 
