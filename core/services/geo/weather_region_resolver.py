@@ -252,7 +252,7 @@ class WeatherRegionResolver:
 
         # 匹配策略：
         # 1. 仅接受 name 与查询词完全相同的精确命中，或以查询词开头的合理扩展命中
-        #（如"五台山"→"五台山风景名胜区"），避免把模糊结果误判为精确命中；
+        # （如"五台山"→"五台山风景名胜区"），避免把模糊结果误判为精确命中；
         # 2. 扩展命中仅统计 province/city/district 等行政区划层级，
         # 排除 town/village 等低层级记录，防止 full_name 中碰巧含查询词的乡镇村干扰省份判定；
         # 3. 多个精确命中同名跨省时，省份集合不唯一则不猜测，返回 None；
@@ -268,9 +268,10 @@ class WeatherRegionResolver:
                 continue
             if name == place_name:
                 matched_records.append(record)
-            elif (
-                name.startswith(place_name)
-                and level in ("province", "city", "district")
+            elif name.startswith(place_name) and level in (
+                "province",
+                "city",
+                "district",
             ):
                 # 扩展命中仅限省市区级，避免乡镇村干扰
                 matched_records.append(record)
