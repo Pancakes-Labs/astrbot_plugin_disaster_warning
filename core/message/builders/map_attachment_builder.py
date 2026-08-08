@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from typing import Any
@@ -102,7 +103,12 @@ class MapAttachmentBuilder:
 
             template = Template(template_content)
             html_content = template.render(**context)
-            image_filename = f"map_{lat}_{lon}_{int(time.time())}.png"
+            # 文件名加入 event_caption 的稳定哈希：同一坐标同一秒渲染不同事件描述时，
+            # 避免后一次渲染覆盖前一次图片（缓存命中可能发送错误的事件描述地图）。
+            caption_hash = hashlib.md5(
+                str(event_caption or "").encode("utf-8")
+            ).hexdigest()[:8]
+            image_filename = f"map_{lat}_{lon}_{int(time.time())}_{caption_hash}.png"
             image_path = os.path.join(self.temp_dir, image_filename)
             return await self.browser_manager.render_card(
                 html_content,

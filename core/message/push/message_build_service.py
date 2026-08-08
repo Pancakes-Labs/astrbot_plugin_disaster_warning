@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-from datetime import timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -220,18 +219,26 @@ class MessageBuildService:
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
 
-    @staticmethod
-    def _build_event_map_caption(event: EventEnvelope) -> str:
+    def _build_event_map_caption(self, event: EventEnvelope) -> str:
         """构建通用地图左上角的事件基础描述文字胶囊。
 
         格式：时间 震中 震级
         - 普通地震：如 "05时29分 岩手県冲 M 3.7"
         - 日本震度速报（缺震级/震中）：如 "02时41分 震源 調查中"
         - 中国烈度速报：时间更详细，如 "2026-08-07 13:08 四川宜宾市高县 M 4.9"
+
+        时间口径与文本消息一致：naive 时间原样显示（解析层已按源时区解析），
+        aware 时间才转换到用户配置的 display_timezone。
         """
         domain_event = getattr(event, "event", None)
         if not isinstance(domain_event, EarthquakeEvent):
             return ""
+
+        # 跟随用户配置的展示时区（与文本消息 display_timezone 同源）
+        manager_config = getattr(self.manager, "config", None) or {}
+        display_timezone = str(
+            manager_config.get("display_timezone", "UTC+8") or "UTC+8"
+        )
 
         source_id = (getattr(event, "source_id", "") or "").strip()
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
@@ -249,18 +256,31 @@ class MessageBuildService:
         )
 
         # 时间格式化：烈度速报显示完整日期时间，其余显示 "HH时MM分"
+        # 口径与各 presenter 保持一致（对齐 TimeConverter.format_time 语义）：
+        # - aware 时间：astimezone 到用户配置的 display_timezone
+        # - naive 时间：解析层多为源本地时间（如 JMA 系按 Asia/Tokyo），
+        #   按源时区解释后再转换，避免像旧实现那样强加 UTC 导致 8 小时偏移
         occurred_at = getattr(domain_event, "occurred_at", None)
         if occurred_at is not None:
             try:
-                # naive datetime 按 UTC 兜底处理，避免 astimezone 误用服务器本地时区
-                local_dt = occurred_at
-                if local_dt.tzinfo is None:
-                    local_dt = local_dt.replace(tzinfo=timezone.utc)
                 fmt = "%Y-%m-%d %H:%M" if is_cenc_ir else "%H时%M分"
-                time_part = TimeConverter._safe_strftime(
-                    local_dt.astimezone(TimeConverter._get_timezone("UTC+8")),
-                    fmt,
+                display_dt = occurred_at
+                if display_dt.tzinfo is None:
+                    # 仅日本源（JMA/P2P 等，源时区 Asia/Tokyo）的 naive 时间
+                    # 需按 JST 解释后再转换；其余源（CWA/CENC/USGS 等）naive
+                    # 时间语义已是展示原值，直接按 display_timezone 解释即可。
+                    if any(token in source_id for token in ("jma", "p2p")):
+                        display_dt = display_dt.replace(
+                            tzinfo=TimeConverter._get_timezone("Asia/Tokyo")
+                        )
+                    else:
+                        display_dt = display_dt.replace(
+                            tzinfo=TimeConverter._get_timezone(display_timezone)
+                        )
+                display_dt = display_dt.astimezone(
+                    TimeConverter._get_timezone(display_timezone)
                 )
+                time_part = TimeConverter._safe_strftime(display_dt, fmt)
             except Exception:
                 time_part = ""
         else:
