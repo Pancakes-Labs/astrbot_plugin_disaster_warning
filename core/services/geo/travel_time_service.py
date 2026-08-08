@@ -11,7 +11,9 @@ P/S 波走时查询服务。
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from astrbot.api import logger
 
@@ -31,6 +33,70 @@ class TravelTimeResult:
     p_travel_sec: float | None
     s_travel_sec: float | None
     model_name: str = ""
+
+
+def _normalize_utc(value: datetime | None) -> datetime | None:
+    """把可能缺失时区的发震时间统一归一为 UTC 时间。
+
+    部分上游来源产出的时间可能没有时区信息，
+    这里统一按 UTC 处理，避免与墙钟求差时出现时区错位。
+
+    Args:
+        value: 发震时间，可为 naive 或 aware。
+
+    Returns:
+        UTC 时间；输入为 None 时返回 None。
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def compute_s_wave_countdown(
+    occurred_at: datetime | None,
+    s_travel_sec: float | None,
+    now: datetime | None = None,
+) -> float | None:
+    """计算 S 波实时剩余到达秒数（近似实时预估）。
+
+    核心公式：剩余秒数 = 绝对走时(发震→到达) - 已流逝时间(发震→当前墙钟)。
+
+    返回值语义：
+    - 正数：S 波尚未到达，数值为剩余秒数。
+    - 0 或负数：S 波已到达（或正好到达）。
+    - None：缺少发震时间或 S 波走时，无法计算（调用方应静默跳过该行）。
+
+    Args:
+        occurred_at: 发震时间；缺失时无法计算倒计时，返回 None。
+        s_travel_sec: S 波绝对走时秒数（发震瞬间算出，与当前时刻无关）。
+        now: 当前墙钟时间；不传时内部取 datetime.now(timezone.utc)，
+            便于单元测试注入固定时间。
+
+    Returns:
+        S 波剩余到达秒数；数据不足返回 None。
+    """
+    if s_travel_sec is None or occurred_at is None:
+        return None
+
+    occurred_utc = _normalize_utc(occurred_at)
+    if occurred_utc is None:
+        return None
+
+    current = now if now is not None else datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+
+    # elapsed 钳制为不小于 0，避免时钟不同步/未来时间导致的负流逝
+    elapsed = max(0.0, (current - occurred_utc).total_seconds())
+    # 极小的浮点误差视为已到达
+    remaining = s_travel_sec - elapsed
+    if math.isclose(remaining, 0.0, abs_tol=1e-6):
+        return 0.0
+    return remaining
 
 
 class TravelTimeService:
@@ -166,4 +232,9 @@ class TravelTimeService:
         )
 
 
-__all__ = ["TravelTimeService", "TravelTimeResult"]
+__all__ = [
+    "TravelTimeService",
+    "TravelTimeResult",
+    "compute_s_wave_countdown",
+    "_normalize_utc",
+]
