@@ -80,15 +80,23 @@ class PushFlowHandler:
                     execution_result,
                     aggregated_session_count=aggregated_session_count,
                 )
-                # 推送未成功（push_success_count == 0）时回滚去重状态，
-                # 允许同一事件稍后重试时再次通过升级放行。
+                # 仅在「真实发送失败」时回滚去重状态（允许重试）：
+                # - 规则拦截（所有会话被过滤，send_failure_stats 为空）：拦截是稳定预期的，
+                #   回滚会导致同一事件每次进来都走“升级放行”→被拦截→回滚，无限刷屏；
+                #   此时应保留去重状态，把事件视为已消费，避免重复处理。
+                # - 真实发送失败（send_failure_stats 非空）：有会话通过筛选但在发送时报错，
+                #   回滚去重状态允许稍后重试再次通过升级放行，避免通知丢失。
                 # 注意：回滚必须先于 return_details 提前返回执行，
                 # 否则详情模式下的失败推送会保留已写入的去重状态，阻塞后续重试。
-                if not success and dedup_snapshot is not None:
+                send_failure_stats = dict(
+                    execution_result.get("send_failure_stats") or {}
+                )
+                had_send_failure = bool(send_failure_stats)
+                if not success and had_send_failure and dedup_snapshot is not None:
                     try:
                         self.manager.deduplicator.restore_state(dedup_snapshot)
                         plugin_logger.info(
-                            f"[灾害预警] 事件 {event.id} 推送未成功，已回滚去重状态以允许重试"
+                            f"[灾害预警] 事件 {event.id} 推送失败，已回滚去重状态以允许重试"
                         )
                     except Exception as rollback_e:
                         plugin_logger.warning(
