@@ -66,12 +66,13 @@ class NmcRadarClient:
         self._page_base = str(page_base or PAGE_BASE).rstrip("/")
         self._concurrency = max(1, int(concurrency or 3))
         self._session: aiohttp.ClientSession | None = None
-        # 页面内容缓存为类级共享：page_path -> (urls, expires_at)。
+        # 页面内容缓存为类级共享：(page_base, page_path) -> (urls, expires_at)。
         # 命令侧每次请求都会新建实例，实例级缓存无法跨请求复用；
         # URL 序列是纯数据、不依赖会话，可安全跨实例共享。
+        # 键包含 page_base，避免不同基础地址的实例互相污染缓存。
         cls = type(self)
         if not hasattr(cls, "_page_cache"):
-            cls._page_cache: dict[str, tuple[list[str], float]] = {}
+            cls._page_cache: dict[tuple[str, str], tuple[list[str], float]] = {}
         self._page_cache = cls._page_cache
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
@@ -108,8 +109,9 @@ class NmcRadarClient:
         Returns:
             图片 URL 列表，最新一帧在前；失败或未解析到时返回空列表。
         """
+        cache_key = (self._page_base, page_path)
         if use_cache:
-            cached = self._page_cache.get(page_path)
+            cached = self._page_cache.get(cache_key)
             if cached is not None and time.time() < cached[1]:
                 return list(cached[0])
 
@@ -146,7 +148,7 @@ class NmcRadarClient:
             result.append(u)
 
         if use_cache:
-            self._page_cache[page_path] = (
+            self._page_cache[cache_key] = (
                 list(result),
                 time.time() + PAGE_CACHE_TTL_SEC,
             )
