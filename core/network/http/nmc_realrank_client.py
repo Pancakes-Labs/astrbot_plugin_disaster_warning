@@ -33,6 +33,10 @@ _RANK_API = "/rest/realrank/{type}/{hour}/{ymdh}"
 
 # 数据缓存 TTL（秒）。排行每小时更新，缓存 60 秒防抖即可。
 CACHE_TTL_SEC = 60.0
+# 失败结果（网络异常/非 200）缓存 TTL：缩短以支持上游快速恢复后立即重试。
+CACHE_FAIL_TTL_SEC = 5.0
+# 缓存最大条目数：键含用户可控 ymdh，防止恶意输入导致无限增长。
+CACHE_MAX_ENTRIES = 512
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -108,10 +112,15 @@ class NmcRealRankClient:
             page_base: 基础地址。
 
         Returns:
-            完整接口 URL。
+            完整接口 URL；ymdh 非法时返回 None。
         """
+        s = str(ymdh or "")
+        # 防御：ymdh 直接拼入 URL 路径，必须限定为 10 位纯数字，
+        # 避免包含 / 或 ? 的输入请求到同域其他路径。
+        if not s.isdigit() or len(s) != 10:
+            return None
         base = str(page_base or PAGE_BASE).rstrip("/")
-        return base + _RANK_API.format(type=rank_type, hour=hour, ymdh=ymdh)
+        return base + _RANK_API.format(type=rank_type, hour=hour, ymdh=s)
 
     async def fetch_rank(
         self,
@@ -143,6 +152,8 @@ class NmcRealRankClient:
                 return cached[0]
 
         url = self.build_url(rank_type=rank_type, hour=hour, ymdh=ymdh)
+        if not url:
+            return {"success": False, "error": "时次格式非法"}
         session = await self._ensure_session()
         try:
             async with session.get(url) as resp:
@@ -181,9 +192,25 @@ class NmcRealRankClient:
         result: dict[str, Any],
         use_cache: bool,
     ) -> None:
-        """按 use_cache 标志决定是否写入缓存。"""
-        if use_cache:
-            self._rank_cache[cache_key] = (result, time.time() + CACHE_TTL_SEC)
+        """按 use_cache 标志决定是否写入缓存。
+
+        失败结果（网络异常/非 200）使用更短的 TTL，以便上游恢复后
+        能尽快重新请求；成功结果使用标准 TTL。写入前顺手清理过期条目，
+        防止键含用户可控 ymdh 导致缓存无限增长。
+        """
+        if not use_cache:
+            return
+        ttl = CACHE_TTL_SEC if result.get("success") else CACHE_FAIL_TTL_SEC
+        now = time.time()
+        # 淘汰过期条目（每写一次最多清一次，O(n) 足够，缓存量有上限）。
+        expired = [k for k, (_, exp) in self._rank_cache.items() if exp <= now]
+        for k in expired:
+            del self._rank_cache[k]
+        # 超过上限时丢弃最旧的条目（按写入顺序近似淘汰）。
+        if len(self._rank_cache) >= CACHE_MAX_ENTRIES:
+            oldest_key = next(iter(self._rank_cache))
+            del self._rank_cache[oldest_key]
+        self._rank_cache[cache_key] = (result, now + ttl)
 
     @staticmethod
     def _parse_payload(payload: Any) -> dict[str, Any]:
