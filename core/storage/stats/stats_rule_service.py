@@ -186,11 +186,12 @@ class StatsRuleService:
         self.manager.stats["earthquake_stats"]["by_region"][region] += 1
         return True
 
-    async def record_weather_stats(self, data) -> bool | tuple[bool, dict[str, str]]:
+    async def record_weather_stats(self, data) -> bool | dict[str, str]:
         """记录气象预警详细统计。
 
-        成功返回 True；失败返回 (False, context) 元组，context 携带
-        提取地名、标题、头条等上下文，供 log_weather_stats_skip 输出可排障日志。
+        成功返回 True；失败返回 context 字典（无可用上下文时返回 None），
+        context 携带提取地名、标题、头条等上下文，供 log_weather_stats_skip 输出可排障日志。
+        调用方通过返回值是否非 True 判断失败，不再依赖布尔值身份比较。
         """
         # 气象统计依赖地区解析成功，否则只保留总量，不把不可靠地区写入分布统计。
         title_text = getattr(data, "title", "") or getattr(data, "headline", "") or ""
@@ -213,14 +214,13 @@ class StatsRuleService:
                         headline_text
                     )
                 )
-                return (
-                    False,
-                    {
-                        "place_name": place_name or "",
-                        "title_text": title_text,
-                        "headline_text": headline_text,
-                    },
-                )
+                # 返回 context 字典（而非 (False, context) 元组）：
+                # 调用方通过“返回值非 True”判断失败，避免对 True/False 做身份比较。
+                return {
+                    "place_name": place_name or "",
+                    "title_text": title_text,
+                    "headline_text": headline_text,
+                }
 
         level = "未知"
         # 颜色级别通过标题关键词匹配，统一映射成带符号的展示文本。

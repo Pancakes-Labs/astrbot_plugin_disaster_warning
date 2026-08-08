@@ -363,9 +363,11 @@ async def query_weather_alarm_data(
 
     # 模糊条件搜索分支
     # 普通检索仅保留近 72 小时数据，避免结果过旧且数量过大；
-    # 显式开启全日期模式时加载全量数据（limit<=0 表示不限制）。
+    # 关闭时间过滤（filter_by_time=False 或全日期模式）时读取全量数据（limit<=0 表示不限制）。
+    # 注意：加载范围与 apply_time_filter 语义保持一致，避免 API 仅传 filter_by_time=false
+    # 时仍只读取 16384 条而静默遗漏更早的历史记录。
     weather_events = await db.get_recent_weather_events(
-        limit=0 if all_date_mode else 16384
+        limit=0 if not apply_time_filter else 16384
     )
     if not weather_events:
         return {
@@ -392,6 +394,11 @@ async def query_weather_alarm_data(
             event_time_utc is None or event_time_utc < threshold_utc
         ):
             continue
+
+        # 全日期模式下保留缺失时间的记录：为排序提供稳定值（epoch 起始），
+        # 避免 sorted 比较 datetime 与 None 抛出 TypeError。
+        if event_time_utc is None:
+            event_time_utc = datetime.min.replace(tzinfo=timezone.utc)
 
         title_text = str(item.get("description") or "").strip()
         headline_text = str(item.get("subtitle") or "").strip()
