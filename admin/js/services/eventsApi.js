@@ -85,12 +85,15 @@
             unwrap: false,
         }),
         // 气象精确 ID 或地区预警检索接口
-        queryWeather: ({ keyword, optionalA = '', optionalB = '' } = {}, options = {}) => client.request('/weather/query', {
+        // filterByTime 关闭后端 72 小时时间过滤；optionalC 传“全部/全日期”时同样关闭时间窗口。
+        queryWeather: ({ keyword, optionalA = '', optionalB = '', filterByTime = true, optionalC = '' } = {}, options = {}) => client.request('/weather/query', {
             ...options,
             query: {
                 keyword,
                 optional_a: optionalA,
                 optional_b: optionalB,
+                filter_by_time: filterByTime ? 'true' : 'false',
+                optional_c: optionalC,
             },
             unwrap: false,
         }),

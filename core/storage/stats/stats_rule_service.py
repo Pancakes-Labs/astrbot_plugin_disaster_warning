@@ -186,8 +186,13 @@ class StatsRuleService:
         self.manager.stats["earthquake_stats"]["by_region"][region] += 1
         return True
 
-    async def record_weather_stats(self, data) -> bool:
-        """记录气象预警详细统计。"""
+    async def record_weather_stats(self, data) -> bool | dict[str, str]:
+        """记录气象预警详细统计。
+
+        成功返回 True；失败返回 context 字典（无可用上下文时返回 None），
+        context 携带提取地名、标题、头条等上下文，供 log_weather_stats_skip 输出可排障日志。
+        调用方通过返回值是否非 True 判断失败，不再依赖布尔值身份比较。
+        """
         # 气象统计依赖地区解析成功，否则只保留总量，不把不可靠地区写入分布统计。
         title_text = getattr(data, "title", "") or getattr(data, "headline", "") or ""
         headline_text = getattr(data, "headline", "") or ""
@@ -202,7 +207,20 @@ class StatsRuleService:
                 title_text, headline_text
             )
             if not region:
-                return False
+                # 提取到的地名（可能为空）：供日志区分
+                # “headline 中根本提不出地名”与“地名存在但外部查询失败”两种场景。
+                place_name = (
+                    self.manager._weather_region_resolver._extract_place_from_headline(
+                        headline_text
+                    )
+                )
+                # 返回 context 字典（而非 (False, context) 元组）：
+                # 调用方通过“返回值非 True”判断失败，避免对 True/False 做身份比较。
+                return {
+                    "place_name": place_name or "",
+                    "title_text": title_text,
+                    "headline_text": headline_text,
+                }
 
         level = "未知"
         # 颜色级别通过标题关键词匹配，统一映射成带符号的展示文本。
@@ -269,6 +287,29 @@ class StatsRuleService:
             pressure=data.pressure,
         )
 
-    def log_weather_stats_skip(self) -> None:
-        """记录气象统计被跳过的日志。"""
-        logger.warning("[灾害预警] 气象预警地区信息无效或缺失，已跳过该次气象详细统计")
+    def log_weather_stats_skip(
+        self,
+        *,
+        event_id: str = "",
+        source_id: str = "",
+        place_name: str = "",
+        title_text: str = "",
+        headline_text: str = "",
+    ) -> None:
+        """记录气象统计被跳过的日志，附带地区解析失败上下文以便排障。"""
+        detail_parts = [
+            f"事件 ID 为 {event_id or '未知'}",
+            f"来源：{source_id or 'unknown'}",
+        ]
+        if place_name:
+            detail_parts.append(f"提取地名为 {place_name}")
+        else:
+            detail_parts.append("未提取出可查询地名")
+        if title_text:
+            detail_parts.append(f"标题为{title_text[:60]}")
+        if headline_text:
+            detail_parts.append(f"headline={headline_text[:80]}")
+        logger.warning(
+            "[灾害预警] 气象预警地区信息无效或缺失，已跳过该次气象详细统计"
+            f"（{'; '.join(detail_parts)}）"
+        )

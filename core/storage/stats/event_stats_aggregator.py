@@ -83,13 +83,19 @@ class EventStatsAggregator:
                     self.manager.rule_service.record_earthquake_stats(event)
                 elif isinstance(envelope.event, WeatherEvent):
                     # 气象事件需要先完成地区解析，成功后才写入详细气象统计。
-                    weather_stats_recorded = (
+                    weather_stats_context = (
                         await self.manager.rule_service.record_weather_stats(
                             envelope.event
                         )
                     )
-                    if not weather_stats_recorded:
-                        self.manager.rule_service.log_weather_stats_skip()
+                    if weather_stats_context is not True:
+                        # 统计失败：weather_stats_context 为 context 字典或 None。
+                        # 附带上下文供日志排障（事件ID/来源/标题/头条/提取地名）。
+                        self.manager.rule_service.log_weather_stats_skip(
+                            event_id=event_unique_id,
+                            source_id=source_id,
+                            **(weather_stats_context or {}),
+                        )
 
                 self.manager.rule_service.record_time_series(event)
 

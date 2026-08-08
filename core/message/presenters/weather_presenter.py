@@ -13,9 +13,8 @@ from .base_presenter import BasePresenter
 from .weather_constants import (
     COLOR_LEVEL_EMOJI,
     DEFAULT_MAX_DESCRIPTION_LENGTH,
-    SORTED_WEATHER_TYPES,
-    WEATHER_EMOJI_MAP,
     extract_final_weather_color,
+    resolve_weather_emoji,
 )
 
 
@@ -62,14 +61,7 @@ class WeatherAlertPresenter(BasePresenter):
             title,
             headline,
         ]
-        match_text = " ".join(
-            str(item).strip() for item in match_candidates if str(item).strip()
-        )
-        emoji = "⛈️"
-        for name in SORTED_WEATHER_TYPES:
-            if name in match_text:
-                emoji = WEATHER_EMOJI_MAP[name]
-                break
+        emoji = resolve_weather_emoji(*match_candidates)
 
         # 颜色等级有时直接体现在标题或颜色字段中，这里统一补上颜色提示图标。
         # 对于"升级为/降级为"类预警，取变更后的最终颜色，避免显示变更前的旧颜色。

@@ -356,14 +356,89 @@ def build_local_weather_icon_url(icon_code: str) -> str | None:
     return f"/weatheralarm_logo/{os.path.basename(path)}"
 
 
-def build_weather_icon_url(icon_code: str) -> str:
+def resolve_icon_color_suffix(icon_code: str) -> str | None:
+    """从 11B 完整码/紧凑码/p 编码中解析颜色后缀。
+
+    与 resolve_weather_icon_code 共用同一套颜色映射，避免本地回退图标
+    与官方图标解析逻辑因各自独立维护而产生分歧。
+
+    Args:
+        icon_code: 气象预警编码，如 "11B03_yellow" / "11B2001" / "p0002003"。
+
+    Returns:
+        颜色后缀（"red"/"orange"/"yellow"/"blue"），无法解析返回 None。
+    """
+    code = (icon_code or "").strip()
+    if not code:
+        return None
+
+    # 1. 下划线完整码（11B03_yellow）：下划线后即颜色
+    if "_" in code:
+        color = code.split("_")[-1].strip().lower()
+        if color in {"red", "orange", "yellow", "blue"}:
+            return color
+
+    # 2. 紧凑 11B 码（11B2001）：末两位颜色码
+    compact = _normalize_compact_11b_code(code)
+    if compact and "_" in compact:
+        return compact.split("_")[-1]
+
+    # 3. p 编码：末位颜色数字
+    if _is_p_code(code) and code not in _P_CODE_SKIP_GENERIC:
+        return _P_COLOR_DIGIT_TO_SUFFIX.get(code[-1])
+
+    return None
+
+
+def build_local_weather_fallback_url(icon_code: str) -> str | None:
+    """构建本地通用颜色回退图标 URL。
+
+    当本地缺少具体 11B 图标文件时，按编码解析出的颜色后缀回退到
+    /weatheralarm_logo/fallback_{color}.png（如 fallback_red.png）。
+
+    Args:
+        icon_code: 气象预警编码（11B 完整码 / 紧凑码 / p 码均可）。
+
+    Returns:
+        本地回退图标 URL（如 /weatheralarm_logo/fallback_red.png）；
+        颜色无法解析或文件不存在时返回 None。
+    """
+    color = resolve_icon_color_suffix(icon_code)
+    if not color:
+        return None
+    path, exists = _resolve_local_icon_file(f"fallback_{color}")
+    if not exists:
+        return None
+    return f"/weatheralarm_logo/{os.path.basename(path)}"
+
+
+def build_weather_icon_url(icon_code: str) -> str | None:
     """构建气象预警图标 URL（本地优先，缺失时回退 Fan Studio 官方接口）。
 
     图标使用策略：
     1. 本地 resources/weatheralarm_logo 目录存在对应文件 → 返回本地静态 URL；
-    2. 本地文件缺失 → 返回 Fan Studio 官方图标接口 URL。
+    2. 本地文件缺失 → 回退本地通用颜色图标 /weatheralarm_logo/fallback_{color}.png；
+    3. 颜色也无法解析 → 返回 Fan Studio 官方图标接口 URL 兜底。
+
+    优先返回本地静态资源可避免远程接口返回“伪图片”（HTTP 200 的 HTML）
+    导致浏览器无法触发 img onError 而显示破图的问题。
+
+    Args:
+        icon_code: 气象预警编码（11B 完整码 / 紧凑码 / p 码），可为空。
+
+    Returns:
+        图标 URL；编码为空时返回 None（调用方应自行决定是否展示图标）。
     """
-    local_url = build_local_weather_icon_url(icon_code)
+    code = (icon_code or "").strip()
+    if not code:
+        return None
+
+    local_url = build_local_weather_icon_url(code)
     if local_url:
         return local_url
-    return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={icon_code}"
+
+    fallback_url = build_local_weather_fallback_url(code)
+    if fallback_url:
+        return fallback_url
+
+    return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={code}"

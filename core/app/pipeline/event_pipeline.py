@@ -6,15 +6,76 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
 
 from ....utils.plugin_logger import plugin_logger
-from ...domain.event_models import EventEnvelope, WeatherEvent
+from ...domain.event_models import (
+    EarthquakeEvent,
+    EventEnvelope,
+    TsunamiEvent,
+    TyphoonEvent,
+    WeatherEvent,
+)
+from ...message.presenters.weather_constants import resolve_weather_emoji
 from ...message.push.weather_aggregation_service import WeatherBufferEntry
+
+
+def _resolve_event_occurred_time(event: EventEnvelope):
+    """从领域事件提取事件自身发生/发布时间（与数据库口径一致）。
+
+    数据库事件记录的时间字段使用事件发生时间（如发震时间 / 发布时间），
+    而非广播到达时间；管理端跑马灯需按同一时间基准展示与过滤，
+    因此广播摘要的 time 必须取事件自身时间，避免与统计投影时间错位。
+    """
+    domain = getattr(event, "event", None)
+    if isinstance(domain, EarthquakeEvent):
+        return getattr(domain, "occurred_at", None)
+    if isinstance(domain, TsunamiEvent):
+        return getattr(domain, "issued_at", None)
+    if isinstance(domain, WeatherEvent):
+        return getattr(domain, "effective_at", None)
+    if isinstance(domain, TyphoonEvent):
+        return getattr(domain, "updated_at", None)
+    return None
+
+
+def _build_event_summary_description(event: EventEnvelope) -> str:
+    """从领域事件提取适合跑马灯展示的描述文本。
+
+    各灾种字段存在差异，统一在此收敛，避免前端重复判断：
+    - 地震：震中位置 / 标题
+    - 海啸：事件标题
+    - 气象：预警名称 / 标题
+    - 台风：强度等级 + 台风名称
+    """
+    domain = getattr(event, "event", None)
+    if isinstance(domain, EarthquakeEvent):
+        return str(domain.place_name or domain.headline or "").strip()
+    if isinstance(domain, TsunamiEvent):
+        return str(domain.title or "").strip()
+    if isinstance(domain, WeatherEvent):
+        return str(domain.title or domain.headline or "").strip()
+    if isinstance(domain, TyphoonEvent):
+        name = str(domain.name or domain.name_en or domain.typhoon_id or "").strip()
+        typhoon_type = str(domain.typhoon_type or "").strip()
+        return f"{typhoon_type} {name}".strip() if typhoon_type else name
+    return ""
+
+
+def _resolve_event_magnitude(event: EventEnvelope):
+    """从领域事件提取震级（若有）。"""
+    domain = getattr(event, "event", None)
+    if isinstance(domain, EarthquakeEvent):
+        return getattr(domain, "magnitude", None)
+    if isinstance(domain, TsunamiEvent):
+        # 海啸领域模型无独立震级字段，metadata 可能携带源震级
+        metadata = getattr(domain, "metadata", None)
+        if isinstance(metadata, dict):
+            return metadata.get("magnitude")
+    return None
 
 
 class EventPipeline:
@@ -135,16 +196,48 @@ class EventPipeline:
         )
 
         # 第四阶段：向管理端广播轻量摘要。
-        # 这里只发送最小必要字段，避免把完整事件对象直接传给管理端，
+        # 这里只发送展示所需的最小字段，避免把完整事件对象直接传给管理端，
         # 从而降低实时面板负载，并减少内部模型字段外露带来的耦合风险。
+        # 摘要需携带 description / magnitude 与事件自身发生时间，
+        # 使前端跑马灯首次推送即可展示完整内容，无需依赖后续统计投影回填占位。
         if self.service.web_admin_server:
             try:
+                occurred_at = _resolve_event_occurred_time(event)
                 event_summary = {
                     "id": envelope.id,  # 事件唯一标识
                     "type": envelope.event_type,  # 灾害事件类型 (如 earthquake, tsunami)
                     "source": envelope.source_id,  # 数据来源
-                    "time": datetime.now().isoformat(),  # 广播到达应用的本地时间
+                    # 时间用事件自身发生/发布时间（与数据库口径一致），
+                    # 而不是广播到达时间，保证跑马灯时效过滤与排序正确。
+                    "time": (
+                        occurred_at.isoformat()
+                        if occurred_at is not None
+                        else envelope.received_at.isoformat()
+                    ),
+                    # 描述文本与震级随摘要一并下发，前端直接消费，不再出现"无详细描述"占位。
+                    "description": _build_event_summary_description(event),
+                    "magnitude": _resolve_event_magnitude(event),
                 }
+                # 台风摘要补充 typhoon_id 个体标识（前端跑马灯按此去重，
+                # 每个活跃台风只保留最新一报；id 可能为其他事件指纹，必须显式下发）。
+                if isinstance(envelope.event, TyphoonEvent):
+                    event_summary["typhoon_id"] = str(
+                        getattr(envelope.event, "typhoon_id", "") or ""
+                    ).strip()
+                # 气象预警补充后端统一解析的 Emoji（与推送展示口径一致），前端跑马灯直接消费。
+                if isinstance(envelope.event, WeatherEvent):
+                    event_metadata = (
+                        envelope.event.metadata
+                        if isinstance(envelope.event.metadata, dict)
+                        else {}
+                    )
+                    event_summary["weather_emoji"] = resolve_weather_emoji(
+                        envelope.event.title,
+                        envelope.event.headline,
+                        event_metadata.get("weather_code"),
+                        event_metadata.get("weather_type"),
+                        event_metadata.get("type"),
+                    )
                 await self.service.web_admin_server.notify_event(event_summary)
             except Exception as ws_e:
                 # 管理端广播失败不影响主链路；用户侧推送与统计已完成，因此这里按可降级的旁路处理。

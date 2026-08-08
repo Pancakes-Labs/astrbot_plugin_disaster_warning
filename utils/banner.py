@@ -159,12 +159,14 @@ _CONNECTION_LABELS: dict[str, str] = {
     "openquake_api": "OpenQuake API",
 }
 
-# 轮询服务属性名 -> 展示名（大屏轮询明细用）
-_POLL_SERVICE_ATTRS: list[tuple[str, str]] = [
-    ("snet_poll_service", "S-Net 测站分布"),
-    ("eqsc_tsunami_poll_service", "EQSC 海啸轮询"),
-    ("eqsc_typhoon_poll_service", "EQSC 台风轮询"),
-    ("eqsc_cenc_intensity_poll_service", "EQSC 烈度速报"),
+# 轮询服务 gate_id -> 展示名（大屏轮询明细用）。
+# gate_id 与 startup_silence_coordinator.arm() 注册的 expected_polls 一一对应，
+# 大屏通过协调器 gates 读取真实首轮抓取状态（primed）。
+_POLL_GATE_LABELS: list[tuple[str, str]] = [
+    ("snet_msil", "S-Net 测站分布"),
+    ("eqsc_tsunami", "EQSC 海啸轮询"),
+    ("eqsc_typhoon", "EQSC 台风轮询"),
+    ("eqsc_cenc_ir", "EQSC 烈度速报"),
 ]
 
 _PANEL_TOP = "┌"
@@ -287,24 +289,66 @@ class StartupSummaryPanel:
                 elapsed = None
         data["elapsed"] = elapsed
 
-        # WebSocket 连接
+        # WebSocket 连接：连接名 -> 已建连（真实运行态）。
+        # 注意：不能把"已建连"与"已就绪（收到首包）"混淆，大屏连接明细
+        # 展示的是连接是否成功建立，与静默协调器 gate.connected 对齐。
+        # 状态三态：True=已连接 / False=未连接 / None=已跳过（gate 显式 skipped）。
         ws_manager = getattr(service, "ws_manager", None)
         connected = set(getattr(ws_manager, "connections", {}) or {})
         plan = getattr(service, "connections", {}) or {}
+        ws_gates = getattr(coordinator, "gates", None)
+        ws_states: list[tuple[str, bool | None]] = []
+        for name in sorted(str(k) for k in plan.keys()):
+            if name in connected:
+                ws_states.append((name, True))
+                continue
+            gate = ws_gates.get(name) if isinstance(ws_gates, dict) else None
+            if gate is not None and bool(getattr(gate, "skipped", False)):
+                # 已显式跳过（缺鉴权/熔断）→ 未启用
+                ws_states.append((name, None))
+            else:
+                ws_states.append((name, False))
+        data["ws_states"] = ws_states
         data["ws_connected"] = sorted(connected)
         data["ws_expected"] = sorted(str(k) for k in plan.keys())
         data["ws_skipped"] = sorted(
             str(k) for k in data["ws_expected"] if k not in connected
         )
 
-        # 轮询服务
-        poll_states: list[tuple[str, bool]] = []
-        for attr, label in _POLL_SERVICE_ATTRS:
-            svc = getattr(service, attr, None)
-            if svc is None:
+        # 轮询服务：从静默协调器 gates 读取真实首轮抓取状态（primed），
+        # 而非"是否启用"。若某轮询源因鉴权/网络失败未完成首轮抓取，
+        # primed=False，大屏如实显示"未就绪"。
+        # 状态三态：True=已就绪 / False=未就绪 / None=未启用（gate 不存在或已跳过）。
+        poll_states: list[tuple[str, bool | None]] = []
+        gates = getattr(coordinator, "gates", None)
+        for gate_id, label in _POLL_GATE_LABELS:
+            gate = gates.get(gate_id) if isinstance(gates, dict) else None
+            if gate is None:
+                # 协调器未注册该门闩（如静默关闭）时，回退到服务级 running 状态。
+                svc = getattr(service, f"{gate_id}_poll_service", None)
+                # 兼容属性名差异：gate_id 与属性名不完全一致时按已知映射补齐。
+                svc = svc or {
+                    "snet_msil": getattr(service, "snet_poll_service", None),
+                    "eqsc_tsunami": getattr(service, "eqsc_tsunami_poll_service", None),
+                    "eqsc_typhoon": getattr(service, "eqsc_typhoon_poll_service", None),
+                    "eqsc_cenc_ir": getattr(
+                        service, "eqsc_cenc_intensity_poll_service", None
+                    ),
+                }.get(gate_id)
+                if svc is None:
+                    continue
+                # 服务未启用时视为"未启用"（None），已启用但未运行视为"未就绪"。
+                enabled = bool(getattr(svc, "is_enabled", lambda: False)())
+                if not enabled:
+                    poll_states.append((label, None))
+                else:
+                    poll_states.append((label, bool(getattr(svc, "running", False))))
                 continue
-            enabled = bool(getattr(svc, "is_enabled", lambda: False)())
-            poll_states.append((label, enabled))
+            if bool(getattr(gate, "skipped", False)):
+                # 已显式跳过（缺鉴权/熔断/轮询未启用）→ 未启用
+                poll_states.append((label, None))
+                continue
+            poll_states.append((label, bool(getattr(gate, "primed", False))))
         data["polls"] = poll_states
 
         # 历史记录
@@ -426,7 +470,7 @@ class StartupSummaryPanel:
         elapsed = data.get("elapsed")
         elapsed_text = f"{elapsed:.2f} 秒" if elapsed is not None else "N/A"
         ws_text = f"{len(data['ws_connected'])}/{len(data['ws_expected'])} 已连接"
-        poll_ok = sum(1 for _, ok in data["polls"] if ok)
+        poll_ok = sum(1 for _, ok in data["polls"] if ok is True)
         poll_total = len(data["polls"])
         poll_text = f"{poll_ok}/{poll_total} 已就绪"
         history_text = (
@@ -472,6 +516,7 @@ class StartupSummaryPanel:
         lines.append(divider())
 
         # 连接明细：展示名前置（隐藏内部连接名），状态列左对齐，右侧对齐说明。
+        # 状态三态：已连接 / 未连接 / 未启用，与轮询明细对齐。
         lines.append(row("连接明细"))
         if data["ws_expected"]:
             # 展示名（_CONNECTION_LABELS 映射）统一按最大宽度对齐
@@ -479,10 +524,19 @@ class StartupSummaryPanel:
                 _CONNECTION_LABELS.get(name, name) for name in data["ws_expected"]
             ]
             name_width = max(_display_width(n) for n in display_names)
-            status_width = max(_display_width("✅ 已连接"), _display_width("⚠️ 未连接"))
+            status_width = max(
+                _display_width(s) for s in ("✅ 已连接", "⚠️ 未连接", "⚪ 未启用")
+            )
+            # 优先消费三态状态表；缺失时回退为"是否在已连接集合"。
+            state_map = dict(data.get("ws_states") or [])
             for name in data["ws_expected"]:
-                ok = name in data["ws_connected"]
-                status = "✅ 已连接" if ok else "⚠️ 未连接"
+                ok = state_map.get(name, name in data["ws_connected"])
+                if ok is None:
+                    status = "⚪ 未启用"
+                elif ok:
+                    status = "✅ 已连接"
+                else:
+                    status = "⚠️ 未连接"
                 label = _CONNECTION_LABELS.get(name, name)
                 # 展示名 + 状态固定宽，说明靠左（展示名宽度已覆盖最长项）
                 lines.append(
@@ -496,13 +550,20 @@ class StartupSummaryPanel:
         else:
             lines.append(row(_pad("（无 WebSocket 连接）", inner - 1)))
 
-        # 轮询明细：展示名 / 状态 两列对齐
+        # 轮询明细：展示名 / 状态 两列对齐（三态：已就绪 / 未就绪 / 未启用）
         lines.append(row("轮询明细"))
         if data["polls"]:
             poll_name_width = max(_display_width(label) for label, _ in data["polls"])
-            status_width = max(_display_width("✅ 已就绪"), _display_width("⚪ 未启用"))
+            status_width = max(
+                _display_width(s) for s in ("✅ 已就绪", "⚠️ 未就绪", "⚪ 未启用")
+            )
             for label, ok in data["polls"]:
-                status = "✅ 已就绪" if ok else "⚪ 未启用"
+                if ok is None:
+                    status = "⚪ 未启用"
+                elif ok:
+                    status = "✅ 已就绪"
+                else:
+                    status = "⚠️ 未就绪"
                 lines.append(
                     row(
                         _pad(
@@ -516,8 +577,15 @@ class StartupSummaryPanel:
 
         lines.append(divider())
 
-        # 状态行
-        all_ok = len(data["ws_skipped"]) == 0 and poll_ok == poll_total
+        # 状态行：全部真实三态状态均为就绪/已连接/已跳过（未启用不算未就绪）。
+        # 连接计划或轮询列表为空时视为满足（无数据源则无需判定）。
+        ws_all_ok = (not data["ws_expected"]) or all(
+            ok is not False for _, ok in data.get("ws_states") or []
+        )
+        poll_all_ok = (not data["polls"]) or all(
+            ok is not False for _, ok in data["polls"]
+        )
+        all_ok = ws_all_ok and poll_all_ok
         status_text = (
             "所有数据源已就绪，静默结束，开始正常推送"
             if all_ok
@@ -575,10 +643,24 @@ class StopSummaryPanel:
                 elapsed = None
         data["elapsed"] = elapsed
 
-        # WebSocket 连接：按连接计划（connections）统计启用数量，停止时全部回收。
+        # WebSocket 连接：按连接计划（connections）统计数量；
+        # 断开数读取 ws_manager 真实剩余连接（停止流程已回收时为 0）。
         plan = getattr(service, "connections", {}) or {}
         data["ws_total"] = len(plan)
-        data["ws_disconnected"] = len(plan)
+        ws_manager = getattr(service, "ws_manager", None)
+        remaining = (
+            set(getattr(ws_manager, "connections", {}) or {})
+            if ws_manager is not None
+            else set()
+        )
+        # 计划连接与实际剩余连接的并集决定是否启用：
+        # - plan 为空但存在计划外残留连接（如手动建立）时仍视为已启用（True），
+        #   避免把残留连接误判为"未启用"（None）；
+        # - 断开数按并集计算，避免 plan 为空时出现负数。
+        enabled_names = set(plan) | remaining
+        data["ws_disconnected"] = len(enabled_names) - len(remaining)
+        # 并集为空视为未启用（None）；否则以剩余连接是否为空判断是否已断开。
+        data["ws_stopped"] = None if not enabled_names else len(remaining) == 0
 
         # 停机前气象预警聚合转发的最后一批条数与目标会话（flush_all 发送成功后记录）。
         agg = getattr(service, "_weather_aggregation_service", None)
@@ -717,27 +799,50 @@ class StopSummaryPanel:
         detail_rows.append(("📨 最后转发", forward_text))
 
         ws_total = data.get("ws_total", 0)
+        ws_disconnected = data.get("ws_disconnected", 0)
+        ws_stopped = data.get("ws_stopped")
+        if ws_stopped is None:
+            ws_state_text = "⚪ 未启用"
+        elif ws_stopped:
+            ws_state_text = "✅ 已断开"
+        else:
+            ws_state_text = "⚠️ 未断开"
         detail_rows.append(
             (
                 "🔌 WebSocket 管理器",
-                f"✅ 已停止 · {data.get('ws_disconnected', 0)}/{ws_total} 已断开",
+                f"{ws_state_text} · {ws_disconnected}/{ws_total}",
             )
         )
 
-        def state_text(stopped: bool | None) -> str:
-            """把资源回收状态渲染为面板文案（None 表示未启用/无该组件）。"""
+        def state_text(stopped: bool | None, done_word: str = "已停止") -> str:
+            """把资源回收状态渲染为面板文案。
+
+            Args:
+                stopped: True=已完成 / False=未完成 / None=未启用（无该组件）。
+                done_word: 完成态动词（如"已停止"/"已关闭"），未完成态自动
+                    取反为"未{动词}"，使各资源行文案更贴切。
+            """
             if stopped is None:
                 return "⚪ 未启用"
-            return "✅ 已完成" if stopped else "⚠️ 未完成"
+            undone_word = "未" + done_word[1:]
+            return f"✅ {done_word}" if stopped else f"⚠️ {undone_word}"
 
-        detail_rows.append(("🩺 连接健康采样", state_text(data.get("health_stopped"))))
         detail_rows.append(
-            ("🔔 通知系统", state_text(data.get("notification_stopped")))
+            ("🩺 连接健康采样", state_text(data.get("health_stopped"), "已停止"))
         )
-        detail_rows.append(("💾 数据库", state_text(data.get("db_closed"))))
-        detail_rows.append(("🌍 浏览器", state_text(data.get("browser_closed"))))
-        detail_rows.append(("🔍 后台延迟检测", state_text(data.get("monitor_stopped"))))
-        detail_rows.append(("🌐 Web 管理端", state_text(data.get("web_stopped"))))
+        detail_rows.append(
+            ("🔔 通知系统", state_text(data.get("notification_stopped"), "已停止"))
+        )
+        detail_rows.append(("💾 数据库", state_text(data.get("db_closed"), "已关闭")))
+        detail_rows.append(
+            ("🌍 浏览器", state_text(data.get("browser_closed"), "已关闭"))
+        )
+        detail_rows.append(
+            ("🔍 后台延迟检测", state_text(data.get("monitor_stopped"), "已停止"))
+        )
+        detail_rows.append(
+            ("🌐 Web 管理端", state_text(data.get("web_stopped"), "已停止"))
+        )
         detail_rows.append(
             ("📦 缓存已保存", "✅ 已保存" if data.get("cache_saved") else "⚪ 未保存")
         )
@@ -751,8 +856,26 @@ class StopSummaryPanel:
 
         lines.append(divider())
 
-        # 状态行
-        lines.append(row("状态：所有服务已安全停止，退出流程完成 ✨"))
+        # 状态行：全部回收项（已启用组件）均完成后才显示完全停止。
+        detail_state_keys = [
+            "ws_stopped",
+            "health_stopped",
+            "notification_stopped",
+            "db_closed",
+            "browser_closed",
+            "monitor_stopped",
+            "web_stopped",
+        ]
+        unfinished = [
+            data.get(k)
+            for k in detail_state_keys
+            if data.get(k) is not None and not data.get(k)
+        ]
+        if unfinished:
+            status_line = "存在未完成回收项，请检查上方状态"
+        else:
+            status_line = "所有服务已安全停止，退出流程完成 ✨"
+        lines.append(row(f"状态：{status_line}"))
         lines.append(bottom())
         return lines
 

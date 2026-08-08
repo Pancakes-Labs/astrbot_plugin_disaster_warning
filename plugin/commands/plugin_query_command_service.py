@@ -316,8 +316,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         keyword: str | None = None,
         optional_a: str | None = None,
         optional_b: str | None = None,
+        optional_c: str | None = None,
     ):
-        """处理气象预警查询命令，支持指定地区、类型与级别，全国模式下支持分批合并转发展示。"""
+        """处理气象预警查询命令，支持指定地区、类型、级别与时间范围，全国模式下支持分批合并转发展示。"""
 
         def _quoted_plain_result(text: str):
             return quoted_plain_result(self.plugin, event, text)
@@ -402,15 +403,21 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             yield _quoted_plain_result(
                 "❌ 参数不足。\n"
                 "用法：\n"
-                "• /气象预警查询 <省份/地名> [<预警类型>] [<预警颜色>]\n"
-                "• /气象预警查询 全国 [<预警类型>] [<预警颜色>]\n"
+                "• /气象预警查询 <省份/地名> [<预警类型>] [<预警颜色>] [全部|全日期]\n"
+                "• /气象预警查询 全国 [<预警类型>] [<预警颜色>] [全部|全日期]\n"
                 "• /气象预警查询 <预警ID>"
             )
             return
 
         try:
             db = self.plugin.disaster_service.statistics_manager.db
-            result = await query_weather_alarm_data(db, keyword, optional_a, optional_b)
+            result = await query_weather_alarm_data(
+                db,
+                keyword,
+                optional_a,
+                optional_b,
+                optional_c=optional_c,
+            )
 
             if not result.get("success"):
                 error_text = str(result.get("error") or "查询失败")
@@ -423,6 +430,13 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         desc.append(f"预警类型={filters.get('type')}")
                     if filters.get("color"):
                         desc.append(f"预警颜色={filters.get('color')}")
+                    # 时间范围：全日期模式或显式传了时间关键词时补充说明
+                    if filters.get("all_date_mode"):
+                        desc.append("时间范围=全部日期")
+                    elif filters.get("time_window_hours"):
+                        desc.append(
+                            f"时间范围=近{filters.get('time_window_hours')}小时"
+                        )
                     if desc:
                         error_text = f"❌ {error_text}\n检索条件：{'，'.join(desc)}"
                     else:

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from typing import Any
@@ -34,9 +35,20 @@ class MapAttachmentBuilder:
         self.default_config = default_config
 
     async def render_map_image(
-        self, lat: float, lon: float, config: dict[str, Any]
+        self,
+        lat: float,
+        lon: float,
+        config: dict[str, Any],
+        event_caption: str = "",
     ) -> str | None:
-        """渲染指定经纬度的地图图片。"""
+        """渲染指定经纬度的地图图片。
+
+        Args:
+            lat: 纬度。
+            lon: 经度。
+            config: 渲染配置（地图源、缩放级别、Playwright 模式等）。
+            event_caption: 左上角事件描述文字胶囊文本（时间 震中 震级）。
+        """
         try:
             map_source = config.get("map_source", "PetalMap矢量图亮")
             zoom_level = config.get("map_zoom_level", 5)
@@ -86,11 +98,17 @@ class MapAttachmentBuilder:
                 "leaflet_js_url": leaflet_js_url,
                 "leaflet_css_url": leaflet_css_url,
                 "map_render_helper_js": map_render_helper_js,
+                "event_caption": event_caption or "",
             }
 
             template = Template(template_content)
             html_content = template.render(**context)
-            image_filename = f"map_{lat}_{lon}_{int(time.time())}.png"
+            # 文件名加入 event_caption 的稳定哈希：同一坐标同一秒渲染不同事件描述时，
+            # 避免后一次渲染覆盖前一次图片（缓存命中可能发送错误的事件描述地图）。
+            caption_hash = hashlib.md5(
+                str(event_caption or "").encode("utf-8")
+            ).hexdigest()[:8]
+            image_filename = f"map_{lat}_{lon}_{int(time.time())}_{caption_hash}.png"
             image_path = os.path.join(self.temp_dir, image_filename)
             return await self.browser_manager.render_card(
                 html_content,

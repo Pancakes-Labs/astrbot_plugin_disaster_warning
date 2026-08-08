@@ -47,8 +47,13 @@ def register_runtime_routes(app, disaster_service, config: dict[str, Any]):
         keyword: str = "",
         optional_a: str = "",
         optional_b: str = "",
+        filter_by_time: bool = True,
+        optional_c: str = "",
     ):
-        """查询气象预警，逻辑与命令侧查询保持一致。"""
+        """查询气象预警，逻辑与命令侧查询保持一致。
+
+        支持 filter_by_time 关闭时间过滤，以及 optional_c 指定“全部/全日期”检索。
+        """
         try:
             guard_result = ApiResponse.guard_service_ready(
                 disaster_service,
@@ -63,6 +68,8 @@ def register_runtime_routes(app, disaster_service, config: dict[str, Any]):
                 keyword,
                 optional_a or None,
                 optional_b or None,
+                filter_by_time=filter_by_time,
+                optional_c=optional_c or None,
             )
             await _track_runtime_feature(
                 "web_weather_query",

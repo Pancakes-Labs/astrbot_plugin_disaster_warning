@@ -1,7 +1,8 @@
 const { Typography, CircularProgress } = MaterialUI;
 const { useState, useMemo, useEffect } = React;
-const { buildWeatherIconFallbackHandler: _rawBuildHandler } = window.EventFormatters || {};
+const { buildWeatherIconFallbackHandler: _rawBuildHandler, isWeatherImageInvalid: _rawInvalidCheck } = window.EventFormatters || {};
 const buildWeatherIconFallbackHandler = _rawBuildHandler || ((_, cb) => (e) => typeof cb === 'function' && cb(e));
+const isWeatherImageInvalid = _rawInvalidCheck || ((el) => Boolean(el) && el.naturalWidth === 0 && el.naturalHeight === 0);
 
 /**
  * 气象预警快捷查询面板组件 (WeatherQueryPanel)
@@ -18,6 +19,7 @@ function WeatherQueryPanel() {
         keyword, setKeyword,
         optionalA, setOptionalA,
         optionalB, setOptionalB,
+        timeRange, setTimeRange,
         loading,
         error,
         result,
@@ -79,6 +81,16 @@ function WeatherQueryPanel() {
                                     detail.weather_type_code,
                                     (e) => e.currentTarget.classList.add('is-hidden')
                                 )}
+                                onLoad={(e) => {
+                                    // 伪图片（HTTP 200 的 HTML）不会触发 onError，
+                                    // 通过 naturalWidth=0 识别无效内容并触发同一条回退链
+                                    if (isWeatherImageInvalid(e.currentTarget)) {
+                                        buildWeatherIconFallbackHandler(
+                                            detail.weather_type_code,
+                                            (ev) => ev.currentTarget.classList.add('is-hidden')
+                                        )(e);
+                                    }
+                                }}
                             />
                         </div>
                     </div>
@@ -135,6 +147,16 @@ function WeatherQueryPanel() {
                                     item.weather_type_code,
                                     (e) => e.currentTarget.classList.add('is-hidden')
                                 )}
+                                onLoad={(e) => {
+                                    // 伪图片（HTTP 200 的 HTML）不会触发 onError，
+                                    // 通过 naturalWidth=0 识别无效内容并触发同一条回退链
+                                    if (isWeatherImageInvalid(e.currentTarget)) {
+                                        buildWeatherIconFallbackHandler(
+                                            item.weather_type_code,
+                                            (ev) => ev.currentTarget.classList.add('is-hidden')
+                                        )(e);
+                                    }
+                                }}
                             />
                         )}
                         {/* 右侧：单条列表详细元数据 */}
@@ -218,6 +240,17 @@ function WeatherQueryPanel() {
                     <option value="黄色">黄色</option>
                     <option value="蓝色">蓝色</option>
                     <option value="白色">白色</option>
+                </select>
+
+                {/* 3.5 可选：时间范围（默认近72小时，可选全日期），仅在非 ID 直查下启用 */}
+                <select
+                    value={timeRange}
+                    onChange={(e) => setTimeRange(e.target.value)}
+                    className="weather-query-input"
+                    disabled={isIdQuery}
+                >
+                    <option value="">时间范围：近72小时</option>
+                    <option value="全部">时间范围：全部日期</option>
                 </select>
 
                 {/* 4. 执行与重置按钮 */}

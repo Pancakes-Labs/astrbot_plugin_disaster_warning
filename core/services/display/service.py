@@ -20,6 +20,7 @@ from ...domain.event_context import (
     WeatherDisplayContext,
 )
 from ...domain.event_models import EventEnvelope
+from ...message.presenters.weather_constants import resolve_weather_emoji
 from .builders.common import prepare_display_projection
 from .builders.earthquake_context_builder import build_earthquake_display_context
 from .builders.tsunami_context_builder import build_tsunami_display_context
@@ -62,6 +63,19 @@ def _normalize_event_summary_fields(record: dict[str, Any]) -> dict[str, Any]:
         "weather_type_code": record.get("weather_type_code"),
         # 提取气象预警图标 URL（供前端直接展示）
         "icon_url": record.get("icon_url"),
+        # 提取气象预警 Emoji（由后端 WEATHER_EMOJI_MAP 统一解析下发，前端零维护）。
+        # 注意：只从标题层字段（description/subtitle）与类型编码中提取，绝不混入 weather_detail 长正文，
+        # 否则正文里出现的"地质灾害""山洪"等字样会按长度倒序优先命中，把暴雨/大雾等预警的 emoji 匹配错位。
+        # 该口径与 stats_load_service 的统计分类（仅标题层提取气象类型）保持一致。
+        "weather_emoji": (
+            resolve_weather_emoji(
+                record.get("description"),
+                record.get("subtitle"),
+                record.get("weather_type_code"),
+            )
+            if record.get("type") == "weather_alarm"
+            else None
+        ),
     }
 
 

@@ -720,6 +720,48 @@ class EventDeduplicationService:
         )
         return True
 
+    def snapshot_state(self) -> dict[str, Any]:
+        """对去重状态做浅层快照，供推送失败时回滚。
+
+        由于 processed_reports 是可变 set，这里对每个源记录做深拷贝，
+        确保回滚时能还原到推送前的完整状态。
+        """
+        return {
+            "recent_events": {
+                fingerprint: {
+                    source_id: dict(record)
+                    | {"processed_reports": set(record.get("processed_reports") or ())}
+                    for source_id, record in source_records.items()
+                }
+                for fingerprint, source_records in self.recent_events.items()
+            },
+            "typhoon_cache": dict(self._typhoon_cache),
+            "tsunami_cache": {
+                key: dict(value) for key, value in self._tsunami_cache.items()
+            },
+            "cenc_ir_cache": {
+                key: dict(value) for key, value in self._cenc_ir_cache.items()
+            },
+        }
+
+    def restore_state(self, snapshot: dict[str, Any]) -> None:
+        """恢复去重状态快照（推送失败时回滚到推送前状态）。"""
+        self.recent_events = {
+            fingerprint: {
+                source_id: dict(record)
+                | {"processed_reports": set(record.get("processed_reports") or ())}
+                for source_id, record in source_records.items()
+            }
+            for fingerprint, source_records in snapshot.get("recent_events", {}).items()
+        }
+        self._typhoon_cache = dict(snapshot.get("typhoon_cache", {}))
+        self._tsunami_cache = {
+            key: dict(value) for key, value in snapshot.get("tsunami_cache", {}).items()
+        }
+        self._cenc_ir_cache = {
+            key: dict(value) for key, value in snapshot.get("cenc_ir_cache", {}).items()
+        }
+
     def _seed_earthquake(
         self, event: EventEnvelope, domain_eq: EarthquakeEvent
     ) -> bool:
@@ -756,8 +798,13 @@ class EventDeduplicationService:
                 existing["is_final"] = existing.get("is_final", False) or bool(
                     metadata.get("is_final", False)
                 )
+                # 状态一致性：静默播种时同步回写最新 info_type / issue_type，
+                # 避免旧状态（如 automatic）残留导致静默结束后 reviewed 被误判为升级重复放行。
                 if issue_type:
                     existing["issue_type"] = issue_type
+                current_info_type = metadata.get("info_type") or issue_type or ""
+                if current_info_type:
+                    existing["info_type"] = current_info_type
             else:
                 source_events[source_id] = record
         else:
@@ -839,6 +886,24 @@ class EventDeduplicationService:
                         existing_event["is_final"] = existing_event["is_final"] or bool(
                             metadata.get("is_final", False)
                         )
+                        # 关键修复：状态升级放行（如 USGS automatic -> reviewed）后，
+                        # 必须把最新 info_type / issue_type 回写缓存。
+                        # 否则缓存始终停留在旧状态（如 automatic），
+                        # 后续每条 reviewed 都会再次触发“升级放行”而被重复推送。
+                        current_info_type = (
+                            metadata.get("info_type")
+                            or self._extract_issue_type_from_earthquake(
+                                domain_eq, metadata
+                            )
+                            or ""
+                        )
+                        if current_info_type:
+                            existing_event["info_type"] = current_info_type
+                        current_issue_type = self._extract_issue_type_from_earthquake(
+                            domain_eq, metadata
+                        )
+                        if current_issue_type:
+                            existing_event["issue_type"] = current_issue_type
                         return True
                     plugin_logger.info(
                         f"[灾害预警] 同一数据源重复事件，过滤: {source_id}",

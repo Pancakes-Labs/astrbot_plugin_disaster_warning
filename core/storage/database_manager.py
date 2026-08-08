@@ -49,6 +49,14 @@ class DatabaseManager:
     同时维护主事件表与事件更新表之间的配套关系。
     """
 
+    # 全日期检索模式的最大行数保护：events 表过大时防止单次全表扫描
+    # 拉取所有行导致内存与耗时不可控；需要更彻底的全量检索应自行评估分页策略。
+    # 当调用方传 limit<=0 时，实际仍会附加 LIMIT _WEATHER_FULL_SCAN_MAX_ROWS，
+    # 即“全日期”查询最多返回该数量的记录，超出部分被截断（不会抛错）。
+    # 设计依据：约 3000 条/天 × 365 天/年 × 50 年 ≈ 5475 万条，
+    # 取 2^26 = 67_108_864 作为覆盖 50 年数据量且接近 2 的幂的上限。
+    _WEATHER_FULL_SCAN_MAX_ROWS = 67_108_864
+
     def __init__(self, db_path: Path):
         """
         初始化数据库管理器
@@ -1261,19 +1269,43 @@ class DatabaseManager:
     async def get_recent_weather_events(
         self, limit: int = 5000
     ) -> list[dict[str, Any]]:
-        """获取最近气象预警事件（含 history），按更新时间倒序。"""
+        """获取最近气象预警事件（含 history），按更新时间倒序。
+
+        当 limit > 0 时最多返回 limit 条；当 limit <= 0 时视为“全日期”检索，
+        返回最多 _WEATHER_FULL_SCAN_MAX_ROWS 条记录（超出部分被截断）。
+
+        注意：调用方不应把 limit<=0 理解为“无条件完整历史”，
+        该模式仍受上限保护，如需遍历完整历史应使用分页/分批读取。
+        """
+        # 全日期（无 LIMIT）模式的最大行数保护：防止 events 表过大时单次全表扫描
+        # 拉取所有行导致内存与耗时不可控。
+        full_scan_limit = (
+            limit if limit and limit > 0 else self._WEATHER_FULL_SCAN_MAX_ROWS
+        )
         try:
             cursor = await self.connection.cursor()
-            await cursor.execute(
-                """
-                SELECT *
-                FROM events
-                WHERE type='weather' OR type='weather_alarm'
-                ORDER BY updated_at DESC, time DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            if limit and limit > 0:
+                await cursor.execute(
+                    """
+                    SELECT *
+                    FROM events
+                    WHERE type='weather' OR type='weather_alarm'
+                    ORDER BY updated_at DESC, time DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                await cursor.execute(
+                    """
+                    SELECT *
+                    FROM events
+                    WHERE type='weather' OR type='weather_alarm'
+                    ORDER BY updated_at DESC, time DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (full_scan_limit,),
+                )
             events = [dict(row) for row in await cursor.fetchall()]
             return await self._attach_history(events)
         except Exception as e:

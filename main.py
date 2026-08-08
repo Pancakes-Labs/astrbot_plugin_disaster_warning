@@ -148,7 +148,7 @@ class DisasterWarningPlugin(Star):
 • /灾害预警重连 - 强制重连所有数据源 (仅管理员)
 • /地震列表查询 或 /地震列表 [数据源] [数量] [格式] - 查询最新地震列表
 • /地震预警查询 或 /地震预警 - 查询各机构 EEW 状态与无 EEW 计时
-• /气象预警查询 或 /气象预警 <省份/地名|全国> [预警类型] [预警颜色] 或 <预警ID>
+• /气象预警查询 或 /气象预警 <省份/地名|全国> [预警类型] [预警颜色] [全部|全日期] 或 <预警ID>（默认近72小时，全日期查询全部历史）
 • /台风信息查询 或 /台风查询 [台风ID|名称|数量] [完整|简要] [活跃] - 查询台风信息（优先EQSC，失败回退本地）
 • /JMA震央分布 [开始日期] [结束日期] - 查询 JMA 震央分布统计（默认今天）
 • /JMA震央分布绘图 [投影类型] [开始日期] [结束日期] - 绘制 JMA 震央分布图
@@ -253,13 +253,15 @@ class DisasterWarningPlugin(Star):
         keyword: str = None,
         optional_a: str = None,
         optional_b: str = None,
+        optional_c: str = None,
     ):
-        """气象预警查询"""
+        """气象预警查询（支持 [全部|全日期] 关闭 72 小时过滤）"""
         async for result in self._query_command_service.handle_query_weather_alarm(
             event,
             keyword=keyword,
             optional_a=optional_a,
             optional_b=optional_b,
+            optional_c=optional_c,
         ):
             yield result
 
