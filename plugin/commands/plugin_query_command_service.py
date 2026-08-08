@@ -1322,8 +1322,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 "command_query_radar",
                 {
                     "success": True,
-                    "keyword": str(name).strip(),
-                    "target": result.get("name"),
+                    "kind": result.get("kind", "station"),
                 },
             )
 
@@ -1390,8 +1389,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 "command_query_radar_gif",
                 {
                     "success": True,
-                    "keyword": str(name).strip(),
+                    "kind": result.get("kind", "station"),
                     "frames": result.get("frames"),
+                    "degraded": bool(result.get("degraded")),
                 },
             )
 
