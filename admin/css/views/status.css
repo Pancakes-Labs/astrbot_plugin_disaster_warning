@@ -885,7 +885,7 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 }
 
 /* ==========================================================================
-   7. 顶部实报横滚动条 (EEW & Earthquake News Ticker)
+   7. 顶部三栏竖向滚动跑马灯 (Vertical News Ticker: 地震 / 气象 / 海啸+台风)
    ========================================================================== */
 .news-ticker-card {
     --hover-lift: 0px;
@@ -896,6 +896,13 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     gap: 16px;
     overflow: hidden;
     margin-bottom: 16px;
+}
+
+/* 加载骨架态：保持单行横排布局 */
+.news-ticker-card--loading {
+    gap: 16px;
+    height: 56px;
+    padding: 0 24px !important;
 }
 
 .news-ticker-card.is-dark {
@@ -913,7 +920,9 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     overflow: visible;
 }
 
-/* 走马灯最左侧固定的标题面板 (带遮罩渐变隔离走马灯滑入效果) */
+/* 走马灯左侧固定标题面板。
+   竖向布局下无横向滑入元素，去除右侧投影与面板底色，
+   避免在文字后方形成独立色块/阴影块。 */
 .news-ticker-head {
     display: flex;
     align-items: center;
@@ -921,10 +930,9 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     font-weight: 800;
     min-width: fit-content;
     z-index: 2;
-    /* 卡片视觉面在 ::before，不能 inherit 透明壳；改用 --card-bg */
-    background: var(--card-bg, var(--md-sys-color-surface));
-    padding-right: 12px;
-    box-shadow: 10px 0 10px -5px rgba(0, 0, 0, 0.1);
+    background: transparent;
+    padding-right: 0;
+    box-shadow: none;
 }
 
 .news-ticker-head--loading {
@@ -956,54 +964,96 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     font-size: 0.9rem !important;
 }
 
-/* 走马灯遮罩蒙版：左右淡入淡出 */
-.news-ticker-marquee-mask {
+/* ── 三栏网格：占满标题右侧剩余宽度 ────────────────────────
+   列宽比例 35:45:25（地震 : 气象 : 海啸+台风）。 */
+.news-ticker-v-grid {
     flex: 1;
-    overflow: hidden;
-    white-space: nowrap;
-    mask-image: linear-gradient(to right, transparent, black 20px, black 95%, transparent);
+    min-width: 0;
+    height: 100%;
+    display: grid;
+    grid-template-columns: 7fr 9fr 5fr;
+    gap: 16px;
+    align-items: stretch;
 }
 
-/* 无尽横向循环滚动动画轨道 */
-.news-ticker-marquee-track {
-    display: inline-block;
-    animation: scroll-left 30s linear infinite;
+/* 单栏容器：无底框无背景，文字直接在跑马灯条上滚 */
+.news-ticker-v-column {
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* 竖向滚动遮罩视窗：上下淡入淡出。
+   顶部淡出区收窄（8px），避免文字停在顶部时被模糊影响阅读。 */
+.news-ticker-v-mask {
+    height: 100%;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, transparent, black 8px, black 92%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 8px, black 92%, transparent);
+}
+
+/* 事件过少（≤2 条）时的静态展示容器：纵向排列，不滚动。
+   不加顶部内边距，保证与滚动轨道（贴顶）的停止位置一致。 */
+.news-ticker-v-static {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* 竖向无缝循环滚动动画轨道：内容自我复制双份，translateY 0→-50% 首尾相接。
+   内容向上滚出（最新时间沉在底部），动画名/时长由 JSX 动态注入
+   （含"播完停 3 秒再续"的关键帧），此处保留基础声明作为 JS 未注入时的兜底。 */
+.news-ticker-v-track {
+    display: flex;
+    flex-direction: column;
+    animation: ticker-scroll-up linear infinite;
     animation-play-state: running;
-    white-space: nowrap;
     will-change: transform;
 }
 
 /* 悬停走马灯时自动暂停滚动，方便管理员阅读 */
-.news-ticker-marquee-track.is-paused {
+.news-ticker-v-track.is-paused {
     animation-play-state: paused;
 }
 
-/* 单条滚动播报条目 */
-.news-ticker-item {
-    display: inline-flex;
+/* 单条竖向播报条目 */
+.news-ticker-v-item {
+    display: flex;
     align-items: center;
-    gap: 8px;
-    margin-right: 48px;
-}
-
-.news-ticker-item--last {
-    margin-right: 24px;
+    gap: 6px;
+    padding: 3px 2px;
+    min-height: 24px;
+    white-space: nowrap;
 }
 
 .news-ticker-time {
     opacity: 0.7;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    line-height: 22px;
+    line-height: 20px;
     display: inline-flex;
     align-items: center;
+    flex-shrink: 0;
+}
+
+/* 时间标签跟随主题色：与震级胶囊内的 Mx.x 保持一致，明暗主题各自取主色 */
+.news-ticker-time.is-dark {
+    opacity: 0.95;
+    color: var(--md-sys-color-primary);
+}
+
+.news-ticker-time.is-light {
+    opacity: 0.9;
+    color: var(--md-sys-color-primary);
 }
 
 .news-ticker-type-icon {
-    font-size: 16px;
-    line-height: 22px;
+    font-size: 14px;
+    line-height: 20px;
     display: inline-flex;
     align-items: center;
+    flex-shrink: 0;
 }
 
 /* 走马灯内微型震级高亮胶囊 */
@@ -1012,12 +1062,12 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 .news-ticker-mag-chip.MuiChip-sizeSmall,
 .news-ticker-mag-chip.MuiChip-filled,
 .news-ticker-mag-chip.MuiChip-filled.MuiChip-sizeSmall {
-    height: 22px !important;
-    min-height: 22px !important;
+    height: 20px !important;
+    min-height: 20px !important;
     box-sizing: border-box !important;
     flex-shrink: 0 !important;
     border-radius: 999px !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
     padding: 0 !important;
 }
@@ -1027,9 +1077,9 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 .news-ticker-mag-chip.MuiChip-sizeSmall .MuiChip-label,
 .news-ticker-mag-chip.MuiChip-filled .MuiChip-label,
 .news-ticker-mag-chip.MuiChip-filled.MuiChip-sizeSmall .MuiChip-label {
-    padding: 0 8px !important;
-    line-height: 22px !important;
-    font-size: 12px !important;
+    padding: 0 7px !important;
+    line-height: 20px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -1074,29 +1124,51 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 
 .news-ticker-desc {
     font-weight: 600 !important;
-    line-height: 26px !important;
+    line-height: 20px !important;
     display: inline-flex !important;
     align-items: center !important;
-    vertical-align: middle;
-    padding-top: 0;
-    padding-bottom: 0;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-/* 滚动条目之间的精美圆点分隔符 */
-.news-ticker-divider {
-    margin-left: 20px;
-    opacity: 0.3;
-    font-weight: 300;
-    font-size: 18px;
-    line-height: 30px;
-    display: inline-flex;
+/* 空栏目占位：居中显示，不加斜体 */
+.news-ticker-v-empty {
+    display: flex;
     align-items: center;
+    justify-content: center;
+    height: 100%;
+    opacity: 0.55;
+    font-size: 12.5px !important;
+    font-style: normal;
 }
 
-/* 走马灯滚动关键帧 */
-@keyframes scroll-left {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
+/* 竖向无缝滚动关键帧：内容向上滚出，最新时间沉在底部（轨道含双份数据） */
+@keyframes ticker-scroll-up {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); }
+}
+
+@media (max-width: 1024px) {
+    .news-ticker-v-grid {
+        gap: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .news-ticker-card {
+        height: 56px;
+        padding: 0 14px !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .news-ticker-v-track {
+        animation: none;
+        transform: none;
+    }
 }
 
 /* ==========================================================================
