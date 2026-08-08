@@ -201,7 +201,13 @@ def _match_province_pinyin(
     keyword: str,
     stations: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """省份拼音匹配（如 beijing → 北京，命中该省首个站点）。"""
+    """省份拼音匹配（如 beijing → 北京，命中该省首个站点）。
+
+    收集全部命中的省份：山西/陕西拼音均为 shanxi，若只命中一个省份返回结果，
+    命中多个省份（如输入 shan 前缀命中山东/山西/陕西）返回 ambiguous 候选，
+    交由调用方提示用户选择，避免静默匹配到非预期省份。
+    """
+    matched: list[tuple[str, dict[str, Any]]] = []
     for prov_name, prov_dir in _PROVINCE_DIRS.items():
         prov_dir_key = _norm_key(prov_dir)
         # 仅允许：完全相等，或关键词是拼音前缀（避免长关键词误命中短拼音）
@@ -214,8 +220,22 @@ def _match_province_pinyin(
             stations,
             note="已匹配「{province}」省首个雷达站：{city}",
         )
-        if found:
-            return found
+        if found and found.get("matched"):
+            matched.append((prov_name, found))
+
+    if len(matched) == 1:
+        return matched[0][1]
+    if len(matched) > 1:
+        candidates = [
+            {
+                "city": found.get("name", ""),
+                "province": prov_name,
+                "path": found.get("path", ""),
+                "code": found.get("code", ""),
+            }
+            for prov_name, found in matched
+        ]
+        return {"matched": False, "reason": "ambiguous", "candidates": candidates}
     return None
 
 
@@ -386,7 +406,7 @@ def _degraded_single_result(
     target: dict[str, Any],
     image_bytes: bytes,
     label: str,
-    times: list[str],
+    times: list[str | None],
     frames_count: int,
 ) -> dict[str, Any]:
     """帧数不足时降级为单图结果（取最新一帧，即时间序列最后一个）。"""
@@ -445,7 +465,7 @@ async def build_radar_gif_result(
     *,
     target: dict[str, Any],
     frames: list[bytes],
-    times: list[str],
+    times: list[str | None],
 ) -> dict[str, Any]:
     """用多帧合成循环 GIF 并返回结果。
 

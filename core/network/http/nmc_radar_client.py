@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -28,6 +29,7 @@ from astrbot.api import logger
 
 PAGE_BASE = "https://www.nmc.cn"
 IMAGE_BASE = "https://image.nmc.cn"
+_IMAGE_HOST = "image.nmc.cn"
 
 # 页面内容缓存 TTL（秒）。雷达帧每 6 分钟更新，缓存 90 秒既降低请求频率，
 # 又不会让用户看到明显过期的帧。
@@ -64,8 +66,13 @@ class NmcRadarClient:
         self._page_base = str(page_base or PAGE_BASE).rstrip("/")
         self._concurrency = max(1, int(concurrency or 3))
         self._session: aiohttp.ClientSession | None = None
-        # 页面内容缓存：page_path -> (urls, expires_at)
-        self._page_cache: dict[str, tuple[list[str], float]] = {}
+        # 页面内容缓存为类级共享：page_path -> (urls, expires_at)。
+        # 命令侧每次请求都会新建实例，实例级缓存无法跨请求复用；
+        # URL 序列是纯数据、不依赖会话，可安全跨实例共享。
+        cls = type(self)
+        if not hasattr(cls, "_page_cache"):
+            cls._page_cache: dict[str, tuple[list[str], float]] = {}
+        self._page_cache = cls._page_cache
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """确保 aiohttp 会话可用（延迟初始化）。"""
@@ -77,11 +84,13 @@ class NmcRadarClient:
         return self._session
 
     async def close(self) -> None:
-        """关闭 HTTP 会话并清空缓存。"""
+        """关闭 HTTP 会话。
+
+        注意：不清理类级页面缓存，URL 序列不依赖会话可跨请求复用。
+        """
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
-        self._page_cache.clear()
 
     async def fetch_page_radar_urls(
         self,
@@ -119,12 +128,19 @@ class NmcRadarClient:
             return []
 
         urls = _DATA_IMG_RE.findall(html)
-        # 仅保留 image.nmc.cn 主机下的地址，避免页面被篡改后向任意主机发请求
+        # 仅保留 image.nmc.cn 主机下的 https 地址，避免页面被篡改后向任意主机发请求。
+        # 使用 urlsplit 精确校验主机名，防止 image.nmc.cn.evil.com 之类绕过 startswith。
         result: list[str] = []
         seen: set[str] = set()
         for u in urls:
             u = u.strip()
-            if not u or not u.startswith(IMAGE_BASE) or u in seen:
+            if not u or u in seen:
+                continue
+            try:
+                parts = urlsplit(u)
+            except ValueError:
+                continue
+            if parts.scheme != "https" or (parts.hostname or "").lower() != _IMAGE_HOST:
                 continue
             seen.add(u)
             result.append(u)
@@ -192,8 +208,19 @@ class NmcRadarClient:
                     return None
                 return (u, data)
 
-        results = await asyncio.gather(*(_one(u) for u in urls))
-        return [r for r in results if r is not None]
+        # return_exceptions=True：单帧异常只跳过该帧，不让整个 gather 中断，
+        # 避免剩余任务成为孤儿协程在已关闭会话上继续运行。
+        results = await asyncio.gather(
+            *(_one(u) for u in urls),
+            return_exceptions=True,
+        )
+        pairs: list[tuple[str, bytes]] = []
+        for r in results:
+            if isinstance(r, BaseException):
+                continue
+            if r is not None:
+                pairs.append(r)
+        return pairs
 
     @staticmethod
     def parse_code_from_url(url: str) -> str | None:
