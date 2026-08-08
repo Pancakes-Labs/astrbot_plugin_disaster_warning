@@ -45,6 +45,11 @@ from ...core.services.query.radar_query_service import (
     query_radar_list,
     resolve_radar_target,
 )
+from ...core.services.query.realrank_query_service import (
+    parse_time_arg,
+    query_rank,
+    resolve_rank_type,
+)
 from ...core.services.query.typhoon_query_parser import DETAIL_CURRENT, DETAIL_FULL
 from ...core.services.query.typhoon_query_presenter import attach_summary_text
 from ...core.services.query.typhoon_query_service import (
@@ -1430,3 +1435,72 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
             )
             yield quoted_plain_result(self.plugin, event, f"❌ 雷达列表查询失败: {e}")
+
+    # ------------------------------------------------------------------
+    # 实况排行查询（/气温排行 /降水排行 /风速排行）
+    # ------------------------------------------------------------------
+    async def handle_query_rank(
+        self,
+        event,
+        rank_keyword: str,
+        time_arg: str | None = None,
+    ):
+        """处理实况排行查询命令（气温/最低气温/降水/风速），支持可选历史时次。
+
+        Args:
+            event: 消息事件。
+            rank_keyword: 排行要素关键词，如「气温」「最低气温」「降水」「风速」。
+            time_arg: 可选历史时次，如「08日15时」「2026080815」「今天15时」。
+        """
+        try:
+            # 解析排行要素类型
+            rank_type = resolve_rank_type(rank_keyword)
+            if not rank_type:
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "用法：气温排行 [时次] | 最低气温排行 [时次] | 降水排行 [时次] | 风速排行 [时次]\n"
+                    "示例：气温排行、最低气温排行、降水排行 08日15时、风速排行 2026080815\n"
+                    "时次格式：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时",
+                )
+                return
+
+            # 解析可选时次
+            ymdh = None
+            if time_arg and str(time_arg).strip():
+                ymdh = parse_time_arg(str(time_arg).strip())
+                if not ymdh:
+                    yield quoted_plain_result(
+                        self.plugin,
+                        event,
+                        f"❌ 无法识别时间参数「{time_arg}」，可用格式：\n"
+                        "· MM月DD日HH时（如 08日15时）\n"
+                        "· YYYYMMDDHH（如 2026080815）\n"
+                        "· 今天HH时 / 昨天HH时（如 今天15时）",
+                    )
+                    return
+
+            # 查询排行
+            result = await query_rank(rank_type=rank_type, ymdh=ymdh)
+
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 排行查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            await self._track_command_feature(
+                "command_query_rank",
+                {
+                    "success": True,
+                    "rank_type": rank_type,
+                    "time_arg": bool(ymdh),
+                    "item_count": len(result.get("raw_items") or []),
+                },
+            )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(f"[灾害预警] 排行查询失败: {e}\n{traceback.format_exc()}")
+            yield quoted_plain_result(self.plugin, event, f"❌ 排行查询失败: {e}")
