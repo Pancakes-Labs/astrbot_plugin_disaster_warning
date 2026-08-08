@@ -1261,19 +1261,33 @@ class DatabaseManager:
     async def get_recent_weather_events(
         self, limit: int = 5000
     ) -> list[dict[str, Any]]:
-        """获取最近气象预警事件（含 history），按更新时间倒序。"""
+        """获取最近气象预警事件（含 history），按更新时间倒序。
+
+        当 limit <= 0 时不附加 LIMIT 子句，返回全量气象预警记录，
+        供“全日期”检索模式使用。
+        """
         try:
             cursor = await self.connection.cursor()
-            await cursor.execute(
-                """
-                SELECT *
-                FROM events
-                WHERE type='weather' OR type='weather_alarm'
-                ORDER BY updated_at DESC, time DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            if limit and limit > 0:
+                await cursor.execute(
+                    """
+                    SELECT *
+                    FROM events
+                    WHERE type='weather' OR type='weather_alarm'
+                    ORDER BY updated_at DESC, time DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            else:
+                await cursor.execute(
+                    """
+                    SELECT *
+                    FROM events
+                    WHERE type='weather' OR type='weather_alarm'
+                    ORDER BY updated_at DESC, time DESC, id DESC
+                    """
+                )
             events = [dict(row) for row in await cursor.fetchall()]
             return await self._attach_history(events)
         except Exception as e:
