@@ -63,7 +63,9 @@ def _enrich_event_list(events: list[dict]) -> None:
         if event_type == "weather_alarm":
             weather_type_code = str(event.get("weather_type_code") or "").strip()
             # 本地优先：p 编码经统一映射转为 11B 码
-            # 内部优先返回 /weatheralarm_logo/ 静态 URL，本地文件缺失时回退 Fan Studio 官方接口。
+            # 内部优先返回 /weatheralarm_logo/ 静态 URL，本地文件缺失时依次回退
+            # 本地通用颜色图标（fallback_{color}.png）与 Fan Studio 官方接口，
+            # 避免远程接口返回伪图片导致前端无法回退。
             if weather_type_code:
                 title_text = str(event.get("description") or "").strip()
                 headline_text = str(event.get("subtitle") or "").strip()
@@ -72,8 +74,8 @@ def _enrich_event_list(events: list[dict]) -> None:
                     title=title_text,
                     headline=headline_text,
                 )
-                event["icon_url"] = (
-                    build_weather_icon_url(icon_code) if icon_code else None
+                event["icon_url"] = build_weather_icon_url(
+                    icon_code or weather_type_code
                 )
             else:
                 event["icon_url"] = None
