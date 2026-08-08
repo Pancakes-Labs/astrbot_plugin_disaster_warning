@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
@@ -21,6 +22,7 @@ from ...domain.typhoon.typhoon_display_format import (
     get_typhoon_level_emoji,
     is_valid_radius_value,
 )
+from ...services.geo.region_service import region_service
 from ...sources.source_catalog import get_source_entry
 from .base_presenter import BasePresenter
 
@@ -45,8 +47,24 @@ class TyphoonPresenter(BasePresenter):
 
     @staticmethod
     def _format_wind_circle(wind_circle: dict[str, Any]) -> list[str]:
-        """格式化 EQSC 四象限风圈数据为文本行。"""
+        """格式化 EQSC 四象限风圈数据为紧凑表格文本行。"""
         return format_wind_circle(wind_circle)
+
+    @staticmethod
+    def _format_reference_place(latitude: Any, longitude: Any) -> str:
+        """根据经纬度解析 F-E 区域近似地名（如“菲律宾海附近”）。
+
+        拒绝非有限坐标（inf/NaN），避免传给 region_service 时触发
+        int(lat + 90) 的 OverflowError。
+        """
+        try:
+            lat_num = float(latitude)
+            lon_num = float(longitude)
+        except (TypeError, ValueError):
+            return ""
+        if not math.isfinite(lat_num) or not math.isfinite(lon_num):
+            return ""
+        return region_service.get_fe_name(lat_num, lon_num) or ""
 
     @staticmethod
     def _format_wind_speed(wind_speed: float | None, power: int | None) -> str | None:
@@ -142,6 +160,9 @@ class TyphoonPresenter(BasePresenter):
         if lat is not None and lon is not None:
             coords = cls._format_coordinates(lat, lon)
             lines.append(f"🌍中心位置：({coords})")
+            reference = cls._format_reference_place(lat, lon)
+            if reference:
+                lines.append(f"📍参考位置：{reference}")
 
         # 最大风速
         wind_speed_str = cls._format_wind_speed(
@@ -178,18 +199,18 @@ class TyphoonPresenter(BasePresenter):
         circle_lines = cls._format_wind_circle(display_context.wind_circle)
         if circle_lines:
             lines.append("")
-            lines.append("🌪️风圈半径：")
-            lines.extend(circle_lines)
+            lines.append(f"🌪️风圈半径：{circle_lines[0]}")
+            lines.extend(circle_lines[1:])
         elif cls._is_valid_radius_value(
             display_context.radius7
         ) or cls._is_valid_radius_value(display_context.radius10):
-            # 回退到 FAN Studio 单值风圈，每个等级独立成行
+            # 回退到 FAN Studio 单值风圈，紧凑对齐展示
             lines.append("")
             lines.append("🌪️风圈半径：")
             if cls._is_valid_radius_value(display_context.radius7):
-                lines.append(f"  • 7级风圈：{display_context.radius7} km")
+                lines.append(f"7 级：{display_context.radius7} (KM)")
             if cls._is_valid_radius_value(display_context.radius10):
-                lines.append(f"  • 10级风圈：{display_context.radius10} km")
+                lines.append(f"10级：{display_context.radius10} (KM)")
 
         # 更新时间
         if display_context.updated_at:
