@@ -1040,6 +1040,15 @@
             const el = e.currentTarget;
             const code = String(weatherTypeCode || '').trim();
 
+            // 原始图片输入变化时重置回退状态：React 可能复用同一 <img> 节点，
+            // 旧图片已耗尽回退链时 dataset 标记会残留；不清除会导致新图片加载失败
+            // 时直接执行 finalCallback，不再尝试新的回退图标。
+            if (el.dataset.fallbackCode !== code) {
+                delete el.dataset.localIconTried;
+                delete el.dataset.fallbackTried;
+                el.dataset.fallbackCode = code;
+            }
+
             // onLoad 场景：若图片内容无效（伪图片/空图），继续走 fallback 链
             if (e.type === 'load' && !isWeatherImageInvalid(el)) {
                 return; // 有效图片，无需回退
