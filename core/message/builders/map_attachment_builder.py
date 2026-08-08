@@ -34,9 +34,20 @@ class MapAttachmentBuilder:
         self.default_config = default_config
 
     async def render_map_image(
-        self, lat: float, lon: float, config: dict[str, Any]
+        self,
+        lat: float,
+        lon: float,
+        config: dict[str, Any],
+        event_caption: str = "",
     ) -> str | None:
-        """渲染指定经纬度的地图图片。"""
+        """渲染指定经纬度的地图图片。
+
+        Args:
+            lat: 纬度。
+            lon: 经度。
+            config: 渲染配置（地图源、缩放级别、Playwright 模式等）。
+            event_caption: 左上角事件描述文字胶囊文本（时间 震中 震级）。
+        """
         try:
             map_source = config.get("map_source", "PetalMap矢量图亮")
             zoom_level = config.get("map_zoom_level", 5)
@@ -86,6 +97,7 @@ class MapAttachmentBuilder:
                 "leaflet_js_url": leaflet_js_url,
                 "leaflet_css_url": leaflet_css_url,
                 "map_render_helper_js": map_render_helper_js,
+                "event_caption": event_caption or "",
             }
 
             template = Template(template_content)
