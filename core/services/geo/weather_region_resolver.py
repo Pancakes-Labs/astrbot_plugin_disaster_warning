@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 
@@ -58,6 +59,29 @@ CHINA_PROVINCES = [
 
 # ResAPI 行政区划搜索接口地址
 _RESAPI_REGIONS_SEARCH_URL = "https://www.resapi.cn/v1/regions/search"
+
+# 地名别名映射：气象预警常用功能/惯用名 → 官方行政区划名。
+# 平潭综合实验区在 2026 全国区划中仍为"平潭县"；
+# 洋浦经济开发区行政上隶属儋州市（460400），ResAPI 无"洋浦"独立实体。
+# 后续遇到类似"功能区名 ≠ 官方区划名"的地名可在此补充。
+_PLACE_ALIASES: dict[str, str] = {
+    "平潭综合实验区": "平潭县",
+    "洋浦": "儋州市",
+    "洋浦经济开发区": "儋州市",
+}
+
+# 功能区尾缀：查询失败时截掉这些尾缀做受控退化查询。
+# 退化后的查询词仍需通过省份唯一校验，防止命中跨省同名乡镇村等噪音。
+_FUNCTIONAL_ZONE_SUFFIXES = (
+    "综合实验区",
+    "实验区",
+    "经济技术开发区",
+    "高新技术产业开发区",
+    "高新区",
+    "新区",
+    "开发区",
+    "特区",
+)
 
 # 行政区划后缀（用于从 headline 中剥离市县级地名）。
 # 覆盖省直辖县/旗、自治州/县、地级市、市辖区、县级市、特区、林区、新区等。
@@ -192,8 +216,39 @@ class WeatherRegionResolver:
             await self._session.close()
             self._session = None
 
+    def _build_query_candidates(self, place_name: str) -> list[str]:
+        """生成地名查询候选队列（原词 → 别名 → 退化尾缀）。
+
+        用于处理"功能/惯用名 ≠ 官方行政区划名"的场景，
+        例如"平潭综合实验区"在官方区划中仍是"平潭县"。
+        """
+        candidates: list[str] = []
+        seen: set[str] = set()
+
+        def add(candidate: str) -> None:
+            candidate = candidate.strip()
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                candidates.append(candidate)
+
+        # 1. 原词优先
+        add(place_name)
+        # 2. 别名映射（手工维护，如"平潭综合实验区"→"平潭县"）
+        alias = _PLACE_ALIASES.get(place_name)
+        if alias:
+            add(alias)
+        # 3. 截掉功能区尾缀做受控退化（如"XX综合实验区"→"XX"）
+        for suffix in _FUNCTIONAL_ZONE_SUFFIXES:
+            if place_name.endswith(suffix):
+                add(place_name[: -len(suffix)])
+                break
+        return candidates
+
     async def _query_province_by_place_name(self, place_name: str) -> str | None:
-        """通过 ResAPI 行政区划搜索接口按地名反查所属省份。"""
+        """通过 ResAPI 行政区划搜索接口按地名反查所属省份。
+
+        依次尝试原词、别名映射、退化尾缀候选；任一候选命中唯一省份即返回。
+        """
         now = time.monotonic()
         # 成功结果直接缓存，失败结果短时缓存，减少重复网络查询。
         if place_name in self._location_province_cache:
@@ -203,77 +258,92 @@ class WeatherRegionResolver:
             if now < self._cache_expire.get(place_name, 0):
                 return None
 
+        for query in self._build_query_candidates(place_name):
+            province = await self._resolve_province_from_search(query)
+            if province is not None:
+                self._location_province_cache[place_name] = province
+                return province
+
+        self._location_province_cache[place_name] = None
+        self._cache_expire[place_name] = now + self._failure_ttl
+        return None
+
+    async def _resolve_province_from_search(self, query: str) -> str | None:
+        """对单个查询词执行 ResAPI 搜索并解析省份。
+
+        匹配策略：
+        1. 仅接受 name 与查询词完全相同的精确命中，或以查询词开头的合理扩展命中
+           （如"五台山"→"五台山风景名胜区"），避免把模糊结果误判为精确命中；
+        2. 命中记录不限层级（含 town/village），允许功能区退化后只剩乡镇级的场景参与省份判定；
+        3. 所有命中记录的省份集合唯一时才采纳（核心安全阀），
+           同名跨省/模糊命中多省时返回 None，不猜测；
+        4. 从命中记录的 full_name 首段解析省份。
+        """
         # ResAPI 搜索接口参数
         params = {
-            "q": place_name,
+            "q": query,
             "page": "1",
             "page_size": "10",
         }
-        try:
-            session = self._get_session()
-            async with session.get(
-                _RESAPI_REGIONS_SEARCH_URL,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status != 200:
-                    logger.debug(
-                        f"[灾害预警] ResAPI 行政区划查询 HTTP {resp.status}，"
-                        f"地点为 {place_name}"
-                    )
-                    self._location_province_cache[place_name] = None
-                    self._cache_expire[place_name] = now + self._failure_ttl
-                    return None
-                payload = await resp.json(content_type=None)
-        except Exception as exc:
-            logger.debug(
-                f"[灾害预警] 行政区划查询失败，地点为 {place_name}，错误为 {exc}"
-            )
-            self._location_province_cache[place_name] = None
-            self._cache_expire[place_name] = now + self._failure_ttl
+        # 网络层偶发故障（连接超时/断开等）时重试一次，避免整条统计丢失。
+        # 最多尝试 2 次：第 1 次失败后短暂等待再试。
+        payload = None
+        for attempt in range(2):
+            try:
+                session = self._get_session()
+                async with session.get(
+                    _RESAPI_REGIONS_SEARCH_URL,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(
+                            f"[灾害预警] ResAPI 行政区划查询 HTTP {resp.status}，"
+                            f"查询词为 {query}"
+                        )
+                        continue
+                    payload = await resp.json(content_type=None)
+                    break
+            except Exception as exc:
+                # 注意：aiohttp 的 ClientConnectionError / asyncio.TimeoutError
+                # 等异常 str(exc) 为空，仅打 f"{exc}" 无法区分错误类型。
+                # 这里补打异常类型名与完整信息（含 errno 等），便于排障。
+                logger.error(
+                    f"[灾害预警] 行政区划查询失败(第 {attempt + 1}/2 次)，"
+                    f"查询词为 {query}，异常类型为 {type(exc).__name__}，"
+                    f"错误信息为 {exc!r}"
+                )
+                if attempt == 0:
+                    await asyncio.sleep(0.3)
+        if payload is None:
             return None
 
         # 顶层类型校验：ResAPI 正常返回 dict，但网关错误/错误页等场景
         # 可能解析出数组、字符串或标量；此时 payload.get 会抛 AttributeError，
         # 而该异常位于 try 块之外，会逃逸到历史统计重建路径导致中断。
-        # 将非 dict 响应一律视为失败查询，写入失败缓存后返回 None。
+        # 将非 dict 响应一律视为失败查询。
         if not isinstance(payload, dict):
             logger.debug(
                 f"[灾害预警] ResAPI 行政区划响应顶层类型异常 "
-                f"({type(payload).__name__})，地点为 {place_name}"
+                f"({type(payload).__name__})，查询词为 {query}"
             )
-            self._location_province_cache[place_name] = None
-            self._cache_expire[place_name] = now + self._failure_ttl
             return None
 
         records = payload.get("data") or []
         if not isinstance(records, list):
             records = []
 
-        # 匹配策略：
-        # 1. 仅接受 name 与查询词完全相同的精确命中，或以查询词开头的合理扩展命中
-        # （如"五台山"→"五台山风景名胜区"），避免把模糊结果误判为精确命中；
-        # 2. 扩展命中仅统计 province/city/district 等行政区划层级，
-        # 排除 town/village 等低层级记录，防止 full_name 中碰巧含查询词的乡镇村干扰省份判定；
-        # 3. 多个精确命中同名跨省时，省份集合不唯一则不猜测，返回 None；
-        # 4. 从命中记录的 full_name 首段解析省份。
         matched_records: list[dict] = []
         for record in records:
             if not isinstance(record, dict):
                 continue
             name = str(record.get("name") or "").strip()
             full_name = str(record.get("full_name") or "")
-            level = str(record.get("level") or "")
             if not full_name:
                 continue
-            if name == place_name:
-                matched_records.append(record)
-            elif name.startswith(place_name) and level in (
-                "province",
-                "city",
-                "district",
-            ):
-                # 扩展命中仅限省市区级，避免乡镇村干扰
+            # 精确命中或名称以查询词开头的扩展命中均纳入候选；
+            # 不再限制省市区级，但最终省份必须唯一（见下方 province_set 校验）。
+            if name == query or name.startswith(query):
                 matched_records.append(record)
 
         if matched_records:
@@ -289,12 +359,8 @@ class WeatherRegionResolver:
 
             # 命中记录归一化后得到唯一省份时才采纳，避免同名跨省时任意猜测
             if len(province_set) == 1:
-                province = province_set.pop()
-                self._location_province_cache[place_name] = province
-                return province
+                return province_set.pop()
 
-        self._location_province_cache[place_name] = None
-        self._cache_expire[place_name] = now + self._failure_ttl
         return None
 
     async def extract_province_with_fallback(
