@@ -16,6 +16,7 @@ from ...domain.typhoon.typhoon_display_format import (
     get_typhoon_level_emoji,
     is_valid_radius_value,
 )
+from ..geo.region_service import region_service
 from .typhoon_query_parser import DETAIL_CURRENT, DETAIL_FULL
 
 
@@ -69,6 +70,16 @@ def _format_typhoon_short_id(*candidates: object) -> str:
     return ""
 
 
+def _format_reference_place(latitude: Any, longitude: Any) -> str:
+    """根据经纬度解析 F-E 区域近似地名（如“菲律宾海附近”）。"""
+    try:
+        lat_num = float(latitude)
+        lon_num = float(longitude)
+    except (TypeError, ValueError):
+        return ""
+    return region_service.get_fe_name(lat_num, lon_num) or ""
+
+
 def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
     """生成单条台风摘要文本，供命令侧与详情卡片复用。"""
     lines: list[str] = []
@@ -101,6 +112,9 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
     coords = format_coordinates(item.get("latitude"), item.get("longitude"))
     if coords:
         lines.append(f"🌍中心位置：({coords})")
+        reference = _format_reference_place(item.get("latitude"), item.get("longitude"))
+        if reference:
+            lines.append(f"📍参考位置：{reference}")
 
     wind_speed = item.get("wind_speed")
     power = item.get("power")
@@ -125,14 +139,14 @@ def build_summary_text(item: dict[str, Any], *, detail: str) -> str:
     circle_lines = format_wind_circle(item.get("wind_circle") or {})
     if circle_lines:
         lines.append("")
-        lines.append("🌪️风圈半径：")
-        lines.extend(circle_lines)
+        lines.append(f"🌪️风圈半径：{circle_lines[0]}")
+        lines.extend(circle_lines[1:])
     else:
         radius_lines: list[str] = []
         if is_valid_radius_value(item.get("radius7")):
-            radius_lines.append(f"  • 7级风圈：{item.get('radius7')} km")
+            radius_lines.append(f"7 级：{item.get('radius7')} (KM)")
         if is_valid_radius_value(item.get("radius10")):
-            radius_lines.append(f"  • 10级风圈：{item.get('radius10')} km")
+            radius_lines.append(f"10级：{item.get('radius10')} (KM)")
         if radius_lines:
             lines.append("")
             lines.append("🌪️风圈半径：")

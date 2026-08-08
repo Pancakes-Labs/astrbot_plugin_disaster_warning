@@ -69,9 +69,9 @@ MOVE_DIRECTION_DISPLAY_MAP: dict[str, str] = {
 }
 
 WIND_CIRCLE_LABELS = {
-    "30KTS": "7级风圈",
-    "50KTS": "10级风圈",
-    "64KTS": "12级风圈",
+    "30KTS": "7 级",
+    "50KTS": "10级",
+    "64KTS": "12级",
 }
 WIND_QUADRANT_LABELS = {
     "NE": "东北",
@@ -108,36 +108,56 @@ def is_valid_radius_value(value: Any) -> bool:
 
 
 def format_wind_circle(wind_circle: dict[str, Any] | None) -> list[str]:
-    """格式化 EQSC 四象限风圈数据为文本行。"""
+    """格式化 EQSC 四象限风圈数据为紧凑表格文本行。
+
+    输出样例（象限顺序固定为 NE/SE/SW/NW）：
+        (NE, SE, SW, NW)
+        7 级：450, 420, 420, 450 (KM)
+        10级：250, 220, 220, 250 (KM)
+        12级：100, 100, 100, 100 (KM)
+
+    缺失象限以「-」占位保持数值列对齐；整级无有效数值时跳过该行。
+    """
     lines: list[str] = []
     if not wind_circle or not isinstance(wind_circle, dict):
         return lines
 
+    collected: list[tuple[str, list[str]]] = []
     for circle_key, label in WIND_CIRCLE_LABELS.items():
         circle_data = wind_circle.get(circle_key)
         if not isinstance(circle_data, dict):
             continue
-        parts: list[str] = []
-        for quadrant, quad_label in WIND_QUADRANT_LABELS.items():
+        values: list[str] = []
+        valid_count = 0
+        for quadrant in WIND_QUADRANT_LABELS:
             radius = circle_data.get(quadrant)
-            if radius is None:
-                continue
             if isinstance(radius, str) and radius.strip().upper() in {
                 "",
                 "NULL",
                 "NONE",
                 "无数据",
             }:
-                continue
+                radius = None
             number = to_float(radius)
             if number is None or number <= 0:
+                values.append("-")
                 continue
             radius_text = (
                 str(int(number)) if float(number).is_integer() else str(number)
             )
-            parts.append(f"{quad_label}{radius_text}km")
-        if parts:
-            lines.append(f"  • {label}：{' / '.join(parts)}")
+            values.append(radius_text)
+            valid_count += 1
+        if valid_count == 0:
+            continue
+        collected.append((label, values))
+
+    if not collected:
+        return lines
+
+    # 表头行（象限缩写）由调用方拼接在“风圈半径：”之后
+    lines.append(f"({', '.join(WIND_QUADRANT_LABELS)})")
+    for label, values in collected:
+        lines.append(f"{label}：{', '.join(values)} (KM)")
     return lines
 
 
