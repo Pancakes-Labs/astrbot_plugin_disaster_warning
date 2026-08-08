@@ -20,8 +20,9 @@
 
 from __future__ import annotations
 
+import math
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ...network.http.nmc_realrank_client import (
@@ -30,11 +31,18 @@ from ...network.http.nmc_realrank_client import (
     NmcRealRankClient,
 )
 
+# NMC 接口时次使用北京时间（UTC+8），与服务器本地时区解耦，
+# 避免容器部署在 UTC 等非 +8 时区时无参查询取错时次。
+_CST = timezone(timedelta(hours=8))
+
 # 默认查询条数（接口本身返回 Top10）
 DEFAULT_LIMIT = 10
 
 # 无参查询时，当前整点数据未发布时自动回退的小时数上限（每次回退 1 小时）
 AUTO_RETRY_HOURS = 3
+
+# 缺测标记值：接口用 9999 表示缺测，显示为「-」。
+MISSING_VALUE = 9999.0
 
 # 排行要素定义：展示名、接口 type、数值单位、输出标题、默认时间跨度
 # mintemp（最低气温）与 maxtemp 共用「气温」大类，但走不同接口 type。
@@ -110,16 +118,14 @@ _REL_DAY_RE = re.compile(r"^(今天|今日|昨天|昨日)\s*(?P<h>\d{1,2})[时�
 
 
 def _today_ymdh(hour: int) -> str:
-    """按当前时间生成 YYYYMMDDHH 时次。"""
-    now = datetime.now()
+    """按北京时间（UTC+8）生成 YYYYMMDDHH 时次。"""
+    now = datetime.now(_CST)
     return f"{now.year:04d}{now.month:02d}{now.day:02d}{hour:02d}"
 
 
 def _shift_day_ymdh(hour: int, days: int) -> str:
-    """生成偏移 days 天的 YYYYMMDDHH 时次。"""
-    from datetime import timedelta
-
-    target = datetime.now() + timedelta(days=days)
+    """生成偏移 days 天的 YYYYMMDDHH 时次（按北京时间）。"""
+    target = datetime.now(_CST) + timedelta(days=days)
     return f"{target.year:04d}{target.month:02d}{target.day:02d}{hour:02d}"
 
 
@@ -138,9 +144,10 @@ def resolve_rank_kind(keyword: str) -> str | None:
     # 先精确匹配，再按包含关系匹配
     if key in _RANK_KIND_KEYWORDS:
         return _RANK_KIND_KEYWORDS[key]
-    for k, v in _RANK_KIND_KEYWORDS.items():
+    # 包含匹配按关键词长度降序，避免「气温」抢先命中「最低气温」。
+    for k in sorted(_RANK_KIND_KEYWORDS, key=len, reverse=True):
         if k in key:
-            return v
+            return _RANK_KIND_KEYWORDS[k]
     return None
 
 
@@ -193,7 +200,13 @@ def parse_time_arg(text: str) -> str | None:
     # 1) YYYYMMDDHH
     m = _YMDH_RE.match(s)
     if m:
-        return f"{m.group('y')}{m.group('m')}{m.group('d')}{m.group('h')}"
+        ymdh = f"{m.group('y')}{m.group('m')}{m.group('d')}{m.group('h')}"
+        # 校验日期真实合法（如 2026139925 非法），避免误导用户
+        try:
+            datetime.strptime(ymdh, "%Y%m%d%H")
+        except ValueError:
+            return None
+        return ymdh
 
     # 2) MM月DD日HH时 / 点
     m = _MDH_RE.match(s)
@@ -288,7 +301,8 @@ def _format_value(value: Any, *, unit: str) -> str:
         except (TypeError, ValueError):
             num = "-"
         else:
-            if v >= 9999:
+            # 缺测标记（9999）或非有限值（NaN/inf）统一显示为「-」
+            if not math.isfinite(v) or v >= MISSING_VALUE:
                 num = "-"
             else:
                 num = f"{v:.1f}"
@@ -355,10 +369,14 @@ def build_rank_text(
         lines.append("暂无数据")
         return "\n".join(lines)
 
-    # 站点名列宽度：取前 limit 条中「站点 - 省份」的最大显示宽度，最小 12
+    # 站点名列宽度：复用 _format_station_name（空名会替换为「-」），
+    # 保证宽度计算与实际渲染一致，避免空站点名时该行错位。
     limit_items = items[:limit]
     station_width = max(
-        (_display_width(f"{it['name']} - {it['pname']}") for it in limit_items),
+        (
+            _display_width(_format_station_name(it.get("name"), it.get("pname")))
+            for it in limit_items
+        ),
         default=12,
     )
 
@@ -441,7 +459,8 @@ async def query_rank(
     auto_retry = ymdh is None
     resolved_ymdh = ymdh
     if not resolved_ymdh:
-        now = datetime.now()
+        # 接口时次按北京时间（UTC+8）计算，避免容器时区差异导致取错时次
+        now = datetime.now(_CST)
         resolved_ymdh = f"{now.year:04d}{now.month:02d}{now.day:02d}{now.hour:02d}"
 
     owned_client = client is None
@@ -499,14 +518,17 @@ async def query_rank(
     }
 
 
+# 时次参数帮助文本：集中定义，减少帮助文本与实际解析行为不一致的风险。
+TIME_ARG_HELP = "时次格式：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时"
+
 __all__ = [
     "resolve_rank_kind",
     "resolve_rank_type",
     "resolve_time_text",
     "parse_time_arg",
     "build_rank_text",
-    "_normalize_time_text",
     "query_rank",
     "DEFAULT_LIMIT",
     "AUTO_RETRY_HOURS",
+    "TIME_ARG_HELP",
 ]
