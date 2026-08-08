@@ -2523,7 +2523,7 @@ html.theme-dark .horizontal-timeline-nav-btn:hover {
 /* 响应式自适应多栏天气输入栅格 */
 .weather-query-form {
     display: grid;
-    grid-template-columns: minmax(320px, 2.2fr) minmax(150px, 1fr) minmax(132px, 0.8fr) auto auto;
+    grid-template-columns: minmax(320px, 2.2fr) minmax(150px, 1fr) minmax(132px, 0.8fr) minmax(132px, 0.8fr) auto auto;
     gap: 10px;
     align-items: center;
 }
