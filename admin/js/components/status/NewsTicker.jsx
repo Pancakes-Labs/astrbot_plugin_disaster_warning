@@ -448,6 +448,7 @@ function NewsTicker({ style }) {
      * 已存在的 data-ticker-keyframes 节点，避免组件重挂载后 style 节点累积。
      */
     useEffect(() => {
+        if (!dataLoaded) return;
         COLUMN_DEFS.forEach((col) => {
             const rawItems = dedupeTyphoon(columns[col.key] || [], col.key);
             const items = sortByTimeAsc(rawItems);
@@ -459,7 +460,7 @@ function NewsTicker({ style }) {
                 );
             }
         });
-    }, [columns]);
+    }, [columns, dataLoaded]);
 
     /**
      * 周期刷新：渲染前会按时效过滤过期条目；定时触发一次重渲染，
