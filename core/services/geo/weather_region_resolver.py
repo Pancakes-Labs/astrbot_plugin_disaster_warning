@@ -278,73 +278,91 @@ class WeatherRegionResolver:
         3. 所有命中记录的省份集合唯一时才采纳（核心安全阀），
            同名跨省/模糊命中多省时返回 None，不猜测；
         4. 从命中记录的 full_name 首段解析省份。
+        5. 遍历所有结果页收集完整匹配集合（最多 _RESAPI_MAX_PAGES 页），
+           避免同名/同前缀记录分布在后续页时省份唯一校验只看到第一页而误判。
         """
-        # ResAPI 搜索接口参数
-        params = {
-            "q": query,
-            "page": "1",
-            "page_size": "10",
-        }
-        # 网络层偶发故障（连接超时/断开等）时重试一次，避免整条统计丢失。
-        # 最多尝试 2 次：第 1 次失败后短暂等待再试。
-        payload = None
-        for attempt in range(2):
-            try:
-                session = self._get_session()
-                async with session.get(
-                    _RESAPI_REGIONS_SEARCH_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if resp.status != 200:
-                        logger.debug(
-                            f"[灾害预警] ResAPI 行政区划查询 HTTP {resp.status}，"
-                            f"查询词为 {query}"
-                        )
-                        continue
-                    payload = await resp.json(content_type=None)
-                    break
-            except Exception as exc:
-                # 注意：aiohttp 的 ClientConnectionError / asyncio.TimeoutError
-                # 等异常 str(exc) 为空，仅打 f"{exc}" 无法区分错误类型。
-                # 这里补打异常类型名与完整信息（含 errno 等），便于排障。
-                logger.error(
-                    f"[灾害预警] 行政区划查询失败(第 {attempt + 1}/2 次)，"
-                    f"查询词为 {query}，异常类型为 {type(exc).__name__}，"
-                    f"错误信息为 {exc!r}"
-                )
-                if attempt == 0:
-                    await asyncio.sleep(0.3)
-        if payload is None:
-            return None
-
-        # 顶层类型校验：ResAPI 正常返回 dict，但网关错误/错误页等场景
-        # 可能解析出数组、字符串或标量；此时 payload.get 会抛 AttributeError，
-        # 而该异常位于 try 块之外，会逃逸到历史统计重建路径导致中断。
-        # 将非 dict 响应一律视为失败查询。
-        if not isinstance(payload, dict):
-            logger.debug(
-                f"[灾害预警] ResAPI 行政区划响应顶层类型异常 "
-                f"({type(payload).__name__})，查询词为 {query}"
-            )
-            return None
-
-        records = payload.get("data") or []
-        if not isinstance(records, list):
-            records = []
-
+        # 分页遍历上限：防止极端情况下接口返回大量页拖慢统计链路。
+        max_pages = 3
+        page_size = 10
         matched_records: list[dict] = []
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            name = str(record.get("name") or "").strip()
-            full_name = str(record.get("full_name") or "")
-            if not full_name:
-                continue
-            # 精确命中或名称以查询词开头的扩展命中均纳入候选；
-            # 不再限制省市区级，但最终省份必须唯一（见下方 province_set 校验）。
-            if name == query or name.startswith(query):
-                matched_records.append(record)
+        last_error: Exception | None = None
+
+        # 网络层偶发故障（连接超时/断开等）时重试一次，避免整条统计丢失。
+        # 分页内最多尝试 2 次；某页连续失败则放弃后续页（已有匹配仍可参与判定）。
+        for page in range(1, max_pages + 1):
+            params = {
+                "q": query,
+                "page": str(page),
+                "page_size": str(page_size),
+            }
+            payload = None
+            for attempt in range(2):
+                try:
+                    session = self._get_session()
+                    async with session.get(
+                        _RESAPI_REGIONS_SEARCH_URL,
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.debug(
+                                f"[灾害预警] ResAPI 行政区划查询 HTTP {resp.status}，"
+                                f"查询词为 {query}"
+                            )
+                            continue
+                        payload = await resp.json(content_type=None)
+                        break
+                except Exception as exc:
+                    # 注意：aiohttp 的 ClientConnectionError / asyncio.TimeoutError
+                    # 等异常 str(exc) 为空，仅打 f"{exc}" 无法区分错误类型。
+                    # 这里补打异常类型名与完整信息（含 errno 等），便于排障。
+                    logger.error(
+                        f"[灾害预警] 行政区划查询失败(第 {page} 页第 {attempt + 1}/2 次)，"
+                        f"查询词为 {query}，异常类型为 {type(exc).__name__}，"
+                        f"错误信息为 {exc!r}"
+                    )
+                    last_error = exc
+                    if attempt == 0:
+                        await asyncio.sleep(0.3)
+            if payload is None:
+                # 当前页失败：若已有匹配记录则停止分页（避免重复请求），否则整次失败。
+                if matched_records:
+                    break
+                break
+
+            # 顶层类型校验：ResAPI 正常返回 dict，但网关错误/错误页等场景
+            # 可能解析出数组、字符串或标量；此时 payload.get 会抛 AttributeError，
+            # 而该异常位于 try 块之外，会逃逸到历史统计重建路径导致中断。
+            if not isinstance(payload, dict):
+                logger.debug(
+                    f"[灾害预警] ResAPI 行政区划响应顶层类型异常 "
+                    f"({type(payload).__name__})，查询词为 {query}"
+                )
+                break
+
+            records = payload.get("data") or []
+            if not isinstance(records, list):
+                records = []
+
+            page_matched = 0
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                name = str(record.get("name") or "").strip()
+                full_name = str(record.get("full_name") or "")
+                if not full_name:
+                    continue
+                # 精确命中或名称以查询词开头的扩展命中均纳入候选；
+                # 不再限制省市区级，但最终省份必须唯一（见下方 province_set 校验）。
+                if name == query or name.startswith(query):
+                    matched_records.append(record)
+                    page_matched += 1
+
+            # 当前页未产生任何命中，说明后续页也不会有更多相关记录，提前终止分页。
+            if page_matched == 0:
+                break
+
+        del last_error
 
         if matched_records:
             # 取命中记录的省份集合，归一化后去重
