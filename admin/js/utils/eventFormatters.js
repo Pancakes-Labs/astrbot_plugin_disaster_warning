@@ -1003,22 +1003,47 @@
     }
 
     /**
-     * 构建气象预警图标 img onError 回退处理器（本地优先）。
+     * 判断图片元素加载结果是否为无效内容。
      *
-     * 当图标加载失败（如官方接口 404 或服务端本地 URL 失效）时，按以下顺序回退：
+     * Fan Studio 图标接口对不存在的编码会返回 HTTP 200 的 HTML 伪图片，
+     * 浏览器 <img> 不会触发 onError，但加载的内容不是有效图片。
+     * 通过 naturalWidth/naturalHeight 是否为 0 来识别这种伪图片。
+     *
+     * @param {HTMLImageElement} el  图片元素
+     * @returns {boolean}  true 表示图片无效（需回退）
+     */
+    function isWeatherImageInvalid(el) {
+        if (!el || typeof el.naturalWidth !== 'number') return false;
+        return el.naturalWidth === 0 || el.naturalHeight === 0;
+    }
+
+    /**
+     * 构建气象预警图标 img onError/onLoad 回退处理器（本地优先）。
+     *
+     * 触发时机：
+     * - onError：图片加载失败（404 等）
+     * - onLoad：图片加载成功但内容无效（如 Fan Studio 返回 HTTP 200 的 HTML 伪图片，
+     *   naturalWidth=0，onError 不会触发但 onLoad 会触发）
+     *
+     * 回退顺序：
      * 1. 本地具体预警图标：/weatheralarm_logo/{11B码}.png（如 11B03_yellow.png）；
      * 2. 本地通用回退图标：/weatheralarm_logo/fallback_{color}.png；
      * 3. data-color-hint 提示色解析的本地通用回退图标；
      * 4. finalCallback 最终兜底。
      *
      * @param {string} weatherTypeCode  气象预警编码，如 "11B20_yellow" 或 "p0002002"
-     * @param {Function} finalCallback   最终兜底回调，接收事件对象 e
-     * @returns {Function}              可直接绑定到 img onError 的处理器
+     * @param {Function} finalCallback  最终兜底回调，接收事件对象 e
+     * @returns {Function}              可直接绑定到 img onError/onLoad 的处理器
      */
     function buildWeatherIconFallbackHandler(weatherTypeCode, finalCallback) {
         return function (e) {
             const el = e.currentTarget;
             const code = String(weatherTypeCode || '').trim();
+
+            // onLoad 场景：若图片内容无效（伪图片/空图），继续走 fallback 链
+            if (e.type === 'load' && !isWeatherImageInvalid(el)) {
+                return; // 有效图片，无需回退
+            }
 
             // 1. 本地具体预警图标（本地优先）
             if (code && !el.dataset.localIconTried) {
@@ -1095,6 +1120,7 @@
         resolveWeatherIconCode,
         resolveLocalWeatherIconUrl,
         resolveWeatherFallbackUrl,
+        isWeatherImageInvalid,
         buildWeatherIconFallbackHandler,
     };
 })();
