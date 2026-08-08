@@ -8,13 +8,17 @@
 - 格式化站点列表文本
 
 数据源：中央气象台雷达页面 https://www.nmc.cn/publish/radar/chinaall.html
-站点表：resources/radar_stations.json（8 区域拼图 + 213 单站）
+站点表：resources/radar_stations.json（8 区域拼图 + 213 单站雷达）
+省份匹配统一按站点表的 province 字段判定，避免依赖路径前缀导致
+山西/陕西（NMC 拼音同为 shan-xi）互相串号。
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import json
 import os
 import re
 from datetime import datetime
@@ -37,19 +41,7 @@ DEFAULT_GIF_FRAMES = 20
 MAX_GIF_FRAMES = 512
 MIN_GIF_FRAMES = 3
 
-# 区域拼图别名 → 页面路径
-_PUZZLE_ALIASES = {
-    "全国": "chinaall",
-    "华北": "huabei",
-    "东北": "dongbei",
-    "华东": "huadong",
-    "华中": "huazhong",
-    "华南": "huanan",
-    "西南": "xinan",
-    "西北": "xibei",
-}
-
-# 省份名 → 省份拼音目录（用于按省份过滤/提示）
+# 省份名（仅用于省份拼音目录匹配提示；省份精确匹配走站点表 province 字段）
 _PROVINCE_DIRS = {
     "北京": "bei-jing",
     "天津": "tian-jin",
@@ -87,8 +79,6 @@ _PROVINCE_DIRS = {
 
 def _load_stations() -> dict[str, Any]:
     """加载雷达站点资源表；失败时返回空结构。"""
-    import json
-
     try:
         with open(_RESOURCE_PATH, encoding="utf-8") as f:
             return json.load(f)
@@ -113,30 +103,8 @@ def _norm_key(text: str) -> str:
     return re.sub(r"[\s\-]+", "", str(text or "")).lower()
 
 
-def resolve_radar_target(
-    keyword: str,
-) -> dict[str, Any]:
-    """解析雷达查询关键词，返回目标信息。
-
-    支持匹配：
-    - 区域拼图：全国 / 华北 / 东北 / 华东 / 华中 / 华南 / 西南 / 西北
-    - 城市名：北京 / 大兴 / 石家庄 ...
-    - 省份名：河北 / 山西 ...（命中该省任一站点）
-    - 拼音：beijing / daxing / huabei ...
-
-    Returns:
-        dict 包含：matched(bool)、kind("puzzle"|"station")、name、province、path、code、
-        candidates(模糊匹配候选列表)。
-    """
-    data = _get_stations()
-    puzzles = data.get("puzzles") or {}
-    stations = data.get("stations") or {}
-    keyword = _norm_key(keyword)
-
-    if not keyword:
-        return {"matched": False, "reason": "empty", "candidates": []}
-
-    # 1. 区域拼图精确匹配（中文名或拼音文件名）
+def _match_puzzle_exact(keyword: str, puzzles: dict[str, Any]) -> dict[str, Any] | None:
+    """区域拼图精确匹配（中文名或拼音文件名）。"""
     for name, info in puzzles.items():
         info_dict = info if isinstance(info, dict) else {}
         puzzle_path = str(info_dict.get("path", "") or "")
@@ -150,21 +118,25 @@ def resolve_radar_target(
                 "path": puzzle_path,
                 "code": str(info_dict.get("code", "") or ""),
             }
+    return None
 
-    # 2. 城市名精确匹配（含省份筛选）
+
+def _match_city_exact(keyword: str, stations: dict[str, Any]) -> dict[str, Any] | None:
+    """城市名精确匹配（含省份信息）。"""
     exact = []
     for city, info in stations.items():
         info_list = info if isinstance(info, list) else [info]
+        if _norm_key(city) != keyword:
+            continue
         for it in info_list:
-            if _norm_key(city) == keyword:
-                exact.append(
-                    {
-                        "city": city,
-                        "province": it.get("province", ""),
-                        "path": it.get("path", ""),
-                        "code": it.get("code", ""),
-                    }
-                )
+            exact.append(
+                {
+                    "city": city,
+                    "province": it.get("province", ""),
+                    "path": it.get("path", ""),
+                    "code": it.get("code", ""),
+                }
+            )
     if len(exact) == 1:
         it = exact[0]
         return {
@@ -176,53 +148,81 @@ def resolve_radar_target(
             "code": it["code"],
         }
     if len(exact) > 1:
-        return {
-            "matched": False,
-            "reason": "ambiguous",
-            "candidates": exact,
-        }
+        return {"matched": False, "reason": "ambiguous", "candidates": exact}
+    return None
 
-    # 3. 省份名精确匹配（命中该省第一个站点）
-    if keyword in _PROVINCE_DIRS:
-        prov_dir = _PROVINCE_DIRS[keyword]
-        for city, info in stations.items():
-            info_list = info if isinstance(info, list) else [info]
-            for it in info_list:
-                if str(it.get("path", "")).startswith(f"/publish/radar/{prov_dir}/"):
-                    return {
-                        "matched": True,
-                        "kind": "station",
-                        "name": city,
-                        "province": keyword,
-                        "path": it.get("path", ""),
-                        "code": it.get("code", ""),
-                        "note": f"已匹配「{keyword}」省首个雷达站：{city}",
-                    }
-        return {"matched": False, "reason": "no_province_station", "keyword": keyword}
 
-    # 3a. 省份拼音目录匹配（如 beijing → bei-jing 目录下任一站点）
+def _first_station_of_province(
+    province: str,
+    stations: dict[str, Any],
+    *,
+    note: str,
+) -> dict[str, Any] | None:
+    """按站点表 province 字段匹配，返回该省首个站点。
+
+    不依赖路径前缀，规避山西/陕西（NMC 拼音均为 shan-xi）以及
+    hunan/ 目录等路径命名不一致导致的串号/漏匹配。
+    """
+    for city, info in stations.items():
+        info_list = info if isinstance(info, list) else [info]
+        for it in info_list:
+            if str(it.get("province", "")) != province:
+                continue
+            return {
+                "matched": True,
+                "kind": "station",
+                "name": city,
+                "province": province,
+                "path": it.get("path", ""),
+                "code": it.get("code", ""),
+                "note": note.format(province=province, city=city),
+            }
+    return None
+
+
+def _match_province_exact(
+    keyword: str,
+    stations: dict[str, Any],
+) -> dict[str, Any] | None:
+    """省份名精确匹配（按 province 字段）。"""
+    if keyword not in _PROVINCE_DIRS:
+        return None
+    found = _first_station_of_province(
+        keyword,
+        stations,
+        note="已匹配「{province}」省首个雷达站：{city}",
+    )
+    if found:
+        return found
+    return {"matched": False, "reason": "no_province_station", "keyword": keyword}
+
+
+def _match_province_pinyin(
+    keyword: str,
+    stations: dict[str, Any],
+) -> dict[str, Any] | None:
+    """省份拼音匹配（如 beijing → 北京，命中该省首个站点）。"""
     for prov_name, prov_dir in _PROVINCE_DIRS.items():
         prov_dir_key = _norm_key(prov_dir)
         # 仅允许：完全相等，或关键词是拼音前缀（避免长关键词误命中短拼音）
-        if keyword == prov_dir_key or (
+        if keyword != prov_dir_key and not (
             len(keyword) >= 2 and prov_dir_key.startswith(keyword)
         ):
-            for city, info in stations.items():
-                info_list = info if isinstance(info, list) else [info]
-                for it in info_list:
-                    if str(it.get("path", "")).startswith(
-                        f"/publish/radar/{prov_dir}/"
-                    ):
-                        return {
-                            "matched": True,
-                            "kind": "station",
-                            "name": city,
-                            "province": prov_name,
-                            "path": it.get("path", ""),
-                            "code": it.get("code", ""),
-                            "note": f"已匹配「{prov_name}」省首个雷达站：{city}",
-                        }
-    # 3b. 区域拼图拼音匹配（如 huabei → huabei.html）
+            continue
+        found = _first_station_of_province(
+            prov_name,
+            stations,
+            note="已匹配「{province}」省首个雷达站：{city}",
+        )
+        if found:
+            return found
+    return None
+
+
+def _match_puzzle_pinyin(
+    keyword: str, puzzles: dict[str, Any]
+) -> dict[str, Any] | None:
+    """区域拼图拼音匹配（如 huabei → 华北）。"""
     for name, info in puzzles.items():
         info_dict = info if isinstance(info, dict) else {}
         puzzle_path = str(info_dict.get("path", "") or "")
@@ -235,12 +235,19 @@ def resolve_radar_target(
                 "path": puzzle_path,
                 "code": str(info_dict.get("code", "") or ""),
             }
+    return None
 
-    # 4. 模糊匹配：收集所有候选
+
+def _match_fuzzy(
+    keyword: str,
+    stations: dict[str, Any],
+) -> dict[str, Any] | None:
+    """模糊匹配（拼音子串 / 中文子串），返回首个命中或候选列表。"""
     # 收紧规则：仅允许「关键词是站名/拼音的子串」（单向、关键词更短），
     # 禁止「长关键词包含短站名」的反向匹配，避免「佛罗里达州」误命中「达州」。
-    candidates = []
-    # 4a. 拼音匹配：关键词是页面路径拼音的前缀或子串（关键词长度 >= 2）
+    candidates: list[dict[str, Any]] = []
+
+    # 4a. 拼音匹配：关键词是页面路径拼音的子串（关键词长度 >= 2）
     if len(keyword) >= 2:
         for city, info in stations.items():
             info_list = info if isinstance(info, list) else [info]
@@ -260,16 +267,18 @@ def resolve_radar_target(
     if not candidates and len(keyword) >= 2:
         for city, info in stations.items():
             info_list = info if isinstance(info, list) else [info]
+            if keyword not in _norm_key(city):
+                continue
             for it in info_list:
-                if keyword in _norm_key(city):
-                    candidates.append(
-                        {
-                            "city": city,
-                            "province": it.get("province", ""),
-                            "path": it.get("path", ""),
-                            "code": it.get("code", ""),
-                        }
-                    )
+                candidates.append(
+                    {
+                        "city": city,
+                        "province": it.get("province", ""),
+                        "path": it.get("path", ""),
+                        "code": it.get("code", ""),
+                    }
+                )
+
     if len(candidates) == 1:
         it = candidates[0]
         return {
@@ -281,11 +290,62 @@ def resolve_radar_target(
             "code": it["code"],
         }
     if len(candidates) > 1:
-        return {
-            "matched": False,
-            "reason": "ambiguous",
-            "candidates": candidates,
-        }
+        return {"matched": False, "reason": "ambiguous", "candidates": candidates}
+    return None
+
+
+def resolve_radar_target(
+    keyword: str,
+) -> dict[str, Any]:
+    """解析雷达查询关键词，返回目标信息。
+
+    支持匹配（按优先级）：
+    - 区域拼图：全国 / 华北 / 东北 / 华东 / 华中 / 华南 / 西南 / 西北（含拼音）
+    - 城市名：北京 / 大兴 / 石家庄 ...
+    - 省份名：河北 / 山西 / 陕西 ...（按站点表 province 字段精确匹配）
+    - 拼音：beijing / daxing / huabei ...
+
+    Returns:
+        dict 包含：matched(bool)、kind("puzzle"|"station")、name、province、path、code、
+        candidates(模糊匹配候选列表)。
+    """
+    data = _get_stations()
+    puzzles = data.get("puzzles") or {}
+    stations = data.get("stations") or {}
+    keyword = _norm_key(keyword)
+
+    if not keyword:
+        return {"matched": False, "reason": "empty", "candidates": []}
+
+    # 1. 区域拼图精确匹配（中文名或拼音文件名）
+    hit = _match_puzzle_exact(keyword, puzzles)
+    if hit is not None:
+        return hit
+
+    # 2. 城市名精确匹配
+    hit = _match_city_exact(keyword, stations)
+    if hit is not None:
+        return hit
+
+    # 3. 省份名精确匹配（按 province 字段）
+    hit = _match_province_exact(keyword, stations)
+    if hit is not None:
+        return hit
+
+    # 3a. 省份拼音目录匹配
+    hit = _match_province_pinyin(keyword, stations)
+    if hit is not None:
+        return hit
+
+    # 3b. 区域拼图拼音匹配
+    hit = _match_puzzle_pinyin(keyword, puzzles)
+    if hit is not None:
+        return hit
+
+    # 4. 模糊匹配（拼音子串 / 中文子串）
+    hit = _match_fuzzy(keyword, stations)
+    if hit is not None:
+        return hit
 
     return {"matched": False, "reason": "no_match", "keyword": keyword}
 
@@ -321,30 +381,30 @@ def build_radar_image_result(
     }
 
 
-def build_radar_gif_result(
+def _degraded_single_result(
     *,
     target: dict[str, Any],
-    frames: list[bytes],
+    image_bytes: bytes,
+    label: str,
     times: list[str],
+    frames_count: int,
 ) -> dict[str, Any]:
-    """用多帧合成循环 GIF 并返回结果。"""
-    label = f"{target.get('name', '')}" + (
-        f"（{target.get('province', '')}）" if target.get("province") else ""
-    )
-    if not frames:
-        return {"success": False, "error": "无可用雷达图像帧"}
-    if len(frames) < MIN_GIF_FRAMES:
-        # 帧数过少，降级为单图
-        return {
-            "success": True,
-            "kind": target.get("kind", "station"),
-            "name": label,
-            "time": _format_time_label(times[0]) if times else "",
-            "image_base64": base64.b64encode(frames[0]).decode(),
-            "degraded": True,
-            "frames": len(frames),
-        }
+    """帧数不足时降级为单图结果（取最新一帧，即时间序列最后一个）。"""
+    return {
+        "success": True,
+        "kind": target.get("kind", "station"),
+        "name": label,
+        "time": _format_time_label(times[-1]) if times else "",
+        "image_base64": base64.b64encode(image_bytes).decode(),
+        "degraded": True,
+        "frames": frames_count,
+    }
 
+
+def _render_gif_sync(
+    frames: list[bytes],
+) -> bytes | None:
+    """在独立线程中同步合成循环 GIF（Pillow CPU 密集操作）。"""
     pil_frames = []
     for data in frames:
         try:
@@ -353,20 +413,8 @@ def build_radar_gif_result(
             pil_frames.append(img)
         except Exception as e:
             logger.warning(f"[灾害预警] 雷达帧解析失败: {e}")
-
     if not pil_frames:
-        return {"success": False, "error": "雷达图像帧解析失败"}
-    if len(pil_frames) < MIN_GIF_FRAMES:
-        # 有效帧不足，仍降级单图
-        return {
-            "success": True,
-            "kind": target.get("kind", "station"),
-            "name": label,
-            "time": _format_time_label(times[0]) if times else "",
-            "image_base64": base64.b64encode(frames[0]).decode(),
-            "degraded": True,
-            "frames": len(frames),
-        }
+        return None
 
     buf = io.BytesIO()
     # 统一各帧尺寸，保证 GIF 可正常播放
@@ -385,13 +433,57 @@ def build_radar_gif_result(
         loop=0,
         optimize=False,
     )
-    gif_bytes = buf.getvalue()
+    return buf.getvalue()
+
+
+async def _render_gif(frames: list[bytes]) -> bytes | None:
+    """异步包装 GIF 合成，避免阻塞事件循环线程。"""
+    return await asyncio.to_thread(_render_gif_sync, frames)
+
+
+async def build_radar_gif_result(
+    *,
+    target: dict[str, Any],
+    frames: list[bytes],
+    times: list[str],
+) -> dict[str, Any]:
+    """用多帧合成循环 GIF 并返回结果。
+
+    times 与 frames 必须按同一帧序对应（由调用方保证）。
+    降级单图时取最新一帧（时间序列最后一个）。
+    """
+    label = f"{target.get('name', '')}" + (
+        f"（{target.get('province', '')}）" if target.get("province") else ""
+    )
+    if not frames:
+        return {"success": False, "error": "无可用雷达图像帧"}
+    if len(frames) < MIN_GIF_FRAMES:
+        return _degraded_single_result(
+            target=target,
+            image_bytes=frames[-1],
+            label=label,
+            times=times,
+            frames_count=len(frames),
+        )
+
+    gif_bytes = await _render_gif(frames)
+    if gif_bytes is None:
+        # 有效帧不足，降级为单图（取最新帧）
+        return _degraded_single_result(
+            target=target,
+            image_bytes=frames[-1],
+            label=label,
+            times=times,
+            frames_count=len(frames),
+        )
+
+    # GIF 由 frames 合成，时间标签取序列最后一个（最新时次）
     return {
         "success": True,
         "kind": target.get("kind", "station"),
         "name": label,
-        "time": _format_time_label(times[0]) if times else "",
-        "frames": len(pil_frames),
+        "time": _format_time_label(times[-1]) if times else "",
+        "frames": len(frames),
         "image_base64": base64.b64encode(gif_bytes).decode(),
     }
 
@@ -404,8 +496,9 @@ def build_radar_list_text() -> str:
 
     lines = ["📡 气象雷达站点列表", ""]
     lines.append("【区域拼图】")
-    for name in ["全国", "华北", "东北", "华东", "华中", "华南", "西南", "西北"]:
-        if name in puzzles:
+    for name, info in puzzles.items():
+        info_dict = info if isinstance(info, dict) else {}
+        if info_dict.get("path"):
             lines.append(f"  • {name}")
     lines.append("")
 
@@ -478,12 +571,14 @@ async def query_radar_gif(
     selected = list(reversed(urls[:frames]))
     # 统一取原图（去掉 medium）
     selected = [client.strip_medium(u) for u in selected]
-    data_list = await client.download_images(selected)
-    if not data_list:
+    # 下载帧并保留 URL 配对，避免失败帧导致时间标签错位
+    pairs = await client.download_frames(selected)
+    if not pairs:
         return {"success": False, "error": "雷达动图帧下载失败"}
 
-    times = [NmcRadarClient.parse_time_from_url(u) for u in selected]
-    return build_radar_gif_result(target=target, frames=data_list, times=times)
+    data_list = [d for _, d in pairs]
+    times = [NmcRadarClient.parse_time_from_url(u) for u, _ in pairs]
+    return await build_radar_gif_result(target=target, frames=data_list, times=times)
 
 
 async def query_radar_list() -> dict[str, Any]:
