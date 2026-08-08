@@ -236,5 +236,4 @@ __all__ = [
     "TravelTimeService",
     "TravelTimeResult",
     "compute_s_wave_countdown",
-    "_normalize_utc",
 ]
