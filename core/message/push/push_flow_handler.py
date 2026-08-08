@@ -39,6 +39,19 @@ class PushFlowHandler:
         """执行完整推送流程：去重、会话执行、后处理与异常遥测。"""
         plugin_logger.debug(f"[灾害预警] 执行事件推送流程: {event.id}")
 
+        # 去重检查会在 should_push_event 中写入 recent_events 等去重状态；
+        # 若后续推送失败，需回滚这些状态，避免同一状态升级重试被误过滤导致通知丢失。
+        dedup_snapshot = None
+        if not skip_dedup and commit_state:
+            try:
+                dedup_snapshot = self.manager.deduplicator.snapshot_state()
+            except Exception as snapshot_e:
+                # 快照失败不阻塞推送，仅无法回滚。
+                plugin_logger.warning(
+                    f"[灾害预警] 去重状态快照失败，推送失败时将无法回滚: {snapshot_e}"
+                )
+                dedup_snapshot = None
+
         # 地震重复与烈度/警报合并过滤判断
         if not skip_dedup and not self.manager.deduplicator.should_push_event(event):
             plugin_logger.debug(f"[灾害预警] 事件 {event.id} 被去重器过滤")
@@ -61,9 +74,28 @@ class PushFlowHandler:
             if return_details:
                 execution_result["success"] = bool(success)
                 return execution_result
+            # 推送未成功（push_success_count == 0）时回滚去重状态，
+            # 允许同一事件稍后重试时再次通过升级放行。
+            if not success and dedup_snapshot is not None:
+                try:
+                    self.manager.deduplicator.restore_state(dedup_snapshot)
+                    plugin_logger.info(
+                        f"[灾害预警] 事件 {event.id} 推送未成功，已回滚去重状态以允许重试"
+                    )
+                except Exception as rollback_e:
+                    plugin_logger.warning(f"[灾害预警] 去重状态回滚失败: {rollback_e}")
             return success
         except Exception as e:
             plugin_logger.error(f"[灾害预警] 推送事件失败: {e}")
+            # 异常路径同样回滚去重状态，避免失败的重试被误过滤。
+            if dedup_snapshot is not None:
+                try:
+                    self.manager.deduplicator.restore_state(dedup_snapshot)
+                    plugin_logger.info(
+                        f"[灾害预警] 事件 {event.id} 推送异常，已回滚去重状态以允许重试"
+                    )
+                except Exception as rollback_e:
+                    plugin_logger.warning(f"[灾害预警] 去重状态回滚失败: {rollback_e}")
             if self.manager._telemetry and self.manager._telemetry.enabled:
                 await self.manager._telemetry.track_error(
                     e,
@@ -84,6 +116,9 @@ class PushFlowHandler:
         session_message_format_config = dict(
             execution_result.get("session_message_format_config", {})
         )
+        session_display_timezone_map = dict(
+            execution_result.get("session_display_timezone_map", {})
+        )
         filter_reason_stats = dict(execution_result.get("filter_reason_stats", {}))
         filter_reason_detail_stats = dict(
             execution_result.get("filter_reason_detail_stats", {})
@@ -95,6 +130,7 @@ class PushFlowHandler:
             event,
             passed_sessions=passed_sessions,
             session_message_format_config=session_message_format_config,
+            session_display_timezone_map=session_display_timezone_map,
         )
 
         # 打印本次推送的中文日志摘要 (如通过几个，拦截几个，什么原因拦截等)
@@ -171,8 +207,18 @@ class PushFlowHandler:
         *,
         passed_sessions: list[str],
         session_message_format_config: dict[str, dict[str, Any]],
+        session_display_timezone_map: dict[str, str] | None = None,
     ) -> None:
-        """为需要拆分地图的事件按配置分组异步派发地图推送。"""
+        """为需要拆分地图的事件按配置分组异步派发地图推送。
+
+        Args:
+            event: 事件信封。
+            passed_sessions: 成功推送的会话列表。
+            session_message_format_config: 会话 -> message_format 配置映射。
+            session_display_timezone_map: 会话 -> 展示时区映射（可能为空），
+                用于地图描述时间与各会话文本对齐；缺失时回退到全局时区。
+        """
+        session_display_timezone_map = session_display_timezone_map or {}
         source_id = (getattr(event, "source_id", "") or "").strip()
         split_map_sources = set(
             get_source_ids_by_type(SourceType.EARTHQUAKE_WARNING)
@@ -198,27 +244,40 @@ class PushFlowHandler:
             return
 
         plugin_logger.debug(f"[灾害预警] 触发异步地图渲染 (第 {current_report} 报)")
+        # 分组键 = 消息格式配置 + 展示时区：同一会话组内地图样式与描述时间一致。
         grouped_sessions: dict[str, list[str]] = {}
         grouped_config: dict[str, dict[str, Any]] = {}
+        grouped_timezone: dict[str, str] = {}
         for session in passed_sessions:
             msg_cfg = session_message_format_config.get(session, {})
             if not msg_cfg.get("include_map", False):
                 continue
 
-            config_key = json.dumps(msg_cfg, sort_keys=True, ensure_ascii=False)
+            session_tz = str(session_display_timezone_map.get(session) or "UTC+8")
+            config_key = json.dumps(
+                {
+                    "cfg": msg_cfg,
+                    "timezone": session_tz,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
             if config_key not in grouped_sessions:
                 grouped_sessions[config_key] = []
                 grouped_config[config_key] = msg_cfg
+                grouped_timezone[config_key] = session_tz
             grouped_sessions[config_key].append(session)
 
         # 启动异步截图并多路发送的后台协程
         for config_key, sessions in grouped_sessions.items():
-            # 按消息格式配置分组后再异步派发，避免不同地图样式被错误混发。
+            # 按消息格式配置 + 展示时区分组后再异步派发，
+            # 避免不同地图样式/不同描述时间被错误混发。
             asyncio.create_task(
                 self.manager.message_build_service.push_split_map(
                     event,
                     sessions,
                     grouped_config[config_key],
+                    display_timezone=grouped_timezone[config_key],
                 )
             )
 

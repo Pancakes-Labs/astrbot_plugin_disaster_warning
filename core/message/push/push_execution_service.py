@@ -184,6 +184,11 @@ class PushExecutionService:
             filter_reason_stats=filter_reason_stats,
             filter_reason_detail_stats=filter_reason_detail_stats,
         )
+        # 会话级展示时区映射：供分离地图渲染时对齐各会话文本时间。
+        session_display_timezone_map: dict[str, str] = {
+            session: str((runtime_config or {}).get("display_timezone") or "UTC+8")
+            for session, runtime_config in push_candidates
+        }
 
         # 同一事件在不同会话下若渲染参数一致，则共享同一个消息构建任务，
         # 避免并发下重复渲染文本/地图/卡片。
@@ -417,6 +422,12 @@ class PushExecutionService:
             "push_success_count": push_success_count,
             "passed_sessions": passed_sessions,
             "session_message_format_config": session_message_format_config,
+            # 成功会话的展示时区映射，供分离地图渲染对齐文本时间。
+            "session_display_timezone_map": {
+                s: tz
+                for s, tz in session_display_timezone_map.items()
+                if s in passed_sessions
+            },
             "filter_reason_stats": filter_reason_stats,
             "filter_reason_detail_stats": filter_reason_detail_stats,
             "send_failure_stats": send_failure_stats,

@@ -219,7 +219,9 @@ class MessageBuildService:
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
 
-    def _build_event_map_caption(self, event: EventEnvelope) -> str:
+    def _build_event_map_caption(
+        self, event: EventEnvelope, display_timezone: str = ""
+    ) -> str:
         """构建通用地图左上角的事件基础描述文字胶囊。
 
         格式：时间 震中 震级
@@ -229,16 +231,24 @@ class MessageBuildService:
 
         时间口径与文本消息一致：naive 时间原样显示（解析层已按源时区解析），
         aware 时间才转换到用户配置的 display_timezone。
+
+        Args:
+            event: 事件信封。
+            display_timezone: 展示时区；为空时回退到全局配置（与文本消息同源）。
+                分离地图场景由调用方传入会话级时区，保证与各会话文本时间一致。
         """
         domain_event = getattr(event, "event", None)
         if not isinstance(domain_event, EarthquakeEvent):
             return ""
 
-        # 跟随用户配置的展示时区（与文本消息 display_timezone 同源）
-        manager_config = getattr(self.manager, "config", None) or {}
-        display_timezone = str(
-            manager_config.get("display_timezone", "UTC+8") or "UTC+8"
-        )
+        # 优先使用调用方传入的会话级时区；未传时回退到全局配置（与文本消息同源）。
+        if display_timezone:
+            display_timezone = str(display_timezone)
+        else:
+            manager_config = getattr(self.manager, "config", None) or {}
+            display_timezone = str(
+                manager_config.get("display_timezone", "UTC+8") or "UTC+8"
+            )
 
         source_id = (getattr(event, "source_id", "") or "").strip()
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
@@ -520,8 +530,17 @@ class MessageBuildService:
         event: EventEnvelope,
         target_sessions: list[str],
         config: dict[str, Any],
+        display_timezone: str = "",
     ) -> None:
-        """后台渲染并发送分离的地图图片。"""
+        """后台渲染并发送分离的地图图片。
+
+        Args:
+            event: 事件信封。
+            target_sessions: 目标会话列表。
+            config: 地图渲染配置。
+            display_timezone: 会话级展示时区；为空时回退到全局配置，
+                保证地图描述时间与各会话文本消息一致。
+        """
         try:
             domain_event = self._get_domain_event(event)
             if not isinstance(domain_event, EarthquakeEvent):
@@ -538,7 +557,9 @@ class MessageBuildService:
                 return
 
             # 调用 Playwright 动态渲染地图图片（带事件描述文字胶囊）
-            event_caption = self._build_event_map_caption(event)
+            event_caption = self._build_event_map_caption(
+                event, display_timezone=display_timezone
+            )
             map_image_path = await self.render_map_image(
                 lat, lon, config, event_caption=event_caption
             )
