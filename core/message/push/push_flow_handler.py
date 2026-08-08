@@ -24,6 +24,9 @@ class PushFlowHandler:
     def __init__(self, manager):
         # 该处理器专注于推送链中的轻量流程编排，不直接承担消息构建细节。
         self.manager = manager  # 主消息管理器 MessagePushManager 实例
+        # 去重状态快照/回滚串行化锁：多个事件并发推送时，
+        # 防止事件 A 失败回滚覆盖事件 B 刚提交的去重状态。
+        self._dedup_lock = asyncio.Lock()
 
     async def execute_push(
         self,
@@ -39,69 +42,81 @@ class PushFlowHandler:
         """执行完整推送流程：去重、会话执行、后处理与异常遥测。"""
         plugin_logger.debug(f"[灾害预警] 执行事件推送流程: {event.id}")
 
-        # 去重检查会在 should_push_event 中写入 recent_events 等去重状态；
-        # 若后续推送失败，需回滚这些状态，避免同一状态升级重试被误过滤导致通知丢失。
-        dedup_snapshot = None
-        if not skip_dedup and commit_state:
+        # 去重状态（recent_events 等）由 should_push_event 写入、由本次推送的成败决定是否回滚。
+        # 用锁串行化整个快照→推送→回滚流程，防止并发事件互相覆盖去重状态：
+        # 事件 A 失败时 restore_state 不能把事件 B 刚提交的状态一并回滚掉。
+        async with self._dedup_lock:
+            # 去重检查会在 should_push_event 中写入 recent_events 等去重状态；
+            # 若后续推送失败，需回滚这些状态，避免同一状态升级重试被误过滤导致通知丢失。
+            dedup_snapshot = None
+            if not skip_dedup and commit_state:
+                try:
+                    dedup_snapshot = self.manager.deduplicator.snapshot_state()
+                except Exception as snapshot_e:
+                    # 快照失败不阻塞推送，仅无法回滚。
+                    plugin_logger.warning(
+                        f"[灾害预警] 去重状态快照失败，推送失败时将无法回滚: {snapshot_e}"
+                    )
+                    dedup_snapshot = None
+
+            # 地震重复与烈度/警报合并过滤判断
+            if not skip_dedup and not self.manager.deduplicator.should_push_event(
+                event
+            ):
+                plugin_logger.debug(f"[灾害预警] 事件 {event.id} 被去重器过滤")
+                return False
+
             try:
-                dedup_snapshot = self.manager.deduplicator.snapshot_state()
-            except Exception as snapshot_e:
-                # 快照失败不阻塞推送，仅无法回滚。
-                plugin_logger.warning(
-                    f"[灾害预警] 去重状态快照失败，推送失败时将无法回滚: {snapshot_e}"
+                # 委托消息推送执行服务进行多会话分发与降级尝试
+                execution_result = await self.manager.push_execution_service.execute(
+                    event,
+                    target_sessions=target_sessions,
+                    session_config_getter=session_config_getter,
+                    commit_state=commit_state,
                 )
-                dedup_snapshot = None
-
-        # 地震重复与烈度/警报合并过滤判断
-        if not skip_dedup and not self.manager.deduplicator.should_push_event(event):
-            plugin_logger.debug(f"[灾害预警] 事件 {event.id} 被去重器过滤")
-            return False
-
-        try:
-            # 委托消息推送执行服务进行多会话分发与降级尝试
-            execution_result = await self.manager.push_execution_service.execute(
-                event,
-                target_sessions=target_sessions,
-                session_config_getter=session_config_getter,
-                commit_state=commit_state,
-            )
-            # 执行完成后处理，例如发送分离地图、输出统计过滤摘要与上报指标
-            success = await self.handle_execution_result(
-                event,
-                execution_result,
-                aggregated_session_count=aggregated_session_count,
-            )
-            if return_details:
-                execution_result["success"] = bool(success)
-                return execution_result
-            # 推送未成功（push_success_count == 0）时回滚去重状态，
-            # 允许同一事件稍后重试时再次通过升级放行。
-            if not success and dedup_snapshot is not None:
-                try:
-                    self.manager.deduplicator.restore_state(dedup_snapshot)
-                    plugin_logger.info(
-                        f"[灾害预警] 事件 {event.id} 推送未成功，已回滚去重状态以允许重试"
-                    )
-                except Exception as rollback_e:
-                    plugin_logger.warning(f"[灾害预警] 去重状态回滚失败: {rollback_e}")
-            return success
-        except Exception as e:
-            plugin_logger.error(f"[灾害预警] 推送事件失败: {e}")
-            # 异常路径同样回滚去重状态，避免失败的重试被误过滤。
-            if dedup_snapshot is not None:
-                try:
-                    self.manager.deduplicator.restore_state(dedup_snapshot)
-                    plugin_logger.info(
-                        f"[灾害预警] 事件 {event.id} 推送异常，已回滚去重状态以允许重试"
-                    )
-                except Exception as rollback_e:
-                    plugin_logger.warning(f"[灾害预警] 去重状态回滚失败: {rollback_e}")
-            if self.manager._telemetry and self.manager._telemetry.enabled:
-                await self.manager._telemetry.track_error(
-                    e,
-                    module="core.message_manager._execute_push",
+                # 执行完成后处理，例如发送分离地图、输出统计过滤摘要与上报指标
+                success = await self.handle_execution_result(
+                    event,
+                    execution_result,
+                    aggregated_session_count=aggregated_session_count,
                 )
-            return False
+                # 推送未成功（push_success_count == 0）时回滚去重状态，
+                # 允许同一事件稍后重试时再次通过升级放行。
+                # 注意：回滚必须先于 return_details 提前返回执行，
+                # 否则详情模式下的失败推送会保留已写入的去重状态，阻塞后续重试。
+                if not success and dedup_snapshot is not None:
+                    try:
+                        self.manager.deduplicator.restore_state(dedup_snapshot)
+                        plugin_logger.info(
+                            f"[灾害预警] 事件 {event.id} 推送未成功，已回滚去重状态以允许重试"
+                        )
+                    except Exception as rollback_e:
+                        plugin_logger.warning(
+                            f"[灾害预警] 去重状态回滚失败: {rollback_e}"
+                        )
+                if return_details:
+                    execution_result["success"] = bool(success)
+                    return execution_result
+                return success
+            except Exception as e:
+                plugin_logger.error(f"[灾害预警] 推送事件失败: {e}")
+                # 异常路径同样回滚去重状态，避免失败的重试被误过滤。
+                if dedup_snapshot is not None:
+                    try:
+                        self.manager.deduplicator.restore_state(dedup_snapshot)
+                        plugin_logger.info(
+                            f"[灾害预警] 事件 {event.id} 推送异常，已回滚去重状态以允许重试"
+                        )
+                    except Exception as rollback_e:
+                        plugin_logger.warning(
+                            f"[灾害预警] 去重状态回滚失败: {rollback_e}"
+                        )
+                if self.manager._telemetry and self.manager._telemetry.enabled:
+                    await self.manager._telemetry.track_error(
+                        e,
+                        module="core.message_manager._execute_push",
+                    )
+                return False
 
     async def handle_execution_result(
         self,
