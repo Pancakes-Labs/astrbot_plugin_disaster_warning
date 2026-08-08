@@ -1,35 +1,8 @@
-const { Typography, Chip } = MaterialUI;
-const { useState, useRef, useEffect, useCallback } = React;
-
-/**
- * 合并两个 ticker 条目：优先保留带描述/带震级的一侧，
- * 避免 WS 精简摘要与统计投影相互覆盖造成"无详细描述"或丢失震级。
- * 模块级纯函数，不依赖组件作用域。
- */
-const mergeTickerItem = (prevItem, nextItem) => {
-    const desc = (nextItem.desc && nextItem.desc !== '无详细描述')
-        ? nextItem.desc
-        : (prevItem.desc && prevItem.desc !== '无详细描述' ? prevItem.desc : '无详细描述');
-    return {
-        ...nextItem,
-        ...prevItem,
-        id: prevItem.id || nextItem.id,
-        desc,
-        mag: nextItem.mag || prevItem.mag || null,
-        timeMs: prevItem.timeMs || nextItem.timeMs,
-        time: prevItem.time || nextItem.time,
-        source: prevItem.source || nextItem.source,
-        type: prevItem.type || nextItem.type,
-        typhoonKey: prevItem.typhoonKey || nextItem.typhoonKey || '',
-        emoji: prevItem.emoji || nextItem.emoji || '',
-    };
-};
-
 /**
  * 实时事件三栏竖向滚动跑马灯组件 (NewsTicker)
  * 基于旧版横向跑马灯改造：
  * - 保持单行条状卡片（56px 高度，与旧版一致），左侧「🔔 最新动态」标题固定，
- *   右侧剩余宽度三等分为三栏：地震 / 气象 / 海啸+台风；
+ *   右侧剩余宽度分为三栏：地震 / 气象 / 海啸+台风；
  * - 三栏文字直接在跑马灯条上竖向无缝循环滚动，无底框、无栏目标题；
  * - 时效策略：地震 / 气象 仅播报近 1 小时内事件，海啸单独放宽至近 24 小时；
  * - 台风栏特殊处理：仅保留每个活跃台风的最新一报数据（按 typhoon_id 去重，
@@ -53,6 +26,120 @@ const mergeTickerItem = (prevItem, nextItem) => {
  * @param {Object} props
  * @param {Object} [props.style] 外部样式
  */
+const { Typography, Chip } = MaterialUI;
+const { useState, useRef, useEffect, useCallback } = React;
+
+// ===== 模块级常量：不随渲染重建，避免每次渲染创建新引用 =====
+
+// 三栏定义：key / 接受的底层事件类型（宽度由 CSS 网格负责）
+const COLUMN_DEFS = [
+    { key: 'quake',   types: ['earthquake', 'earthquake_warning'] },
+    { key: 'weather', types: ['weather_alarm', 'weather'] },
+    { key: 'ocean',   types: ['tsunami', 'typhoon'] },
+];
+
+// 每栏队列长度上限：保证滚动条高度可控，同时保留足够的近况条目
+const MAX_ITEMS_PER_COLUMN = 12;
+
+// 时效窗口：
+// - 地震/气象：近 1 小时
+// - 海啸：近 24 小时（影响周期长，放宽避免速报过快过期）
+// - 台风：近 6 小时（台风编报稀疏，1 小时太紧会漏掉活跃台风最新状态）
+const HOURS = 3600000;
+const TSUNAMI_WINDOW_MS = 24 * HOURS;
+const TYPHOON_WINDOW_MS = 6 * HOURS;
+
+// 每轮滚动播完后停顿的时长（毫秒），便于阅读
+const PAUSE_AFTER_CYCLE_MS = 3000;
+
+// consumedIdsRef 允许的最大容量，超出后清理最旧的一半（事件 id 均为短字符串，内存占用极小）
+const CONSUMED_IDS_LIMIT = 256;
+
+// 未来时间容差（毫秒）：事件时间略微超前（时区处理误差、来源时钟偏移）仍视为有效，
+// 但超出该容差视为无效/异常数据，不进入跑马灯，避免未来事件永久占据栏目。
+const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+
+// 「无详细描述」占位条目与全量快照载荷匹配的时间容差（毫秒）
+const PLACEHOLDER_TIME_SLACK_MS = 3 * 60 * 1000;
+
+/**
+ * 判断事件时间是否位于时效窗口内（含未来时间容差）。
+ * 地震/气象近 1 小时、海啸近 24 小时、台风近 6 小时。
+ * 入队与渲染前过滤共用同一口径，保证展示不会超出时效窗口。
+ * @param {number} timeMs 事件时间戳（毫秒）
+ * @param {string} type 规范化后的事件类型
+ * @returns {boolean} 是否在窗口内
+ */
+const isTimeWithinWindow = (timeMs, type) => {
+    if (!timeMs) return false;
+    let windowMs = HOURS;
+    if (type === 'tsunami') windowMs = TSUNAMI_WINDOW_MS;
+    else if (type === 'typhoon') windowMs = TYPHOON_WINDOW_MS;
+    const now = Date.now();
+    return timeMs > now - windowMs && timeMs <= now + FUTURE_TOLERANCE_MS;
+};
+
+/**
+ * 动态注入「播完停 3 秒」的关键帧（幂等）。
+ * 仅在 effect 副作用中调用，渲染阶段不做任何 DOM 写入。
+ * 注入前先按 data-ticker-keyframes 查询已存在的 <style> 节点，复用避免累积。
+ * @param {number} scrollSeconds 单轮滚动时长（秒）
+ * @param {Set<string>} injectedSet 已注入时长集合（组件实例级）
+ */
+const injectKeyframesIfNeeded = (scrollSeconds, injectedSet) => {
+    const key = `${scrollSeconds}`;
+    if (injectedSet.has(key)) return;
+
+    // 组件卸载再挂载后 ref 会重置，但上一轮注入的 style 节点仍在 document.head 中；
+    // 按属性查询已存在的同名关键帧节点并复用，避免重复累积。
+    const existing = document.querySelector(`style[data-ticker-keyframes="${key}"]`);
+    if (existing) {
+        injectedSet.add(key);
+        return;
+    }
+
+    const totalMs = scrollSeconds * 1000 + PAUSE_AFTER_CYCLE_MS;
+    const scrollPct = ((scrollSeconds * 1000) / totalMs) * 100;
+    const scrollPctSafe = Math.max(0.5, Math.min(99.5, scrollPct));
+
+    const styleEl = document.createElement('style');
+    styleEl.setAttribute('data-ticker-keyframes', key);
+    styleEl.textContent = `
+        @keyframes ticker-scroll-${key} {
+            0% { transform: translateY(0); }
+            ${scrollPctSafe}% { transform: translateY(-50%); }
+            100% { transform: translateY(-50%); }
+        }
+    `;
+    document.head.appendChild(styleEl);
+    injectedSet.add(key);
+};
+
+/**
+ * 合并两个 ticker 条目：优先保留带描述/带震级的一侧，
+ * 避免 WS 精简摘要与统计投影相互覆盖造成"无详细描述"或丢失震级。
+ * 模块级纯函数，不依赖组件作用域。
+ *
+ * 合并方向：以 nextItem（全量快照载荷）为基础，显式字段逐一取有值一侧；
+ * 不整体展开 prevItem，避免新旧字段的合并方向被隐式展开顺序掩盖。
+ */
+const mergeTickerItem = (prevItem, nextItem) => {
+    const desc = (nextItem.desc && nextItem.desc !== '无详细描述')
+        ? nextItem.desc
+        : (prevItem.desc && prevItem.desc !== '无详细描述' ? prevItem.desc : '无详细描述');
+    return {
+        id: nextItem.id || prevItem.id,
+        timeMs: nextItem.timeMs || prevItem.timeMs,
+        time: nextItem.time || prevItem.time,
+        type: nextItem.type || prevItem.type,
+        source: nextItem.source || prevItem.source,
+        desc,
+        mag: nextItem.mag || prevItem.mag || null,
+        typhoonKey: nextItem.typhoonKey || prevItem.typhoonKey || '',
+        emoji: nextItem.emoji || prevItem.emoji || '',
+    };
+};
+
 function NewsTicker({ style }) {
     const { state } = useAppContext();
     const { events, config, dataLoaded, lastEvent } = state;
@@ -62,41 +149,20 @@ function NewsTicker({ style }) {
     const [paused, setPaused] = useState(false);
     const isDark = state.theme === 'dark';
 
-    // 三栏定义：key / 接受的底层事件类型（宽度三等分由 CSS 网格负责）
-    const COLUMN_DEFS = [
-        { key: 'quake',   types: ['earthquake', 'earthquake_warning'] },
-        { key: 'weather', types: ['weather_alarm', 'weather'] },
-        { key: 'ocean',   types: ['tsunami', 'typhoon'] },
-    ];
-
-    // 每栏队列长度上限：保证滚动条高度可控，同时保留足够的近况条目
-    const MAX_ITEMS_PER_COLUMN = 12;
-
-    // 时效窗口：
-    // - 地震/气象：近 1 小时
-    // - 海啸：近 24 小时（影响周期长，放宽避免速报过快过期）
-    // - 台风：近 6 小时（台风编报稀疏，1 小时太紧会漏掉活跃台风最新状态）
-    const HOURS = 3600000;
-    const TSUNAMI_WINDOW_MS = 24 * HOURS;
-    const TYPHOON_WINDOW_MS = 6 * HOURS;
-
-    // 每轮滚动播完后停顿的时长（毫秒），便于阅读
-    const PAUSE_AFTER_CYCLE_MS = 3000;
-
     // 三栏事件队列（新事件头部插入，尾部淘汰）
     const [columns, setColumns] = useState(() => ({
         quake: [],
         weather: [],
         ocean: [],
     }));
+    // columns 的最新快照：供快照同步 effect 在 setState 之外做纯计算，
+    // 避免在 updater 内写入 ref（React 并发/StrictMode 可能重放 updater 导致丢事件）。
+    const columnsRef = useRef(columns);
+    columnsRef.current = columns;
 
     // 已消费事件 ID 集合：同一事件无论从 WS 推送还是全量快照进入均只入队一次
     // 该集合只增不减，长期运行会随事件总数增长；通过封顶清理兜底防膨胀。
     const consumedIdsRef = useRef(new Set());
-    // consumedIdsRef 允许的最大容量，超出后清理最旧的一半（事件 id 均为短字符串，内存占用极小）
-    const CONSUMED_IDS_LIMIT = 256;
-    // 台风已入队个体的集合（按 typhoon_id 去重，同一台风只保留最新一报）
-    const activeTyphoonIdsRef = useRef(new Set());
     // 已注入动态关键帧的时长集合（幂等，避免重复注入 style）
     const injectedKeyframesRef = useRef(new Set());
 
@@ -175,7 +241,7 @@ function NewsTicker({ style }) {
     };
 
     /**
-     * 时效判定：按类型区分窗口
+     * 时效判定：按类型区分窗口（含未来时间容差，复用模块级口径）
      * - 海啸（tsunami）：近 24 小时
      * - 台风（typhoon）：近 6 小时
      * - 其他（地震/气象）：近 1 小时
@@ -184,10 +250,7 @@ function NewsTicker({ style }) {
         const t = getEventTimeMs(event);
         if (!t) return false;
         const type = normalizeType(event?.type || event?.event_type || '');
-        let windowMs = HOURS;
-        if (type === 'tsunami') windowMs = TSUNAMI_WINDOW_MS;
-        else if (type === 'typhoon') windowMs = TYPHOON_WINDOW_MS;
-        return t > Date.now() - windowMs;
+        return isTimeWithinWindow(t, type);
     };
 
     /**
@@ -244,6 +307,9 @@ function NewsTicker({ style }) {
 
         setColumns((prev) => {
             const queue = prev[colKey] || [];
+            // 队列内去重兜底：consumedIdsRef 清理最旧一半后同一事件重推会再次到达，
+            // 若队列已含该 id 则直接忽略，避免重复入队。
+            if (queue.some((it) => it.id === id)) return prev;
             return {
                 ...prev,
                 [colKey]: [item, ...queue].slice(0, MAX_ITEMS_PER_COLUMN),
@@ -275,72 +341,109 @@ function NewsTicker({ style }) {
             .filter((e) => !isSnetEvent(e) && isWithinWindow(e))
             .sort((a, b) => getEventTimeMs(b) - getEventTimeMs(a));
 
-        setColumns((prev) => {
-            let changed = false;
-            const next = { ...prev };
+        // 在 setState 之外基于最新快照做纯计算（columnsRef）：
+        // 避免在 updater 内写 consumedIdsRef——React 并发/StrictMode 可能重放 updater，
+        // 第二次调用时 prev 仍是旧队列但 ref 已含 id，会导致新事件永久不入队。
+        let changed = false;
+        const next = { ...columnsRef.current };
 
-            sorted.forEach((e) => {
-                const colKey = classifyEvent(e);
-                if (!colKey) return;
-                const fullItem = toTickerItem(e);
-                const id = fullItem.id;
-                if (!id) return;
+        sorted.forEach((e) => {
+            const colKey = classifyEvent(e);
+            if (!colKey) return;
+            const fullItem = toTickerItem(e);
+            const id = fullItem.id;
+            if (!id) return;
 
-                let queue = next[colKey] || [];
+            let queue = next[colKey] || [];
 
-                // 1) id 精确匹配
-                let idx = queue.findIndex((it) => it.id === id);
+            // 1) id 精确匹配
+            let idx = queue.findIndex((it) => it.id === id);
 
-                // 2) 台风个体匹配（同 typhoonKey，覆盖 WS id 与快照 id 不一致）
-                if (idx === -1 && colKey === 'ocean') {
-                    const key = getTyphoonKey(fullItem);
-                    if (key) {
-                        idx = queue.findIndex((it) => getTyphoonKey(it) === key);
-                    }
+            // 2) 台风个体匹配（同 typhoonKey，覆盖 WS id 与快照 id 不一致）
+            if (idx === -1 && colKey === 'ocean') {
+                const key = getTyphoonKey(fullItem);
+                if (key) {
+                    idx = queue.findIndex((it) => getTyphoonKey(it) === key);
                 }
+            }
 
-                // 3) 同类型同来源的「无详细描述」占位条目
-                if (idx === -1 && fullItem.desc !== '无详细描述') {
-                    idx = queue.findIndex(
-                        (it) => it.desc === '无详细描述'
-                            && normalizeType(it.type) === fullItem.type
-                            && it.source === fullItem.source
-                    );
-                }
+            // 3) 同类型同来源且时间临近的「无详细描述」占位条目
+            //    （时间约束复用下方容差：避免同一来源多条占位时把描述错贴到别的预警）
+            if (idx === -1 && fullItem.desc !== '无详细描述') {
+                idx = queue.findIndex(
+                    (it) => it.desc === '无详细描述'
+                        && normalizeType(it.type) === fullItem.type
+                        && it.source === fullItem.source
+                        && it.timeMs > 0
+                        && fullItem.timeMs > 0
+                        && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
+                );
+            }
 
-                // 4) 同类型且时间临近（±3 分钟）的「无详细描述」占位条目
-                if (idx === -1 && fullItem.desc !== '无详细描述') {
-                    const TIME_SLACK_MS = 3 * 60 * 1000;
-                    idx = queue.findIndex(
-                        (it) => it.desc === '无详细描述'
-                            && normalizeType(it.type) === fullItem.type
-                            && it.timeMs > 0
-                            && fullItem.timeMs > 0
-                            && Math.abs(it.timeMs - fullItem.timeMs) <= TIME_SLACK_MS
-                    );
-                }
+            // 4) 同类型且时间临近（±3 分钟）的「无详细描述」占位条目（不限来源，兜底）
+            if (idx === -1 && fullItem.desc !== '无详细描述') {
+                idx = queue.findIndex(
+                    (it) => it.desc === '无详细描述'
+                        && normalizeType(it.type) === fullItem.type
+                        && it.timeMs > 0
+                        && fullItem.timeMs > 0
+                        && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
+                );
+            }
 
-                if (idx === -1) {
-                    // 真新增才插入；已消费 id 跳过（队列已有该事件，WS/快照不重复）
-                    if (!consumedIdsRef.current.has(id)) {
-                        consumedIdsRef.current.add(id);
-                        queue = [fullItem, ...queue].slice(0, MAX_ITEMS_PER_COLUMN);
-                        changed = true;
-                    }
-                } else {
-                    // 已存在：合并载荷（优先保留带描述的一侧），避免占位残留
-                    const newQueue = [...queue];
-                    newQueue[idx] = mergeTickerItem(queue[idx], fullItem);
-                    queue = newQueue;
+            if (idx === -1) {
+                // 真新增才插入；已消费 id 跳过（队列已有该事件，WS/快照不重复）
+                if (!consumedIdsRef.current.has(id)) {
+                    consumedIdsRef.current.add(id);
+                    queue = [fullItem, ...queue].slice(0, MAX_ITEMS_PER_COLUMN);
                     changed = true;
                 }
+            } else {
+                // 已存在：合并载荷（优先保留带描述的一侧），避免占位残留
+                const newQueue = [...queue];
+                newQueue[idx] = mergeTickerItem(queue[idx], fullItem);
+                queue = newQueue;
+                changed = true;
+            }
 
-                next[colKey] = queue;
-            });
-
-            return changed ? next : prev;
+            next[colKey] = queue;
         });
+
+        if (changed) {
+            columnsRef.current = next;
+            setColumns(next);
+        }
     }, [events, dataLoaded]);
+
+    /**
+     * 关键帧注入副作用：渲染保持纯函数，DOM 写入（document.head <style>）只在此执行。
+     * 依赖 columns 变化时重算各栏 duration 并幂等注入；injectKeyframesIfNeeded 会复用
+     * 已存在的 data-ticker-keyframes 节点，避免组件重挂载后 style 节点累积。
+     */
+    useEffect(() => {
+        COLUMN_DEFS.forEach((col) => {
+            const rawItems = dedupeTyphoon(columns[col.key] || [], col.key);
+            const items = sortByTimeAsc(rawItems);
+            const isStatic = items.length <= 2;
+            if (!isStatic) {
+                injectKeyframesIfNeeded(
+                    getDuration(items.length),
+                    injectedKeyframesRef.current
+                );
+            }
+        });
+    }, [columns]);
+
+    /**
+     * 周期刷新：渲染前会按时效过滤过期条目；定时触发一次重渲染，
+     * 让超过时效窗口的旧事件自动从栏目消失。
+     */
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setColumns((prev) => ({ ...prev }));
+        }, 60 * 1000);
+        return () => clearInterval(timer);
+    }, []);
 
     // 1. 状态：网络数据未就绪，渲染跑马灯骨架屏结构
     if (!dataLoaded) {
@@ -428,40 +531,44 @@ function NewsTicker({ style }) {
 
 
     /**
-     * 动态注入「播完停 3 秒」的关键帧（幂等）。
-     * 关键帧结构（轨道复制双份，内容向上滚出，最新时间沉在底部）：
-     *   0%     -> translateY(0)       （起始：轨道前半段可见）
-     *   P%     -> translateY(-50%)    （滚动部分：内容向上滚出，直到后半段补位完成）
-     *   100%   -> translateY(-50%)    （停顿部分，PAUSE_AFTER_CYCLE_MS，停在滚动终点）
-     * 视觉上事件从底部向上滚出，最新时间在队列底部，滚完一轮停顿 3 秒再循环。
+     * 渲染单个跑马灯条目（静态分支与滚动分支共用，避免两处 JSX 重复维护）。
+     * @param {Object} item ticker 条目
+     * @param {string} key React key
      */
-    const ensureKeyframes = (scrollSeconds) => {
-        const key = `${scrollSeconds}`;
-        if (injectedKeyframesRef.current.has(key)) return;
+    const renderItem = (item, key) => (
+        <div key={key} className="news-ticker-v-item">
+            <span className={`news-ticker-time ${isDark ? 'is-dark' : 'is-light'}`}>
+                {formatTime(item.time, item.source)}
+            </span>
+            <span className="news-ticker-type-icon">{getIcon(item.type, item.emoji)}</span>
 
-        const totalMs = scrollSeconds * 1000 + PAUSE_AFTER_CYCLE_MS;
-        const scrollPct = ((scrollSeconds * 1000) / totalMs) * 100;
-        const scrollPctSafe = Math.max(0.5, Math.min(99.5, scrollPct));
+            {item.mag && (
+                <Chip
+                    label={Number.isInteger(item.mag) ? `M ${item.mag}.0` : `M ${item.mag}`}
+                    size="small"
+                    className={`news-ticker-mag-chip ${isDark ? 'is-dark' : 'is-light'}`}
+                />
+            )}
 
-        const styleEl = document.createElement('style');
-        styleEl.setAttribute('data-ticker-keyframes', key);
-        styleEl.textContent = `
-            @keyframes ticker-scroll-${key} {
-                0% { transform: translateY(0); }
-                ${scrollPctSafe}% { transform: translateY(-50%); }
-                100% { transform: translateY(-50%); }
-            }
-        `;
-        document.head.appendChild(styleEl);
-        injectedKeyframesRef.current.add(key);
-    };
+            <Typography
+                component="span"
+                variant="body2"
+                className="news-ticker-desc"
+            >
+                {item.desc.replace(/^M[\d.]+\s*/, '')}
+            </Typography>
+        </div>
+    );
 
     return (
         <div
             className={`card news-ticker-card ${isDark ? 'is-dark' : 'is-light'}`}
             style={style}
+            tabIndex={0}
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
+            onFocus={() => setPaused(true)}
+            onBlur={() => setPaused(false)}
         >
             {/* 左侧固定标题（与三栏同一行） */}
             <div className="news-ticker-head">
@@ -473,13 +580,14 @@ function NewsTicker({ style }) {
             <div className="news-ticker-v-grid">
                 {COLUMN_DEFS.map((col) => {
                     // 1) 台风按个体去重（每个台风只保留最新一报）
-                    // 2) 按时间升序重排（最新在下，滚动时最新沉到底部）
+                    // 2) 渲染前按时效再次过滤：入队后可能已过期，保证展示不超出时效窗口
+                    // 3) 按时间升序重排（最新在下，滚动时最新沉到底部）
                     const rawItems = dedupeTyphoon(columns[col.key] || [], col.key);
-                    const items = sortByTimeAsc(rawItems);
+                    const freshItems = rawItems.filter((it) => isTimeWithinWindow(it.timeMs, it.type));
+                    const items = sortByTimeAsc(freshItems);
                     const isStatic = items.length <= 2; // 事件过少不滚动，静态展示
                     const duration = getDuration(items.length);
                     const totalDuration = duration + PAUSE_AFTER_CYCLE_MS / 1000;
-                    if (!isStatic) ensureKeyframes(duration);
                     return (
                         <div className="news-ticker-v-column" key={col.key}>
                             <div className="news-ticker-v-mask">
@@ -490,30 +598,7 @@ function NewsTicker({ style }) {
                                 ) : isStatic ? (
                                     /* 事件过少（≤2 条）时静态展示：不复制、不滚动 */
                                     <div className="news-ticker-v-static">
-                                        {items.map((item) => (
-                                            <div key={item.id} className="news-ticker-v-item">
-                                                <span className={`news-ticker-time ${isDark ? 'is-dark' : 'is-light'}`}>
-                                                    {formatTime(item.time, item.source)}
-                                                </span>
-                                                <span className="news-ticker-type-icon">{getIcon(item.type, item.emoji)}</span>
-
-                                                {item.mag && (
-                                                    <Chip
-                                                        label={Number.isInteger(item.mag) ? `M ${item.mag}.0` : `M ${item.mag}`}
-                                                        size="small"
-                                                        className={`news-ticker-mag-chip ${isDark ? 'is-dark' : 'is-light'}`}
-                                                    />
-                                                )}
-
-                                                <Typography
-                                                    component="span"
-                                                    variant="body2"
-                                                    className="news-ticker-desc"
-                                                >
-                                                    {item.desc.replace(/^M[\d.]+\s*/, '')}
-                                                </Typography>
-                                            </div>
-                                        ))}
+                                        {items.map((item) => renderItem(item, item.id))}
                                     </div>
                                 ) : (
                                     /* 滚动长轴轨道（内容复制双份，动态关键帧实现"播完停 3 秒再续"）
@@ -526,32 +611,7 @@ function NewsTicker({ style }) {
                                             animationDuration: `${totalDuration}s`,
                                         }}
                                     >
-                                        {[...items, ...items].map((item, index) => (
-                                            <div key={`${item.id}-${index}`} className="news-ticker-v-item">
-                                                <span className={`news-ticker-time ${isDark ? 'is-dark' : 'is-light'}`}>
-                                                    {formatTime(item.time, item.source)}
-                                                </span>
-                                                <span className="news-ticker-type-icon">{getIcon(item.type, item.emoji)}</span>
-
-                                                {/* 震级标签 (若包含震级) */}
-                                                {item.mag && (
-                                                    <Chip
-                                                        label={Number.isInteger(item.mag) ? `M ${item.mag}.0` : `M ${item.mag}`}
-                                                        size="small"
-                                                        className={`news-ticker-mag-chip ${isDark ? 'is-dark' : 'is-light'}`}
-                                                    />
-                                                )}
-
-                                                <Typography
-                                                    component="span"
-                                                    variant="body2"
-                                                    className="news-ticker-desc"
-                                                >
-                                                    {/* 去除首部可能冗余的 Mxx 格式前缀，防范视觉重复 */}
-                                                    {item.desc.replace(/^M[\d.]+\s*/, '')}
-                                                </Typography>
-                                            </div>
-                                        ))}
+                                        {[...items, ...items].map((item, index) => renderItem(item, `${item.id}-${index}`))}
                                     </div>
                                 )}
                             </div>

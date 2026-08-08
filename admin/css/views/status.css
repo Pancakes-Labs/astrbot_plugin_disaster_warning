@@ -1003,11 +1003,12 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 
 /* 竖向无缝循环滚动动画轨道：内容自我复制双份，translateY 0→-50% 首尾相接。
    内容向上滚出（最新时间沉在底部），动画名/时长由 JSX 动态注入
-   （含"播完停 3 秒再续"的关键帧），此处保留基础声明作为 JS 未注入时的兜底。 */
+   （含"播完停 3 秒再续"的关键帧），此处保留基础声明作为 JS 未注入时的兜底，
+   并给出默认时长（12s），避免 animation 简写缺少时长回落为 0s 导致轨道静止。 */
 .news-ticker-v-track {
     display: flex;
     flex-direction: column;
-    animation: ticker-scroll-up linear infinite;
+    animation: ticker-scroll-up 12s linear infinite;
     animation-play-state: running;
     will-change: transform;
 }
@@ -1166,8 +1167,10 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 
 @media (prefers-reduced-motion: reduce) {
     .news-ticker-v-track {
-        animation: none;
-        transform: none;
+        /* 内联 style（animationName/animationDuration）优先级高于样式表规则，
+           必须加 !important 才能覆盖，真正关闭"减少动态效果"用户看到的滚动。 */
+        animation: none !important;
+        transform: none !important;
     }
 }
 
