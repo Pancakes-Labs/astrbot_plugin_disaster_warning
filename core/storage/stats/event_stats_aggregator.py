@@ -88,8 +88,23 @@ class EventStatsAggregator:
                             envelope.event
                         )
                     )
-                    if not weather_stats_recorded:
-                        self.manager.rule_service.log_weather_stats_skip()
+                    if weather_stats_recorded is False:
+                        # 附带上下文供日志排障（事件ID/来源/标题/头条/提取地名）。
+                        self.manager.rule_service.log_weather_stats_skip(
+                            event_id=event_unique_id,
+                            source_id=source_id,
+                            title_text=str(getattr(envelope.event, "title", "") or ""),
+                            headline_text=str(
+                                getattr(envelope.event, "headline", "") or ""
+                            ),
+                        )
+                    elif weather_stats_recorded is not True:
+                        # record_weather_stats 返回 (False, context) 时带上解析细节。
+                        self.manager.rule_service.log_weather_stats_skip(
+                            event_id=event_unique_id,
+                            source_id=source_id,
+                            **weather_stats_recorded[1],
+                        )
 
                 self.manager.rule_service.record_time_series(event)
 
