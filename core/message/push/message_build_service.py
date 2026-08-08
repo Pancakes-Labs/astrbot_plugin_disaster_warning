@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from datetime import timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,6 +20,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
 
+from ....utils.time_converter import TimeConverter
 from ...domain.event_models import (
     EarthquakeEvent,
     EventEnvelope,
@@ -29,6 +31,7 @@ from ...domain.event_models import (
 from ...services.identity.event_identity import resolve_report_num
 from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
+from ...storage.source_compat import is_cenc_intensity_report
 from ..presenters.weather_alarm_code_map import (
     build_weather_icon_url,
     resolve_local_weather_icon_abs_path,
@@ -199,7 +202,12 @@ class MessageBuildService:
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False, default=str)
 
     @staticmethod
-    def _build_map_cache_key(lat: float, lon: float, config: dict[str, Any]) -> str:
+    def _build_map_cache_key(
+        lat: float,
+        lon: float,
+        config: dict[str, Any],
+        event_caption: str = "",
+    ) -> str:
         """构建地图渲染缓存键。"""
         key_obj = {
             "type": "map",
@@ -208,8 +216,85 @@ class MessageBuildService:
             "map_source": config.get("map_source", "PetalMap矢量图亮"),
             "map_zoom_level": config.get("map_zoom_level", 5),
             "playwright_mode": config.get("playwright_mode", "local"),
+            "event_caption": event_caption or "",
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
+
+    @staticmethod
+    def _build_event_map_caption(event: EventEnvelope) -> str:
+        """构建通用地图左上角的事件基础描述文字胶囊。
+
+        格式：时间 震中 震级
+        - 普通地震：如 "05时29分 岩手県冲 M 3.7"
+        - 日本震度速报（缺震级/震中）：如 "02时41分 震源 調查中"
+        - 中国烈度速报：时间更详细，如 "2026-08-07 13:08 四川宜宾市高县 M 4.9"
+        """
+        domain_event = getattr(event, "event", None)
+        if not isinstance(domain_event, EarthquakeEvent):
+            return ""
+
+        source_id = (getattr(event, "source_id", "") or "").strip()
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        domain_metadata = (
+            domain_event.metadata if isinstance(domain_event.metadata, dict) else {}
+        )
+        merged_metadata = dict(domain_metadata)
+        merged_metadata.update(metadata)
+        info_type = str(merged_metadata.get("info_type") or "").strip()
+        # 烈度速报：时间格式更详细
+        is_cenc_ir = is_cenc_intensity_report(source_id, info_type=info_type)
+        # 震度速报：日本 P2P ScalePrompt 或 info_type 含"震度速报"，缺震级/震中
+        is_shindo_report = info_type in ("ScalePrompt", "震度速报") or (
+            "震度速报" in info_type
+        )
+
+        # 时间格式化：烈度速报显示完整日期时间，其余显示 "HH时MM分"
+        occurred_at = getattr(domain_event, "occurred_at", None)
+        if occurred_at is not None:
+            try:
+                # naive datetime 按 UTC 兜底处理，避免 astimezone 误用服务器本地时区
+                local_dt = occurred_at
+                if local_dt.tzinfo is None:
+                    local_dt = local_dt.replace(tzinfo=timezone.utc)
+                fmt = "%Y-%m-%d %H:%M" if is_cenc_ir else "%H时%M分"
+                time_part = TimeConverter._safe_strftime(
+                    local_dt.astimezone(TimeConverter._get_timezone("UTC+8")),
+                    fmt,
+                )
+            except Exception:
+                time_part = ""
+        else:
+            time_part = ""
+
+        # 震中：有真实地名优先；震度速报用"震源 調查中"，其余兜底"未知地点"
+        place_name = str(getattr(domain_event, "place_name", "") or "").strip()
+        has_place = bool(place_name) and place_name not in ("未知地点", "未知位置")
+        if has_place:
+            place_text = place_name
+        elif is_shindo_report:
+            place_text = "震源 調查中"
+        else:
+            place_text = "未知地点"
+
+        # 震级：有值保留一位小数；震度速报缺震级时不重复输出（"震源 調查中"已统一表达）；
+        # 其余兜底用通用文案"未知震级"
+        magnitude = getattr(domain_event, "magnitude", None)
+        magnitude_text = ""
+        try:
+            mag_float = float(magnitude) if magnitude is not None else None
+        except (TypeError, ValueError):
+            mag_float = None
+        if mag_float is not None and mag_float > 0:
+            # 用窄空格（U+2009 THIN SPACE）连接 M 与震级：
+            # 保留可读留白但比普通空格紧凑，避免视觉空隙过大。
+            magnitude_text = f"M\u2009{mag_float:.1f}"
+        elif is_shindo_report:
+            magnitude_text = ""
+        else:
+            magnitude_text = "未知震级"
+
+        parts = [p for p in (time_part, place_text, magnitude_text) if p]
+        return " ".join(parts)
 
     @staticmethod
     def _build_global_quake_card_cache_key(
@@ -432,8 +517,11 @@ class MessageBuildService:
             ):
                 return
 
-            # 调用 Playwright 动态渲染地图图片
-            map_image_path = await self.render_map_image(lat, lon, config)
+            # 调用 Playwright 动态渲染地图图片（带事件描述文字胶囊）
+            event_caption = self._build_event_map_caption(event)
+            map_image_path = await self.render_map_image(
+                lat, lon, config, event_caption=event_caption
+            )
             if not map_image_path:
                 return
 
@@ -454,7 +542,11 @@ class MessageBuildService:
             logger.error(f"[灾害预警] 异步地图渲染任务失败: {e}")
 
     async def render_map_image(
-        self, lat: float, lon: float, config: dict
+        self,
+        lat: float,
+        lon: float,
+        config: dict,
+        event_caption: str = "",
     ) -> str | None:
         """渲染通用地图图片（带缓存复用）。"""
 
@@ -463,9 +555,12 @@ class MessageBuildService:
                 lat,
                 lon,
                 config,
+                event_caption=event_caption,
             )
 
-        map_cache_key = self._build_map_cache_key(lat, lon, config)
+        map_cache_key = self._build_map_cache_key(
+            lat, lon, config, event_caption=event_caption
+        )
         return await self.manager._render_with_cache(map_cache_key, render_map)
 
     async def _try_build_global_quake_card(
@@ -635,10 +730,12 @@ class MessageBuildService:
             return
 
         try:
+            event_caption = self._build_event_map_caption(event)
             map_image_path = await self.render_map_image(
                 domain_event.latitude,
                 domain_event.longitude,
                 message_format_config,
+                event_caption=event_caption,
             )
             if not map_image_path:
                 return
