@@ -720,6 +720,48 @@ class EventDeduplicationService:
         )
         return True
 
+    def snapshot_state(self) -> dict[str, Any]:
+        """对去重状态做浅层快照，供推送失败时回滚。
+
+        由于 processed_reports 是可变 set，这里对每个源记录做深拷贝，
+        确保回滚时能还原到推送前的完整状态。
+        """
+        return {
+            "recent_events": {
+                fingerprint: {
+                    source_id: dict(record)
+                    | {"processed_reports": set(record.get("processed_reports") or ())}
+                    for source_id, record in source_records.items()
+                }
+                for fingerprint, source_records in self.recent_events.items()
+            },
+            "typhoon_cache": dict(self._typhoon_cache),
+            "tsunami_cache": {
+                key: dict(value) for key, value in self._tsunami_cache.items()
+            },
+            "cenc_ir_cache": {
+                key: dict(value) for key, value in self._cenc_ir_cache.items()
+            },
+        }
+
+    def restore_state(self, snapshot: dict[str, Any]) -> None:
+        """恢复去重状态快照（推送失败时回滚到推送前状态）。"""
+        self.recent_events = {
+            fingerprint: {
+                source_id: dict(record)
+                | {"processed_reports": set(record.get("processed_reports") or ())}
+                for source_id, record in source_records.items()
+            }
+            for fingerprint, source_records in snapshot.get("recent_events", {}).items()
+        }
+        self._typhoon_cache = dict(snapshot.get("typhoon_cache", {}))
+        self._tsunami_cache = {
+            key: dict(value) for key, value in snapshot.get("tsunami_cache", {}).items()
+        }
+        self._cenc_ir_cache = {
+            key: dict(value) for key, value in snapshot.get("cenc_ir_cache", {}).items()
+        }
+
     def _seed_earthquake(
         self, event: EventEnvelope, domain_eq: EarthquakeEvent
     ) -> bool:
