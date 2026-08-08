@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
@@ -51,11 +52,17 @@ class TyphoonPresenter(BasePresenter):
 
     @staticmethod
     def _format_reference_place(latitude: Any, longitude: Any) -> str:
-        """根据经纬度解析 F-E 区域近似地名（如“菲律宾海附近”）。"""
+        """根据经纬度解析 F-E 区域近似地名（如“菲律宾海附近”）。
+
+        拒绝非有限坐标（inf/NaN），避免传给 region_service 时触发
+        int(lat + 90) 的 OverflowError。
+        """
         try:
             lat_num = float(latitude)
             lon_num = float(longitude)
         except (TypeError, ValueError):
+            return ""
+        if not math.isfinite(lat_num) or not math.isfinite(lon_num):
             return ""
         return region_service.get_fe_name(lat_num, lon_num) or ""
 

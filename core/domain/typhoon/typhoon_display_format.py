@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .typhoon_values import clean_text, to_float
@@ -99,11 +100,12 @@ def is_valid_radius_value(value: Any) -> bool:
         if not text or text in {"无数据", "NULL", "null", "None", "-"}:
             return False
         try:
-            return float(text) > 0
+            number = float(text)
         except ValueError:
             return False
+        return math.isfinite(number) and number > 0
     if isinstance(value, (int, float)):
-        return value > 0
+        return math.isfinite(float(value)) and value > 0
     return False
 
 
@@ -139,7 +141,7 @@ def format_wind_circle(wind_circle: dict[str, Any] | None) -> list[str]:
             }:
                 radius = None
             number = to_float(radius)
-            if number is None or number <= 0:
+            if number is None or not math.isfinite(number) or number <= 0:
                 values.append("-")
                 continue
             radius_text = (
