@@ -8,7 +8,7 @@
 - 格式化站点列表文本
 
 数据源：中央气象台雷达页面 https://www.nmc.cn/publish/radar/chinaall.html
-站点表：resources/radar_stations.json（8 区域拼图 + 181 单站）
+站点表：resources/radar_stations.json（8 区域拼图 + 213 单站）
 """
 
 from __future__ import annotations
