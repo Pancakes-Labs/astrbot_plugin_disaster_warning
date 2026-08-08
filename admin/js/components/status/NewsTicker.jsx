@@ -332,6 +332,13 @@ function NewsTicker({ style }) {
      * - 已入队的条目：按 id / 台风个体 / 占位三级匹配后合并载荷（升级占位）。
      * 台风去重完全交给渲染前 dedupeTyphoon 兜底，这里不做删除，
      * 保证事件流（WS 推送 + 快照）交替到达时队列平滑增长，不会突然坍缩成一条。
+     *
+     * 并发安全说明：
+     * - 使用函数式 setColumns(prev => ...)：React 会按调用顺序链式应用 updater，
+     *   同帧内 WS 入队（enqueueEvent）的更新先于本快照应用，快照基于最新 prev 合并，
+     *   不会用过期快照整体替换状态、丢弃刚入队的 WS 事件。
+     * - consumedIdsRef 记账移到 updater 之外预计算：避免在 updater 内写 ref
+     *   （React 并发/StrictMode 可能重放 updater，导致新事件永久不入队）。
      */
     useEffect(() => {
         if (!dataLoaded || !Array.isArray(events) || events.length === 0) return;
@@ -341,78 +348,98 @@ function NewsTicker({ style }) {
             .filter((e) => !isSnetEvent(e) && isWithinWindow(e))
             .sort((a, b) => getEventTimeMs(b) - getEventTimeMs(a));
 
-        // 在 setState 之外基于最新快照做纯计算（columnsRef）：
-        // 避免在 updater 内写 consumedIdsRef——React 并发/StrictMode 可能重放 updater，
-        // 第二次调用时 prev 仍是旧队列但 ref 已含 id，会导致新事件永久不入队。
-        let changed = false;
-        const next = { ...columnsRef.current };
-
+        // 预计算本帧快照中将作为「真新增」插入的条目 id（基于最新 columnsRef 快照），
+        // 统一在 setState 之外记账：即使 updater 被 StrictMode 重放，记账也只会执行一次。
+        const idsToConsume = [];
         sorted.forEach((e) => {
             const colKey = classifyEvent(e);
             if (!colKey) return;
             const fullItem = toTickerItem(e);
             const id = fullItem.id;
             if (!id) return;
+            if (consumedIdsRef.current.has(id)) return;
+            const queue = columnsRef.current[colKey] || [];
+            const alreadyInQueue = queue.some((it) => it.id === id)
+                || (colKey === 'ocean' && queue.some((it) => getTyphoonKey(it) === getTyphoonKey(fullItem)));
+            if (!alreadyInQueue) {
+                idsToConsume.push(id);
+            }
+        });
+        idsToConsume.forEach((id) => consumedIdsRef.current.add(id));
 
-            let queue = next[colKey] || [];
+        if (sorted.length === 0) return;
 
-            // 1) id 精确匹配
-            let idx = queue.findIndex((it) => it.id === id);
+        // 函数式 updater：基于最新 prev 合并，绝不整体替换，避免覆盖同帧 WS 入队结果。
+        setColumns((prev) => {
+            let changed = false;
+            const next = { ...prev };
 
-            // 2) 台风个体匹配（同 typhoonKey，覆盖 WS id 与快照 id 不一致）
-            if (idx === -1 && colKey === 'ocean') {
-                const key = getTyphoonKey(fullItem);
-                if (key) {
-                    idx = queue.findIndex((it) => getTyphoonKey(it) === key);
+            sorted.forEach((e) => {
+                const colKey = classifyEvent(e);
+                if (!colKey) return;
+                const fullItem = toTickerItem(e);
+                const id = fullItem.id;
+                if (!id) return;
+
+                let queue = next[colKey] || [];
+
+                // 1) id 精确匹配
+                let idx = queue.findIndex((it) => it.id === id);
+
+                // 2) 台风个体匹配（同 typhoonKey，覆盖 WS id 与快照 id 不一致）
+                if (idx === -1 && colKey === 'ocean') {
+                    const key = getTyphoonKey(fullItem);
+                    if (key) {
+                        idx = queue.findIndex((it) => getTyphoonKey(it) === key);
+                    }
                 }
-            }
 
-            // 3) 同类型同来源且时间临近的「无详细描述」占位条目
-            //    （时间约束复用下方容差：避免同一来源多条占位时把描述错贴到别的预警）
-            if (idx === -1 && fullItem.desc !== '无详细描述') {
-                idx = queue.findIndex(
-                    (it) => it.desc === '无详细描述'
-                        && normalizeType(it.type) === fullItem.type
-                        && it.source === fullItem.source
-                        && it.timeMs > 0
-                        && fullItem.timeMs > 0
-                        && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
-                );
-            }
+                // 3) 同类型同来源且时间临近的「无详细描述」占位条目
+                //    （时间约束复用下方容差：避免同一来源多条占位时把描述错贴到别的预警）
+                if (idx === -1 && fullItem.desc !== '无详细描述') {
+                    idx = queue.findIndex(
+                        (it) => it.desc === '无详细描述'
+                            && normalizeType(it.type) === fullItem.type
+                            && it.source === fullItem.source
+                            && it.timeMs > 0
+                            && fullItem.timeMs > 0
+                            && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
+                    );
+                }
 
-            // 4) 同类型且时间临近（±3 分钟）的「无详细描述」占位条目（不限来源，兜底）
-            if (idx === -1 && fullItem.desc !== '无详细描述') {
-                idx = queue.findIndex(
-                    (it) => it.desc === '无详细描述'
-                        && normalizeType(it.type) === fullItem.type
-                        && it.timeMs > 0
-                        && fullItem.timeMs > 0
-                        && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
-                );
-            }
+                // 4) 同类型且时间临近（±3 分钟）的「无详细描述」占位条目（不限来源，兜底）
+                if (idx === -1 && fullItem.desc !== '无详细描述') {
+                    idx = queue.findIndex(
+                        (it) => it.desc === '无详细描述'
+                            && normalizeType(it.type) === fullItem.type
+                            && it.timeMs > 0
+                            && fullItem.timeMs > 0
+                            && Math.abs(it.timeMs - fullItem.timeMs) <= PLACEHOLDER_TIME_SLACK_MS
+                    );
+                }
 
-            if (idx === -1) {
-                // 真新增才插入；已消费 id 跳过（队列已有该事件，WS/快照不重复）
-                if (!consumedIdsRef.current.has(id)) {
-                    consumedIdsRef.current.add(id);
+                if (idx === -1) {
+                    // 真新增才插入；prev 已含该 id（WS 已入队）时 findIndex 必命中，不会走到这里。
                     queue = [fullItem, ...queue].slice(0, MAX_ITEMS_PER_COLUMN);
                     changed = true;
+                } else {
+                    // 已存在：合并载荷（优先保留带描述的一侧），避免占位残留
+                    const newQueue = [...queue];
+                    newQueue[idx] = mergeTickerItem(queue[idx], fullItem);
+                    queue = newQueue;
+                    changed = true;
                 }
-            } else {
-                // 已存在：合并载荷（优先保留带描述的一侧），避免占位残留
-                const newQueue = [...queue];
-                newQueue[idx] = mergeTickerItem(queue[idx], fullItem);
-                queue = newQueue;
-                changed = true;
+
+                next[colKey] = queue;
+            });
+
+            if (changed) {
+                // 幂等同步最新快照，供下一次预计算使用。
+                columnsRef.current = next;
+                return next;
             }
-
-            next[colKey] = queue;
+            return prev;
         });
-
-        if (changed) {
-            columnsRef.current = next;
-            setColumns(next);
-        }
     }, [events, dataLoaded]);
 
     /**
