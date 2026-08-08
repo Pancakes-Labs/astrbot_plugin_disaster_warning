@@ -653,9 +653,14 @@ class StopSummaryPanel:
             if ws_manager is not None
             else set()
         )
-        data["ws_disconnected"] = len(plan) - len(remaining)
-        # 全部按计划断开才视为 WebSocket 已停止；无连接计划视为未启用（None）。
-        data["ws_stopped"] = None if not plan else len(remaining) == 0
+        # 计划连接与实际剩余连接的并集决定是否启用：
+        # - plan 为空但存在计划外残留连接（如手动建立）时仍视为已启用（True），
+        #   避免把残留连接误判为"未启用"（None）；
+        # - 断开数按并集计算，避免 plan 为空时出现负数。
+        enabled_names = set(plan) | remaining
+        data["ws_disconnected"] = len(enabled_names) - len(remaining)
+        # 并集为空视为未启用（None）；否则以剩余连接是否为空判断是否已断开。
+        data["ws_stopped"] = None if not enabled_names else len(remaining) == 0
 
         # 停机前气象预警聚合转发的最后一批条数与目标会话（flush_all 发送成功后记录）。
         agg = getattr(service, "_weather_aggregation_service", None)
