@@ -20,6 +20,7 @@ from ...services.geo.cn_district_intensity_service import (
 )
 from ...services.geo.intensity_service import IntensityCalculator
 from ...services.geo.jma_seis_int_loc_loader import get_sect_map
+from ...services.geo.travel_time_service import compute_s_wave_countdown
 from .base_presenter import BasePresenter
 
 
@@ -162,6 +163,11 @@ def _resolve_shock_time(display_context: EarthquakeDisplayContext):
     return display_context.occurred_at
 
 
+# S 波倒计时进入「即将到达」紧迫文案的阈值（秒）。
+# 剩余时间小于等于该值时，展示为紧迫提示文案，提醒用户做好避险准备。
+S_WAVE_URGENT_THRESHOLD_SEC = 10
+
+
 def _append_local_estimation(
     lines: list[str],
     display_context: EarthquakeDisplayContext,
@@ -199,6 +205,19 @@ def _append_local_estimation(
         lines.append(f"⏱️预计P波到达：约 {p_sec:.0f} 秒")
     if s_sec is not None:
         lines.append(f"⏱️预计S波到达：约 {s_sec:.0f} 秒")
+
+    # S 波实时倒计时（近似实时预估）：
+    # 保留上方两行绝对走时展示，这里额外追加一行基于「发震时间 + 当前墙钟」
+    # 投影出的剩余到达秒数，让每一报推送都展示当下最新的临近状态。
+    # 缺发震时间或 S 波走时时静默跳过该行，不影响原有展示。
+    s_remaining = compute_s_wave_countdown(display_context.occurred_at, s_sec)
+    if s_remaining is not None:
+        if s_remaining <= 0:
+            lines.append("⏳S波已到达，请保持警惕")
+        elif s_remaining <= S_WAVE_URGENT_THRESHOLD_SEC:
+            lines.append(f"⏳S波即将到达！约 {s_remaining:.0f} 秒")
+        else:
+            lines.append(f"⏳S波倒计时：约 {s_remaining:.0f} 秒")
 
 
 def _append_cn_district_estimation(
