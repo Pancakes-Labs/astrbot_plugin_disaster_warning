@@ -253,13 +253,15 @@ class DisasterWarningPlugin(Star):
         keyword: str = None,
         optional_a: str = None,
         optional_b: str = None,
+        optional_c: str = None,
     ):
-        """气象预警查询"""
+        """气象预警查询（支持 [全部|全日期] 关闭 72 小时过滤）"""
         async for result in self._query_command_service.handle_query_weather_alarm(
             event,
             keyword=keyword,
             optional_a=optional_a,
             optional_b=optional_b,
+            optional_c=optional_c,
         ):
             yield result
 
