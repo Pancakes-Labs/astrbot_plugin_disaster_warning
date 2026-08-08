@@ -67,13 +67,14 @@ class NmcRealRankClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout_sec)
         self._page_base = str(page_base or PAGE_BASE).rstrip("/")
         self._session: aiohttp.ClientSession | None = None
-        # 数据缓存为类级共享：(type, hour, ymdh) -> (payload, expires_at)。
+        # 数据缓存为类级共享：(page_base, type, hour, ymdh) -> (payload, expires_at)。
         # 命令侧每次请求都会新建实例，实例级缓存无法跨请求复用；
         # 排行数据是纯数据、不依赖会话，可安全跨实例共享。
+        # 键包含 page_base，避免不同基础地址的实例互相污染缓存。
         cls = type(self)
         if not hasattr(cls, "_rank_cache"):
             cls._rank_cache: dict[
-                tuple[str, int, str], tuple[dict[str, Any], float]
+                tuple[str, str, int, str], tuple[dict[str, Any], float]
             ] = {}
         self._rank_cache = cls._rank_cache
 
@@ -102,7 +103,7 @@ class NmcRealRankClient:
         hour: int,
         ymdh: str,
         page_base: str = PAGE_BASE,
-    ) -> str:
+    ) -> str | None:
         """构建排行接口 URL。
 
         Args:
@@ -145,13 +146,19 @@ class NmcRealRankClient:
             请求失败或解析失败时：
                 {"success": False, "error": "错误描述"}
         """
-        cache_key = (rank_type, int(hour), ymdh)
+        # 缓存键包含 page_base，避免不同基础地址的实例共享缓存结果。
+        cache_key = (self._page_base, rank_type, int(hour), ymdh)
         if use_cache:
             cached = self._rank_cache.get(cache_key)
             if cached is not None and time.time() < cached[1]:
                 return cached[0]
 
-        url = self.build_url(rank_type=rank_type, hour=hour, ymdh=ymdh)
+        url = self.build_url(
+            rank_type=rank_type,
+            hour=hour,
+            ymdh=ymdh,
+            page_base=self._page_base,
+        )
         if not url:
             return {"success": False, "error": "时次格式非法"}
         session = await self._ensure_session()
@@ -188,7 +195,7 @@ class NmcRealRankClient:
 
     def _cache_result(
         self,
-        cache_key: tuple[str, int, str],
+        cache_key: tuple[str, str, int, str],
         result: dict[str, Any],
         use_cache: bool,
     ) -> None:
