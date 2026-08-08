@@ -5,6 +5,7 @@ NMC 中央气象台雷达图 HTTP 客户端。
 - 抓取雷达页面 HTML，解析 data-img 属性中的雷达图片 URL 序列
 - 并发下载 PNG 图片帧（用于单图与动图合成）
 - 复用 aiohttp 会话，伪装浏览器 UA 以兼容 CDN
+- 页面内容带 TTL 内存缓存（雷达帧 6 分钟更新，缓存 90 秒防抖）
 
 数据来源：https://www.nmc.cn/publish/radar/chinaall.html 及其分页
 图片 URL 结构（实测验证）：
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 
 import aiohttp
 
@@ -27,6 +29,10 @@ from astrbot.api import logger
 PAGE_BASE = "https://www.nmc.cn"
 IMAGE_BASE = "https://image.nmc.cn"
 
+# 页面内容缓存 TTL（秒）。雷达帧每 6 分钟更新，缓存 90 秒既降低请求频率，
+# 又不会让用户看到明显过期的帧。
+PAGE_CACHE_TTL_SEC = 90.0
+
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -34,6 +40,7 @@ _UA = (
 
 _DATA_IMG_RE = re.compile(r'data-img="([^"]+)"')
 _CODE_RE = re.compile(r"ECREF_([A-Z0-9_]+)_L88")
+_TIME_RE = re.compile(r"_PI_(\d{17})")
 
 
 class NmcRadarClient:
@@ -57,6 +64,8 @@ class NmcRadarClient:
         self._page_base = str(page_base or PAGE_BASE).rstrip("/")
         self._concurrency = max(1, int(concurrency or 3))
         self._session: aiohttp.ClientSession | None = None
+        # 页面内容缓存：page_path -> (urls, expires_at)
+        self._page_cache: dict[str, tuple[list[str], float]] = {}
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """确保 aiohttp 会话可用（延迟初始化）。"""
@@ -68,10 +77,11 @@ class NmcRadarClient:
         return self._session
 
     async def close(self) -> None:
-        """关闭 HTTP 会话。"""
+        """关闭 HTTP 会话并清空缓存。"""
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
+        self._page_cache.clear()
 
     async def fetch_page_radar_urls(
         self,
@@ -83,11 +93,17 @@ class NmcRadarClient:
 
         Args:
             page_path: 雷达页面路径，如 /publish/radar/chinaall.html。
-            use_cache: 是否启用页面内容缓存（默认开启，页面结构基本不变）。
+            use_cache: 是否启用页面内容缓存（默认开启）。缓存 TTL 见
+                PAGE_CACHE_TTL_SEC，期间重复调用直接返回缓存结果。
 
         Returns:
             图片 URL 列表，最新一帧在前；失败或未解析到时返回空列表。
         """
+        if use_cache:
+            cached = self._page_cache.get(page_path)
+            if cached is not None and time.time() < cached[1]:
+                return list(cached[0])
+
         url = f"{self._page_base}{page_path}"
         session = await self._ensure_session()
         try:
@@ -103,20 +119,27 @@ class NmcRadarClient:
             return []
 
         urls = _DATA_IMG_RE.findall(html)
-        # 去重并保持顺序（同帧可能重复出现）
-        seen: set[str] = set()
+        # 仅保留 image.nmc.cn 主机下的地址，避免页面被篡改后向任意主机发请求
         result: list[str] = []
+        seen: set[str] = set()
         for u in urls:
             u = u.strip()
-            if u and u not in seen:
-                seen.add(u)
-                result.append(u)
+            if not u or not u.startswith(IMAGE_BASE) or u in seen:
+                continue
+            seen.add(u)
+            result.append(u)
+
+        if use_cache:
+            self._page_cache[page_path] = (
+                list(result),
+                time.time() + PAGE_CACHE_TTL_SEC,
+            )
         return result
 
     @staticmethod
     def strip_medium(url: str) -> str:
-        """去掉图片 URL 中的 /medium 路径段，取原图。"""
-        return url.replace("/medium", "")
+        """去掉图片 URL 中的 /medium 路径段（仅替换一次），取原图。"""
+        return url.replace("/medium", "", 1)
 
     async def download_image(self, url: str) -> bytes | None:
         """下载单帧雷达图片字节。
@@ -145,27 +168,32 @@ class NmcRadarClient:
             )
             return None
 
-    async def download_images(self, urls: list[str]) -> list[bytes]:
-        """并发下载多帧图片字节，保持与输入顺序一致。
+    async def download_frames(self, urls: list[str]) -> list[tuple[str, bytes]]:
+        """并发下载多帧图片，返回 (url, bytes) 配对列表。
 
         使用信号量限制并发，避免一次拉取过多连接打爆 CDN。
+        失败帧会被跳过，因此返回列表长度可能小于输入；配对保留 URL，
+        供上层按实际成功帧提取时间戳，避免时间标签与帧错位。
 
         Args:
             urls: 图片 URL 列表。
 
         Returns:
-            下载成功的图片字节列表（跳过失败帧，顺序与输入一致）。
+            下载成功的 (url, bytes) 配对列表，顺序与输入一致。
         """
-        sem = asyncio.Semaphore(self._concurrency)
-
-        async def _one(u: str) -> bytes | None:
-            async with sem:
-                return await self.download_image(u)
-
         if not urls:
             return []
+        sem = asyncio.Semaphore(self._concurrency)
+
+        async def _one(u: str) -> tuple[str, bytes] | None:
+            async with sem:
+                data = await self.download_image(u)
+                if data is None:
+                    return None
+                return (u, data)
+
         results = await asyncio.gather(*(_one(u) for u in urls))
-        return [d for d in results if d]
+        return [r for r in results if r is not None]
 
     @staticmethod
     def parse_code_from_url(url: str) -> str | None:
@@ -176,7 +204,7 @@ class NmcRadarClient:
     @staticmethod
     def parse_time_from_url(url: str) -> str | None:
         """从图片 URL 中提取时间戳字符串（如 20260808102400000）。"""
-        m = re.search(r"_PI_(\d{17})", url or "")
+        m = _TIME_RE.search(url or "")
         return m.group(1) if m else None
 
 
