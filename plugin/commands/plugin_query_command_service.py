@@ -29,6 +29,7 @@ from ...core.message.presenters.weather_alarm_code_map import (
 from ...core.message.push.message_build_service import MessageBuildService
 from ...core.message.render.beachball_renderer import BeachballRenderer
 from ...core.message.render.jma_hypo_renderer import JmaHypoRenderer
+from ...core.network.http.nmc_radar_client import NmcRadarClient
 from ...core.services.query.jma_hypo_query_presenter import (
     build_jma_hypo_list_text,
     build_jma_hypo_plot_caption,
@@ -36,6 +37,13 @@ from ...core.services.query.jma_hypo_query_presenter import (
 from ...core.services.query.jma_hypo_query_service import (
     query_jma_hypo_list,
     query_jma_hypo_plot,
+)
+from ...core.services.query.radar_query_service import (
+    format_candidates_text,
+    query_radar_gif,
+    query_radar_image,
+    query_radar_list,
+    resolve_radar_target,
 )
 from ...core.services.query.typhoon_query_parser import DETAIL_CURRENT, DETAIL_FULL
 from ...core.services.query.typhoon_query_presenter import attach_summary_text
@@ -1258,3 +1266,167 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] /snet 查询失败: {e}\n{traceback.format_exc()}")
             yield _quoted_plain_result(f"❌ S-Net 查询失败: {e}")
+
+    async def handle_query_radar(
+        self,
+        event,
+        name: str | None = None,
+    ):
+        """处理 /雷达 <名称> 命令：查询最新一帧雷达图。
+
+        支持关键词：区域拼图（全国/华北等）、城市名、省份名、拼音。
+        """
+        try:
+            if not name or not str(name).strip():
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "用法：/雷达 <雷达名称>\n示例：/雷达 北京、/雷达 全国\n可用站点见 /雷达列表",
+                )
+                return
+
+            target = resolve_radar_target(str(name).strip())
+            if not target.get("matched"):
+                reason = target.get("reason", "")
+                if reason == "ambiguous":
+                    yield quoted_plain_result(
+                        self.plugin,
+                        event,
+                        format_candidates_text(target.get("candidates") or []),
+                    )
+                else:
+                    yield quoted_plain_result(
+                        self.plugin,
+                        event,
+                        f"❌ 未找到匹配的雷达站「{name}」，可用 /雷达列表 查看全部站点。",
+                    )
+                return
+
+            client = NmcRadarClient()
+            try:
+                result = await query_radar_image(client=client, target=target)
+            finally:
+                await client.close()
+
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 雷达图查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            image_comp = Comp.Image.fromBase64(result["image_base64"])
+
+            await self._track_command_feature(
+                "command_query_radar",
+                {
+                    "success": True,
+                    "keyword": str(name).strip(),
+                    "target": result.get("name"),
+                },
+            )
+
+            # 只发送雷达图片，不附带文字说明
+            yield event.chain_result(
+                self.plugin._with_quote_reply(
+                    event,
+                    [image_comp],
+                )
+            )
+        except Exception as e:
+            logger.error(f"[灾害预警] /雷达 查询失败: {e}\n{traceback.format_exc()}")
+            yield quoted_plain_result(self.plugin, event, f"❌ 雷达图查询失败: {e}")
+
+    async def handle_query_radar_gif(
+        self,
+        event,
+        name: str | None = None,
+    ):
+        """处理 /雷达动图 <名称> 命令：查询最近多帧并合成循环 GIF。"""
+        try:
+            if not name or not str(name).strip():
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "用法：/雷达动图 <雷达名称>\n示例：/雷达动图 北京、/雷达动图 全国",
+                )
+                return
+
+            target = resolve_radar_target(str(name).strip())
+            if not target.get("matched"):
+                reason = target.get("reason", "")
+                if reason == "ambiguous":
+                    yield quoted_plain_result(
+                        self.plugin,
+                        event,
+                        format_candidates_text(target.get("candidates") or []),
+                    )
+                else:
+                    yield quoted_plain_result(
+                        self.plugin,
+                        event,
+                        f"❌ 未找到匹配的雷达站「{name}」，可用 /雷达列表 查看全部站点。",
+                    )
+                return
+
+            client = NmcRadarClient()
+            try:
+                result = await query_radar_gif(client=client, target=target)
+            finally:
+                await client.close()
+
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 雷达动图查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            image_comp = Comp.Image.fromBase64(result["image_base64"])
+
+            await self._track_command_feature(
+                "command_query_radar_gif",
+                {
+                    "success": True,
+                    "keyword": str(name).strip(),
+                    "frames": result.get("frames"),
+                },
+            )
+
+            # 只发送雷达动图，不附带文字说明
+            yield event.chain_result(
+                self.plugin._with_quote_reply(
+                    event,
+                    [image_comp],
+                )
+            )
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] /雷达动图 查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 雷达动图查询失败: {e}")
+
+    async def handle_query_radar_list(self, event):
+        """处理 /雷达列表 命令：输出全部雷达站点。"""
+        try:
+            result = await query_radar_list()
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 雷达列表查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            await self._track_command_feature(
+                "command_query_radar_list",
+                {"success": True},
+            )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 雷达列表查询失败: {e}")

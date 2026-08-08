@@ -157,6 +157,9 @@ class DisasterWarningPlugin(Star):
 • /灾害预警统计 - 查看详细的事件统计报告
 • /灾害预警统计清除 - 清除所有统计信息 (仅管理员)
 • /灾害预警推送开关 - 开启或关闭当前会话的推送 (仅管理员)
+• /雷达 <名称> - 查询最新一帧气象雷达图（如：/雷达 北京、/雷达 全国）
+• /雷达动图 <名称> - 查询最近多帧合成循环动图（如：/雷达动图 北京）
+• /雷达列表 - 查看全部雷达站点列表
 • /灾害预警模拟 <纬度> <经度> <震级> [深度] [数据源] - 模拟地震事件
 • /灾害预警配置 查看 [全局|当前|会话UMO] - 查看配置（会话模式返回差异覆写）(仅管理员)
 • /灾害预警日志 - 查看原始消息日志统计摘要 (仅管理员)
@@ -401,6 +404,28 @@ class DisasterWarningPlugin(Star):
             strike=strike,
             dip=dip,
             rake=rake,
+        ):
+            yield result
+
+    @filter.command("雷达列表")
+    async def radar_list(self, event: AstrMessageEvent):
+        """查看全部气象雷达站点列表"""
+        async for result in self._query_command_service.handle_query_radar_list(event):
+            yield result
+
+    @filter.command("雷达")
+    async def radar_image(self, event: AstrMessageEvent, name: str = None):
+        """查询最新一帧气象雷达图"""
+        async for result in self._query_command_service.handle_query_radar(
+            event, name=name
+        ):
+            yield result
+
+    @filter.command("雷达动图")
+    async def radar_gif(self, event: AstrMessageEvent, name: str = None):
+        """查询最近多帧合成循环动图"""
+        async for result in self._query_command_service.handle_query_radar_gif(
+            event, name=name
         ):
             yield result
 
