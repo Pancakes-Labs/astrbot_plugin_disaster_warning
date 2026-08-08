@@ -46,6 +46,7 @@ from ...core.services.query.radar_query_service import (
     resolve_radar_target,
 )
 from ...core.services.query.realrank_query_service import (
+    TIME_ARG_HELP,
     parse_time_arg,
     query_rank,
     resolve_rank_type,
@@ -1459,9 +1460,9 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 yield quoted_plain_result(
                     self.plugin,
                     event,
-                    "用法：气温排行 [时次] | 最低气温排行 [时次] | 降水排行 [时次] | 风速排行 [时次]\n"
-                    "示例：气温排行、最低气温排行、降水排行 08日15时、风速排行 2026080815\n"
-                    "时次格式：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时",
+                    "用法：/气温排行 [时次] | /最低气温排行 [时次] | /降水排行 [时次] | /风速排行 [时次]\n"
+                    "示例：/气温排行、/最低气温排行、/降水排行 08日15时、/风速排行 2026080815\n"
+                    + TIME_ARG_HELP,
                 )
                 return
 
