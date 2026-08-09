@@ -257,6 +257,7 @@ def _find_history_item(
     prefix, hour = target
     hour_str = f"{hour:02d}"
     best: dict[str, Any] | None = None
+    # 列表已由调用方按时间倒序处理，首个匹配即最近
     for item in chart:
         t = str(item.get("time") or "").strip()  # 形如 "2026-08-09 23:00"
         if " " not in t:
@@ -266,7 +267,6 @@ def _find_history_item(
             continue
         if prefix != "*" and prefix != day_part:
             continue
-        # 记录最早匹配（近24h列表按时间倒序，首个匹配即最近）
         if best is None:
             best = item
     return best
@@ -428,6 +428,14 @@ class WeatherStationQueryService:
 
         if not all_hits:
             return {"success": False, "error": f"未找到城市「{city_name}」"}
+
+        # 跨省合并后恢复单省内的“精确优先”语义：
+        # 存在与查询词完全相同的城市名时，只保留精确命中，
+        # 避免 A 省精确命中 + B 省包含命中被误判为多候选。
+        exact_hits = [h for h in all_hits if h.get("city") == city_name]
+        if exact_hits:
+            all_hits = exact_hits
+
         if len(all_hits) > 1:
             # 多候选：去重城市名后提示用户加省份前缀
             names = sorted({h.get("city", "") for h in all_hits})
@@ -512,9 +520,9 @@ class WeatherStationQueryService:
         weather = real.get("weather") if isinstance(real.get("weather"), dict) else {}
         wind = real.get("wind") if isinstance(real.get("wind"), dict) else {}
 
-        lines = [f"🌦️ 站点：{display_city}"]
+        lines = [f"站点：{display_city}"]
         if publish_time:
-            lines.append(f"🕐 更新时间：{publish_time}")
+            lines.append(f"更新时间：{publish_time}")
 
         for label, key, unit in _REAL_FIELD_DEFS:
             lines.append(f"• {label}：{_norm_value(weather.get(key), unit)}")
@@ -540,7 +548,7 @@ class WeatherStationQueryService:
         # 预警
         warn = data.get("warn") or {}
         if warn.get("alert") and warn.get("alert") != "9999":
-            lines.append(f"🚨 预警：{warn.get('alert')}")
+            lines.append(f"预警：{warn.get('alert')}")
             if warn.get("issuecontent"):
                 lines.append(f"  {warn['issuecontent']}")
 
@@ -576,6 +584,12 @@ class WeatherStationQueryService:
         chart = data.get("passedchart") or []
         if not chart:
             return {"success": False, "error": "暂无近24小时逐小时观测数据"}
+        # 不依赖接口返回顺序：显式按时间倒序（最新在前），保证展示与匹配语义一致
+        chart = sorted(
+            (item for item in chart if str(item.get("time") or "").strip()),
+            key=lambda item: str(item["time"]).strip(),
+            reverse=True,
+        )
 
         # 指定时次：在近24h中精确匹配
         target = _parse_history_time(time_arg)
@@ -613,9 +627,9 @@ class WeatherStationQueryService:
 
         display_city = WeatherStationQueryService._format_display_city(station, code)
 
-        lines = [f"🕐 气象站历史（近24小时）：{display_city}"]
+        lines = [f"气象站历史（近24小时）：{display_city}"]
         if publish_time:
-            lines.append(f"🕐 数据时间：{publish_time}")
+            lines.append(f"数据时间：{publish_time}")
 
         # 只展示最近 8 条，避免过长
         for item in chart[:8]:
@@ -745,10 +759,14 @@ class WeatherStationQueryService:
         # 反向用 NMC 城市名过滤：只保留能匹配 NMC 城市的站，剔除台湾/街镇自动站污染。
         nmc_city_names: set[str] = set()
         provinces_all = await self._nmc.fetch_provinces()
+        # 首轮拉取各省城市：既用于反向过滤 FAN 站名，也作为后续列表数据源复用
+        province_cities: dict[str, list[dict[str, Any]]] = {}
         for p in provinces_all:
             cities = await self._nmc.fetch_cities(p["code"])
-            for c in cities:
-                nmc_city_names.add(c["city"])
+            if cities:
+                province_cities[p["code"]] = cities
+                for c in cities:
+                    nmc_city_names.add(c["city"])
         fan_map, fan_error = await self._build_fan_name_to_sid(
             nmc_city_names=nmc_city_names
         )
@@ -759,12 +777,12 @@ class WeatherStationQueryService:
             }
 
         if not province_keyword:
-            # 无省份参数：全国全量，每省一块（复用上方已拉取的省份/城市数据）
+            # 无省份参数：全国全量，每省一块（复用首轮已拉取的城市数据）
             if not provinces_all:
                 return {"success": False, "error": "获取省份列表失败"}
             blocks: list[str] = []
             for p in provinces_all:
-                cities = await self._nmc.fetch_cities(p["code"])
+                cities = province_cities.get(p["code"]) or []
                 if not cities:
                     continue
                 display_pname = cities[0].get("province") or p["name"]

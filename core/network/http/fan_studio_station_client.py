@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import aiohttp
 
@@ -43,6 +43,12 @@ CACHE_FAIL_TTL_SEC = 10.0
 class FanStudioStationClient:
     """FAN Studio 全国气象站（五位站号）客户端。"""
 
+    # 全站站点映射缓存（类级共享）：api_base -> (stations, error, expires_at)
+    # 失败结果同样缓存（error 一并保存），避免把「网络失败」误当作「无站点」。
+    _station_cache: ClassVar[
+        dict[str, tuple[list[dict[str, Any]], str | None, float]]
+    ] = {}
+
     def __init__(
         self,
         *,
@@ -58,11 +64,8 @@ class FanStudioStationClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout_sec)
         self._api_base = str(api_base or API_BASE).rstrip("/")
         self._session: aiohttp.ClientSession | None = None
-        # 全站站点映射缓存（类级共享）：api_base -> (stations, expires_at)
-        cls = type(self)
-        if not hasattr(cls, "_station_cache"):
-            cls._station_cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
-        self._station_cache = cls._station_cache
+        # 全站站点映射缓存（类级共享，子类与父类共享同一份）。
+        self._station_cache = type(self)._station_cache
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """确保 aiohttp 会话可用（延迟初始化）。"""
@@ -96,8 +99,9 @@ class FanStudioStationClient:
         key = self._api_base
         if use_cache:
             item = self._station_cache.get(key)
-            if item is not None and time.time() < item[1]:
-                return item[0], None
+            if item is not None and time.time() < item[2]:
+                # 命中时返回缓存的 (stations, error)，失败结果不再被误读为「无站点」
+                return item[0], item[1]
 
         url = f"{self._api_base}/we/station_all.php?type=temperature"
         session = await self._ensure_session()
@@ -153,7 +157,8 @@ class FanStudioStationClient:
         if len(self._station_cache) >= 8:
             oldest_key = next(iter(self._station_cache))
             del self._station_cache[oldest_key]
-        self._station_cache[key] = (stations, now + ttl)
+        # 三元组缓存：失败时 ([] , error, expires_at)，读取路径一并返回 error
+        self._station_cache[key] = (stations, error, now + ttl)
         return stations, error
 
     async def find_station(self, station_code: str) -> dict[str, Any] | None:

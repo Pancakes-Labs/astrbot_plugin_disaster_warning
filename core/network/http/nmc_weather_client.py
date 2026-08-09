@@ -272,8 +272,8 @@ class NmcWeatherClient:
                 "error": f"接口返回异常: msg={payload.get('msg')}, code={payload.get('code')}",
             }
         data = payload.get("data")
-        # 站点不存在/无数据时 data 可能为空字符串 ""
-        if isinstance(data, str) or data is None or not isinstance(data, dict):
+        # 站点不存在/无数据时 data 可能为空字符串 ""；非 dict 一律视为无站点数据
+        if not isinstance(data, dict):
             return {"success": False, "error": "未找到该站点数据"}
         real = data.get("real") if isinstance(data.get("real"), dict) else {}
         predict_raw = data.get("predict")
