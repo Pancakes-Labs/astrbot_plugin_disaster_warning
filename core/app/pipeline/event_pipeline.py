@@ -19,7 +19,10 @@ from ...domain.event_models import (
     TyphoonEvent,
     WeatherEvent,
 )
-from ...message.presenters.weather_constants import resolve_weather_emoji
+from ...message.presenters.weather_constants import (
+    resolve_weather_color_emoji,
+    resolve_weather_emoji,
+)
 from ...message.push.weather_aggregation_service import WeatherBufferEntry
 
 
@@ -237,6 +240,13 @@ class EventPipeline:
                         event_metadata.get("weather_code"),
                         event_metadata.get("weather_type"),
                         event_metadata.get("type"),
+                    )
+                    # 颜色 emoji（与推送展示器口径一致）：标题/副标题含颜色词时给出 🔴🟠🟡🔵
+                    event_summary["weather_color_emoji"] = resolve_weather_color_emoji(
+                        event_metadata.get("level"),
+                        event_metadata.get("alert_level"),
+                        envelope.event.title,
+                        envelope.event.headline,
                     )
                 await self.service.web_admin_server.notify_event(event_summary)
             except Exception as ws_e:

@@ -137,6 +137,8 @@ const mergeTickerItem = (prevItem, nextItem) => {
         mag: nextItem.mag || prevItem.mag || null,
         typhoonKey: nextItem.typhoonKey || prevItem.typhoonKey || '',
         emoji: nextItem.emoji || prevItem.emoji || '',
+        // 气象预警颜色 Emoji。后端按 COLOR_LEVEL_EMOJI 解析下发
+        colorEmoji: nextItem.colorEmoji || prevItem.colorEmoji || '',
     };
 };
 
@@ -273,6 +275,8 @@ function NewsTicker({ style }) {
             || (normalizeType(event.type || event.event_type || '') === 'typhoon' ? getEventId(event) : ''),
         // 后端已按 WEATHER_EMOJI_MAP 唯一映射表解析好气象 Emoji，前端直接消费无需重复维护
         emoji: event.weather_emoji || '',
+        // 后端按 COLOR_LEVEL_EMOJI 解析的气象预警颜色 Emoji。无则空串
+        colorEmoji: event.weather_color_emoji || '',
     });
 
     /**
@@ -585,6 +589,10 @@ function NewsTicker({ style }) {
             >
                 {item.desc.replace(/^M[\d.]+\s*/, '')}
             </Typography>
+            {/* 气象预警颜色等级 Emoji：对齐文本展示器「标题 + 颜色」结构，放在描述之后 */}
+            {item.colorEmoji && (
+                <span className="news-ticker-color-icon">{item.colorEmoji}</span>
+            )}
         </div>
     );
 
