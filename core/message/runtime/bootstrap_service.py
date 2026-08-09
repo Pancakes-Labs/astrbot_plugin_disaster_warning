@@ -39,6 +39,8 @@ class MessageManagerBootstrapService:
         self.snet_map_renderer = None
         self.typhoon_map_renderer = None
         self.remote_media_fetcher = None
+        # 浏览器预热登记标志：构造阶段只登记不执行，待静默协调器武装后统一触发。
+        self._browser_warmup_pending = False
 
     def setup_filters(self, config: dict[str, Any]) -> None:
         """初始化全局过滤器与去重器。"""
@@ -114,9 +116,32 @@ class MessageManagerBootstrapService:
                 and EqscChannelService.resolve_eqsc_flags(eqsc_cfg) == (True, True)
             )
         )
-        if playwright_mode == "local" and need_browser:
-            logger.debug("[灾害预警] 检测到已启用卡片渲染功能，正在后台预热浏览器...")
-            asyncio.create_task(self.manager.browser_manager.initialize())
+        # 是否需要在合适的时机后台预热浏览器：只登记标志，真正预热推迟到
+        # 静默协调器武装后由 warmup_browser() 触发，避免在 AstrBot 加载窗口内
+        # 抢占事件循环导致页面创建超时（对应启动日志中的“创建页面 1 超时”）。
+        self._browser_warmup_pending = playwright_mode == "local" and need_browser
+
+    def warmup_browser(self) -> None:
+        """在合适的时机（静默协调器武装后）后台预热浏览器渲染底座。
+
+        预热任务自带异常吞噬，避免“Task exception was never retrieved”噪音；
+        预热失败仅降级为 WARN，渲染时按需重试，不影响主链路。
+        """
+        if not getattr(self, "_browser_warmup_pending", False):
+            return
+        self._browser_warmup_pending = False
+        browser_manager = self.manager.browser_manager
+        if browser_manager is None:
+            return
+
+        async def _safe_initialize() -> None:
+            try:
+                await browser_manager.initialize()
+            except Exception as exc:
+                logger.warning(f"[灾害预警] 浏览器后台预热失败（已记录）: {exc}")
+
+        logger.debug("[灾害预警] 检测到已启用卡片渲染功能，正在后台预热浏览器...")
+        asyncio.create_task(_safe_initialize(), name="dw_browser_warmup")
 
     def setup_message_components(self) -> None:
         """初始化消息构建与远程媒体依赖。"""
