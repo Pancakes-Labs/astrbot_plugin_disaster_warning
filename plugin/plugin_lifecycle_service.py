@@ -185,6 +185,9 @@ class PluginLifecycleService:
                 logger.debug(
                     f"[灾害预警] 气象站查询服务会话关闭时出错（已忽略）: {wse}"
                 )
+            finally:
+                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的服务实例
+                self.plugin._weather_station_query_service = None
 
         if self.plugin.telemetry:
             try:
