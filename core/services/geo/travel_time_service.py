@@ -36,13 +36,13 @@ class TravelTimeResult:
 
 
 def _normalize_utc(value: datetime | None) -> datetime | None:
-    """把可能缺失时区的发震时间统一归一为 UTC 时间。
+    """把带时区信息的发震时间统一归一为 UTC 时间。
 
-    部分上游来源产出的时间可能没有时区信息，
-    这里统一按 UTC 处理，避免与墙钟求差时出现时区错位。
+    调用方应在传入前用源时区补齐 naive 时间（如 ensure_aware_datetime），
+    这里仅负责把 aware 时间统一到 UTC 基准，避免与墙钟求差出现时区错位。
 
     Args:
-        value: 发震时间，可为 naive 或 aware。
+        value: 发震时间，建议为 aware；naive 会被视为 UTC。
 
     Returns:
         UTC 时间；输入为 None 时返回 None。
@@ -58,10 +58,23 @@ def compute_s_wave_countdown(
     occurred_at: datetime | None,
     s_travel_sec: float | None,
     now: datetime | None = None,
+    *,
+    extra_delay_sec: float = 0.0,
 ) -> float | None:
     """计算 S 波实时剩余到达秒数（近似实时预估）。
 
-    核心公式：剩余秒数 = 绝对走时(发震→到达) - 已流逝时间(发震→当前墙钟)。
+    核心公式：
+        剩余秒数 = 绝对走时(发震→到达)
+                  - 已流逝时间(发震→当前墙钟)
+                  - 额外传输延迟补偿
+
+    关键语义（与每报重新计算的绝对走时解耦）：
+    - 倒计时完全由「当报最新发震时间 + 当报最新走时 + 计算时刻墙钟」决定；
+    - 不冻结任何历史值；若后续报修正把发震时间往晚调（elapsed 变小），
+      剩余秒数允许自然回涨，这是数据修正带来的正常延时现象；
+    - 调用方应在「最接近消息真正发送的时刻」再调用本函数，
+      必要时通过 extra_delay_sec 补偿构建/网络传输耗时，让用户看到的
+      数字更接近真实剩余。
 
     返回值语义：
     - 正数：S 波尚未到达，数值为剩余秒数。
@@ -69,10 +82,13 @@ def compute_s_wave_countdown(
     - None：缺少发震时间或 S 波走时，无法计算（调用方应静默跳过该行）。
 
     Args:
-        occurred_at: 发震时间；缺失时无法计算倒计时，返回 None。
-        s_travel_sec: S 波绝对走时秒数（发震瞬间算出，与当前时刻无关）。
+        occurred_at: 发震时间（建议为按源时区补齐后的 aware 时间）；
+            缺失时无法计算倒计时，返回 None。
+        s_travel_sec: S 波绝对走时秒数（当报由走时模型算出，与当前时刻无关）。
         now: 当前墙钟时间；不传时内部取 datetime.now(timezone.utc)，
             便于单元测试注入固定时间。
+        extra_delay_sec: 额外传输/构建延迟补偿秒数；用于让倒计时更贴近
+            用户真正收到消息时的剩余时间。
 
     Returns:
         S 波剩余到达秒数；数据不足返回 None。
@@ -93,7 +109,7 @@ def compute_s_wave_countdown(
     # elapsed 钳制为不小于 0，避免时钟不同步/未来时间导致的负流逝
     elapsed = max(0.0, (current - occurred_utc).total_seconds())
     # 极小的浮点误差视为已到达
-    remaining = s_travel_sec - elapsed
+    remaining = s_travel_sec - elapsed - max(0.0, extra_delay_sec)
     if math.isclose(remaining, 0.0, abs_tol=1e-6):
         return 0.0
     return remaining
