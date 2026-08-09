@@ -788,20 +788,24 @@ class ConfigValidator:
             default=1200,
             field_name="台风最大中心距离",
         )
-        distance_filter["latitude"] = ConfigValidator._clamp_number(
-            distance_filter.get("latitude", 39.9042),
-            minimum=-90,
-            maximum=90,
-            default=39.9042,
-            field_name="台风关注点纬度",
-        )
-        distance_filter["longitude"] = ConfigValidator._clamp_number(
-            distance_filter.get("longitude", 116.4074),
-            minimum=-180,
-            maximum=180,
-            default=116.4074,
-            field_name="台风关注点经度",
-        )
+        # 距离过滤坐标仅在用户显式配置时写入；未配置时不注入默认坐标，
+        # 避免“未配置本地参考点”的会话被默认北京坐标兜底、误触发距离/逼近过滤。
+        if distance_filter.get("latitude") is not None:
+            distance_filter["latitude"] = ConfigValidator._clamp_number(
+                distance_filter.get("latitude"),
+                minimum=-90,
+                maximum=90,
+                default=39.9042,
+                field_name="台风关注点纬度",
+            )
+        if distance_filter.get("longitude") is not None:
+            distance_filter["longitude"] = ConfigValidator._clamp_number(
+                distance_filter.get("longitude"),
+                minimum=-180,
+                maximum=180,
+                default=116.4074,
+                field_name="台风关注点经度",
+            )
         if "place_name" in distance_filter and not isinstance(
             distance_filter.get("place_name"), str
         ):

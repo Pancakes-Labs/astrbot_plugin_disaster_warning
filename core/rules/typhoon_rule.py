@@ -293,7 +293,16 @@ class TyphoonRule(BaseRule):
         typhoon_filter: dict[str, Any],
         runtime_config: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """解析用于距离/逼近计算的本地参考点。"""
+        """解析用于距离/逼近计算的本地参考点。
+
+        语义（改进后）：
+        - 优先采用 distance_filter 显式配置的坐标；未显式配置时
+          仅当 local_monitoring.enabled 为真才复用其坐标。
+        - 会话关闭本地监控（enabled=false）或未配置任何可用坐标时，
+          返回 None → 上层按“未配置可用本地坐标”跳过距离/逼近过滤，避免误杀。
+        - 返回值携带 reference_source 字段，供日志/展示透出参考点来源，
+          便于排查“为什么按某坐标算距离”。
+        """
         distance_filter = typhoon_filter.get("distance_filter")
         if not isinstance(distance_filter, dict):
             distance_filter = {}
@@ -311,20 +320,35 @@ class TyphoonRule(BaseRule):
         latitude = None
         longitude = None
         place_name = ""
+        source = ""
 
-        if use_local and local_monitoring:
-            latitude = to_float(local_monitoring.get("latitude"))
-            longitude = to_float(local_monitoring.get("longitude"))
-            place_name = str(local_monitoring.get("place_name") or "").strip()
+        # 优先级 1：distance_filter 显式坐标（无论是否复用本地监控均优先）。
+        distance_lat = to_float(distance_filter.get("latitude"))
+        distance_lon = to_float(distance_filter.get("longitude"))
+        if distance_lat is not None and distance_lon is not None:
+            latitude = distance_lat
+            longitude = distance_lon
+            source = "distance_filter"
+            override_place = str(distance_filter.get("place_name") or "").strip()
+            if override_place:
+                place_name = override_place
 
-        # 未复用本地监控，或本地监控缺坐标时，回退到台风配置坐标。
+        # 优先级 2：仅当本地监控显式启用时，才复用其坐标。
+        # 修复：原先只判断 local_monitoring 是否为 dict，忽略了 enabled=false，
+        # 导致“已关闭本地预估”的会话仍被全局默认坐标套住。
         if latitude is None or longitude is None:
-            latitude = to_float(distance_filter.get("latitude"))
-            longitude = to_float(distance_filter.get("longitude"))
+            local_enabled = bool(local_monitoring.get("enabled", False))
+            if use_local and local_enabled:
+                local_lat = to_float(local_monitoring.get("latitude"))
+                local_lon = to_float(local_monitoring.get("longitude"))
+                if local_lat is not None and local_lon is not None:
+                    latitude = local_lat
+                    longitude = local_lon
+                    source = "local_monitoring"
+                    local_place = str(local_monitoring.get("place_name") or "").strip()
+                    if not place_name and local_place:
+                        place_name = local_place
 
-        override_place = str(distance_filter.get("place_name") or "").strip()
-        if override_place:
-            place_name = override_place
         if not place_name:
             place_name = "本地"
 
@@ -338,6 +362,7 @@ class TyphoonRule(BaseRule):
             "longitude": longitude,
             "place_name": place_name,
             "use_local_monitoring": use_local,
+            "reference_source": source,
         }
 
     def _effective_wind_radius_km(self, event: TyphoonEvent) -> float | None:
@@ -576,10 +601,20 @@ class TyphoonRule(BaseRule):
         reference = self._resolve_reference_point(typhoon_filter, runtime_config)
         if reference is None:
             # 没有可用坐标时不因位置条件误杀。
+            # 透出 local_monitoring 开关与 use_local_monitoring，便于排查
+            # “为什么没算距离/逼近”（例如本地监控已关闭）。
+            local_monitoring = runtime_config.get("local_monitoring")
+            if not isinstance(local_monitoring, dict):
+                local_monitoring = {}
+            skip_detail = (
+                "未配置可用本地坐标，跳过距离/逼近过滤"
+                f"（local_monitoring.enabled={bool(local_monitoring.get('enabled', False))}，"
+                f"use_local_monitoring={distance_filter.get('use_local_monitoring', True)}）"
+            )
             return {
                 "accepted": True,
                 "reason": "",
-                "detail": "未配置可用本地坐标，跳过距离/逼近过滤",
+                "detail": skip_detail,
                 "estimation": estimation,
             }
 
