@@ -121,11 +121,15 @@ class MessageManagerBootstrapService:
         # 抢占事件循环导致页面创建超时（对应启动日志中的“创建页面 1 超时”）。
         self._browser_warmup_pending = playwright_mode == "local" and need_browser
 
-    def warmup_browser(self) -> None:
+    def warmup_browser(self, register_task=None) -> None:
         """在合适的时机（静默协调器武装后）后台预热浏览器渲染底座。
 
         预热任务自带异常吞噬，避免“Task exception was never retrieved”噪音；
         预热失败仅降级为 WARN，渲染时按需重试，不影响主链路。
+
+        Args:
+            register_task: 可选回调，用于把预热任务登记到服务级后台任务集合，
+                便于停机时统一回收（例如 DisasterService.register_background_task）。
         """
         if not getattr(self, "_browser_warmup_pending", False):
             return
@@ -141,7 +145,13 @@ class MessageManagerBootstrapService:
                 logger.warning(f"[灾害预警] 浏览器后台预热失败（已记录）: {exc}")
 
         logger.debug("[灾害预警] 检测到已启用卡片渲染功能，正在后台预热浏览器...")
-        asyncio.create_task(_safe_initialize(), name="dw_browser_warmup")
+        task = asyncio.create_task(_safe_initialize(), name="dw_browser_warmup")
+        # 登记到后台任务集合，防止停机后任务仍持有浏览器引用导致重新拉起
+        if callable(register_task):
+            try:
+                register_task(task)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 浏览器预热任务登记失败（已忽略）: {exc}")
 
     def setup_message_components(self) -> None:
         """初始化消息构建与远程媒体依赖。"""

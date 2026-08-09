@@ -486,7 +486,8 @@ class DisasterWarningService:
             return
         warmup = getattr(manager, "warmup_browser", None)
         if callable(warmup):
-            warmup()
+            # 透传任务登记回调，确保预热任务纳入停机统一回收
+            warmup(register_task=self.register_background_task)
 
     async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""

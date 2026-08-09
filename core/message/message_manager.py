@@ -222,9 +222,14 @@ class MessagePushManager:
         """设置浏览器管理器。"""
         self.__dict__["_browser_manager"] = value
 
-    def warmup_browser(self) -> None:
-        """在合适的时机后台预热浏览器渲染底座（由上层在静默武装后触发）。"""
-        self._bootstrap_service.warmup_browser()
+    def warmup_browser(self, register_task=None) -> None:
+        """在合适的时机后台预热浏览器渲染底座（由上层在静默武装后触发）。
+
+        Args:
+            register_task: 可选回调，透传给 BootstrapService 登记预热任务，
+                便于停机时统一回收。
+        """
+        self._bootstrap_service.warmup_browser(register_task=register_task)
 
     @property
     def system_notification_service(self):
