@@ -127,12 +127,11 @@ class RealtimePayloadBuilder:
                 else {}
             ),
         )
-        # recent_pushes 统一替换为归一化事件摘要视图（event_summary_views）。
-        # 原始 recent_pushes 是统计记录，不含前端跑马灯直接消费的 weather_emoji；
-        # 若 WS 实时快照（本方法）与 HTTP 接口（build_statistics_api_payload）各自维护替换逻辑，
-        # 会导致 WS 路径下前端 state.events 的 weather_emoji 全部为空、跑马灯 emoji 失效。
-        # 收敛到本方法统一替换，HTTP 接口只做浅拷贝 + 时间戳，不再重复处理。
-        payload["recent_pushes"] = list(payload.get("event_summary_views", []))[:50]
+        # recent_pushes 已由 build_admin_statistics_projection 逐条附加 weather_emoji
+        # （保留原始记录全部字段，如 real_event_id / unique_id / update_count / history，
+        # 避免替换为 event_summary_views 导致管理端事件分组等消费者丢字段）。
+        # 此处只做裁剪限制，不再整体替换数组。
+        payload["recent_pushes"] = list(payload.get("recent_pushes", []))[:50]
         return self._enrich_session_stats_for_display(payload)
 
     def _enrich_session_stats_for_display(
@@ -219,7 +218,7 @@ class RealtimePayloadBuilder:
 
     def build_statistics_api_payload(self) -> dict[str, Any]:
         """构建 /api/statistics 载荷。"""
-        # recent_pushes 已由 build_statistics_payload 统一替换为 event_summary_views（含 weather_emoji），
+        # recent_pushes 已由 build_statistics_payload 统一裁剪并附加 weather_emoji，
         # 这里只做浅拷贝并补时间戳，避免两处重复维护裁剪逻辑。
         payload = self.build_statistics_payload().copy()
         payload["timestamp"] = datetime.now().isoformat()
