@@ -70,6 +70,14 @@ class WeatherAggregationService:
         # 最后一次成功推送的条数与目标会话（停机时用于汇总大屏"最后转发"指标）。
         self.last_flushed_count: int | None = None
         self.last_flushed_session: str | None = None
+        # 停机 flush_all 批次累计统计：条数为所有转发会话的预警总和，
+        # 会话列表覆盖全部目标会话（供停止汇总大屏"最后转发"展示）。
+        self.last_flush_batch_count: int | None = None
+        self.last_flush_batch_sessions: list[str] | None = None
+        # flush_all 批次进行中的累加器（批次结束后快照到 last_flush_batch_*）。
+        self._in_flush_batch = False
+        self._flush_batch_count = 0
+        self._flush_batch_sessions: list[str] = []
         # 推送回调，由 EventPipeline 注入
         self._flush_callback = None
         # 发送失败后放回缓冲区的重试次数限制，避免停机/网络异常时无限循环
@@ -359,6 +367,13 @@ class WeatherAggregationService:
             # 记录最后一批成功推送的条数与目标会话，供停止汇总大屏展示。
             self.last_flushed_count = len(entries)
             self.last_flushed_session = session
+            # 处于 flush_all 批次中时，把本轮成功推送累加到批次统计，
+            # 使停机大屏"最后转发"能汇总所有会话的预警总量与目标会话数，
+            # 而非仅保留最后一个会话的记录。
+            if self._in_flush_batch:
+                self._flush_batch_count += len(entries)
+                if session not in self._flush_batch_sessions:
+                    self._flush_batch_sessions.append(session)
         except Exception as e:
             # 合并转发失败：仅当平台确实不支持合并转发时，才允许降级为逐条发送。
             # 注意：不能仅凭一次发送异常就判定"平台不支持"——插件停止/网络瞬时
@@ -428,10 +443,25 @@ class WeatherAggregationService:
         task.add_done_callback(_on_done)
 
     async def flush_all(self) -> None:
-        """强制推送所有会话的缓冲区（用于插件关闭/重载）。"""
-        sessions = list(self._buffers.keys())
-        for session in sessions:
-            await self._flush_session(session)
+        """强制推送所有会话的缓冲区（用于插件关闭/重载）。
+
+        推送期间记录批次累计统计：所有成功推送会话的预警总数与会话列表，
+        停机汇总大屏据此展示"最后转发"指标（覆盖全部目标会话，而非仅最后一个）。
+        """
+        self._in_flush_batch = True
+        self._flush_batch_count = 0
+        self._flush_batch_sessions = []
+        try:
+            sessions = list(self._buffers.keys())
+            for session in sessions:
+                await self._flush_session(session)
+        finally:
+            self._in_flush_batch = False
+            # 仅当批次内确有成功推送时快照；无推送（缓冲区为空）时保留旧值，
+            # 由大屏回退到单次推送记录，避免显示误导性的"0 条"。
+            if self._flush_batch_count > 0 or self._flush_batch_sessions:
+                self.last_flush_batch_count = self._flush_batch_count
+                self.last_flush_batch_sessions = list(self._flush_batch_sessions)
 
     def get_buffer_stats(self) -> dict[str, int]:
         """获取各会话缓冲区状态（用于状态展示）。"""

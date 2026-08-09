@@ -3,7 +3,8 @@
 
 负责三件事：
 1. 插件重载时打印组织名 Pancakes-Labs 的 ASCII art 横幅（bold_cyan 配色，
-   带框线），艺术字下方的插件名、版本与简介水平居中；
+   带框线），艺术字下方的插件名、版本与简介水平居中，底部附版权声明
+   （起始年份固定 2025，结束年份动态取当前年份）；
 2. 启动静默真正结束时（_force_ready）打印一张启动汇总大屏，把散落的初始化
    信息一次性汇总展示，替代原先“车间流水账”式的逐行 INFO 日志；
 3. 服务停止时打印一张停止汇总大屏，汇总资源回收与停机耗时。
@@ -116,9 +117,17 @@ def build_banner_lines() -> list[str]:
     inner_width = art_width + 4  # 左右各留 2 空格
 
     version = (get_plugin_version() or "").strip()
+
+    # 版权年份区间：起始年份固定为 2025，结束年份动态取当前年份；
+    # 当年份恰为 2025 时只显示单一年份，避免出现 "2025-2025"。
+    current_year = datetime.now().year
+    copyright_years = f"2025-{current_year}" if current_year > 2025 else "2025"
+
     caption_lines = [
         f"Disaster Warning Plugin  ·  {version}",
         "多数据源灾害预警插件 · 地震 / 海啸 / 气象 / 台风",
+        f"Copyright © {copyright_years}",
+        "DBJD-CR & 🥞Pancakes-Labs. All Rights Reserved.",
     ]
 
     lines: list[str] = []
@@ -130,7 +139,15 @@ def build_banner_lines() -> list[str]:
     lines.append(
         _PANEL_TITLE_RIGHT + _PANEL_HORIZONTAL * inner_width + _PANEL_TITLE_LEFT
     )
-    for cap in caption_lines:
+    for cap in caption_lines[:2]:
+        lines.append(
+            f"{_PANEL_VERTICAL} {_center(cap, inner_width - 2)} {_PANEL_VERTICAL}"
+        )
+    # 版权信息与上方插件说明之间单独画一条分隔线
+    lines.append(
+        _PANEL_TITLE_RIGHT + _PANEL_HORIZONTAL * inner_width + _PANEL_TITLE_LEFT
+    )
+    for cap in caption_lines[2:]:
         lines.append(
             f"{_PANEL_VERTICAL} {_center(cap, inner_width - 2)} {_PANEL_VERTICAL}"
         )
@@ -252,6 +269,20 @@ def _center(text: str, width: int) -> str:
     left = pad_total // 2
     right = pad_total - left
     return " " * left + text + " " * right
+
+
+def _detail_name_width(data: dict[str, Any]) -> int:
+    """计算连接明细与轮询明细共享的名字列宽。
+
+    两个明细区块共用同一列宽后，状态列（已连接/已就绪）才会垂直对齐；
+    若某一区块暂无条目，则以另一区块的列宽为准，单边显示同样不失对齐。
+    """
+    widths: list[int] = []
+    for name in data.get("ws_expected") or []:
+        widths.append(_display_width(_CONNECTION_LABELS.get(name, name)))
+    for label, _ in data.get("polls") or []:
+        widths.append(_display_width(label))
+    return max(widths) if widths else 0
 
 
 class StartupSummaryPanel:
@@ -457,8 +488,8 @@ class StartupSummaryPanel:
         lines.append(row(""))
         lines.append(
             row(
-                _pad(
-                    f"🌋 Disaster Warning Plugin · {data.get('version') or '?'}",
+                _center(
+                    f"✨ Disaster Warning Plugin · {data.get('version') or '?'}",
                     inner - 1,
                 )
             )
@@ -483,7 +514,7 @@ class StartupSummaryPanel:
         )
 
         info_rows: list[tuple[str, str]] = [
-            ("✨ 启动耗时", elapsed_text),
+            ("⏳ 启动耗时", elapsed_text),
             ("📡 WebSocket", ws_text),
             ("🔄 轮询服务", poll_text),
             ("📚 加载历史记录", history_text),
@@ -519,11 +550,9 @@ class StartupSummaryPanel:
         # 状态三态：已连接 / 未连接 / 未启用，与轮询明细对齐。
         lines.append(row("连接明细"))
         if data["ws_expected"]:
-            # 展示名（_CONNECTION_LABELS 映射）统一按最大宽度对齐
-            display_names = [
-                _CONNECTION_LABELS.get(name, name) for name in data["ws_expected"]
-            ]
-            name_width = max(_display_width(n) for n in display_names)
+            # 名字列宽与轮询明细共享（基于展示名与轮询名取最大），
+            # 保证状态列（已连接/已就绪）在两个明细区块间垂直对齐。
+            name_width = _detail_name_width(data)
             status_width = max(
                 _display_width(s) for s in ("✅ 已连接", "⚠️ 未连接", "⚪ 未启用")
             )
@@ -550,10 +579,14 @@ class StartupSummaryPanel:
         else:
             lines.append(row(_pad("（无 WebSocket 连接）", inner - 1)))
 
+        # 连接明细与轮询明细之间空一行，分隔两个区块
+        lines.append(row(""))
+
         # 轮询明细：展示名 / 状态 两列对齐（三态：已就绪 / 未就绪 / 未启用）
         lines.append(row("轮询明细"))
         if data["polls"]:
-            poll_name_width = max(_display_width(label) for label, _ in data["polls"])
+            # 名字列宽与连接明细共享，保证状态列（已连接/已就绪）垂直对齐
+            poll_name_width = _detail_name_width(data)
             status_width = max(
                 _display_width(s) for s in ("✅ 已就绪", "⚠️ 未就绪", "⚪ 未启用")
             )
@@ -663,22 +696,33 @@ class StopSummaryPanel:
         data["ws_stopped"] = None if not enabled_names else len(remaining) == 0
 
         # 停机前气象预警聚合转发的最后一批条数与目标会话（flush_all 发送成功后记录）。
+        # 优先使用 flush_all 批次累计统计：条数为所有转发会话的预警总和，
+        # 会话列表覆盖全部目标会话（多会话时大屏只展示会话数量）；
+        # 回退到单次推送记录（last_flushed_*，仅含最后一个会话）。
         agg = getattr(service, "_weather_aggregation_service", None)
-        data["last_forward_count"] = getattr(agg, "last_flushed_count", None)
-        last_session = getattr(agg, "last_flushed_session", None)
-        if last_session:
-            # 复用会话配置管理器格式化会话日志字符串（私聊/群聊 ID (备注名)）。
-            session_mgr = getattr(service, "session_config_manager", None)
-            formatter = (
-                getattr(session_mgr, "get_session_log_str", None)
-                if session_mgr is not None
-                else None
-            )
-            data["last_forward_session"] = (
-                formatter(last_session) if callable(formatter) else last_session
-            )
+        session_mgr = getattr(service, "session_config_manager", None)
+        formatter = (
+            getattr(session_mgr, "get_session_log_str", None)
+            if session_mgr is not None
+            else None
+        )
+
+        def _format_session(session: str) -> str:
+            return formatter(session) if callable(formatter) else session
+
+        batch_count = getattr(agg, "last_flush_batch_count", None)
+        batch_sessions = getattr(agg, "last_flush_batch_sessions", None)
+        if batch_count is not None:
+            data["last_forward_count"] = batch_count
+            data["last_forward_sessions"] = [
+                _format_session(s) for s in (batch_sessions or [])
+            ]
         else:
-            data["last_forward_session"] = None
+            data["last_forward_count"] = getattr(agg, "last_flushed_count", None)
+            last_session = getattr(agg, "last_flushed_session", None)
+            data["last_forward_sessions"] = (
+                [_format_session(last_session)] if last_session else []
+            )
 
         # 停止流程中各资源的真实回收状态（基于运行态推导，避免无条件显示已停止）。
         # 注意：浏览器、后台延迟检测与 Web 管理端并不在本停止流程内回收，
@@ -770,8 +814,8 @@ class StopSummaryPanel:
         lines.append(row(""))
         lines.append(
             row(
-                _pad(
-                    f"🌋 Disaster Warning Plugin · {data.get('version') or '?'} — 已停止",
+                _center(
+                    f"✨ Disaster Warning Plugin · {data.get('version') or '?'} — 已停止",
                     inner - 1,
                 )
             )
@@ -793,9 +837,14 @@ class StopSummaryPanel:
 
         last_forward = data.get("last_forward_count")
         forward_text = f"{last_forward} 条预警" if last_forward is not None else "无"
-        last_session = data.get("last_forward_session")
-        if last_session:
-            forward_text = f"{forward_text} · {last_session}"
+        forward_sessions = data.get("last_forward_sessions") or []
+        if forward_sessions:
+            if len(forward_sessions) == 1:
+                # 仅 1 个会话时展示备注名
+                forward_text = f"{forward_text} · {forward_sessions[0]}"
+            else:
+                # 多个会话时只展示会话数量，避免备注名撑破大屏
+                forward_text = f"{forward_text} · {len(forward_sessions)} 个会话"
         detail_rows.append(("📨 最后转发", forward_text))
 
         ws_total = data.get("ws_total", 0)
