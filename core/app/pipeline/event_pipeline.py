@@ -270,7 +270,8 @@ class EventPipeline:
         """聚合缓冲区推送回调。
 
         与 WeatherAggregationService.set_flush_callback 约定一致：
-        成功时返回 None；全部节点发送失败时抛出 RuntimeError，
+        返回实际成功发送的条目数（规则链复核/消息构建可能过滤部分条目，
+        统计口径以实际发送为准）；全部节点发送失败时抛出 RuntimeError，
         由聚合服务捕获后放回缓冲区重试。
 
         为每条气象预警构建含图标的完整消息链后发送。
@@ -348,7 +349,8 @@ class EventPipeline:
         ]
 
         if not built_messages:
-            return
+            # 全部条目被规则链复核过滤或构建失败，实际未发送任何预警
+            return 0
 
         if mode == "forward":
             # 构建合并转发节点
@@ -423,6 +425,8 @@ class EventPipeline:
                 event_stream="weather_alarm",
                 is_silent_window=True,
             )
+            # 返回实际通过复核并构建成功的条目数（供聚合服务统计真实转发量）
+            return total
         else:
             # 逐条发送（降级路径）
             for entry, message in built_messages:
@@ -433,3 +437,5 @@ class EventPipeline:
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"
                     )
                     raise
+            # 返回实际成功发送的条目数（供聚合服务统计真实转发量）
+            return len(built_messages)

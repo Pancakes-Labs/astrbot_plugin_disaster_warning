@@ -88,8 +88,10 @@ class WeatherAggregationService:
     def set_flush_callback(self, callback) -> None:
         """注入推送回调。
 
-        签名: async def callback(session, entries, config, *, mode) -> None。
-        成功时返回 None；失败时抛异常（如 RuntimeError）由本服务捕获后回缓冲重试。
+        签名: async def callback(session, entries, config, *, mode) -> int。
+        返回实际成功发送的条目数：规则链复核/消息构建可能过滤部分条目，
+        回调必须返回真实发送数量，避免统计口径高估；
+        全部发送失败时抛异常（如 RuntimeError）由本服务捕获后回缓冲重试。
         """
         self._flush_callback = callback
 
@@ -361,17 +363,26 @@ class WeatherAggregationService:
             # 注：传入的 config 为全局配置兜底，回调（EventPipeline._flush_weather_buffer）
             # 内部会通过 session_config_manager 重新解析会话级生效配置，
             # 因此会话级差异配置（如 max_batch_size）在 flush 阶段仍能生效。
-            await self._flush_callback(session, entries, self._config, mode="forward")
+            # 回调返回实际成功发送的条数（规则链复核/消息构建会过滤部分条目，
+            # 不能用 len(entries) 统计，避免高估实际转发数量）。
+            sent_count = await self._flush_callback(
+                session, entries, self._config, mode="forward"
+            )
+            if not sent_count:
+                # 全部条目被规则链复核过滤或消息构建失败，实际未发出任何预警：
+                # 不更新"最后转发"统计，也不进入重试（过滤属正常业务路径，
+                # 构建失败条目已在回调内记录日志后丢弃）。
+                return
             # 发送成功后清空该会话的重试计数
             self._flush_retry_counts.pop(session, None)
             # 记录最后一批成功推送的条数与目标会话，供停止汇总大屏展示。
-            self.last_flushed_count = len(entries)
+            self.last_flushed_count = sent_count
             self.last_flushed_session = session
             # 处于 flush_all 批次中时，把本轮成功推送累加到批次统计，
             # 使停机大屏"最后转发"能汇总所有会话的预警总量与目标会话数，
             # 而非仅保留最后一个会话的记录。
             if self._in_flush_batch:
-                self._flush_batch_count += len(entries)
+                self._flush_batch_count += sent_count
                 if session not in self._flush_batch_sessions:
                     self._flush_batch_sessions.append(session)
         except Exception as e:
@@ -447,6 +458,8 @@ class WeatherAggregationService:
 
         推送期间记录批次累计统计：所有成功推送会话的预警总数与会话列表，
         停机汇总大屏据此展示"最后转发"指标（覆盖全部目标会话，而非仅最后一个）。
+        空批次（缓冲区无积压或全部被过滤）时清空批次快照，
+        避免大屏显示上一次停机遗留的过期"最后转发"统计。
         """
         self._in_flush_batch = True
         self._flush_batch_count = 0
@@ -457,11 +470,18 @@ class WeatherAggregationService:
                 await self._flush_session(session)
         finally:
             self._in_flush_batch = False
-            # 仅当批次内确有成功推送时快照；无推送（缓冲区为空）时保留旧值，
-            # 由大屏回退到单次推送记录，避免显示误导性的"0 条"。
-            if self._flush_batch_count > 0 or self._flush_batch_sessions:
+            # 空批次（缓冲区无积压或全部被规则过滤）必须清空全部"最后转发"
+            # 统计：大屏优先读取 last_flush_batch_count，若不更新将显示上一次
+            # 停机的过期统计；且 last_flushed_* 若保留旧值，大屏回退时同样会
+            # 显示过期数据。因此空批次一律清空，保证大屏如实显示"无"。
+            if self._flush_batch_count > 0:
                 self.last_flush_batch_count = self._flush_batch_count
                 self.last_flush_batch_sessions = list(self._flush_batch_sessions)
+            else:
+                self.last_flush_batch_count = None
+                self.last_flush_batch_sessions = None
+                self.last_flushed_count = None
+                self.last_flushed_session = None
 
     def get_buffer_stats(self) -> dict[str, int]:
         """获取各会话缓冲区状态（用于状态展示）。"""
