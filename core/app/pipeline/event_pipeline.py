@@ -19,7 +19,10 @@ from ...domain.event_models import (
     TyphoonEvent,
     WeatherEvent,
 )
-from ...message.presenters.weather_constants import resolve_weather_emoji
+from ...message.presenters.weather_constants import (
+    resolve_weather_color_emoji,
+    resolve_weather_emoji,
+)
 from ...message.push.weather_aggregation_service import WeatherBufferEntry
 
 
@@ -238,6 +241,13 @@ class EventPipeline:
                         event_metadata.get("weather_type"),
                         event_metadata.get("type"),
                     )
+                    # 颜色 emoji（与推送展示器口径一致）：标题/副标题含颜色词时给出 🔴🟠🟡🔵
+                    event_summary["weather_color_emoji"] = resolve_weather_color_emoji(
+                        event_metadata.get("level"),
+                        event_metadata.get("alert_level"),
+                        envelope.event.title,
+                        envelope.event.headline,
+                    )
                 await self.service.web_admin_server.notify_event(event_summary)
             except Exception as ws_e:
                 # 管理端广播失败不影响主链路；用户侧推送与统计已完成，因此这里按可降级的旁路处理。
@@ -270,7 +280,8 @@ class EventPipeline:
         """聚合缓冲区推送回调。
 
         与 WeatherAggregationService.set_flush_callback 约定一致：
-        成功时返回 None；全部节点发送失败时抛出 RuntimeError，
+        返回实际成功发送的条目数（规则链复核/消息构建可能过滤部分条目，
+        统计口径以实际发送为准）；全部节点发送失败时抛出 RuntimeError，
         由聚合服务捕获后放回缓冲区重试。
 
         为每条气象预警构建含图标的完整消息链后发送。
@@ -348,7 +359,8 @@ class EventPipeline:
         ]
 
         if not built_messages:
-            return
+            # 全部条目被规则链复核过滤或构建失败，实际未发送任何预警
+            return 0
 
         if mode == "forward":
             # 构建合并转发节点
@@ -370,6 +382,9 @@ class EventPipeline:
             node_count = (total + max_batch - 1) // max_batch
             sent_nodes = 0
             failed_nodes = 0
+            # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
+            # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
+            sent_entry_count = 0
 
             for batch_idx in range(node_count):
                 batch = built_messages[
@@ -398,6 +413,8 @@ class EventPipeline:
                 try:
                     await message_manager.session_sender.send(session, chain)
                     sent_nodes += 1
+                    # 该节点发送成功：节点内实际加入内容的条目即为成功发出
+                    sent_entry_count += len(batch)
                 except Exception as e:
                     # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
@@ -418,11 +435,15 @@ class EventPipeline:
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
-                f"共 {total} 条预警，切为 {sent_nodes} 个节点（单批上限 {max_batch}）"
+                f"共 {sent_entry_count} 条预警，切为 {sent_nodes} 个节点"
+                f"（单批上限 {max_batch}）"
                 + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
                 event_stream="weather_alarm",
                 is_silent_window=True,
             )
+            # 返回实际成功发送（所在节点发送成功）的条目数，
+            # 供聚合服务统计真实转发量，避免高报成功数量。
+            return sent_entry_count
         else:
             # 逐条发送（降级路径）
             for entry, message in built_messages:
@@ -433,3 +454,5 @@ class EventPipeline:
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"
                     )
                     raise
+            # 返回实际成功发送的条目数（供聚合服务统计真实转发量）
+            return len(built_messages)

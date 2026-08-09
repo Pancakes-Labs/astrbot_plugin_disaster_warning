@@ -223,6 +223,22 @@ def _resolve_emoji_from_code(texts) -> str | None:
     return None
 
 
+def resolve_weather_color_emoji(*texts: str) -> str:
+    """从文本中解析气象预警最终颜色并返回对应 Emoji（如 🔴🟠🟡🔵）。
+
+    与推送展示器（weather_presenter）共用 extract_final_weather_color 口径，
+    正确处理"升级为/降级为"场景；无颜色命中时返回空串。
+
+    Args:
+        texts: 待检索的文本（level、title、headline 等），按优先级传入。
+
+    Returns:
+        颜色 Emoji；无匹配时返回空串。
+    """
+    color = extract_final_weather_color(*texts)
+    return COLOR_LEVEL_EMOJI.get(color, "") if color else ""
+
+
 def resolve_weather_emoji(*texts: str, default: str = "⛈️") -> str:
     """解析气象类型并返回对应 Emoji。
 

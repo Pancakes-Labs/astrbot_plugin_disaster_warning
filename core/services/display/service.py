@@ -20,7 +20,10 @@ from ...domain.event_context import (
     WeatherDisplayContext,
 )
 from ...domain.event_models import EventEnvelope
-from ...message.presenters.weather_constants import resolve_weather_emoji
+from ...message.presenters.weather_constants import (
+    resolve_weather_color_emoji,
+    resolve_weather_emoji,
+)
 from .builders.common import prepare_display_projection
 from .builders.earthquake_context_builder import build_earthquake_display_context
 from .builders.tsunami_context_builder import build_tsunami_display_context
@@ -189,6 +192,30 @@ def build_admin_statistics_projection(
     snet_stats = dict(stats.get("snet_stats", {}))
     # 取最近250条推送记录用于管理端面板渲染，多余的予以截断以减轻前台压力
     recent_push_records = list(stats.get("recent_pushes", [])[:250])
+    # 为气象预警记录就地附加 weather_emoji / weather_color_emoji（保留原始记录全部字段，
+    # 如 real_event_id / unique_id / update_count / history，避免替换数组导致管理端
+    # 事件分组等消费者丢字段）。浅拷贝后写入，避免直接改写统计内存态中的原始 dict。
+    enriched_push_records = []
+    for _rec in recent_push_records:
+        if not isinstance(_rec, dict):
+            enriched_push_records.append(_rec)
+            continue
+        _enriched = dict(_rec)
+        if _enriched.get("type") in ("weather_alarm", "weather"):
+            _enriched["weather_emoji"] = resolve_weather_emoji(
+                _enriched.get("description"),
+                _enriched.get("subtitle"),
+                _enriched.get("weather_type_code"),
+            )
+            # 颜色 emoji：与推送展示器口径一致（level / 标题 / 副标题 / 编码兜底）
+            _enriched["weather_color_emoji"] = resolve_weather_color_emoji(
+                _enriched.get("level"),
+                _enriched.get("description"),
+                _enriched.get("subtitle"),
+                _enriched.get("weather_type_code"),
+            )
+        enriched_push_records.append(_enriched)
+    recent_push_records = enriched_push_records
     # 解析用于地图渲染的地震位置标记列表
     earthquake_views = build_recent_earthquake_views(recent_push_records)
     # 解析用于前端通知滚动条的通用事件简表

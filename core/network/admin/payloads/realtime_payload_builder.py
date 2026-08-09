@@ -127,6 +127,11 @@ class RealtimePayloadBuilder:
                 else {}
             ),
         )
+        # recent_pushes 已由 build_admin_statistics_projection 逐条附加 weather_emoji
+        # （保留原始记录全部字段，如 real_event_id / unique_id / update_count / history，
+        # 避免替换为 event_summary_views 导致管理端事件分组等消费者丢字段）。
+        # 此处只做裁剪限制，不再整体替换数组。
+        payload["recent_pushes"] = list(payload.get("recent_pushes", []))[:50]
         return self._enrich_session_stats_for_display(payload)
 
     def _enrich_session_stats_for_display(
@@ -213,14 +218,9 @@ class RealtimePayloadBuilder:
 
     def build_statistics_api_payload(self) -> dict[str, Any]:
         """构建 /api/statistics 载荷。"""
+        # recent_pushes 已由 build_statistics_payload 统一裁剪并附加 weather_emoji，
+        # 这里只做浅拷贝并补时间戳，避免两处重复维护裁剪逻辑。
         payload = self.build_statistics_payload().copy()
-        # 裁剪 recent_pushes。管理端统计页面仅需要基础统计及少量近期推送（通常由 event_summary_views 展现）
-        # 避免把近千条原始 recent_pushes 完整数据传给前端，减少序列化及网络传输开销（原本的 recent_pushes 长度可达 500）
-        payload["recent_pushes"] = list(payload.get("event_summary_views", []))[:50]
-        # 同时为了避免在 statsNormalizer.js 中因为 stats.recent_pushes 未传而降级丢失，
-        # 在这里显式清理大块 recent_pushes，并用经过裁剪的列表作为 recent_pushes
-        if "recent_pushes" in payload:
-            payload["recent_pushes"] = list(payload["recent_pushes"])[:50]
         payload["timestamp"] = datetime.now().isoformat()
         return payload
 

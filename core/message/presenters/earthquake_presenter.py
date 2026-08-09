@@ -21,6 +21,7 @@ from ...services.geo.cn_district_intensity_service import (
 from ...services.geo.intensity_service import IntensityCalculator
 from ...services.geo.jma_seis_int_loc_loader import get_sect_map
 from ...services.geo.travel_time_service import compute_s_wave_countdown
+from ...services.identity.event_identity import ensure_aware_datetime
 from .base_presenter import BasePresenter
 
 
@@ -167,6 +168,11 @@ def _resolve_shock_time(display_context: EarthquakeDisplayContext):
 # 剩余时间小于等于该值时，展示为紧迫提示文案，提醒用户做好避险准备。
 S_WAVE_URGENT_THRESHOLD_SEC = 10
 
+# S 波倒计时的传输/构建延迟补偿秒数。
+# 倒计时在 presenter 构建消息时计算，到消息真正送达用户还有地图渲染、
+# 网络传输等耗时；这里主动扣除预估延迟，让用户看到的剩余时间更贴近真实接收时刻
+S_WAVE_TRANSMIT_DELAY_SEC = 1.0
+
 
 def _append_local_estimation(
     lines: list[str],
@@ -209,8 +215,22 @@ def _append_local_estimation(
     # S 波实时倒计时（近似实时预估）：
     # 保留上方两行绝对走时展示，这里额外追加一行基于「发震时间 + 当前墙钟」
     # 投影出的剩余到达秒数，让每一报推送都展示当下最新的临近状态。
+    # 关键点：
+    # - 发震时间与走时均使用「当报最新数据」，绝不冻结历史值；
+    #   若后续报修正把发震时间往晚调，剩余秒数允许自然回涨（正常延时）。
+    # - naive 发震时间按来源时区补齐（如日本源为 JST），避免被误当 UTC
+    #   导致 elapsed 错算、倒计时几乎不走。
+    # - 额外扣除传输/构建延迟补偿，让数字更贴近用户真实接收时刻。
     # 缺发震时间或 S 波走时时静默跳过该行，不影响原有展示。
-    s_remaining = compute_s_wave_countdown(display_context.occurred_at, s_sec)
+    occurred_aware = ensure_aware_datetime(
+        display_context.occurred_at,
+        display_context.source_id,
+    )
+    s_remaining = compute_s_wave_countdown(
+        occurred_aware,
+        s_sec,
+        extra_delay_sec=S_WAVE_TRANSMIT_DELAY_SEC,
+    )
     if s_remaining is not None:
         if s_remaining <= 0:
             lines.append("⏳S波已到达，请保持警惕")

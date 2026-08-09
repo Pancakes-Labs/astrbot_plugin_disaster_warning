@@ -11,9 +11,8 @@ from ....utils.time_converter import TimeConverter
 from ...domain.event_context import WeatherDisplayContext
 from .base_presenter import BasePresenter
 from .weather_constants import (
-    COLOR_LEVEL_EMOJI,
     DEFAULT_MAX_DESCRIPTION_LENGTH,
-    extract_final_weather_color,
+    resolve_weather_color_emoji,
     resolve_weather_emoji,
 )
 
@@ -65,10 +64,9 @@ class WeatherAlertPresenter(BasePresenter):
 
         # 颜色等级有时直接体现在标题或颜色字段中，这里统一补上颜色提示图标。
         # 对于"升级为/降级为"类预警，取变更后的最终颜色，避免显示变更前的旧颜色。
-        final_color = extract_final_weather_color(
+        color_emoji = resolve_weather_color_emoji(
             display_context.severity_color, title, headline
         )
-        color_emoji = COLOR_LEVEL_EMOJI.get(final_color, "") if final_color else ""
 
         lines = [f"{emoji}[气象预警] 中国气象局"]
         if title:

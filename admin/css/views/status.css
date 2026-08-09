@@ -1057,6 +1057,15 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     flex-shrink: 0;
 }
 
+/* 气象预警颜色等级 Emoji：与类型图标同尺寸对齐，无额外间距干扰描述 */
+.news-ticker-color-icon {
+    font-size: 14px;
+    line-height: 20px;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
 /* 走马灯内微型震级高亮胶囊 */
 .news-ticker-mag-chip,
 .news-ticker-mag-chip.MuiChip-root,
