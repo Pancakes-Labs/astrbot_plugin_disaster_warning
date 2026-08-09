@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from astrbot.api import logger
+
 from ..domain.event_models import TyphoonEvent
 from ..domain.typhoon import level_weight, to_float
 from ..services.geo.intensity_service import IntensityCalculator
@@ -325,6 +327,16 @@ class TyphoonRule(BaseRule):
         # 优先级 1：distance_filter 显式坐标（无论是否复用本地监控均优先）。
         distance_lat = to_float(distance_filter.get("latitude"))
         distance_lon = to_float(distance_filter.get("longitude"))
+
+        # 只配置了其中一个坐标视为不完整配置：记警告日志并忽略。
+        if (distance_lat is None) ^ (distance_lon is None):
+            logger.warning(
+                "[灾害预警] 距离过滤坐标配置不完整："
+                f"纬度为{distance_filter.get('latitude')!r}, "
+                f"经度为{distance_filter.get('longitude')!r}。"
+                "必须同时设置经纬度才能生效，本次将忽略该配置。"
+            )
+
         if distance_lat is not None and distance_lon is not None:
             latitude = distance_lat
             longitude = distance_lon

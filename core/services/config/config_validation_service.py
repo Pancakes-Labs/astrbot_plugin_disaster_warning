@@ -788,24 +788,33 @@ class ConfigValidator:
             default=1200,
             field_name="台风最大中心距离",
         )
-        # 距离过滤坐标仅在用户显式配置时写入；未配置时不注入默认坐标，
+        # 距离过滤坐标仅在用户显式配置有效数值时写入；未配置或非法值不注入默认坐标
         # 避免“未配置本地参考点”的会话被默认北京坐标兜底、误触发距离/逼近过滤。
-        if distance_filter.get("latitude") is not None:
-            distance_filter["latitude"] = ConfigValidator._clamp_number(
-                distance_filter.get("latitude"),
-                minimum=-90,
-                maximum=90,
-                default=39.9042,
-                field_name="台风关注点纬度",
-            )
-        if distance_filter.get("longitude") is not None:
-            distance_filter["longitude"] = ConfigValidator._clamp_number(
-                distance_filter.get("longitude"),
-                minimum=-180,
-                maximum=180,
-                default=116.4074,
-                field_name="台风关注点经度",
-            )
+        for coord_key, minimum, maximum, default, field_name in (
+            ("latitude", -90.0, 90.0, 39.9042, "台风关注点纬度"),
+            ("longitude", -180.0, 180.0, 116.4074, "台风关注点经度"),
+        ):
+            raw_coord = distance_filter.get(coord_key)
+            # bool 是 int 的子类，显式排除，避免 True/False 被当作 1.0/0.0 坐标。
+            if raw_coord is None or isinstance(raw_coord, bool):
+                distance_filter.pop(coord_key, None)
+                continue
+            if isinstance(raw_coord, (int, float)):
+                number = float(raw_coord)
+                if number < minimum or number > maximum:
+                    logger.warning(
+                        f"[灾害预警] 配置警告: {field_name} {number} 超出范围 "
+                        f"({minimum}~{maximum})，已删除该无效坐标。"
+                    )
+                    distance_filter.pop(coord_key, None)
+                else:
+                    distance_filter[coord_key] = number
+            else:
+                logger.warning(
+                    f"[灾害预警] 配置警告: {field_name} 值 {raw_coord!r} 不是有效数值，"
+                    "已删除该无效坐标。"
+                )
+                distance_filter.pop(coord_key, None)
         if "place_name" in distance_filter and not isinstance(
             distance_filter.get("place_name"), str
         ):
