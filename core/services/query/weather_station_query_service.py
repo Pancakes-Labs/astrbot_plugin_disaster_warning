@@ -759,14 +759,19 @@ class WeatherStationQueryService:
         # 反向用 NMC 城市名过滤：只保留能匹配 NMC 城市的站，剔除台湾/街镇自动站污染。
         nmc_city_names: set[str] = set()
         provinces_all = await self._nmc.fetch_provinces()
-        # 首轮拉取各省城市：既用于反向过滤 FAN 站名，也作为后续列表数据源复用
+        # 首轮拉取各省城市：既用于反向过滤 FAN 站名，也作为后续列表数据源复用。
+        # fetch_cities 失败时返回空列表，与「该省无数据」无法区分，因此把未取到
+        # 城市的省份记录为加载失败，避免全国列表静默缺省误导用户。
         province_cities: dict[str, list[dict[str, Any]]] = {}
+        failed_provinces: list[str] = []
         for p in provinces_all:
             cities = await self._nmc.fetch_cities(p["code"])
             if cities:
                 province_cities[p["code"]] = cities
                 for c in cities:
                     nmc_city_names.add(c["city"])
+            else:
+                failed_provinces.append(str(p.get("name") or p["code"]))
         fan_map, fan_error = await self._build_fan_name_to_sid(
             nmc_city_names=nmc_city_names
         )
@@ -803,13 +808,25 @@ class WeatherStationQueryService:
                 if chunk:
                     lines.append("  " + "、".join(chunk))
                 blocks.append("\n".join(lines))
+            if not blocks:
+                return {
+                    "success": False,
+                    "error": "获取全国气象站列表失败：所有省份数据加载失败",
+                }
             text = "📋 全国气象站列表：\n" + "\n\n".join(blocks)
             text += "\n\n💡 发送「气象站列表 <省份名>」查看该省全部站点"
+            if failed_provinces:
+                # 部分省份加载失败：明确标记缺失省份，避免被误认为完整全国列表
+                shown = "、".join(failed_provinces[:5])
+                if len(failed_provinces) > 5:
+                    shown += f" 等 {len(failed_provinces)} 个"
+                text += f"\n\n⚠️ 以下省份数据加载失败，已从列表中跳过：{shown}"
             return {
                 "success": True,
                 "text": text,
                 "blocks": blocks,
                 "is_nationwide": True,
+                "missing_provinces": failed_provinces,
             }
 
         pname = str(province_keyword).strip().removesuffix("省").removesuffix("市")
