@@ -63,15 +63,18 @@ def build_forward_nodes(
     def _append(text: str, quote: bool = False, components: list | None = None) -> None:
         if not text and not components:
             return
-        if quote and plugin is not None:
-            content = plugin._with_quote_reply(
-                event, [Comp.Plain(text)] if text else []
-            )
-        elif components:
-            # 文本在前、附加组件（如图片）在后，避免只发图丢文本
-            content = ([Comp.Plain(text)] if text else []) + list(components)
+        # 文本在前、附加组件（如图片）在后，避免只发图丢文本
+        base_content: list = ([Comp.Plain(text)] if text else []) + (
+            list(components) if components else []
+        )
+        if quote:
+            if plugin is not None and hasattr(plugin, "_with_quote_reply"):
+                content = plugin._with_quote_reply(event, base_content)
+            else:
+                # 未实现引用辅助时降级为普通节点，避免运行时错误
+                content = base_content
         else:
-            content = [Comp.Plain(text)]
+            content = base_content
         nodes.nodes.append(Comp.Node(uin=bot_id, name=name, content=content))
 
     if header:
@@ -123,6 +126,19 @@ def split_forward_batches(
     batches: list[Comp.Nodes] = []
     total_blocks = len(blocks)
     batch_total = (total_blocks + max_nodes - 1) // max_nodes if total_blocks else 0
+
+    # 仅提供 header 而无正文块时，仍补一批仅含头部节点的转发（与早退条件一致）
+    if total_blocks == 0:
+        nodes = build_forward_nodes(
+            [],
+            event=event,
+            header=header,
+            name=name,
+            plugin=plugin,
+        )
+        if nodes is not None:
+            batches.append(nodes)
+        return batches
 
     # 分批切块（每批 max_nodes 个正文块）
     for start in range(0, total_blocks, max_nodes):

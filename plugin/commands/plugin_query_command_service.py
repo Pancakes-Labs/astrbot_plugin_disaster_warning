@@ -701,13 +701,16 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 comps = None
                 if len(chain_parts) > 1:
                     comps = [chain_parts[1:]]
-                await send_forward_blocks(
+                ok = await send_forward_blocks(
                     self.plugin,
                     event,
                     [text],
                     name="灾害预警",
                     block_components=comps,
                 )
+                if not ok:
+                    # 合并转发失败（如平台拒绝）时回退为普通引用回复，确保有文本输出
+                    yield _quoted_plain_result(text)
                 return
 
             # 非完整模式：有路径图时走普通消息链（文本+图），无图走普通文本回复
@@ -838,13 +841,15 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 # 卡片模式（图片）保持普通引用回复
                 yield _quoted_plain_result(text)
             else:
-                # 文本模式：多条地震列表显式走合并转发
-                await send_forward_blocks(
+                # 文本模式：多条地震列表显式走合并转发，失败则回退引用回复
+                ok = await send_forward_blocks(
                     self.plugin,
                     event,
                     [text],
                     name="灾害预警",
                 )
+                if not ok:
+                    yield _quoted_plain_result(text)
         except Exception as e:
             logger.error(f"[灾害预警] 查询地震列表失败: {e}")
             yield _quoted_plain_result(f"❌ 查询失败: {e}")
@@ -1000,12 +1005,16 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 },
             )
             # JMA 震央分布显式走合并转发（震级分布/较大地震/地点统计）
-            await send_forward_blocks(
+            text = build_jma_hypo_list_text(result)
+            ok = await send_forward_blocks(
                 self.plugin,
                 event,
-                [build_jma_hypo_list_text(result)],
+                [text],
                 name="灾害预警",
             )
+            if not ok:
+                # 合并转发失败时回退为普通引用回复，确保有文本输出
+                yield _quoted_plain_result(text)
         except Exception as e:
             logger.error(
                 f"[灾害预警] JMA 震央分布查询失败: {e}\n{traceback.format_exc()}"
@@ -1433,13 +1442,16 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 "command_query_radar_list",
                 {"success": True},
             )
-            # 雷达站点列表显式走合并转发
-            await send_forward_blocks(
+            # 雷达站点列表显式走合并转发，失败则回退引用回复
+            text = result.get("text", "")
+            ok = await send_forward_blocks(
                 self.plugin,
                 event,
-                [result.get("text", "")],
+                [text],
                 name="灾害预警",
             )
+            if not ok:
+                yield quoted_plain_result(self.plugin, event, text)
         except Exception as e:
             logger.error(
                 f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
@@ -1529,9 +1541,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             self.plugin._weather_station_query_service = service
         return service
 
-    async def handle_query_weather_real(
-        self, event, keyword: str | None = None, element: str | None = None
-    ):
+    async def handle_query_weather_real(self, event, keyword: str | None = None):
         """处理气象站实况查询命令（/实况 /气象站）。"""
         try:
             if not keyword or not str(keyword).strip():
@@ -1539,8 +1549,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     self.plugin,
                     event,
                     "🌦️ 气象站实况查询\n"
-                    "用法：/实况 <站点代码或站名> [要素]\n"
-                    "示例：/实况 59270、/气象站 怀集、/气象站 广东怀集 温度",
+                    "用法：/实况 <站点代码或站名>\n"
+                    "示例：/实况 59270、/气象站 怀集、/气象站 广东怀集",
                 )
                 return
 

@@ -461,10 +461,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 "command_stats_query",
                 {"success": True},
             )
-            # 统计报告显式走合并转发
-            await send_forward_blocks(
+            # 统计报告显式走合并转发，失败则回退普通引用回复
+            ok = await send_forward_blocks(
                 self.plugin, event, [stats_summary], name="灾害预警"
             )
+            if not ok:
+                yield _quoted_plain_result(stats_summary)
         except Exception as e:
             logger.error(f"[灾害预警] 获取统计信息失败: {e}")
             yield _quoted_plain_result(f"❌ 获取统计信息失败: {str(e)}")
