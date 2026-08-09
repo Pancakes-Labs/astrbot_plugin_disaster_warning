@@ -382,6 +382,9 @@ class EventPipeline:
             node_count = (total + max_batch - 1) // max_batch
             sent_nodes = 0
             failed_nodes = 0
+            # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
+            # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
+            sent_entry_count = 0
 
             for batch_idx in range(node_count):
                 batch = built_messages[
@@ -410,6 +413,8 @@ class EventPipeline:
                 try:
                     await message_manager.session_sender.send(session, chain)
                     sent_nodes += 1
+                    # 该节点发送成功：节点内实际加入内容的条目即为成功发出
+                    sent_entry_count += len(batch)
                 except Exception as e:
                     # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
@@ -430,13 +435,15 @@ class EventPipeline:
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
-                f"共 {total} 条预警，切为 {sent_nodes} 个节点（单批上限 {max_batch}）"
+                f"共 {sent_entry_count} 条预警，切为 {sent_nodes} 个节点"
+                f"（单批上限 {max_batch}）"
                 + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
                 event_stream="weather_alarm",
                 is_silent_window=True,
             )
-            # 返回实际通过复核并构建成功的条目数（供聚合服务统计真实转发量）
-            return total
+            # 返回实际成功发送（所在节点发送成功）的条目数，
+            # 供聚合服务统计真实转发量，避免高报成功数量。
+            return sent_entry_count
         else:
             # 逐条发送（降级路径）
             for entry, message in built_messages:
