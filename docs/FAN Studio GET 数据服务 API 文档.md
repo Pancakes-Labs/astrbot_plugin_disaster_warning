@@ -98,7 +98,7 @@ curl "https://api.fanstudio.tech/tool/geo_ip.php"
 
 | 参数 | 类型 | 是否必需 | 描述与可选值 |
 | --- | --- | --- | --- |
-| `type` | string | **是** | 指定要查询的气象要素类型。 **如果此参数缺失或无效，将返回错误信息。**   可选值包括： - `temperature` (气温) - `pressure` (气压) - `windspeed` (风速) - `maxwindspeed24h` (24小时最大风速) - `humidity` (湿度) - `visibility` (能见度) |
+| `type` | string | **是** | 指定要查询的气象要素类型。 **如果此参数缺失或无效，将返回错误信息。**   可选值包括： - `temperature` (气温) - `pressure` (气压) - `windspeed` (风速) - `maxwindspeed24h` (24小时最大风速) - `humidity` (相对湿度) - `visibility` (能见度) - `rain` (1小时降水) |
 
 ## 请求示例
 
@@ -233,6 +233,74 @@ curl "https://api.fanstudio.tech/we/station_all.php?type=temperature"
 | `bounds.sw` | array | 图片西南角（左下角）坐标数组，格式为 `[纬度, 经度]` 。 |
 | `bounds.ne` | array | 图片东北角（右上角）坐标数组，格式为 `[纬度, 经度]` 。 |
 | `image` | string | 卫星云图的 Base64 编码字符串 |
+
+---
+
+## 气象站单站历史数据 /we/station\_history.php
+
+**请求方法:** `GET`  
+**接口路径:** `/we/station_history.php`  
+**功能描述:** 根据站点ID和日期，获取该站点一整天的逐小时历史气象数据。
+
+## URL 参数
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --- | --- | --- | --- |
+| `id` | string | **是** | 需要查询的气象站点的唯一ID。 |
+| `date` | string | **是** | 需要查询的日期，格式为 `YYYY-MM-DD` 。 |
+
+## 请求示例
+
+查询ID为 `56288` 的气象站在 `2025-01-01` 的历史数据：
+
+```bash
+curl "https://api.fanstudio.tech/we/station_history.php?id=56288&date=2025-01-01"
+```
+
+## 成功响应示例
+
+响应体是一个JSON对象，其中每个键 (key) 是一个具体的时间点，值 (value) 是该时间点的气象数据。
+
+```json
+{
+  "2025-01-01 01:00 +0800": {
+    "temperature": "3.6",
+    "pressure": "961.5",
+    "humidity": "93",
+    "wind_direction": "9/N",
+    "wind_speed": "0.7"
+  },
+  "2025-01-01 02:00 +0800": {
+    "temperature": "3.3",
+    "pressure": "961.2",
+    "humidity": "95",
+    "wind_direction": "304/NW",
+    "wind_speed": "0.2"
+  },
+  "2025-01-01 03:00 +0800": {
+    "temperature": "3.5",
+    "pressure": "961.1",
+    "humidity": "97",
+    "wind_direction": "59/ENE",
+    "wind_speed": "0.3"
+  }
+  // ... 当天其他小时的数据
+}
+```
+
+### 响应字段说明 (每个时间点对象内部)
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `temperature` | string | 温度 (°C)。 |
+| `pressure` | string | 气压 (hPa)。 |
+| `humidity` | string | 相对湿度 (%)。 |
+| `wind_direction` | string | 风向，格式为 "角度/方向缩写"。 |
+| `wind_speed` | string | 风速 (m/s)。 |
+
+## 错误处理
+
+如果提供的 `id` 或 `date` 无效，或找不到对应的数据，可能会返回一个空对象 `{}` 或错误信息。
 
 ---
 
