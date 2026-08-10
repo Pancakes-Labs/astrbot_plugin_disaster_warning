@@ -25,6 +25,15 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ....utils.text_format_utils import (
+    MISSING_VALUE,
+)
+from ....utils.text_format_utils import (
+    display_width as _display_width,
+)
+from ....utils.text_format_utils import (
+    pad_display_width as _pad_display_width,
+)
 from ...network.http.nmc_realrank_client import (
     RANK_HOURS,
     RANK_TYPES,
@@ -40,9 +49,6 @@ DEFAULT_LIMIT = 10
 
 # 无参查询时，当前整点数据未发布时自动回退的小时数上限（每次回退 1 小时）
 AUTO_RETRY_HOURS = 3
-
-# 缺测标记值：接口用 9999 表示缺测，显示为「-」。
-MISSING_VALUE = 9999.0
 
 # 排行要素定义：展示名、接口 type、数值单位、输出标题、默认时间跨度
 # mintemp（最低气温）与 maxtemp 共用「气温」大类，但走不同接口 type。
@@ -241,48 +247,6 @@ def parse_time_arg(text: str) -> str | None:
     return None
 
 
-def _display_width(s: str) -> int:
-    """估算字符串显示宽度：中文按 2 字符宽、ASCII 按 1 字符宽。"""
-    w = 0
-    for ch in str(s):
-        w += 2 if ord(ch) > 127 else 1
-    return w
-
-
-# 全角空格（U+3000）：聊天平台会压缩连续半角空格导致对齐失效，
-# 全角空格不会被压缩，且显示宽度固定为 2 列，适合用来做列对齐。
-_FULLWIDTH_SPACE = "\u3000"
-
-
-def _pad_display_width(s: str, width: int, align: str = "left") -> str:
-    """按显示宽度填充/截断字符串到指定宽度。
-
-    终端等宽字体下中文字符占 2 列，直接用 str.ljust/rjust 会因
-    字符数与显示宽度不一致导致列错位；且聊天平台会压缩连续半角空格，
-    因此这里用「全角空格为主、半角空格兜奇数」的方式补齐显示宽度：
-    - 全角空格占 2 显示宽，不会被平台压缩；
-    - 若需要补奇数列宽，用 1 个半角空格兜底（夹在全角空格之间，
-      不会触发平台连续空格折叠）。
-
-    Args:
-        s: 原始字符串。
-        width: 目标显示宽度。
-        align: 对齐方式，left/right。
-
-    Returns:
-        填充后的字符串（按显示宽度对齐）。
-    """
-    s = str(s)
-    cur = _display_width(s)
-    if cur >= width:
-        return s
-    pad_count = width - cur
-    full = pad_count // 2
-    half = pad_count % 2
-    pad = _FULLWIDTH_SPACE * full + " " * half
-    return s + pad if align == "left" else pad + s
-
-
 def _format_value(value: Any, *, unit: str) -> str:
     """格式化排行数值（右对齐到固定宽度）。
 
@@ -392,15 +356,24 @@ def build_rank_text(
     value_right = station_width + 11
 
     # 标题行：日期文本规范化（连字符两侧加空格）。
-    # 日期比数值列短时，标题左对齐、日期右对齐到数值列右端；
-    # 日期比数值列长（超宽）时，标题与日期之间至少保留 2 个空格。
+    # 目标：日期右端精确对齐到数值列右端（value_right，与下方数值右对齐）；
+    # 若「标题 + 2 空格 + 日期」整体宽度超过数值列右端（标题或日期过宽），
+    # 则退化为「标题 + 2 空格 + 日期」保底分隔，日期右端随长度自然延伸。
+    # 注意：不能只用 pad_display_width(title, value_right - date_width)——
+    # 当目标宽度 ≤ 标题自身宽度时它不会填充任何空格，导致标题与日期
+    # 之间 0 空格粘连（如「最低气温排行」+ 较长日期）。
     display_time = _normalize_time_text(time_text)
     date_width = _display_width(display_time)
-    title_pad = value_right - date_width
-    if title_pad >= 2:
-        header = _pad_display_width(title, title_pad, align="left") + display_time
+    title_width = _display_width(title)
+    min_gap = 2
+    if title_width + min_gap + date_width <= value_right:
+        # 宽度充足：标题填充到「数值列右端 - 日期宽」，日期贴右端精确对齐
+        header = (
+            _pad_display_width(title, value_right - date_width, align="left")
+            + display_time
+        )
     else:
-        # 日期超宽：标题 + 2 空格 + 日期（不再强行右对齐）
+        # 宽度不足（标题或日期超宽）：标题 + 2 空格 + 日期（保底分隔）
         header = f"{title}  {display_time}"
     lines.append(header)
 
