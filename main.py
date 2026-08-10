@@ -531,6 +531,45 @@ class DisasterWarningPlugin(Star):
         ):
             yield result
 
+    @filter.command("空气质量", alias={"AQI", "aqi", "空气质量指数"})
+    async def query_aqi(
+        self,
+        event: AstrMessageEvent,
+        keyword: str = None,
+        optional_a: str = None,
+    ):
+        """查询城市/省份/全国空气质量（FAN Studio AQI）"""
+        async for result in self._query_command_service.handle_query_aqi(
+            event, keyword=keyword, optional_a=optional_a
+        ):
+            yield result
+
+    @filter.command(
+        "空气质量排行", alias={"AQI排行", "aqi排行", "空气质量排行榜", "空气榜"}
+    )
+    async def query_aqi_rank(
+        self,
+        event: AstrMessageEvent,
+        direction: str = None,
+    ):
+        """查询空气质量排行榜（最好/最差 Top10）"""
+        async for result in self._query_command_service.handle_query_aqi_rank(
+            event, direction=direction
+        ):
+            yield result
+
+    @filter.command("空气质量列表", alias={"AQI列表", "aqi列表", "空气质量城市列表"})
+    async def query_aqi_city_list(
+        self,
+        event: AstrMessageEvent,
+        province: str = None,
+    ):
+        """查询空气质量支持的城市列表（可按省份过滤）"""
+        async for result in self._query_command_service.handle_query_aqi_city_list(
+            event, province=province
+        ):
+            yield result
+
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
         """AstrBot加载完成时的钩子"""
