@@ -380,11 +380,18 @@ class DisasterWarningService:
             return
 
         async def _warmup_and_keepalive() -> None:
-            await channel.warm_up_access_token()
+            try:
+                await channel.warm_up_access_token()
+            except Exception as exc:
+                # 预热失败不抛给事件循环，避免“Task exception was never retrieved”噪音
+                logger.warning(f"[灾害预警] EQSC AccessToken 预热异常（已记录）: {exc}")
             # 预热成功与否都启动保活：失败时循环会按重试间隔继续尝试
-            start_keepalive = getattr(channel, "start_token_keepalive", None)
-            if callable(start_keepalive):
-                start_keepalive(register_task=self.register_background_task)
+            try:
+                start_keepalive = getattr(channel, "start_token_keepalive", None)
+                if callable(start_keepalive):
+                    start_keepalive(register_task=self.register_background_task)
+            except Exception as exc:
+                logger.warning(f"[灾害预警] EQSC token 保活启动异常（已记录）: {exc}")
 
         warmup_task = asyncio.create_task(
             _warmup_and_keepalive(),
@@ -401,8 +408,18 @@ class DisasterWarningService:
             enrichment_service=self.typhoon_enrichment_service,
             statistics_manager=self.statistics_manager,
         )
+
+        async def _safe_rebuild() -> None:
+            try:
+                await self.typhoon_history_rebuild_service.try_cold_start_rebuild()
+            except Exception as exc:
+                # 重建失败不抛给事件循环，避免“Task exception was never retrieved”噪音
+                logger.warning(
+                    f"[灾害预警] EQSC 历史台风数据库重建异常（已记录）: {exc}"
+                )
+
         rebuild_task = asyncio.create_task(
-            self.typhoon_history_rebuild_service.try_cold_start_rebuild(),
+            _safe_rebuild(),
             name="dw_rebuild_typhoon_db",
         )
         self.register_background_task(rebuild_task)
@@ -457,6 +474,20 @@ class DisasterWarningService:
                 return
         # 生命周期服务不可用时降级：直接按默认参数武装
         logger.warning("[灾害预警] 生命周期服务不可用，无法推迟静默启动")
+
+    def warmup_browser(self) -> None:
+        """在合适的时机（静默协调器武装后）后台预热浏览器渲染底座。
+
+        首次启动时此刻 AstrBot 已加载完成、事件循环空闲，避免页面创建超时；
+        插件重载时 AstrBot 已就绪，同样安全。预热自带异常吞噬，不影响主链路。
+        """
+        manager = getattr(self, "message_manager", None)
+        if manager is None:
+            return
+        warmup = getattr(manager, "warmup_browser", None)
+        if callable(warmup):
+            # 透传任务登记回调，确保预热任务纳入停机统一回收
+            warmup(register_task=self.register_background_task)
 
     async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""

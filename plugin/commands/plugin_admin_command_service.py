@@ -15,6 +15,7 @@ from astrbot.api import logger
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
 from ...utils.version import get_plugin_version
+from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 
 
@@ -108,7 +109,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             uptime = status.get("uptime", "未知")
             plugin_version = get_plugin_version()
 
-            bot_id = event.get_self_id() or "0"
+            # bot_id 由公共 forward_helper 内部从 event 获取；此处仅需显示名。
             bot_name = "灾害预警"
 
             # 对应展示名称映射（命令文本场景投影）。
@@ -193,18 +194,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             }
 
             def _build_forward_nodes(blocks: list[str]) -> Comp.Nodes | None:
-                """生成便于客户端折叠阅读的合并转发节点。"""
-                if not blocks:
-                    return None
-                nodes = Comp.Nodes([])
-                for idx, block in enumerate(blocks):
-                    content = [Comp.Plain(block)]
-                    if idx == 0:
-                        content = self.plugin._with_quote_reply(event, content)
-                    nodes.nodes.append(
-                        Comp.Node(uin=bot_id, name=bot_name, content=content)
-                    )
-                return nodes
+                """生成便于客户端折叠阅读的合并转发节点（复用公共实现）。"""
+                return build_forward_nodes(
+                    blocks,
+                    event=event,
+                    quote_first=True,
+                    plugin=self.plugin,
+                    name=bot_name,
+                )
 
             def _map_sub_source_name(group_display_name: str, raw_key: str) -> str:
                 """将原始的子源键名映射为好看的展示名称。"""
@@ -464,7 +461,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 "command_stats_query",
                 {"success": True},
             )
-            yield _quoted_plain_result(stats_summary)
+            # 统计报告显式走合并转发，失败则回退普通引用回复
+            ok = await send_forward_blocks(
+                self.plugin, event, [stats_summary], name="灾害预警"
+            )
+            if not ok:
+                yield _quoted_plain_result(stats_summary)
         except Exception as e:
             logger.error(f"[灾害预警] 获取统计信息失败: {e}")
             yield _quoted_plain_result(f"❌ 获取统计信息失败: {str(e)}")
@@ -688,7 +690,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     )
                 )
                 config_str = json.dumps(translated_config, indent=2, ensure_ascii=False)
-                yield event.plain_result(f"🔧 当前全局配置详情：{config_str}")
+                await send_forward_blocks(
+                    self.plugin, event, [config_str], name="灾害预警"
+                )
                 return
 
             session_umo = (
@@ -725,10 +729,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             effective_str = json.dumps(
                 translated_effective, indent=2, ensure_ascii=False
             )
-            yield event.plain_result(
-                f"🔧 会话配置详情 ({session_log_str})\n"
-                f"\n📌 差异覆写 (override)：\n{override_str}"
-                f"\n\n📘 合并后配置 (effective)：\n{effective_str}"
+            await send_forward_blocks(
+                self.plugin,
+                event,
+                [
+                    f"📌 差异覆写 (override)：\n{override_str}",
+                    f"📘 合并后配置 (effective)：\n{effective_str}",
+                ],
+                header=f"🔧 会话配置详情 ({session_log_str})",
+                name="灾害预警",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 获取配置详情失败: {e}")

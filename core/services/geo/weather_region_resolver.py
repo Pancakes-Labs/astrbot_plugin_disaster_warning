@@ -63,13 +63,22 @@ _RESAPI_REGIONS_SEARCH_URL = "https://www.resapi.cn/v1/regions/search"
 # 地名别名映射：气象预警常用功能/惯用名 → 官方行政区划名。
 # 平潭综合实验区在 2026 全国区划中仍为"平潭县"；
 # 洋浦经济开发区行政上隶属儋州市（460400），ResAPI 无"洋浦"独立实体。
+# 庐山景区是知名山岳型景区，官方区划实体为"庐山市"（江西省九江市），
+# ResAPI 对"庐山景区"无命中、对"庐山"只命中跨省同名社区/村名，需映射到官方县级名。
 # 后续遇到类似"功能区名 ≠ 官方区划名"的地名可在此补充。
 _PLACE_ALIASES: dict[str, str] = {
     "平潭综合实验区": "平潭县",
     "洋浦": "儋州市",
     "洋浦经济开发区": "儋州市",
     "两江新区": "重庆市",
+    "大通湖区": "大通湖管理区",
+    "庐山景区": "庐山市",
 }
+
+# ResAPI 返回的行政区划层级：district 及以上属于权威行政区划实体，
+# 用于优先过滤同名乡镇/社区等低层级记录造成的跨省噪音，
+# 低层级记录仅在权威层级无命中时参与判定。
+_PRIORITY_LEVELS = frozenset({"province", "city", "district", "county"})
 
 # 功能区尾缀：查询失败时截掉这些尾缀做受控退化查询。
 # 退化后的查询词仍需通过省份唯一校验，防止命中跨省同名乡镇村等噪音。
@@ -85,6 +94,7 @@ _FUNCTIONAL_ZONE_SUFFIXES = (
     "风景名胜区",
     "风景区",
     "景区",
+    "管理区",
 )
 
 # 行政区划后缀（用于从 headline 中剥离市县级地名）。
@@ -356,9 +366,11 @@ class WeatherRegionResolver:
                 full_name = str(record.get("full_name") or "")
                 if not full_name:
                     continue
-                # 精确命中或名称以查询词开头的扩展命中均纳入候选；
-                # 不再限制省市区级，但最终省份必须唯一（见下方 province_set 校验）。
-                if name == query or name.startswith(query):
+                # 精确命中、查询词出现在官方名称中、或查询词为省级名时
+                # 出现在 full_name 首段（如直辖市"重庆市"查询返回的均为
+                # "重庆市/市辖区/万州区"这类下级记录）的命中均纳入候选。
+                # 省份唯一校验仍作为最终安全阀（见下方 province_set 校验）。
+                if query in name or full_name.startswith(query):
                     matched_records.append(record)
                     page_matched += 1
 
@@ -368,22 +380,43 @@ class WeatherRegionResolver:
 
         del last_error
 
-        if matched_records:
-            # 取命中记录的省份集合，归一化后去重
+        if not matched_records:
+            return None
+
+        def _province_of(record: dict) -> str | None:
+            full_name = str(record.get("full_name") or "")
+            # full_name 形如"甘肃省/陇南市/康县"，首段即省级名称
+            province_part = full_name.split("/", 1)[0].strip()
+            return self._normalize_province_name(province_part)
+
+        def _collect_unique_province(records: list[dict]) -> str | None:
+            """从记录集合中归纳唯一省份；跨省歧义时返回 None，不猜测。"""
             province_set: set[str] = set()
-            for record in matched_records:
-                full_name = str(record.get("full_name") or "")
-                # full_name 形如"甘肃省/陇南市/康县"，首段即省级名称
-                province_part = full_name.split("/", 1)[0].strip()
-                province = self._normalize_province_name(province_part)
+            for record in records:
+                province = _province_of(record)
                 if province:
                     province_set.add(province)
-
-            # 命中记录归一化后得到唯一省份时才采纳，避免同名跨省时任意猜测
             if len(province_set) == 1:
                 return province_set.pop()
+            return None
 
-        return None
+        # 第一优先：只看权威行政区划层级（district 及以上）的命中。
+        # 过滤同名乡镇/社区（如"庐山社区"）等低层级跨省噪音记录，
+        # 使"庐山"这类退化词能稳定命中唯一省份（江西省）。
+        priority_records = [
+            record
+            for record in matched_records
+            if str(record.get("level") or "").strip().lower() in _PRIORITY_LEVELS
+        ]
+        if priority_records:
+            province = _collect_unique_province(priority_records)
+            if province is not None:
+                return province
+
+        # 第二优先：权威层级无命中或仍跨省时，回退到全部命中记录做唯一性判定。
+        # 覆盖"五台山"→"五台山风景名胜区"（level 可能不是标准层级）等场景，
+        # 以及功能区退化后只剩乡镇级记录的情形。
+        return _collect_unique_province(matched_records)
 
     async def extract_province_with_fallback(
         self, title_text: str, headline_text: str = ""

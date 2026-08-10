@@ -164,6 +164,9 @@ class DisasterWarningPlugin(Star):
 • /最低气温排行 [时次] - 查询全国实况最低气温排行 Top10（如：/最低气温排行、/最低气温排行 08日23时）
 • /降水排行 [时次] - 查询全国实况降水排行 Top10（如：/降水排行、/降水排行 2026080815）
 • /风速排行 [时次] - 查询全国实况风速排行 Top10（如：/风速排行、/风速排行 今天15时）
+• /气象站实况 或 /实况 或 /气象站 <站点代码或站名> - 查询气象站实况（如：/实况 59270、/气象站 怀集）
+• /气象站历史 或 /实况历史 <站点代码或站名> [时次] - 查询气象站近24小时逐小时历史（如：/气象站历史 59270 10时）
+• /气象站列表 [省份] - 查询气象站列表（如：/气象站列表、/气象站列表 广东）
 • /灾害预警模拟 <纬度> <经度> <震级> [深度] [数据源] - 模拟地震事件
 • /灾害预警配置 查看 [全局|当前|会话UMO] - 查看配置（会话模式返回差异覆写）(仅管理员)
 • /灾害预警日志 - 查看原始消息日志统计摘要 (仅管理员)
@@ -486,6 +489,45 @@ class DisasterWarningPlugin(Star):
             magnitude=magnitude,
             depth=depth,
             source=source,
+        ):
+            yield result
+
+    @filter.command("气象站实况", alias={"实况", "气象站"})
+    async def query_weather_station_real(
+        self,
+        event: AstrMessageEvent,
+        keyword: str = None,
+    ):
+        """查询气象站实况（支持站点代码或站名）"""
+        async for result in self._query_command_service.handle_query_weather_real(
+            event, keyword=keyword
+        ):
+            yield result
+
+    @filter.command("气象站历史", alias={"实况历史"})
+    async def query_weather_station_history(
+        self,
+        event: AstrMessageEvent,
+        keyword: str = None,
+        time_arg: str = None,
+    ):
+        """查询气象站近24小时逐小时历史数据（可选指定时次）"""
+        async for result in self._query_command_service.handle_query_weather_history(
+            event, keyword=keyword, time_arg=time_arg
+        ):
+            yield result
+
+    @filter.command("气象站列表")
+    async def query_weather_station_list(
+        self,
+        event: AstrMessageEvent,
+        province: str = None,
+    ):
+        """查询气象站列表（可按省份过滤）"""
+        async for (
+            result
+        ) in self._query_command_service.handle_query_weather_station_list(
+            event, province=province
         ):
             yield result
 

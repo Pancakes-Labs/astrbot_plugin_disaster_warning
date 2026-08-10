@@ -258,6 +258,16 @@ class DisasterServiceLifecycleService:
             hard_timeout_seconds=hard_timeout_seconds,
         )
 
+        # 静默协调器武装后再预热浏览器渲染底座：
+        # 首次启动时此刻 AstrBot 已加载完成、事件循环空闲，避免页面创建超时噪音；
+        # 插件重载时 AstrBot 已就绪，同样安全。预热自带异常吞噬，不影响主链路。
+        warmup = getattr(self.service, "warmup_browser", None)
+        if callable(warmup):
+            try:
+                warmup()
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 浏览器预热触发失败（已忽略）: {exc}")
+
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """
         取消并等待指定的 asyncio.Task 任务列表结束。

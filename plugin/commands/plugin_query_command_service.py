@@ -59,7 +59,11 @@ from ...core.services.query.typhoon_query_service import (
     query_typhoon_data,
 )
 from ...core.services.query.weather_query_service import query_weather_alarm_data
+from ...core.services.query.weather_station_query_service import (
+    WeatherStationQueryService,
+)
 from ...core.services.simulation.simulation_service import build_earthquake_simulation
+from .forward_helper import send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 from .typhoon_query_image_helper import append_typhoon_track_image
 
@@ -337,60 +341,27 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         def _quoted_plain_result(text: str):
             return quoted_plain_result(self.plugin, event, text)
 
-        def _build_forward_nodes(
-            blocks: list[str],
-            total_blocks: int,
-            batch_index: int,
-            batch_total: int,
-            include_header: bool = True,
-        ) -> Comp.Nodes | None:
-            if not blocks:
-                return None
-
-            bot_id = event.get_self_id() or "0"
-            bot_name = "灾害预警"
-            nodes = Comp.Nodes([])
-            if include_header:
-                header = (
-                    f"📋 全国气象预警列表（共 {total_blocks} 段）"
-                    f"\n📦 分段发送：{batch_index + 1}/{batch_total}"
-                )
-                nodes.nodes.append(
-                    Comp.Node(uin=bot_id, name=bot_name, content=[Comp.Plain(header)])
-                )
-
-            for block in blocks:
-                nodes.nodes.append(
-                    Comp.Node(uin=bot_id, name=bot_name, content=[Comp.Plain(block)])
-                )
-            return nodes
+        def _header_builder(
+            batch_index: int, batch_total: int, total_blocks: int
+        ) -> str:
+            """构建气象预警合并转发头部（带分段进度，对齐原实现）。"""
+            return (
+                f"📋 全国气象预警列表（共 {total_blocks} 段）"
+                f"\n📦 分段发送：{batch_index + 1}/{batch_total}"
+            )
 
         async def _send_forward_batches(blocks: list[str]) -> bool:
-            """将全国级海量数据分批打包为合并转发气泡发送给会话。"""
-            if not blocks:
-                return False
+            """将全国级海量数据分批打包为合并转发气泡发送给会话。
 
-            max_nodes_per_forward = 10
-            total_blocks = len(blocks)
-            batches = [
-                blocks[i : i + max_nodes_per_forward]
-                for i in range(0, total_blocks, max_nodes_per_forward)
-            ]
-
-            for idx, batch in enumerate(batches):
-                nodes = _build_forward_nodes(
-                    batch,
-                    total_blocks=total_blocks,
-                    batch_index=idx,
-                    batch_total=len(batches),
-                    include_header=idx == 0,
-                )
-                if not nodes:
-                    continue
-                chain = MessageChain([nodes])
-                await self.plugin.context.send_message(event.unified_msg_origin, chain)
-
-            return True
+            复用公共 forward_helper 的显式发送逻辑。
+            """
+            return await send_forward_blocks(
+                self.plugin,
+                event,
+                blocks,
+                header_builder=_header_builder,
+                name="灾害预警",
+            )
 
         async def _send_text_blocks(blocks: list[str], total_count: int) -> None:
             """若合并转发节点被平台拒绝，则降级为分段文本气泡发送。"""
@@ -724,6 +695,25 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 result=result,
                 chain_parts=chain_parts,
             )
+            # 完整模式：无论有无路径图，统一走合并转发（显示名「灾害预警」）。
+            # 有路径图时把图组件随文本一起进合并转发节点。
+            if user_detail == DETAIL_FULL:
+                comps = None
+                if len(chain_parts) > 1:
+                    comps = [chain_parts[1:]]
+                ok = await send_forward_blocks(
+                    self.plugin,
+                    event,
+                    [text],
+                    name="灾害预警",
+                    block_components=comps,
+                )
+                if not ok:
+                    # 合并转发失败（如平台拒绝）时回退为普通引用回复，确保有文本输出
+                    yield _quoted_plain_result(text)
+                return
+
+            # 非完整模式：有路径图时走普通消息链（文本+图），无图走普通文本回复
             if len(chain_parts) > 1:
                 try:
                     if hasattr(self.plugin, "_with_quote_reply"):
@@ -847,7 +837,19 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     "count": int(count),
                 },
             )
-            yield _quoted_plain_result(text)
+            if show_card:
+                # 卡片模式（图片）保持普通引用回复
+                yield _quoted_plain_result(text)
+            else:
+                # 文本模式：多条地震列表显式走合并转发，失败则回退引用回复
+                ok = await send_forward_blocks(
+                    self.plugin,
+                    event,
+                    [text],
+                    name="灾害预警",
+                )
+                if not ok:
+                    yield _quoted_plain_result(text)
         except Exception as e:
             logger.error(f"[灾害预警] 查询地震列表失败: {e}")
             yield _quoted_plain_result(f"❌ 查询失败: {e}")
@@ -1002,7 +1004,17 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     "covered_days": int(result.get("covered_days") or 0),
                 },
             )
-            yield _quoted_plain_result(build_jma_hypo_list_text(result))
+            # JMA 震央分布显式走合并转发（震级分布/较大地震/地点统计）
+            text = build_jma_hypo_list_text(result)
+            ok = await send_forward_blocks(
+                self.plugin,
+                event,
+                [text],
+                name="灾害预警",
+            )
+            if not ok:
+                # 合并转发失败时回退为普通引用回复，确保有文本输出
+                yield _quoted_plain_result(text)
         except Exception as e:
             logger.error(
                 f"[灾害预警] JMA 震央分布查询失败: {e}\n{traceback.format_exc()}"
@@ -1430,7 +1442,16 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 "command_query_radar_list",
                 {"success": True},
             )
-            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+            # 雷达站点列表显式走合并转发，失败则回退引用回复
+            text = result.get("text", "")
+            ok = await send_forward_blocks(
+                self.plugin,
+                event,
+                [text],
+                name="灾害预警",
+            )
+            if not ok:
+                yield quoted_plain_result(self.plugin, event, text)
         except Exception as e:
             logger.error(
                 f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
@@ -1505,3 +1526,142 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] 排行查询失败: {e}\n{traceback.format_exc()}")
             yield quoted_plain_result(self.plugin, event, f"❌ 排行查询失败: {e}")
+
+    # ------------------------------------------------------------------
+    # 气象站实况/历史/列表查询（/实况 /气象站 /气象站历史 /气象站列表）
+    # 数据源：NMC 中央气象台（实况+近24h历史+省份城市列表）
+    #         FAN Studio（五位站号->站名映射）
+    # ------------------------------------------------------------------
+
+    def _get_weather_station_service(self) -> WeatherStationQueryService:
+        """获取气象站查询服务实例（懒加载并缓存到插件上，复用会话）。"""
+        service = getattr(self.plugin, "_weather_station_query_service", None)
+        if service is None:
+            service = WeatherStationQueryService()
+            self.plugin._weather_station_query_service = service
+        return service
+
+    async def handle_query_weather_real(self, event, keyword: str | None = None):
+        """处理气象站实况查询命令（/实况 /气象站）。"""
+        try:
+            if not keyword or not str(keyword).strip():
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "🌦️ 气象站实况查询\n"
+                    "用法：/实况 <站点代码或站名>\n"
+                    "示例：/实况 59270、/气象站 怀集、/气象站 广东怀集",
+                )
+                return
+
+            service = self._get_weather_station_service()
+            result = await service.query_real(str(keyword).strip())
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_weather_station_real",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin, event, f"❌ {result.get('error', '查询失败')}"
+                )
+                return
+
+            await self._track_command_feature(
+                "command_weather_station_real", {"success": True}
+            )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(f"[灾害预警] 气象实况查询失败: {e}\n{traceback.format_exc()}")
+            yield quoted_plain_result(self.plugin, event, f"❌ 实况查询失败: {e}")
+
+    async def handle_query_weather_history(
+        self, event, keyword: str | None = None, time_arg: str | None = None
+    ):
+        """处理气象站历史查询命令（/气象站历史 /实况历史）。"""
+        try:
+            if not keyword or not str(keyword).strip():
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "🕐 气象站历史查询\n"
+                    "用法：/气象站历史 <站点代码或站名> [时次]\n"
+                    "示例：/气象站历史 59270、/实况历史 广东怀集 10时\n"
+                    "💡 当前仅支持近24小时逐小时数据（数据源限制）",
+                )
+                return
+
+            service = self._get_weather_station_service()
+            result = await service.query_history(
+                str(keyword).strip(), time_arg=time_arg
+            )
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_weather_station_history",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin, event, f"❌ {result.get('error', '查询失败')}"
+                )
+                return
+
+            await self._track_command_feature(
+                "command_weather_station_history", {"success": True}
+            )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 气象站历史查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 气象站历史查询失败: {e}")
+
+    async def handle_query_weather_station_list(
+        self, event, province: str | None = None
+    ):
+        """处理气象站列表查询命令（/气象站列表）。
+
+        无参时返回全国全量（每省一个合并转发节点）；指定省份时返回该省全量。
+        长文本统一走合并转发（显示名「灾害预警」）。
+        """
+        try:
+            service = self._get_weather_station_service()
+            result = await service.query_list(province)
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_weather_station_list",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ {result.get('error', '气象站列表查询失败')}",
+                )
+                return
+
+            await self._track_command_feature(
+                "command_weather_station_list",
+                {"success": True, "is_nationwide": bool(result.get("is_nationwide"))},
+            )
+
+            blocks = result.get("blocks") or []
+            if blocks:
+                # 显式合并转发发送，失败则回退文本
+                try:
+                    ok = await send_forward_blocks(
+                        self.plugin,
+                        event,
+                        blocks,
+                        name="灾害预警",
+                        quote_first=True,
+                    )
+                    if ok:
+                        return
+                except Exception as fwd_error:
+                    logger.warning(
+                        f"[灾害预警] 气象站列表合并转发失败，回退文本: {fwd_error}"
+                    )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 气象站列表查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 气象站列表查询失败: {e}")
