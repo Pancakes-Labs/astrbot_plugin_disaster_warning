@@ -19,43 +19,7 @@ import aiohttp
 
 from astrbot.api import logger
 
-# 中国 34 个省级行政区划简称与全名关键字定义列表
-CHINA_PROVINCES = [
-    "北京",
-    "天津",
-    "上海",
-    "重庆",
-    "河北",
-    "山西",
-    "辽宁",
-    "吉林",
-    "黑龙江",
-    "江苏",
-    "浙江",
-    "安徽",
-    "福建",
-    "江西",
-    "山东",
-    "河南",
-    "湖北",
-    "湖南",
-    "广东",
-    "海南",
-    "四川",
-    "贵州",
-    "云南",
-    "陕西",
-    "甘肃",
-    "青海",
-    "台湾",
-    "内蒙古",
-    "广西",
-    "西藏",
-    "宁夏",
-    "新疆",
-    "香港",
-    "澳门",
-]
+from ....utils.china_regions import CHINA_PROVINCES
 
 # ResAPI 行政区划搜索接口地址
 _RESAPI_REGIONS_SEARCH_URL = "https://www.resapi.cn/v1/regions/search"
