@@ -29,6 +29,7 @@ from typing import Any
 
 from ....utils.plugin_logger import plugin_logger
 from ...domain.event_models import EventEnvelope, WeatherEvent
+from ...services.identity.event_identity import resolve_event_time_aware
 
 # 气象预警颜色级别 → 数值（用于排序，数值越大优先级越高）
 _COLOR_LEVEL_MAP: dict[str, int] = {
@@ -157,8 +158,6 @@ class WeatherAggregationService:
         超过时效的事件直接交回常规推送路径，由规则链统一兜底拦截。
         """
         try:
-            from ...services.identity.event_identity import resolve_event_time_aware
-
             event_time = resolve_event_time_aware(event)
             if event_time is None:
                 # 无时间信息时放行，交给后续规则链兜底

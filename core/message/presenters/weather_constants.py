@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from .weather_alarm_code_map import resolve_weather_icon_code
+
 WEATHER_EMOJI_MAP = {
     # 一、国家级标准预警（14类）
     "台风": "🌀",
@@ -202,8 +204,6 @@ def _resolve_emoji_from_code(texts) -> str | None:
     Returns:
         精确匹配到的 Emoji；无编码或未命中返回 None。
     """
-    from .weather_alarm_code_map import resolve_weather_icon_code
-
     for item in texts:
         text = str(item or "").strip()
         if not text:

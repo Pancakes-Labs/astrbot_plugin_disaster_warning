@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ...domain.earthquake.cmt_normalize import parse_nodal_plane
 from ...domain.event_identity import EventIdentity
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
 from ...domain.event_payload import SourcePayload
@@ -304,8 +305,6 @@ def build_earthquake_simulation(
                 "is_supplement_product": True,
             }
         )
-        from ...domain.earthquake.cmt_normalize import parse_nodal_plane
-
         metadata["nodal_plane1"] = parse_nodal_plane(metadata["nodal_plane1"])
         metadata["nodal_plane2"] = parse_nodal_plane(metadata["nodal_plane2"])
         earthquake.metadata = dict(metadata)

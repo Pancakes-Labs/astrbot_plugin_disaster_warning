@@ -13,6 +13,7 @@ from astrbot.api import logger
 
 from ...domain.event_models import TyphoonEvent
 from ...domain.typhoon import build_typhoon_event_envelope
+from ...domain.typhoon.typhoon_values import clean_text, to_float
 from ...storage.stats.event_record_factory import EventRecordFactory
 
 
@@ -139,8 +140,6 @@ class TyphoonHistoryRebuildService:
         包含 time / level / wind_speed / pressure / latitude / longitude 等字段。
         节点按时间升序排列（最旧在前），与 event_updates 的 recorded_at ASC 一致。
         """
-        from ...domain.typhoon.typhoon_values import clean_text, to_float
-
         history_track = (
             typhoon.get("historyTrack") or typhoon.get("history_track") or []
         )

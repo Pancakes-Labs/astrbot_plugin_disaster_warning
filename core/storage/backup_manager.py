@@ -6,6 +6,8 @@ import io
 import json
 import os
 import shutil
+import sqlite3
+import tempfile
 import zipfile
 from datetime import datetime
 
@@ -62,9 +64,6 @@ class BackupService:
 
             # 2. 写入 events.db
             if "db" in targets and self.db_path.exists():
-                import sqlite3
-                import tempfile
-
                 temp_db_fd, temp_db_path = tempfile.mkstemp(suffix=".db")
                 os.close(temp_db_fd)
                 try:
@@ -149,8 +148,6 @@ class BackupService:
 
             try:
                 if has_db_in_zip and self.db_path.exists():
-                    import sqlite3
-
                     bak_path = self.db_path.with_suffix(self.db_path.suffix + ".bak")
                     src = sqlite3.connect(str(self.db_path))
                     dst = sqlite3.connect(str(bak_path))

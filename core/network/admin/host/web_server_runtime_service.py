@@ -6,6 +6,8 @@ Web 管理端运行时服务。
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import secrets
 from datetime import datetime
@@ -151,8 +153,6 @@ class WebServerRuntimeService:
                 return
             while True:
                 try:
-                    import json
-
                     data = await websocket.receive_text()
                     msg = json.loads(data)
                     # 响应心跳
@@ -207,8 +207,6 @@ class WebServerRuntimeService:
         """后台广播循环。"""
         while True:
             try:
-                import asyncio
-
                 await asyncio.sleep(interval_seconds)
                 # 周期性定时广播最新数据，保证前端界面状态最终一致
                 await self.broadcast_data()

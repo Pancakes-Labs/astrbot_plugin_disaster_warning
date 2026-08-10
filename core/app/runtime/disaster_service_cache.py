@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -152,8 +153,6 @@ class DisasterServiceCacheService:
             and self.service.statistics_manager._db_initialized
         ):
             try:
-                import asyncio
-
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._restore_eew_query_state_from_db_recent_events())
             except RuntimeError:
