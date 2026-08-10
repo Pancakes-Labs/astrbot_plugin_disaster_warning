@@ -49,6 +49,11 @@ class BrowserManager:
         self._playwright = None
         # 远程连接场景下可能需要保留上下文对象引用。
         self._context = None
+        # 共享 context 是否已关闭（由 _cleanup 联动维护，不依赖属性探测）。
+        self._context_closed = False
+        # 共享 context 创建/关闭互斥锁：_create_local_page 可能在
+        # 补池、应急建页等多协程路径并发调用，不加锁会重复创建 context 造成泄漏。
+        self._context_lock = asyncio.Lock()
         self._ignore_https_errors = bool(ignore_https_errors)
         self._page_pool: asyncio.Queue = asyncio.Queue(maxsize=pool_size)
         # 信号量用于限制同时渲染数量，页面创建锁与初始化锁用于避免并发竞争。
@@ -249,26 +254,30 @@ class BrowserManager:
                 return False
 
     async def _ensure_local_context(self):
-        """确保本地浏览器共享上下文就绪。"""
+        """确保本地浏览器共享上下文就绪。
+
+        并发安全：context 的重新创建受 _context_lock 保护，避免
+        补池/应急建页等多协程路径并发进入时各自创建 context 造成泄漏。
+        存活性以 _context_closed 显式标志为准（由 _cleanup 联动维护），
+        不依赖 .browser 属性探测——该属性在 close() 后仍可访问，无法可靠识别已关闭的 context。
+        """
         if not self._browser:
             raise RuntimeError("浏览器未就绪，无法创建页面")
-        if self._context is not None:
-            try:
-                # 轻量探测：context 已失效时会抛出异常，此时重建。
-                _ = self._context.browser
+        async with self._context_lock:
+            # double-check：锁内再次确认，避免重复创建。
+            if self._context is not None and not self._context_closed:
                 return self._context
-            except Exception:
-                self._context = None
-        self._context = await self._browser.new_context(
-            viewport=dict(self.DEFAULT_VIEWPORT),
-            device_scale_factor=2,
-            ignore_https_errors=self._ignore_https_errors,
-        )
-        if self._ignore_https_errors:
-            logger.debug(
-                "[灾害预警] 已启用忽略 HTTPS 证书错误（仅对瓦片等资源加载生效）"
+            self._context = await self._browser.new_context(
+                viewport=dict(self.DEFAULT_VIEWPORT),
+                device_scale_factor=2,
+                ignore_https_errors=self._ignore_https_errors,
             )
-        return self._context
+            self._context_closed = False
+            if self._ignore_https_errors:
+                logger.debug(
+                    "[灾害预警] 已启用忽略 HTTPS 证书错误（仅对瓦片等资源加载生效）"
+                )
+            return self._context
 
     async def _create_local_page(self) -> Page:
         """创建本地页面池中的新页面。"""
@@ -1262,15 +1271,21 @@ class BrowserManager:
             logger.warning(f"[灾害预警] 清理页面池时发生异常: {e}")
 
         # 步骤 2: 关闭共享 context（与页面池同生命周期，先于浏览器关闭）
-        if self._context is not None:
-            try:
-                await self._context.close()
-            except Exception as e:
-                cleanup_errors.append(f"关闭浏览器上下文失败: {e}")
-                logger.debug(f"[灾害预警] 关闭浏览器上下文失败: {e}")
-            finally:
-                # 无论成败都置空，避免重建路径残留旧 context 引用。
-                self._context = None
+        # 加锁防止与 _ensure_local_context 的并发创建交错；并联动维护
+        # _context_closed 标志，供存活判断使用。
+        async with self._context_lock:
+            if self._context is not None:
+                try:
+                    await self._context.close()
+                except Exception as e:
+                    cleanup_errors.append(f"关闭浏览器上下文失败: {e}")
+                    logger.debug(f"[灾害预警] 关闭浏览器上下文失败: {e}")
+                finally:
+                    # 无论成败都置空，避免重建路径残留旧 context 引用。
+                    self._context = None
+            # 显式标记已关闭：.browser 属性在 close() 后仍可访问，
+            # 不能依赖属性探测判断存活，改由标志与清理路径联动。
+            self._context_closed = True
 
         # 步骤 3: 关闭浏览器
         try:

@@ -705,6 +705,8 @@ class ConfigValidator:
 
         # 展示开关与过滤逻辑解耦：关闭后消息不暴露本地距离/逼近文案。
         ConfigValidator._ensure_bool(cfg, "show_local_estimation", False)
+        # 台风路径图附件开关：必须为布尔值，避免历史/手工配置写入异常类型。
+        ConfigValidator._ensure_bool(cfg, "include_track_map", True)
 
         typhoon_filter = cfg.get("typhoon_filter", {})
         if not isinstance(typhoon_filter, dict):
@@ -1033,6 +1035,10 @@ class ConfigValidator:
                 logger.warning("[灾害预警] 配置警告: 浏览器池大小过大，已限制为 10。")
                 cfg["browser_pool_size"] = 10
 
+        # 是否忽略 HTTPS 证书错误：TLS 安全控制，必须为布尔值。
+        # 若手工配置为字符串 "false"，bool("false") 为 True 会错误启用证书忽略。
+        ConfigValidator._ensure_bool(cfg, "browser_ignore_https_errors", False)
+
         # 地图源校验（通用地图 / 台风路径图共用选项表）
         valid_source_ids = set(MAP_TILE_SOURCES.keys())
         valid_source_names = set(MAP_SOURCE_NAME_TO_ID.keys())
@@ -1311,6 +1317,8 @@ class ConfigValidator:
         # S-Net 轮询间隔校验
         snet_cfg = cfg.get("snet")
         if isinstance(snet_cfg, dict):
+            # 测站分布图附件开关：必须为布尔值，避免异常类型被保留并写回。
+            ConfigValidator._ensure_bool(snet_cfg, "include_station_map", True)
             poll_interval = snet_cfg.get("poll_interval_seconds")
             if isinstance(poll_interval, int):
                 if poll_interval < 30:
