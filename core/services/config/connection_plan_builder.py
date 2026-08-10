@@ -21,6 +21,9 @@ class ConnectionPlanBuilder:
     负责把已启用的数据源目录项转换为运行时可直接消费的连接计划。
     """
 
+    # FAN Studio 应用 ID（硬编码，不再暴露为用户配置项）。
+    FAN_STUDIO_APP_ID = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
+
     @staticmethod
     def _resolve_connection_plan(
         entry: SourceEntry,
@@ -41,14 +44,17 @@ class ConnectionPlanBuilder:
 
     @staticmethod
     def _resolve_fan_studio_auth(config: dict[str, Any]) -> tuple[str, str]:
-        """从全局配置解析 FAN Studio 鉴权字段。"""
+        """从全局配置解析 FAN Studio 鉴权字段。
+
+        app_id 已硬编码为类常量，仅从配置读取 api_key。
+        """
         data_sources = config.get("data_sources")
         fan_cfg: dict[str, Any] = {}
         if isinstance(data_sources, dict):
             raw = data_sources.get("fan_studio")
             if isinstance(raw, dict):
                 fan_cfg = raw
-        app_id = str(fan_cfg.get("app_id") or "").strip()
+        app_id = ConnectionPlanBuilder.FAN_STUDIO_APP_ID
         api_key = str(fan_cfg.get("api_key") or "").strip()
         return app_id, api_key
 
