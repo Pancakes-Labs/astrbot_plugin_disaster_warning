@@ -37,6 +37,9 @@ from .logging.support.p2p_area_mapping_loader import P2PAreaMappingLoader
 class MessageLogger:
     """原始消息格式记录器。"""
 
+    # 原始消息日志文件名（硬编码，不再暴露为用户配置项）。
+    RAW_MESSAGE_LOG_FILE_NAME = "raw_messages.log"
+
     def __init__(self, config: dict[str, Any], plugin_name: str):
         # 消息记录器负责装配日志子系统，并持有共享配置与运行时状态。
         self.config = config
@@ -48,11 +51,9 @@ class MessageLogger:
         )  # 载入 P2P 气象预警区域代码对应表
         debug_config = self.config_accessor.debug_config()
 
-        # 是否启用、文件名、轮转大小与保留份数都由调试配置控制。
+        # 是否启用、轮转大小与保留份数都由调试配置控制。
         self.enabled = debug_config.get("enable_raw_message_logging", False)
-        self.log_file_name = debug_config.get(
-            "raw_message_log_path", "raw_messages.log"
-        )
+        self.log_file_name = self.RAW_MESSAGE_LOG_FILE_NAME
         self.max_size_mb = debug_config.get(
             "log_max_size_mb", 50
         )  # 单个日志文件最大 MB 数
