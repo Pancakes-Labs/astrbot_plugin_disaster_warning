@@ -137,9 +137,11 @@ def resolve_province_full(keyword: str) -> str | None:
     # 直接是全称（如「广东省」）
     if k in PROVINCE_FULL_TO_SHORT:
         return k
-    # 简称包含匹配（如「内蒙古」->「内蒙古自治区」）
+    # 长简称（3 字及以上，如「内蒙古」「黑龙江」）允许包含匹配；
+    # 2 字简称只做精确匹配（上面已处理），避免「海南州」这类
+    # 含省份简称子串的城市名被误判为省份。
     for short, full in PROVINCE_SHORT_TO_FULL.items():
-        if short in k:
+        if len(short) >= 3 and short in k:
             return full
     return None
 

@@ -80,12 +80,66 @@ _QUALITY_FILTER_RANGES: dict[str, tuple[int, int]] = {
     "严重污染": (301, 10**9),
 }
 
+# 等级过滤词别名（用户常用简称）-> 标准键
+_QUALITY_FILTER_ALIASES: dict[str, str] = {
+    "轻度": "轻度污染",
+    "中度": "中度污染",
+    "重度": "重度污染",
+    "严重": "严重污染",
+}
+
+
+def _resolve_quality_filter(fk: str) -> str | None:
+    """把等级过滤词解析为标准键；无法识别返回 None。"""
+    k = str(fk or "").strip()
+    if not k:
+        return None
+    if k in _QUALITY_FILTER_RANGES:
+        return k
+    return _QUALITY_FILTER_ALIASES.get(k)
+
+
+def _filter_by_quality(
+    items: list[dict[str, Any]], quality_filter: str | None
+) -> tuple[list[dict[str, Any]], str | None]:
+    """按等级过滤词过滤城市列表（全国/省份概览模式通用）。
+
+    Args:
+        items: 待过滤城市列表。
+        quality_filter: 等级过滤词（优/良/轻度污染等，支持简称别名）。
+
+    Returns:
+        (filtered, error)：过滤后的列表；过滤词无效时 error 非 None。
+    """
+    if not quality_filter:
+        return items, None
+    fk = _resolve_quality_filter(quality_filter)
+    if fk is None:
+        return items, (
+            f"无效的等级过滤词「{quality_filter}」，"
+            "可用：优/良/轻度(污染)/中度(污染)/重度(污染)/严重(污染)"
+        )
+    lo, hi = _QUALITY_FILTER_RANGES[fk]
+    return [it for it in items if (n := aqi_num(it)) is not None and lo <= n < hi], None
+
+
 # 城市名后缀（用于去掉后缀做模糊匹配）
 _AREA_SUFFIXES = ("市", "地区", "自治州", "盟", "县")
 
 
-def code_to_prov(code: int | None) -> str:
-    """按 CityCode 前两位反推省份；新疆兵团（659xxx）单列。"""
+def _safe_int(v: Any, default: int | None = None) -> int | None:
+    """安全整数解析：非数字/缺测返回 default。"""
+    if v is None or v == "":
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def code_to_prov(code: Any) -> str:
+    """按 CityCode 前两位反推省份；新疆兵团（659xxx）单列；无效代码归类「未知」。"""
+    code = _safe_int(code)
     if code is None:
         return "未知"
     s = str(code)
@@ -172,7 +226,7 @@ def build_city_detail(item: dict[str, Any]) -> str:
     if aqi is None:
         lines.append(f"⬜ AQI {aqi_text}  {q_label}")
     else:
-        level = int(item.get("AqiLevel") or 0)
+        level = _safe_int(item.get("AqiLevel"), default=0) or 0
         lines.append(f"{aqi_level_dot(item)} AQI {aqi_text}  {q_label}（{level}级）")
     lines.append(f"首要污染物：{pp_label}")
     lines.append("")
@@ -352,8 +406,7 @@ def build_city_list_text(
         prov_items = [
             it
             for it in items
-            if code_to_prov(int(it.get("CityCode") or 0))
-            == province_short(province_name)
+            if code_to_prov(it.get("CityCode")) == province_short(province_name)
         ]
         cities = sorted(_area_short(str(it.get("Area") or "")) for it in prov_items)
         display = province_short(province_name) or province_name
@@ -363,7 +416,7 @@ def build_city_list_text(
     # 全国：按省份分组，每省一块
     grouped: dict[str, list[str]] = OrderedDict()
     for item in items:
-        prov = code_to_prov(int(item.get("CityCode") or 0))
+        prov = code_to_prov(item.get("CityCode"))
         grouped.setdefault(prov, []).append(_area_short(str(item.get("Area") or "")))
     blocks: list[str] = []
     for prov in sorted(grouped, key=lambda x: -len(grouped[x])):
@@ -405,7 +458,7 @@ async def query_aqi(
     Args:
         keyword: 城市名 / 省份名 / 全国 / 帮助；None 或空视为帮助。
         client: 复用客户端实例；None 时内部新建并自动关闭。
-        quality_filter: 可选等级过滤词（优/良/轻度污染等）。
+        quality_filter: 可选等级过滤词（全国/省份模式生效：优/良/轻度污染等）。
 
     Returns:
         {
@@ -447,17 +500,12 @@ async def query_aqi(
     time_point = str(items[0].get("TimePoint") or "")
     total = len(items)
 
-    # 等级过滤（仅对城市/省份模式生效）
-    if quality_filter:
-        fk = str(quality_filter).strip()
-        if fk in _QUALITY_FILTER_RANGES:
-            lo, hi = _QUALITY_FILTER_RANGES[fk]
-            items = [
-                it for it in items if (n := aqi_num(it)) is not None and lo <= n < hi
-            ]
-            total = len(items)
-
     if mode == "nationwide":
+        # 等级过滤（全国概览模式，如 /空气质量 全国 优）
+        items, filter_error = _filter_by_quality(items, quality_filter)
+        if filter_error:
+            return {"success": False, "error": filter_error}
+        total = len(items)
         summary, blocks = build_nationwide_text(items, time_point)
         return {
             "success": True,
@@ -472,12 +520,21 @@ async def query_aqi(
         prov_items = [
             it
             for it in items
-            if code_to_prov(int(it.get("CityCode") or 0)) == province_short(province)
+            if code_to_prov(it.get("CityCode")) == province_short(province)
         ]
         if not prov_items:
             return {
                 "success": False,
                 "error": f"未找到「{province}」的 AQI 数据",
+            }
+        # 等级过滤（省份模式同样支持，如 /空气质量 广东 优）
+        prov_items, filter_error = _filter_by_quality(prov_items, quality_filter)
+        if filter_error:
+            return {"success": False, "error": filter_error}
+        if not prov_items:
+            return {
+                "success": False,
+                "error": f"「{province}」暂无符合「{quality_filter}」等级的数据",
             }
         text = build_province_text(province, prov_items, time_point)
         return {
@@ -631,12 +688,12 @@ AQI_HELP_TEXT = (
     "空气质量查询\n\n"
     "用法：\n"
     "  /空气质量 <城市名>        查询指定城市空气质量\n"
-    "  /空气质量 <省份名>        查询全省各城市空气质量\n"
-    "  /空气质量 全国            全国主要城市空气质量概览\n"
+    "  /空气质量 <省份名> [等级]  查询全省各城市空气质量（可按等级过滤）\n"
+    "  /空气质量 全国 [等级]      全国空气质量概览（可按等级过滤，如 优/良/轻度污染）\n"
     "  /空气质量排行 [最好|最差]  空气质量排行榜（无参时同时输出最好与最差）\n"
     "  /空气质量列表 [省份]       查看支持的城市列表\n\n"
-    "等级说明：🟢优 0-50 | 🟡良 51-100 | 🟠轻度 101-150 | 🔴中度 151-200 | 🟣重度 201-300 | 🟤严重 300+\n\n"
-    "示例：/空气质量 北京 | /空气质量 广东 | /空气质量 全国 | /空气质量排行 | /空气质量列表 新疆"
+    "等级说明：🟢优 0-50 | 🟡良 51-100 | 🟠轻度 101-150 | 🔴中度 151-200 | 🟣重度 201-300 | 🟤严重 301+\n\n"
+    "示例：/空气质量 北京 | /空气质量 广东 | /空气质量 全国 优 | /空气质量排行 | /空气质量列表 新疆"
 )
 
 
