@@ -19,6 +19,9 @@ from .eqsc_token_manager import EqscTokenManager
 class EqscTsunamiClient(EqscHttpClient):
     """EQSC JMA 海啸数据 HTTP 客户端。"""
 
+    # 海啸快照内存缓存有效期（秒），用于短时并发复用；轮询本身会绕过缓存强制刷新。
+    TSUNAMI_CACHE_TTL = 60
+
     def __init__(
         self,
         token_manager: EqscTokenManager,
@@ -41,9 +44,9 @@ class EqscTsunamiClient(EqscHttpClient):
             config,
             message_logger=message_logger,
             owns_token_manager=owns_token_manager,
-            # 海啸上游更新不频繁；默认 60 秒缓存，减少重复请求
-            default_cache_ttl=60,
-            cache_ttl_config_key="tsunami_cache_ttl",
+            # 海啸上游更新不频繁；硬编码 60 秒缓存，减少重复请求
+            default_cache_ttl=self.TSUNAMI_CACHE_TTL,
+            cache_ttl_config_key="__tsunami_cache_ttl_hardcoded__",
         )
         # 最新快照缓存：(data, expires_at)
         self._latest_cache: tuple[dict[str, Any], float] | None = None
