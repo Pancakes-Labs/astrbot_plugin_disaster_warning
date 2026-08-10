@@ -41,9 +41,9 @@ class EqscTyphoonClient(EqscHttpClient):
             message_logger=message_logger,
             owns_token_manager=owns_token_manager,
             # cache_ttl 配置项已从配置契约移除：硬编码 300 秒缓存，
-            # 与海啸客户端（TSUNAMI_CACHE_TTL）保持一致，避免 schema 漂移。
+            # 传入 None 完全禁用配置读取，避免任何残留键覆盖默认值。
             default_cache_ttl=300,
-            cache_ttl_config_key="__eqsc_cache_ttl_hardcoded__",
+            cache_ttl_config_key=None,
         )
         # 缓存结构: {typhoon_id: (data, expires_at)}
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}

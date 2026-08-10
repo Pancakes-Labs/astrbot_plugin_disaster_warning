@@ -44,9 +44,10 @@ class EqscTsunamiClient(EqscHttpClient):
             config,
             message_logger=message_logger,
             owns_token_manager=owns_token_manager,
-            # 海啸上游更新不频繁；硬编码 60 秒缓存，减少重复请求
+            # 海啸上游更新不频繁；硬编码 60 秒缓存，减少重复请求。
+            # 传入 None 完全禁用配置读取，避免任何残留键覆盖默认值。
             default_cache_ttl=self.TSUNAMI_CACHE_TTL,
-            cache_ttl_config_key="__tsunami_cache_ttl_hardcoded__",
+            cache_ttl_config_key=None,
         )
         # 最新快照缓存：(data, expires_at)
         self._latest_cache: tuple[dict[str, Any], float] | None = None
