@@ -204,9 +204,7 @@ class PluginLifecycleService:
         try:
             await close_geoip_session()
         except Exception as geoip_err:
-            logger.debug(
-                f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}"
-            )
+            logger.debug(f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}")
 
         # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
         # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。
