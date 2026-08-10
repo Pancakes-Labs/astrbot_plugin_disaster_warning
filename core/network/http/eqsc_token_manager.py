@@ -22,13 +22,16 @@ from astrbot.api import logger
 class EqscTokenManager:
     """EQSC API 令牌管理器。"""
 
+    # EQSC API 基础地址（硬编码，不再暴露为用户配置项）。
+    EQSC_BASE_URL = "https://equake.top"
+
     def __init__(self, config: dict[str, Any]):
         """初始化令牌管理器。
 
         Args:
-            config: EQSC 配置字典，包含 base_url、refresh_token 等字段。
+            config: EQSC 配置字典，包含 refresh_token 等字段。
         """
-        self._base_url = str(config.get("base_url", "")).strip().rstrip("/")
+        self._base_url = self.EQSC_BASE_URL
         self._refresh_token = str(config.get("refresh_token", "")).strip()
         self._access_token: str = ""
         self._access_token_expires_at: float = 0.0

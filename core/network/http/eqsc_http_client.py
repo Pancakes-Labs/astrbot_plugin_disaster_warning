@@ -27,6 +27,9 @@ from .eqsc_token_manager import EqscTokenManager
 class EqscHttpClient:
     """EQSC HTTP 客户端基类。"""
 
+    # EQSC API 基础地址（硬编码，不再暴露为用户配置项）。
+    EQSC_BASE_URL = "https://equake.top"
+
     def __init__(
         self,
         token_manager: EqscTokenManager,
@@ -49,7 +52,7 @@ class EqscHttpClient:
             cache_ttl_config_key: 从 config 读取 TTL 的键名。
         """
         self._token_manager = token_manager
-        self._base_url = str(config.get("base_url", "") or "").strip().rstrip("/")
+        self._base_url = self.EQSC_BASE_URL
         self._message_logger = message_logger
         self._owns_token_manager = bool(owns_token_manager)
         try:
