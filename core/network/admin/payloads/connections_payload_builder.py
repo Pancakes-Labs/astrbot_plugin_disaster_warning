@@ -8,7 +8,6 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
 
 from ....app.services.eqsc_channel_service import EqscChannelService
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
@@ -40,27 +39,13 @@ class ConnectionsPayloadBuilder:
         )
         self.latency_cache = latency_cache if latency_cache is not None else {}
 
+    # EQSC 官方域名（硬编码，base_url 已不再暴露为用户配置项）。
+    EQSC_HOST = "equake.top"
+
     @staticmethod
     def resolve_eqsc_host(config: dict[str, Any] | None) -> str:
-        """从配置解析 EQSC 探测主机名，失败时回退官方域名。"""
-        eqsc_cfg = {}
-        if isinstance(config, dict):
-            data_sources = config.get("data_sources", {})
-            if isinstance(data_sources, dict):
-                raw = data_sources.get("eqsc", {})
-                if isinstance(raw, dict):
-                    eqsc_cfg = raw
-        base_url = str(eqsc_cfg.get("base_url", "") or "").strip()
-        if base_url:
-            try:
-                parsed = urlparse(
-                    base_url if "://" in base_url else f"https://{base_url}"
-                )
-                if parsed.hostname:
-                    return parsed.hostname
-            except Exception:
-                pass
-        return "equake.top"
+        """返回 EQSC 探测主机名（硬编码官方域名）。"""
+        return ConnectionsPayloadBuilder.EQSC_HOST
 
     def _build_eqsc_connection_info(self) -> dict[str, Any]:
         """构建 EQSC HTTP 辅助通道的连接状态条目。"""
