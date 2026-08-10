@@ -20,14 +20,15 @@ from astrbot.api.star import StarTools
 if TYPE_CHECKING:
     from ..services.telemetry.telemetry_service import TelemetryManager
 
+from ...utils.plugin_logger import plugin_logger
 from ..domain.event_models import EventEnvelope
 from ..message.message_logger import MessageLogger
 from ..message.message_manager import MessagePushManager
-from ..message.push.weather_aggregation_service import WeatherAggregationService
 from ..message.presenters.presenter_registry import (
     get_presenter,
     get_text_presenter_keys,
 )
+from ..message.push.weather_aggregation_service import WeatherAggregationService
 from ..network.event_ingress_dispatch_service import EventIngressDispatchService
 from ..network.source_ingress_side_effect_service import SourceIngressSideEffectService
 from ..network.source_message_router import SourceMessageRouter
@@ -56,7 +57,6 @@ from ..sources.source_catalog import SOURCE_CATALOG
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
 from ..storage.statistics_manager import StatisticsManager
-from ...utils.plugin_logger import plugin_logger
 from .pipeline.event_pipeline import EventPipeline
 from .runtime.disaster_service_cache import DisasterServiceCacheService
 from .runtime.disaster_service_lifecycle import DisasterServiceLifecycleService

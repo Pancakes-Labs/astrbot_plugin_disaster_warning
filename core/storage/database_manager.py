@@ -17,8 +17,8 @@ import aiosqlite
 from astrbot.api import logger
 
 from ...utils.time_converter import TimeConverter
-from ..domain.typhoon.typhoon_levels import level_weight
 from ..domain.typhoon.typhoon_ids import to_eqsc_id, to_fan_id
+from ..domain.typhoon.typhoon_levels import level_weight
 from ..domain.typhoon.typhoon_peaks import resolve_storage_peak_fields
 from ..services.identity.event_classifier import (
     MAJOR_EARTHQUAKE_MAGNITUDE_THRESHOLD,
