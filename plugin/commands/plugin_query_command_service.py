@@ -1681,9 +1681,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
         用法：
           /空气质量 <城市名>        查询指定城市空气质量
-          /空气质量 <省份名>        查询全省各城市空气质量
-          /空气质量 全国            全国主要城市空气质量概览
-          /空气质量 <城市> <等级>    城市查询 + 等级过滤（可选）
+          /空气质量 <省份名> [等级]  查询全省各城市空气质量（可按等级过滤）
+          /空气质量 全国 [等级]      全国主要城市空气质量概览（可按等级过滤）
         """
         try:
             result = await query_aqi(
@@ -1713,15 +1712,15 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 },
             )
 
-            # 全国概览：走合并转发（每等级一段），失败回退普通文本
+            # 全国概览：走合并转发（每等级一段），摘要文本作为头部节点，失败回退普通文本
             if blocks:
                 try:
                     ok = await send_forward_blocks(
                         self.plugin,
                         event,
                         blocks,
+                        header=text,
                         name="灾害预警",
-                        quote_first=True,
                     )
                     if ok:
                         return
@@ -1811,14 +1810,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             )
             blocks = result.get("blocks") or []
             if blocks and len(blocks) > 1:
-                # 全国列表：按省分组走合并转发
+                # 全国列表：按省分组走合并转发，摘要文本作为头部节点
                 try:
                     ok = await send_forward_blocks(
                         self.plugin,
                         event,
                         blocks,
+                        header=result.get("text", ""),
                         name="灾害预警",
-                        quote_first=True,
                     )
                     if ok:
                         return
