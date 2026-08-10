@@ -20,11 +20,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ....utils.china_regions import (
+    province_short as _province_short,
+)
+from ....utils.china_regions import (
+    strip_province_prefix,
+)
+from ....utils.text_format_utils import MISSING_VALUE
+from ....utils.text_format_utils import norm_value as _norm_value
 from ...network.http.fan_studio_station_client import FanStudioStationClient
 from ...network.http.nmc_weather_client import NmcWeatherClient
-
-# 缺测标记值：NMC 接口用 9999 表示缺测。
-MISSING_VALUE = 9999.0
 
 # 风向角度 -> 16 方位中文（用于历史数据的 windDirection 角度转中文风向）。
 _DIRECTIONS_16 = [
@@ -76,79 +81,6 @@ _REAL_FIELD_DEFS: list[tuple[str, str, str]] = [
     ("1小时降水", "rain", "mm"),
     ("天气现象", "info", ""),
 ]
-
-
-def _norm_value(v: Any, unit: str = "", decimals: int | None = None) -> str:
-    """把数值格式化为可读文本；缺测/异常显示「-」。
-
-    Args:
-        v: 原始数值。
-        unit: 单位后缀。
-        decimals: 固定小数位；None 时温度（℃）保留 1 位、其余整数不带小数。
-    """
-    if v is None or v == "" or v == "9999" or v == "9999.0":
-        return "-"
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return str(v)
-    if f == MISSING_VALUE:
-        return "-"
-    if decimals is None:
-        # 温度统一保留 1 位小数（如 29.5 ℃、36.0 ℃），其余整数不带小数
-        if unit == "℃":
-            decimals = 1
-        else:
-            decimals = 0 if f == int(f) else 1
-    text = f"{f:.{decimals}f}"
-    return f"{text} {unit}".strip() if unit else text
-
-
-# 省级行政区全称 -> 简称（用于「省份+城市」展示，避免过长）。
-_PROVINCE_FULL_TO_SHORT: dict[str, str] = {
-    "北京市": "北京",
-    "天津市": "天津",
-    "上海市": "上海",
-    "重庆市": "重庆",
-    "河北省": "河北",
-    "山西省": "山西",
-    "内蒙古自治区": "内蒙古",
-    "辽宁省": "辽宁",
-    "吉林省": "吉林",
-    "黑龙江省": "黑龙江",
-    "江苏省": "江苏",
-    "浙江省": "浙江",
-    "安徽省": "安徽",
-    "福建省": "福建",
-    "江西省": "江西",
-    "山东省": "山东",
-    "河南省": "河南",
-    "湖北省": "湖北",
-    "湖南省": "湖南",
-    "广东省": "广东",
-    "广西壮族自治区": "广西",
-    "海南省": "海南",
-    "四川省": "四川",
-    "贵州省": "贵州",
-    "云南省": "云南",
-    "西藏自治区": "西藏",
-    "陕西省": "陕西",
-    "甘肃省": "甘肃",
-    "青海省": "青海",
-    "宁夏回族自治区": "宁夏",
-    "新疆维吾尔自治区": "新疆",
-    "香港特别行政区": "香港",
-    "澳门特别行政区": "澳门",
-    "台湾省": "台湾",
-}
-
-
-def _province_short(province: str) -> str:
-    """把省级行政区全称转为简称；已是简称或未知时原样返回。"""
-    name = str(province or "").strip()
-    if not name:
-        return ""
-    return _PROVINCE_FULL_TO_SHORT.get(name, name)
 
 
 def _degree_to_direction(degree: Any, english: bool = False) -> str:
@@ -335,17 +267,11 @@ class WeatherStationQueryService:
             return matched
 
         # ---- 分支2：站名（可能带省份前缀）----
-        province_hint: str | None = None
-        city_name = raw
         # 提取省份前缀：常见省名 + 简称。
         # 注意：仅当 raw 比省名更长（确实带了站名后缀）才剥离前缀；
         # 若 raw 恰好等于省名（如「上海」「北京」等直辖市名即站名），
         # 整串直接作为城市名匹配，否则会剥成空串导致「请输入有效的站点名称」。
-        for pname in _COMMON_PROVINCES:
-            if raw.startswith(pname) and len(raw) > len(pname):
-                province_hint = pname
-                city_name = raw[len(pname) :]
-                break
+        province_hint, city_name = strip_province_prefix(raw)
         # 去掉「省」「市」后缀再匹配
         city_name = city_name.removesuffix("省").removesuffix("市").strip()
 
@@ -867,78 +793,6 @@ class WeatherStationQueryService:
             "is_nationwide": False,
         }
 
-
-# 常见省名（含简称）用于解析「省+站名」前缀
-_COMMON_PROVINCES = [
-    "北京市",
-    "天津市",
-    "河北省",
-    "山西省",
-    "内蒙古自治区",
-    "辽宁省",
-    "吉林省",
-    "黑龙江省",
-    "上海市",
-    "江苏省",
-    "浙江省",
-    "安徽省",
-    "福建省",
-    "江西省",
-    "山东省",
-    "河南省",
-    "湖北省",
-    "湖南省",
-    "广东省",
-    "广西壮族自治区",
-    "海南省",
-    "重庆市",
-    "四川省",
-    "贵州省",
-    "云南省",
-    "西藏自治区",
-    "陕西省",
-    "甘肃省",
-    "青海省",
-    "宁夏回族自治区",
-    "新疆维吾尔自治区",
-    "香港特别行政区",
-    "澳门特别行政区",
-    "台湾省",
-    "北京",
-    "天津",
-    "上海",
-    "重庆",
-    "河北",
-    "山西",
-    "内蒙古",
-    "辽宁",
-    "吉林",
-    "黑龙江",
-    "江苏",
-    "浙江",
-    "安徽",
-    "福建",
-    "江西",
-    "山东",
-    "河南",
-    "湖北",
-    "湖南",
-    "广东",
-    "广西",
-    "海南",
-    "四川",
-    "贵州",
-    "云南",
-    "西藏",
-    "陕西",
-    "甘肃",
-    "青海",
-    "宁夏",
-    "新疆",
-    "香港",
-    "澳门",
-    "台湾",
-]
 
 # 省份简称 -> NMC 省份码（兜底映射）
 _PROVINCE_SHORT: dict[str, str] = {

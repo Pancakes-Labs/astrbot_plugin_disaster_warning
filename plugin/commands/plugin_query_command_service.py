@@ -20,6 +20,10 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 
 from ...core.app.services import format_earthquake_list_text, quoted_plain_result
+from ...core.domain.earthquake.cmt_normalize import (
+    classify_fault_mechanism,
+    format_fault_type_label,
+)
 from ...core.domain.event_context import EarthquakeDisplayContext
 from ...core.message.presenters.earthquake_presenter import SnetPresenter
 from ...core.message.presenters.weather_alarm_code_map import (
@@ -30,6 +34,11 @@ from ...core.message.push.message_build_service import MessageBuildService
 from ...core.message.render.beachball_renderer import BeachballRenderer
 from ...core.message.render.jma_hypo_renderer import JmaHypoRenderer
 from ...core.network.http.nmc_radar_client import NmcRadarClient
+from ...core.services.query.aqi_query_service import (
+    query_aqi,
+    query_aqi_city_list,
+    query_aqi_rank,
+)
 from ...core.services.query.jma_hypo_query_presenter import (
     build_jma_hypo_list_text,
     build_jma_hypo_plot_caption,
@@ -281,11 +290,6 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             except ValueError:
                 yield _quoted_plain_result("❌ 走向、倾角与滑动角必须为有效数值。")
                 return
-
-            from ...core.domain.earthquake.cmt_normalize import (
-                classify_fault_mechanism,
-                format_fault_type_label,
-            )
 
             plane = {
                 "strike": strike_val,
@@ -1665,3 +1669,167 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 f"[灾害预警] 气象站列表查询失败: {e}\n{traceback.format_exc()}"
             )
             yield quoted_plain_result(self.plugin, event, f"❌ 气象站列表查询失败: {e}")
+
+    # ------------------------------------------------------------------
+    # 空气质量查询（/空气质量 /空气质量排行 /空气质量列表）
+    # ------------------------------------------------------------------
+
+    async def handle_query_aqi(
+        self, event, keyword: str | None = None, optional_a: str | None = None
+    ):
+        """处理空气质量查询命令（/空气质量）。
+
+        用法：
+          /空气质量 <城市名>        查询指定城市空气质量
+          /空气质量 <省份名> [等级]  查询全省各城市空气质量（可按等级过滤）
+          /空气质量 全国 [等级]      全国主要城市空气质量概览（可按等级过滤）
+        """
+        try:
+            result = await query_aqi(
+                keyword,
+                quality_filter=optional_a,
+            )
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_aqi_query",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin, event, f"❌ {result.get('error', '空气质量查询失败')}"
+                )
+                return
+
+            mode = str(result.get("mode") or "help")
+            blocks = result.get("blocks") or []
+            text = result.get("text") or ""
+            await self._track_command_feature(
+                "command_aqi_query",
+                {
+                    "success": True,
+                    "query_mode": mode,
+                    "result_count": int(result.get("total") or 0),
+                    "is_nationwide": mode == "nationwide",
+                },
+            )
+
+            # 全国概览：走合并转发（每等级一段），摘要文本作为头部节点，失败回退普通文本
+            if blocks:
+                try:
+                    ok = await send_forward_blocks(
+                        self.plugin,
+                        event,
+                        blocks,
+                        header=text,
+                        name="灾害预警",
+                    )
+                    if ok:
+                        return
+                except Exception as fwd_error:
+                    logger.warning(
+                        f"[灾害预警] 全国空气质量合并转发送失败，回退文本: {fwd_error}"
+                    )
+            yield quoted_plain_result(self.plugin, event, text)
+        except Exception as e:
+            logger.error(f"[灾害预警] 空气质量查询失败: {e}\n{traceback.format_exc()}")
+            yield quoted_plain_result(self.plugin, event, f"❌ 空气质量查询失败: {e}")
+
+    async def handle_query_aqi_rank(self, event, direction: str | None = None):
+        """处理空气质量排行命令（/空气质量排行 [最好|最差]）。
+
+        无参时同时输出最好与最差两个榜单，显式走合并转发；
+        指定方向时输出单个榜单，同样走合并转发并带引用回复。
+        """
+        try:
+            result = await query_aqi_rank(direction)
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_aqi_rank",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ {result.get('error', '空气质量排行查询失败')}",
+                )
+                return
+
+            await self._track_command_feature(
+                "command_aqi_rank",
+                {
+                    "success": True,
+                    "direction": str(result.get("direction") or "both"),
+                    "block_count": len(result.get("blocks") or []),
+                },
+            )
+            blocks = result.get("blocks") or []
+            if not blocks:
+                yield quoted_plain_result(
+                    self.plugin, event, result.get("text") or "暂无排行数据"
+                )
+                return
+            # 显式走合并转发（显示名「灾害预警」），首个节点带引用回复
+            ok = await send_forward_blocks(
+                self.plugin,
+                event,
+                blocks,
+                name="灾害预警",
+                quote_first=True,
+            )
+            if not ok:
+                yield quoted_plain_result(self.plugin, event, "\n\n".join(blocks))
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 空气质量排行查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(
+                self.plugin, event, f"❌ 空气质量排行查询失败: {e}"
+            )
+
+    async def handle_query_aqi_city_list(self, event, province: str | None = None):
+        """处理空气质量城市列表命令（/空气质量列表 [省份]）。"""
+        try:
+            result = await query_aqi_city_list(province)
+            if not result.get("success"):
+                await self._track_command_feature(
+                    "command_aqi_list",
+                    {"success": False, "error": str(result.get("error", ""))},
+                )
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ {result.get('error', '空气质量列表查询失败')}",
+                )
+                return
+
+            await self._track_command_feature(
+                "command_aqi_list",
+                {
+                    "success": True,
+                    "is_nationwide": bool(result.get("is_nationwide")),
+                },
+            )
+            blocks = result.get("blocks") or []
+            if blocks and len(blocks) > 1:
+                # 全国列表：按省分组走合并转发，摘要文本作为头部节点
+                try:
+                    ok = await send_forward_blocks(
+                        self.plugin,
+                        event,
+                        blocks,
+                        header=result.get("text", ""),
+                        name="灾害预警",
+                    )
+                    if ok:
+                        return
+                except Exception as fwd_error:
+                    logger.warning(
+                        f"[灾害预警] 空气质量城市列表合并转发送失败，回退文本: {fwd_error}"
+                    )
+            yield quoted_plain_result(self.plugin, event, result.get("text", ""))
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 空气质量城市列表查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(
+                self.plugin, event, f"❌ 空气质量城市列表查询失败: {e}"
+            )

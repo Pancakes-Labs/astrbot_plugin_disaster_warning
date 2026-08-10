@@ -167,6 +167,9 @@ class DisasterWarningPlugin(Star):
 • /气象站实况 或 /实况 或 /气象站 <站点代码或站名> - 查询气象站实况（如：/实况 59270、/气象站 怀集）
 • /气象站历史 或 /实况历史 <站点代码或站名> [时次] - 查询气象站近24小时逐小时历史（如：/气象站历史 59270 10时）
 • /气象站列表 [省份] - 查询气象站列表（如：/气象站列表、/气象站列表 广东）
+• /空气质量 或 /AQI <城市|省份|全国> [等级] - 查询空气质量（如：/空气质量 北京、/空气质量 全国 优）
+• /空气质量排行 或 /空气榜 [最好|最差] - 查询空气质量排行榜 Top10
+• /空气质量列表 或 /AQI列表 [省份] - 查看空气质量支持的城市列表（如：/空气质量列表 新疆）
 • /灾害预警模拟 <纬度> <经度> <震级> [深度] [数据源] - 模拟地震事件
 • /灾害预警配置 查看 [全局|当前|会话UMO] - 查看配置（会话模式返回差异覆写）(仅管理员)
 • /灾害预警日志 - 查看原始消息日志统计摘要 (仅管理员)
@@ -527,6 +530,45 @@ class DisasterWarningPlugin(Star):
         async for (
             result
         ) in self._query_command_service.handle_query_weather_station_list(
+            event, province=province
+        ):
+            yield result
+
+    @filter.command("空气质量", alias={"AQI", "aqi", "空气质量指数"})
+    async def query_aqi(
+        self,
+        event: AstrMessageEvent,
+        keyword: str = None,
+        optional_a: str = None,
+    ):
+        """查询城市/省份/全国空气质量（FAN Studio AQI）"""
+        async for result in self._query_command_service.handle_query_aqi(
+            event, keyword=keyword, optional_a=optional_a
+        ):
+            yield result
+
+    @filter.command(
+        "空气质量排行", alias={"AQI排行", "aqi排行", "空气质量排行榜", "空气榜"}
+    )
+    async def query_aqi_rank(
+        self,
+        event: AstrMessageEvent,
+        direction: str = None,
+    ):
+        """查询空气质量排行榜（最好/最差 Top10）"""
+        async for result in self._query_command_service.handle_query_aqi_rank(
+            event, direction=direction
+        ):
+            yield result
+
+    @filter.command("空气质量列表", alias={"AQI列表", "aqi列表", "空气质量城市列表"})
+    async def query_aqi_city_list(
+        self,
+        event: AstrMessageEvent,
+        province: str = None,
+    ):
+        """查询空气质量支持的城市列表（可按省份过滤）"""
+        async for result in self._query_command_service.handle_query_aqi_city_list(
             event, province=province
         ):
             yield result

@@ -413,8 +413,11 @@ async def query_weather_alarm_data(
         detected_type = detect_weather_type(title_text, weather_type_code)
         detected_color = detect_weather_color(level_text, title_text)
 
-        # 气象警报种类过滤
-        if query_type and query_type not in haystack and query_type != detected_type:
+        # 气象警报种类过滤：按识别出的精确类型匹配，避免子串误伤。
+        # 例如用户查"大风"时，"雷暴大风/雷雨大风/海上大风"等复合类型
+        # 的标题同样包含"大风"子串，宽松的子串匹配会把它们误当结果返回；
+        # 这里只保留 detected_type 与查询类型完全一致的记录（查什么回什么）。
+        if query_type and query_type != detected_type:
             continue
 
         # 警报色彩级别过滤

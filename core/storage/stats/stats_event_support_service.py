@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....utils.china_regions import CHINA_PROVINCES
 from ....utils.converters import ScaleConverter
 from ...domain.event_models import (
     EarthquakeEvent,
@@ -23,43 +24,6 @@ from ...domain.tsunami.tsunami_levels import (
 )
 from ...domain.tsunami.tsunami_title import build_tsunami_list_title
 from ..source_compat import is_cenc_intensity_report, is_fssn_cmt_report
-
-CHINA_PROVINCES = [
-    "北京",
-    "天津",
-    "上海",
-    "重庆",
-    "河北",
-    "山西",
-    "辽宁",
-    "吉林",
-    "黑龙江",
-    "江苏",
-    "浙江",
-    "安徽",
-    "福建",
-    "江西",
-    "山东",
-    "河南",
-    "湖北",
-    "湖南",
-    "广东",
-    "海南",
-    "四川",
-    "贵州",
-    "云南",
-    "陕西",
-    "甘肃",
-    "青海",
-    "台湾",
-    "内蒙古",
-    "广西",
-    "西藏",
-    "宁夏",
-    "新疆",
-    "香港",
-    "澳门",
-]
 
 
 class StatsEventSupportService:
