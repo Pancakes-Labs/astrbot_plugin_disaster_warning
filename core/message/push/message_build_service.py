@@ -215,6 +215,10 @@ class MessageBuildService:
             "map_source": config.get("map_source", "PetalMap矢量图亮"),
             "map_zoom_level": config.get("map_zoom_level", 5),
             "playwright_mode": config.get("playwright_mode", "local"),
+            # 是否忽略 HTTPS 证书错误会直接影响底图能否加载，纳入缓存键避免切换后误用旧图。
+            "ignore_https_errors": bool(
+                config.get("browser_ignore_https_errors", False)
+            ),
             "event_caption": event_caption or "",
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
@@ -371,6 +375,10 @@ class MessageBuildService:
             "map_source": message_format_config.get("map_source", "PetalMap矢量图亮"),
             "map_zoom_level": message_format_config.get("map_zoom_level", 5),
             "playwright_mode": message_format_config.get("playwright_mode", "local"),
+            # 是否忽略 HTTPS 证书错误会直接影响底图能否加载，纳入缓存键避免切换后误用旧图。
+            "ignore_https_errors": bool(
+                message_format_config.get("browser_ignore_https_errors", False)
+            ),
             "timezone": display_timezone,
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
@@ -498,12 +506,15 @@ class MessageBuildService:
         )
 
         # S-Net 测站分布图（替代通用地图）
-        await self._append_snet_map_if_needed(chain, event, source_id=source_id)
+        await self._append_snet_map_if_needed(
+            chain, event, source_id=source_id, active_config=active_config
+        )
         # 台风路径图（EQSC 富化轨迹）
         await self._append_typhoon_map_if_needed(
             chain,
             event,
             message_format_config=message_format_config,
+            active_config=active_config,
         )
         # 地图渲染与插入（S-Net、CMT 跳过，避免重复或误附加通用地图）
         if source_id not in ("snet_msil", "fssn_cmt_fanstudio"):
@@ -640,9 +651,21 @@ class MessageBuildService:
         event: EventEnvelope,
         *,
         source_id: str,
+        active_config: dict[str, Any],
     ) -> None:
         """为 S-Net 事件附加测站分布图（走 RenderImageCache，避免重复截图）。"""
         if source_id != "snet_msil":
+            return
+        # 检查会话/全局配置是否启用测站分布图
+        data_sources = (
+            active_config.get("data_sources", {})
+            if isinstance(active_config, dict)
+            else {}
+        )
+        snet_cfg = (
+            data_sources.get("snet", {}) if isinstance(data_sources, dict) else {}
+        )
+        if not snet_cfg.get("include_station_map", True):
             return
         renderer = getattr(self.manager, "snet_map_renderer", None)
         if renderer is None:
@@ -683,10 +706,20 @@ class MessageBuildService:
         event: EventEnvelope,
         *,
         message_format_config: dict[str, Any],
+        active_config: dict[str, Any],
     ) -> None:
         """为台风事件附加路径图（需 history_track，走 RenderImageCache）。"""
         domain_event = self._get_domain_event(event)
         if not isinstance(domain_event, TyphoonEvent):
+            return
+
+        # 检查会话/全局配置是否启用台风路径图
+        typhoon_config = (
+            active_config.get("typhoon_config", {})
+            if isinstance(active_config, dict)
+            else {}
+        )
+        if not typhoon_config.get("include_track_map", True):
             return
 
         renderer = getattr(self.manager, "typhoon_map_renderer", None)

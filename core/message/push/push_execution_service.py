@@ -238,6 +238,13 @@ class PushExecutionService:
                         "playwright_mode": message_format_config.get(
                             "playwright_mode", "local"
                         ),
+                        # 是否忽略 HTTPS 证书错误直接影响地图底图能否加载，
+                        # 纳入缓存键避免切换开关后误复用旧渲染结果。
+                        "browser_ignore_https_errors": bool(
+                            message_format_config.get(
+                                "browser_ignore_https_errors", False
+                            )
+                        ),
                         "use_global_quake_card": message_format_config.get(
                             "use_global_quake_card", False
                         ),
