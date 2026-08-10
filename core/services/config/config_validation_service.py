@@ -1403,8 +1403,18 @@ class ConfigValidator:
                 eqsc_cfg["refresh_token"] = ""
 
             # 统一轮询间隔校验
+            # 缺失（键不存在）与显式 None 都视为未配置，统一回退默认 120，
+            # 避免 None 原样保留导致下游轮询调度收到无效间隔。
             poll_interval = eqsc_cfg.get("poll_interval_seconds")
-            if isinstance(poll_interval, int) and not isinstance(poll_interval, bool):
+            if poll_interval is None:
+                if "poll_interval_seconds" not in eqsc_cfg:
+                    logger.debug("[灾害预警] EQSC 未配置轮询间隔，已填充默认值 120。")
+                else:
+                    logger.warning(
+                        "[灾害预警] 配置警告: EQSC 轮询间隔为 null，已重置为 120。"
+                    )
+                eqsc_cfg["poll_interval_seconds"] = 120
+            elif isinstance(poll_interval, int) and not isinstance(poll_interval, bool):
                 if poll_interval < 30:
                     logger.warning(
                         f"[灾害预警] 配置警告: EQSC 轮询间隔 {poll_interval} 过短，已修正为 30。"
@@ -1415,12 +1425,10 @@ class ConfigValidator:
                         f"[灾害预警] 配置警告: EQSC 轮询间隔 {poll_interval} 过长，已修正为 600。"
                     )
                     eqsc_cfg["poll_interval_seconds"] = 600
-            elif poll_interval is not None:
+            else:
                 logger.warning(
                     "[灾害预警] 配置警告: EQSC 轮询间隔类型错误，已重置为 120。"
                 )
-                eqsc_cfg["poll_interval_seconds"] = 120
-            elif "poll_interval_seconds" not in eqsc_cfg:
                 eqsc_cfg["poll_interval_seconds"] = 120
 
             # EQSC 启用但缺少 RefreshToken 时输出警告

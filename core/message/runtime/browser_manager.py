@@ -795,23 +795,25 @@ class BrowserManager:
                                 f"{self._truncate_debug_text(failure_text or 'unknown failure')}"
                             )
                             is_tile = self._is_map_tile_url(getattr(req, "url", None))
-                            # 方案A：瓦片类失败（含证书过期/中止等）一律降级为 debug，
-                            # 仅在末尾统一汇总一条，避免每张瓦片刷屏。
-                            if is_tile:
-                                tile_request_failures.append(entry)
-                                logger.debug(
-                                    f"[灾害预警] 瓦片资源请求失败(已降级为debug): {entry}"
-                                )
-                                return
+                            # 先判断良性中止（瓦片重试/视野更新/截图收尾导致的
+                            # net::ERR_ABORTED）：这类噪声直接忽略，不进瓦片汇总，
+                            # 避免出图成功时被 WARN 汇总刷屏。
                             if self._is_benign_request_failure(
                                 url=getattr(req, "url", None),
                                 failure_text=failure_text,
                                 resource_type=resource_type,
                             ):
-                                # 非瓦片但属于重试/视野更新导致的中止请求：仅 debug。
                                 benign_request_failures.append(entry)
                                 logger.debug(
                                     f"[灾害预警] 忽略可预期的资源中止: {entry}"
+                                )
+                                return
+                            # 方案A：瓦片类失败（如证书过期等真实错误）一律降级为 debug，
+                            # 仅在末尾统一去重汇总一条，避免每张瓦片刷屏。
+                            if is_tile:
+                                tile_request_failures.append(entry)
+                                logger.debug(
+                                    f"[灾害预警] 瓦片资源请求失败(已降级为debug): {entry}"
                                 )
                                 return
                             request_failures.append(entry)
