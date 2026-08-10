@@ -17,7 +17,6 @@ from ....utils.map_tile_sources import (
     MAP_TILE_SOURCES,
     normalize_map_source,
 )
-from ..eqsc.eqsc_typhoon_poll_service import EqscTyphoonPollService
 from ..snet.snet_filter_constants import (
     DEFAULT_MIN_SHINDO,
     DEFAULT_MIN_TRIGGERED_STATIONS,
@@ -959,15 +958,6 @@ class ConfigValidator:
             )
             cfg["log_downgrade_behavior"] = "降级为DEBUG"
 
-        # 原始消息日志路径校验
-        if "raw_message_log_path" in cfg and not isinstance(
-            cfg["raw_message_log_path"], str
-        ):
-            logger.warning(
-                "[灾害预警] 配置警告: 原始消息日志路径类型错误，已重置为 raw_messages.log。"
-            )
-            cfg["raw_message_log_path"] = "raw_messages.log"
-
         # 布尔值校验
         ConfigValidator._ensure_bool(cfg, "enable_raw_message_logging", False)
         ConfigValidator._ensure_bool(cfg, "filter_heartbeat_messages", True)
@@ -1354,18 +1344,7 @@ class ConfigValidator:
                 fan_studio_cfg["fssn_cmt"] = True
             ConfigValidator._ensure_bool(fan_studio_cfg, "fssn_cmt", True)
 
-            # app_id / api_key：WebSocket 建连后发送 {"type":"auth","appId","key"}
-            app_id = fan_studio_cfg.get("app_id")
-            if app_id is None:
-                fan_studio_cfg["app_id"] = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
-            elif not isinstance(app_id, str):
-                logger.warning(
-                    "[灾害预警] 配置警告: FAN Studio app_id 类型错误，已重置为默认应用 ID。"
-                )
-                fan_studio_cfg["app_id"] = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
-            else:
-                fan_studio_cfg["app_id"] = app_id.strip()
-
+            # api_key：WebSocket 建连后发送 {"type":"auth","appId","key"}
             api_key = fan_studio_cfg.get("api_key")
             if api_key is None:
                 fan_studio_cfg["api_key"] = ""
@@ -1383,14 +1362,6 @@ class ConfigValidator:
             ):
                 logger.warning(
                     "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 api_key，"
-                    "WebSocket 鉴权将无法完成，相关连接会被跳过。"
-                )
-            if (
-                fan_studio_cfg.get("enabled")
-                and not str(fan_studio_cfg.get("app_id", "")).strip()
-            ):
-                logger.warning(
-                    "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 app_id，"
                     "WebSocket 鉴权将无法完成，相关连接会被跳过。"
                 )
 
@@ -1415,23 +1386,6 @@ class ConfigValidator:
                 )
             ConfigValidator._ensure_bool(eqsc_cfg, "china_cenc_intensity_report", False)
 
-            # Base URL 校验：确保为非空字符串且去除尾部斜杠
-            base_url = eqsc_cfg.get("base_url")
-            if isinstance(base_url, str):
-                base_url = base_url.strip().rstrip("/")
-                if base_url:
-                    eqsc_cfg["base_url"] = base_url
-                else:
-                    logger.warning(
-                        "[灾害预警] 配置警告: EQSC base_url 为空，已重置为默认值。"
-                    )
-                    eqsc_cfg["base_url"] = "https://equake.top"
-            elif base_url is not None:
-                logger.warning(
-                    "[灾害预警] 配置警告: EQSC base_url 类型错误，已重置为默认值。"
-                )
-                eqsc_cfg["base_url"] = "https://equake.top"
-
             # RefreshToken 校验：确保为字符串类型
             refresh_token = eqsc_cfg.get("refresh_token")
             if refresh_token is not None and not isinstance(refresh_token, str):
@@ -1440,90 +1394,26 @@ class ConfigValidator:
                 )
                 eqsc_cfg["refresh_token"] = ""
 
-            # 缓存 TTL 校验：确保为合理范围内的整数
-            cache_ttl = eqsc_cfg.get("cache_ttl")
-            if isinstance(cache_ttl, int):
-                if cache_ttl < 60:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 缓存 TTL {cache_ttl} 过小，已修正为 60。"
-                    )
-                    eqsc_cfg["cache_ttl"] = 60
-                elif cache_ttl > 3600:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 缓存 TTL {cache_ttl} 过大，已修正为 3600。"
-                    )
-                    eqsc_cfg["cache_ttl"] = 3600
-            elif cache_ttl is not None:
-                logger.warning(
-                    "[灾害预警] 配置警告: EQSC 缓存 TTL 类型错误，已重置为 300。"
-                )
-                eqsc_cfg["cache_ttl"] = 300
-
-            # 台风轮询间隔（边界与默认值复用 EqscTyphoonPollService 常量）
-            typhoon_min = EqscTyphoonPollService.MIN_INTERVAL_SECONDS
-            typhoon_max = EqscTyphoonPollService.MAX_INTERVAL_SECONDS
-            typhoon_default = EqscTyphoonPollService.DEFAULT_INTERVAL_SECONDS
-            typhoon_poll_interval = eqsc_cfg.get("typhoon_poll_interval_seconds")
-            # bool 是 int 子类，不能当作合法间隔。
-            if isinstance(typhoon_poll_interval, int) and not isinstance(
-                typhoon_poll_interval, bool
-            ):
-                if typhoon_poll_interval < typhoon_min:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 台风轮询间隔 {typhoon_poll_interval} 过短，已修正为 {typhoon_min}。"
-                    )
-                    eqsc_cfg["typhoon_poll_interval_seconds"] = typhoon_min
-                elif typhoon_poll_interval > typhoon_max:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 台风轮询间隔 {typhoon_poll_interval} 过长，已修正为 {typhoon_max}。"
-                    )
-                    eqsc_cfg["typhoon_poll_interval_seconds"] = typhoon_max
-            elif typhoon_poll_interval is not None:
-                logger.warning(
-                    f"[灾害预警] 配置警告: EQSC 台风轮询间隔类型错误，已重置为 {typhoon_default}。"
-                )
-                eqsc_cfg["typhoon_poll_interval_seconds"] = typhoon_default
-            elif "typhoon_poll_interval_seconds" not in eqsc_cfg:
-                eqsc_cfg["typhoon_poll_interval_seconds"] = typhoon_default
-
-            # 海啸轮询间隔
-            poll_interval = eqsc_cfg.get("jma_tsunami_poll_interval_seconds")
-            # bool 是 int 子类，不能当作合法间隔。
+            # 统一轮询间隔校验
+            poll_interval = eqsc_cfg.get("poll_interval_seconds")
             if isinstance(poll_interval, int) and not isinstance(poll_interval, bool):
-                if poll_interval < 15:
+                if poll_interval < 30:
                     logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 海啸轮询间隔 {poll_interval} 过短，已修正为 15。"
+                        f"[灾害预警] 配置警告: EQSC 轮询间隔 {poll_interval} 过短，已修正为 30。"
                     )
-                    eqsc_cfg["jma_tsunami_poll_interval_seconds"] = 15
-                elif poll_interval > 300:
+                    eqsc_cfg["poll_interval_seconds"] = 30
+                elif poll_interval > 600:
                     logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 海啸轮询间隔 {poll_interval} 过长，已修正为 300。"
+                        f"[灾害预警] 配置警告: EQSC 轮询间隔 {poll_interval} 过长，已修正为 600。"
                     )
-                    eqsc_cfg["jma_tsunami_poll_interval_seconds"] = 300
+                    eqsc_cfg["poll_interval_seconds"] = 600
             elif poll_interval is not None:
                 logger.warning(
-                    "[灾害预警] 配置警告: EQSC 海啸轮询间隔类型错误，已重置为 60。"
+                    "[灾害预警] 配置警告: EQSC 轮询间隔类型错误，已重置为 120。"
                 )
-                eqsc_cfg["jma_tsunami_poll_interval_seconds"] = 60
-
-            # 海啸快照缓存 TTL
-            tsunami_cache_ttl = eqsc_cfg.get("tsunami_cache_ttl")
-            if isinstance(tsunami_cache_ttl, int):
-                if tsunami_cache_ttl < 15:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 海啸缓存 TTL {tsunami_cache_ttl} 过小，已修正为 15。"
-                    )
-                    eqsc_cfg["tsunami_cache_ttl"] = 15
-                elif tsunami_cache_ttl > 300:
-                    logger.warning(
-                        f"[灾害预警] 配置警告: EQSC 海啸缓存 TTL {tsunami_cache_ttl} 过大，已修正为 300。"
-                    )
-                    eqsc_cfg["tsunami_cache_ttl"] = 300
-            elif tsunami_cache_ttl is not None:
-                logger.warning(
-                    "[灾害预警] 配置警告: EQSC 海啸缓存 TTL 类型错误，已重置为 60。"
-                )
-                eqsc_cfg["tsunami_cache_ttl"] = 60
+                eqsc_cfg["poll_interval_seconds"] = 120
+            elif "poll_interval_seconds" not in eqsc_cfg:
+                eqsc_cfg["poll_interval_seconds"] = 120
 
             # EQSC 启用但缺少 RefreshToken 时输出警告
             if (
