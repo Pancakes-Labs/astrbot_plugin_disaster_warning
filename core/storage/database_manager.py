@@ -8,6 +8,7 @@ Schema v2：
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from astrbot.api import logger
 
 from ...utils.time_converter import TimeConverter
 from ..domain.typhoon.typhoon_ids import to_eqsc_id, to_fan_id
+from ..domain.typhoon.typhoon_levels import level_weight
 from ..domain.typhoon.typhoon_peaks import resolve_storage_peak_fields
 from ..services.identity.event_classifier import (
     MAJOR_EARTHQUAKE_MAGNITUDE_THRESHOLD,
@@ -1387,8 +1389,6 @@ class DatabaseManager:
         - 跌破阈值后再次进入重大区间。
         连续相同等级的观测不重复生成点。
         """
-        from ..domain.typhoon.typhoon_levels import level_weight
-
         cursor = await self.connection.cursor()
         await cursor.execute(
             """
@@ -2265,8 +2265,6 @@ class DatabaseManager:
                 if not raw_time:
                     continue
                 try:
-                    from datetime import datetime, timezone
-
                     normalized_time = str(raw_time).replace("Z", "+00:00")
                     event_time = datetime.fromisoformat(normalized_time)
                     if event_time.tzinfo is None:

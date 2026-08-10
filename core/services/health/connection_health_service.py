@@ -67,7 +67,7 @@ RESOLVE_INCIDENT_SECONDS = 120
 FLAP_IGNORE_SECONDS = 60
 
 # 高延迟视为 degraded 的阈值（ms）
-HIGH_LATENCY_MS = 1500
+HIGH_LATENCY_MS = 2000
 
 # 服务启动/重载后的建连宽限期：此期间「已启用但未连通」记为降级(连接中)，
 # 避免插件重载后几十秒内整页被误判为「核心通道中断」。

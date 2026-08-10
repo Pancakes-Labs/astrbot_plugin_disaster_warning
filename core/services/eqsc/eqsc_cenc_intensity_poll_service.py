@@ -30,9 +30,11 @@ class EqscCencIntensityPollService:
     """EQSC CENC 烈度速报 HTTP 轮询服务。"""
 
     SOURCE_ID = "cenc_ir_eqsc"
-    DEFAULT_INTERVAL_SECONDS = 90
+    DEFAULT_INTERVAL_SECONDS = 120
     MIN_INTERVAL_SECONDS = 30
     MAX_INTERVAL_SECONDS = 600
+    # 统一轮询间隔配置键（与台风、海啸共用同一配置项）
+    POLL_INTERVAL_CONFIG_KEY = "poll_interval_seconds"
     DEFAULT_LIST_LIMIT = 5
     MIN_LIST_LIMIT = 1
     MAX_LIST_LIMIT = 20
@@ -70,7 +72,8 @@ class EqscCencIntensityPollService:
 
     def _resolve_interval(self) -> int:
         cfg = self._eqsc_config()
-        raw = cfg.get("cenc_ir_poll_interval_seconds", self.DEFAULT_INTERVAL_SECONDS)
+        raw = cfg.get(self.POLL_INTERVAL_CONFIG_KEY, self.DEFAULT_INTERVAL_SECONDS)
+        # bool 是 int 子类，不能当作合法间隔。
         if isinstance(raw, bool) or not isinstance(raw, int):
             interval = self.DEFAULT_INTERVAL_SECONDS
         else:

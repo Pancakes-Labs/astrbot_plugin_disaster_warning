@@ -31,7 +31,7 @@ class EqscTyphoonClient(EqscHttpClient):
 
         Args:
             token_manager: EQSC 令牌管理器实例。
-            config: EQSC 配置字典，包含 cache_ttl 等字段。
+            config: EQSC 配置字典（缓存 TTL 已硬编码，不再读取 cache_ttl）。
             message_logger: 可选原始消息记录器；启用后会落盘 EQSC HTTP 响应。
             owns_token_manager: close() 时是否关闭 token_manager。
         """
@@ -40,8 +40,10 @@ class EqscTyphoonClient(EqscHttpClient):
             config,
             message_logger=message_logger,
             owns_token_manager=owns_token_manager,
+            # cache_ttl 配置项已从配置契约移除：硬编码 300 秒缓存，
+            # 传入 None 完全禁用配置读取，避免任何残留键覆盖默认值。
             default_cache_ttl=300,
-            cache_ttl_config_key="cache_ttl",
+            cache_ttl_config_key=None,
         )
         # 缓存结构: {typhoon_id: (data, expires_at)}
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}

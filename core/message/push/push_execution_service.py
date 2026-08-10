@@ -238,6 +238,13 @@ class PushExecutionService:
                         "playwright_mode": message_format_config.get(
                             "playwright_mode", "local"
                         ),
+                        # 是否忽略 HTTPS 证书错误直接影响地图底图能否加载，
+                        # 纳入缓存键避免切换开关后误复用旧渲染结果。
+                        "browser_ignore_https_errors": bool(
+                            message_format_config.get(
+                                "browser_ignore_https_errors", False
+                            )
+                        ),
                         "use_global_quake_card": message_format_config.get(
                             "use_global_quake_card", False
                         ),
@@ -266,7 +273,20 @@ class PushExecutionService:
                         "show_local_estimation": typhoon_config.get(
                             "show_local_estimation", False
                         ),
+                        # 台风路径图附件开关影响消息是否附加路径图卡片，
+                        # 必须纳入缓存键，否则不同会话会误复用彼此的渲染结果。
+                        "include_track_map": bool(
+                            typhoon_config.get("include_track_map", True)
+                        ),
                         "typhoon": typhoon_enrichment,
+                    },
+                    # S-Net 测站分布图附件开关同理，纳入缓存键避免跨会话误复用。
+                    "snet": {
+                        "include_station_map": bool(
+                            data_sources.get("snet", {}).get(
+                                "include_station_map", True
+                            )
+                        ),
                     },
                     # 本地监控配置差异会导致地震正文附带不同的本地预估，
                     # 缺失时会使不同会话误共享同一份渲染结果。

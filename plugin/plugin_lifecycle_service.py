@@ -13,9 +13,11 @@ import time
 
 from astrbot.api import logger
 
+from ..core.app.disaster_service import stop_disaster_service
 from ..core.services.config.config_validation_service import ConfigValidator
 from ..core.services.telemetry.telemetry_service import TelemetryManager
 from ..utils.banner import print_stop_summary
+from ..utils.geolocation import close_geoip_session
 from ..utils.version import get_plugin_version
 
 
@@ -137,8 +139,6 @@ class PluginLifecycleService:
             except asyncio.CancelledError:
                 pass
 
-        from ..core.app.disaster_service import stop_disaster_service
-
         await stop_disaster_service()
 
         if (
@@ -198,6 +198,13 @@ class PluginLifecycleService:
         if self.plugin.web_server:
             # 最后停止管理端 Web 服务器，避免外部仍尝试进行网络交互
             await self.plugin.web_server.stop()
+
+        # 兜底关闭 GeoIP 共享会话：close_geoip_session() 目前由 web_server.stop() 触发，
+        # 但为避免 web_admin 未启用或未来其他路径使用 GeoIP 时残留模块级会话，此处再兜底一次。
+        try:
+            await close_geoip_session()
+        except Exception as geoip_err:
+            logger.debug(f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}")
 
         # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
         # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。

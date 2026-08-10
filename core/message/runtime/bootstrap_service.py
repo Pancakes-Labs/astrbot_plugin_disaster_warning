@@ -77,11 +77,15 @@ class MessageManagerBootstrapService:
 
         playwright_mode = msg_config.get("playwright_mode", "local")
         playwright_server_url = msg_config.get("playwright_server_url", "")
+        # 仅本地模式生效：部分瓦片源（如 FAN Studio）证书过期时，
+        # 开启后可继续加载底图；会信任自签/过期证书，默认关闭。
+        ignore_https_errors = bool(msg_config.get("browser_ignore_https_errors", False))
         self.manager.browser_manager = BrowserManager(
             pool_size=pool_size,
             telemetry=telemetry,
             mode=playwright_mode,
             server_url=playwright_server_url,
+            ignore_https_errors=ignore_https_errors,
         )
 
         # 只有本地浏览器模式且确实需要图形渲染时才后台预热，
@@ -105,15 +109,34 @@ class MessageManagerBootstrapService:
         need_browser = (
             msg_config.get("include_map", False)
             or msg_config.get("use_global_quake_card", False)
-            or bool(isinstance(snet_cfg, dict) and snet_cfg.get("enabled", False))
-            # 台风路径图查询/推送也依赖 Playwright，启用台风源时一并预热。
-            or bool(
-                isinstance(fan_studio_cfg, dict)
-                and fan_studio_cfg.get("china_typhoon", False)
+            or (
+                bool(isinstance(snet_cfg, dict) and snet_cfg.get("enabled", False))
+                and bool(snet_cfg.get("include_station_map", True))
             )
-            or bool(
-                isinstance(eqsc_cfg, dict)
-                and EqscChannelService.resolve_eqsc_flags(eqsc_cfg) == (True, True)
+            # 台风路径图查询/推送也依赖 Playwright，启用台风源且开启路径图时一并预热。
+            or (
+                bool(
+                    isinstance(fan_studio_cfg, dict)
+                    and fan_studio_cfg.get("china_typhoon", False)
+                )
+                and bool(
+                    isinstance(self.manager.config.get("typhoon_config", {}), dict)
+                    and self.manager.config.get("typhoon_config", {}).get(
+                        "include_track_map", True
+                    )
+                )
+            )
+            or (
+                bool(
+                    isinstance(eqsc_cfg, dict)
+                    and EqscChannelService.resolve_eqsc_flags(eqsc_cfg) == (True, True)
+                )
+                and bool(
+                    isinstance(self.manager.config.get("typhoon_config", {}), dict)
+                    and self.manager.config.get("typhoon_config", {}).get(
+                        "include_track_map", True
+                    )
+                )
             )
         )
         # 是否需要在合适的时机后台预热浏览器：只登记标志，真正预热推迟到

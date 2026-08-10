@@ -52,9 +52,10 @@ class EqscCencIntensityClient(EqscHttpClient):
             config,
             message_logger=message_logger,
             owns_token_manager=owns_token_manager,
-            # 详情相对稳定；默认 10 分钟缓存，减少重复大包下载
+            # 详情相对稳定；默认 10 分钟缓存，减少重复大包下载。
+            # cenc_ir_cache_ttl 配置项已从配置契约移除：传入 None 完全禁用配置读取，避免任何残留键覆盖默认值。
             default_cache_ttl=600,
-            cache_ttl_config_key="cenc_ir_cache_ttl",
+            cache_ttl_config_key=None,
         )
         # 列表缓存：(items, expires_at)
         self._list_cache: tuple[list[dict[str, Any]], float] | None = None

@@ -27,6 +27,9 @@ from .eqsc_token_manager import EqscTokenManager
 class EqscHttpClient:
     """EQSC HTTP 客户端基类。"""
 
+    # EQSC API 基础地址（硬编码，不再暴露为用户配置项）。
+    EQSC_BASE_URL = "https://equake.top"
+
     def __init__(
         self,
         token_manager: EqscTokenManager,
@@ -35,7 +38,7 @@ class EqscHttpClient:
         *,
         owns_token_manager: bool = True,
         default_cache_ttl: int = 300,
-        cache_ttl_config_key: str = "cache_ttl",
+        cache_ttl_config_key: str | None = "cache_ttl",
     ):
         """初始化公共 HTTP 能力。
 
@@ -46,16 +49,21 @@ class EqscHttpClient:
             owns_token_manager: close() 时是否关闭 token_manager。
                 共享同一 token_manager 的附属客户端应设为 False。
             default_cache_ttl: 缓存 TTL 默认值（秒）。
-            cache_ttl_config_key: 从 config 读取 TTL 的键名。
+            cache_ttl_config_key: 从 config 读取 TTL 的键名；传 None
+                表示禁用配置读取（始终使用 default_cache_ttl 硬编码）。
         """
         self._token_manager = token_manager
-        self._base_url = str(config.get("base_url", "") or "").strip().rstrip("/")
+        self._base_url = self.EQSC_BASE_URL
         self._message_logger = message_logger
         self._owns_token_manager = bool(owns_token_manager)
         try:
-            cache_ttl = int(
-                config.get(cache_ttl_config_key, default_cache_ttl) or default_cache_ttl
-            )
+            if cache_ttl_config_key:
+                cache_ttl = int(
+                    config.get(cache_ttl_config_key, default_cache_ttl)
+                    or default_cache_ttl
+                )
+            else:
+                cache_ttl = default_cache_ttl
         except (TypeError, ValueError):
             cache_ttl = default_cache_ttl
         self._cache_ttl = max(1, cache_ttl)

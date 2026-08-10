@@ -31,9 +31,11 @@ class EqscTsunamiPollService:
     """EQSC JMA 海啸轮询服务。"""
 
     SOURCE_ID = "jma_tsunami_eqsc"
-    DEFAULT_INTERVAL_SECONDS = 60
-    MIN_INTERVAL_SECONDS = 15
-    MAX_INTERVAL_SECONDS = 300
+    DEFAULT_INTERVAL_SECONDS = 120
+    MIN_INTERVAL_SECONDS = 30
+    MAX_INTERVAL_SECONDS = 600
+    # 统一轮询间隔配置键（与台风、烈度速报共用同一配置项）
+    POLL_INTERVAL_CONFIG_KEY = "poll_interval_seconds"
 
     def __init__(self, service):
         self.service = service
@@ -63,14 +65,12 @@ class EqscTsunamiPollService:
 
     def _resolve_interval(self) -> int:
         cfg = self._eqsc_config()
-        try:
-            interval = int(
-                cfg.get(
-                    "jma_tsunami_poll_interval_seconds", self.DEFAULT_INTERVAL_SECONDS
-                )
-            )
-        except (TypeError, ValueError):
+        raw = cfg.get(self.POLL_INTERVAL_CONFIG_KEY, self.DEFAULT_INTERVAL_SECONDS)
+        # bool 是 int 子类，不能当作合法间隔。
+        if isinstance(raw, bool) or not isinstance(raw, int):
             interval = self.DEFAULT_INTERVAL_SECONDS
+        else:
+            interval = raw
         return max(self.MIN_INTERVAL_SECONDS, min(interval, self.MAX_INTERVAL_SECONDS))
 
     def _resolve_include_training(self) -> bool:

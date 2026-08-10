@@ -18,6 +18,7 @@ EQSC 通道级能力（鉴权、保活、健康、熔断）由 EqscChannelServic
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 from ....utils.plugin_logger import plugin_logger as logger
@@ -167,8 +168,6 @@ class TyphoonEnrichmentService:
     @staticmethod
     def _coerce_datetime(value: Any):
         """尽力把时间字段转换为 datetime，失败则返回 None。"""
-        from datetime import datetime
-
         if value is None:
             return None
         if isinstance(value, datetime):

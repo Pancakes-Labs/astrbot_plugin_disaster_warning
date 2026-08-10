@@ -20,6 +20,7 @@ from astrbot.api.star import StarTools
 if TYPE_CHECKING:
     from ..services.telemetry.telemetry_service import TelemetryManager
 
+from ...utils.plugin_logger import plugin_logger
 from ..domain.event_models import EventEnvelope
 from ..message.message_logger import MessageLogger
 from ..message.message_manager import MessagePushManager
@@ -27,6 +28,7 @@ from ..message.presenters.presenter_registry import (
     get_presenter,
     get_text_presenter_keys,
 )
+from ..message.push.weather_aggregation_service import WeatherAggregationService
 from ..network.event_ingress_dispatch_service import EventIngressDispatchService
 from ..network.source_ingress_side_effect_service import SourceIngressSideEffectService
 from ..network.source_message_router import SourceMessageRouter
@@ -205,8 +207,6 @@ class DisasterWarningService:
         self.message_logger.set_silence_checker(self.is_silencing)
         # 静默期事件流日志抑制也需要感知"当前是否处于静默期"，
         # 这样静默结束后事件流日志能立即恢复打印，不会被永久屏蔽。
-        from ...utils.plugin_logger import plugin_logger
-
         plugin_logger.set_silence_checker(self.is_silencing)
         # WebSocket 连接成功日志同样复用静默判定：启动静默期降级为 DEBUG，
         # 静默结束后恢复 INFO，避免建连阶段刷屏同时保留重连成功反馈。
@@ -218,10 +218,6 @@ class DisasterWarningService:
         # 以下服务分别承接事件流水线、生命周期、运行时调度、缓存、状态整理、通知、重连与接入旁路编排，主服务本身只保留高层协调职责。
         self.event_pipeline = EventPipeline(self)  # 事件流处理流水线
         # 气象预警聚合推送服务，注入到事件流水线
-        from ..message.push.weather_aggregation_service import (
-            WeatherAggregationService,
-        )
-
         self._weather_aggregation_service = WeatherAggregationService(self.config)
         self.event_pipeline.set_weather_aggregation_service(
             self._weather_aggregation_service

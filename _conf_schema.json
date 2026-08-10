@@ -45,12 +45,6 @@
             "default": false,
             "hint": "启用后将连接 FAN Studio WebSocket。需配置下方 appId 与 API Key，否则会跳过建连。"
           },
-          "app_id": {
-            "description": "FAN Studio 应用 ID",
-            "type": "string",
-            "default": "97b68b51-ec96-42c3-80d7-83d2bff70d99",
-            "hint": "一般情况下保持默认配置即可，请勿修改。"
-          },
           "api_key": {
             "description": "FAN Studio API Key",
             "type": "string",
@@ -245,12 +239,6 @@
             "default": true,
             "hint": "控制 EQSC 通道是否启用（鉴权、连通性、后续子能力入口）。关闭后所有 EQSC 子能力均不可用。"
           },
-          "base_url": {
-            "description": "EQSC API 基础地址",
-            "type": "string",
-            "default": "https://equake.top",
-            "hint": "EQSC API 的基础URL，默认为官方地址"
-          },
           "refresh_token": {
             "description": "EQSC 访问令牌 (RefreshToken)",
             "type": "string",
@@ -258,84 +246,40 @@
             "hint": "从 EQuake 设置界面获取的访问令牌（以 ARh. 开头），用于创建 AccessToken。请妥善保管，不要泄露。",
             "hidden": true
           },
-          "typhoon": {
-            "description": "启用台风轮询",
-            "type": "bool",
-            "default": true,
-            "hint": "启用后由 EQSC HTTP 独立轮询活跃台风并推送"
-          },
-          "typhoon_poll_interval_seconds": {
-            "description": "台风轮询间隔（秒）",
+          "poll_interval_seconds": {
+            "description": "EQSC 统一轮询间隔（秒）",
             "type": "int",
             "default": 120,
-            "hint": "单位：秒。EQSC 台风列表轮询间隔。",
+            "hint": "单位：秒。EQSC 所有子数据源共用的轮询间隔。建议 60~180 秒，过短可能增加对 EQSC 服务器的请求压力。",
             "slider": {
               "min": 30,
               "max": 600,
               "step": 10
             }
           },
-          "cache_ttl": {
-            "description": "台风数据缓存时间",
-            "type": "int",
-            "hint": "单位：秒。EQSC台风数据的内存缓存有效期，与EQSC更新频率（约5分钟）一致。",
-            "default": 300,
-            "slider": {
-              "min": 60,
-              "max": 3600,
-              "step": 30
-            }
+          "typhoon": {
+            "description": "启用台风轮询",
+            "type": "bool",
+            "default": true,
+            "hint": "启用后由 EQSC HTTP 独立轮询活跃台风并推送。"
           },
           "jma_tsunami": {
             "description": "日本气象厅：津波予報（EQSC）",
             "type": "bool",
             "default": true,
-            "hint": "通过 EQSC HTTP 轮询获取日本气象厅海啸情报，作为 P2P 津波予報的高优先级补充。字段更完整（eventID、震中、区域波高/初波状态等）。"
-          },
-          "jma_tsunami_poll_interval_seconds": {
-            "description": "海啸轮询间隔（秒）",
-            "type": "int",
-            "default": 60,
-            "hint": "单位：秒。EQSC 海啸快照轮询间隔。海啸更新不频繁，建议 30~120 秒。",
-            "slider": {
-              "min": 15,
-              "max": 300,
-              "step": 10
-            }
+            "hint": "通过 EQSC HTTP 轮询获取日本气象厅海啸情报。"
           },
           "jma_tsunami_include_training": {
             "description": "接收海啸训练报",
             "type": "bool",
             "default": false,
-            "hint": "是否推送 EQSC 标记为训练报（isTraining）的海啸情报。默认忽略。"
-          },
-          "tsunami_cache_ttl": {
-            "description": "海啸数据缓存时间",
-            "type": "int",
-            "hint": "单位：秒。EQSC 海啸快照内存缓存有效期，用于短时并发复用；轮询本身会绕过缓存强制刷新。",
-            "default": 60,
-            "slider": {
-              "min": 15,
-              "max": 300,
-              "step": 15
-            }
+            "hint": "是否推送 EQSC 标记为训练报的海啸情报。默认忽略。"
           },
           "china_cenc_intensity_report": {
             "description": "中国地震台网（CENC）：烈度速报（EQSC）",
             "type": "bool",
             "default": true,
             "hint": "通过 EQSC HTTP 轮询获取 CENC 烈度速报。"
-          },
-          "cenc_ir_poll_interval_seconds": {
-            "description": "烈度速报轮询间隔（秒）",
-            "type": "int",
-            "default": 90,
-            "hint": "单位：秒。EQSC CENC 烈度速报列表轮询间隔。速报更新不频繁，建议 60~180 秒。",
-            "slider": {
-              "min": 30,
-              "max": 600,
-              "step": 10
-            }
           }
         }
       },
@@ -349,6 +293,12 @@
             "type": "bool",
             "default": false,
             "hint": "开启后将每分钟轮询 MSIL 瓦片；无触发测站时不会推送"
+          },
+          "include_station_map": {
+            "description": "包含测站分布图",
+            "type": "bool",
+            "default": true,
+            "hint": "开启后将在 S-Net 推送消息中附加测站分布图卡片（需 Playwright）。未安装浏览器时自动降级为纯文本。"
           },
           "poll_interval_seconds": {
             "description": "轮询间隔（秒）",
@@ -917,6 +867,12 @@
           "step": 1
         }
       },
+      "browser_ignore_https_errors": {
+        "description": "忽略浏览器 HTTPS 证书错误（仅本地模式）",
+        "type": "bool",
+        "hint": "默认关闭。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败时，开启后可继续加载底图；注意这会信任自签/过期证书，存在安全风险，请谨慎使用。",
+        "default": false
+      },
       "detailed_jma_intensity": {
         "description": "详细显示JMA区域震度",
         "type": "bool",
@@ -1077,6 +1033,12 @@
     "type": "object",
     "hint": "配置台风推送的强度、气压、距离与预报路径逼近过滤。",
     "items": {
+      "include_track_map": {
+        "description": "包含台风路径图",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后将在台风推送消息中附加路径图卡片（需 Playwright）。未安装浏览器时自动降级为纯文本。"
+      },
       "show_local_estimation": {
         "description": "显示本地预估信息",
         "type": "bool",
@@ -1495,12 +1457,6 @@
         "type": "bool",
         "hint": "用于分析所有数据源的消息格式",
         "default": false
-      },
-      "raw_message_log_path": {
-        "description": "原始消息日志文件路径",
-        "type": "string",
-        "hint": "相对于插件数据目录",
-        "default": "raw_messages.log"
       },
       "log_max_size_mb": {
         "description": "日志文件最大大小",

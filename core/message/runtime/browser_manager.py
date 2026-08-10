@@ -31,13 +31,30 @@ class BrowserManager:
         telemetry=None,
         mode: str = "local",
         server_url: str = "",
+        ignore_https_errors: bool = False,
     ):
-        """初始化浏览器管理器。"""
+        """初始化浏览器管理器。
+
+        Args:
+            pool_size: 页面池大小。
+            telemetry: 遥测服务实例。
+            mode: 运行模式，local 或 remote。
+            server_url: 远程浏览器服务地址。
+            ignore_https_errors: 是否忽略 HTTPS 证书错误（仅本地模式生效）。
+                默认关闭。某些地图瓦片源（如 FAN Studio ）证书过期时，
+                开启后底图可继续加载；但会信任自签/过期证书，请谨慎使用。
+        """
         self.pool_size = pool_size
         self._browser: Browser | None = None
         self._playwright = None
         # 远程连接场景下可能需要保留上下文对象引用。
         self._context = None
+        # 共享 context 是否已关闭（由 _cleanup 联动维护，不依赖属性探测）。
+        self._context_closed = False
+        # 共享 context 创建/关闭互斥锁：_create_local_page 可能在
+        # 补池、应急建页等多协程路径并发调用，不加锁会重复创建 context 造成泄漏。
+        self._context_lock = asyncio.Lock()
+        self._ignore_https_errors = bool(ignore_https_errors)
         self._page_pool: asyncio.Queue = asyncio.Queue(maxsize=pool_size)
         # 信号量用于限制同时渲染数量，页面创建锁与初始化锁用于避免并发竞争。
         self._semaphore = asyncio.Semaphore(pool_size)
@@ -134,6 +151,28 @@ class BrowserManager:
             return False
         return cls._is_map_tile_url(url)
 
+    @staticmethod
+    def _dedupe_failures(entries: list[str]) -> list[str]:
+        """按条目内容去重并保持首次出现顺序，供汇总日志使用。
+
+        Args:
+            entries: 原始失败条目列表（如 "GET https://... -> net::ERR_CERT_DATE_INVALID"）。
+
+        Returns:
+            去重后的条目列表；若输入为空则返回空列表。
+        """
+        if not entries:
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        for entry in entries:
+            key = str(entry).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(entry)
+        return result
+
     def _truncate_debug_text(self, value, limit: int = 240) -> str:
         """截断浏览器侧日志文本，避免单条日志过长。"""
         text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
@@ -214,14 +253,36 @@ class BrowserManager:
                 await self._cleanup()
                 return False
 
-    async def _create_local_page(self) -> Page:
-        """创建本地页面池中的新页面。"""
+    async def _ensure_local_context(self):
+        """确保本地浏览器共享上下文就绪。
+
+        并发安全：context 的重新创建受 _context_lock 保护，避免
+        补池/应急建页等多协程路径并发进入时各自创建 context 造成泄漏。
+        存活性以 _context_closed 显式标志为准（由 _cleanup 联动维护），
+        不依赖 .browser 属性探测——该属性在 close() 后仍可访问，无法可靠识别已关闭的 context。
+        """
         if not self._browser:
             raise RuntimeError("浏览器未就绪，无法创建页面")
-        return await self._browser.new_page(
-            viewport=dict(self.DEFAULT_VIEWPORT),
-            device_scale_factor=2,
-        )
+        async with self._context_lock:
+            # double-check：锁内再次确认，避免重复创建。
+            if self._context is not None and not self._context_closed:
+                return self._context
+            self._context = await self._browser.new_context(
+                viewport=dict(self.DEFAULT_VIEWPORT),
+                device_scale_factor=2,
+                ignore_https_errors=self._ignore_https_errors,
+            )
+            self._context_closed = False
+            if self._ignore_https_errors:
+                logger.debug(
+                    "[灾害预警] 已启用忽略 HTTPS 证书错误（仅对瓦片等资源加载生效）"
+                )
+            return self._context
+
+    async def _create_local_page(self) -> Page:
+        """创建本地页面池中的新页面。"""
+        context = await self._ensure_local_context()
+        return await context.new_page()
 
     async def _put_page_into_pool(self, page: Page) -> bool:
         """非阻塞入池；池满时关闭多余页面，避免 put 永久阻塞。"""
@@ -509,14 +570,11 @@ class BrowserManager:
 
     async def _initialize_local_page_pool(self):
         """初始化本地浏览器的页面池"""
+        # 统一走共享 context 创建页面，以支持 ignore_https_errors 等上下文级配置。
+        context = await self._ensure_local_context()
         for i in range(self.pool_size):
             try:
-                page = await asyncio.wait_for(
-                    self._browser.new_page(
-                        viewport=dict(self.DEFAULT_VIEWPORT), device_scale_factor=2
-                    ),
-                    timeout=10.0,
-                )
+                page = await asyncio.wait_for(context.new_page(), timeout=10.0)
                 if not await self._put_page_into_pool(page):
                     break
                 logger.debug(f"[灾害预警] 页面 {i + 1}/{self.pool_size} 已创建")
@@ -642,6 +700,8 @@ class BrowserManager:
         console_messages: list[str] = []
         page_errors: list[str] = []
         request_failures: list[str] = []
+        # 瓦片类资源失败：方案A降级为 debug 收集，末尾统一去重汇总。
+        tile_request_failures: list[str] = []
         benign_request_failures: list[str] = []
         listeners_attached = False
         _record_console = None
@@ -673,7 +733,35 @@ class BrowserManager:
                                 f" @ {location.get('url', '')}:{location.get('lineNumber', '')}:{location.get('columnNumber', '')}"
                             )
                             console_messages.append(entry)
-                            if msg.type in {"error", "warning"}:
+                            if msg.type not in {"error", "warning"}:
+                                return
+                            text_lower = str(msg.text or "").lower()
+                            # 方案A：瓦片资源加载失败时，requestfailed 事件已精确记录
+                            # URL 与错误码，此处浏览器侧 console 的 "Failed to load resource"
+                            # 是同一事件的重复上报。降级为 debug，避免每条瓦片刷两条 WARN。
+                            is_dup_resource_log = (
+                                "failed to load resource" in text_lower
+                                and any(
+                                    marker in text_lower
+                                    for marker in (
+                                        "tilemap.fanstudio.tech",
+                                        "/petallight/",
+                                        "/petaldark/",
+                                        "/arcwi/",
+                                        "/arcwob/",
+                                        "/arcwh/",
+                                        "/geovis/",
+                                        "tile.openstreetmap",
+                                        "tiles.",
+                                        "/tiles/",
+                                    )
+                                )
+                            )
+                            if is_dup_resource_log:
+                                logger.debug(
+                                    f"[灾害预警] 忽略与资源请求失败重复的控制台日志: {entry}"
+                                )
+                            else:
                                 logger.warning(f"[灾害预警] 页面控制台{entry}")
                         except Exception as hook_err:
                             logger.debug(f"[灾害预警] 记录控制台日志失败: {hook_err}")
@@ -706,15 +794,26 @@ class BrowserManager:
                                 f"{req.method} {req.url} -> "
                                 f"{self._truncate_debug_text(failure_text or 'unknown failure')}"
                             )
+                            is_tile = self._is_map_tile_url(getattr(req, "url", None))
+                            # 先判断良性中止（瓦片重试/视野更新/截图收尾导致的
+                            # net::ERR_ABORTED）：这类噪声直接忽略，不进瓦片汇总，
+                            # 避免出图成功时被 WARN 汇总刷屏。
                             if self._is_benign_request_failure(
                                 url=getattr(req, "url", None),
                                 failure_text=failure_text,
                                 resource_type=resource_type,
                             ):
-                                # 瓦片重试/视野更新导致的中止请求：仅 debug，避免刷屏。
                                 benign_request_failures.append(entry)
                                 logger.debug(
                                     f"[灾害预警] 忽略可预期的资源中止: {entry}"
+                                )
+                                return
+                            # 方案A：瓦片类失败（如证书过期等真实错误）一律降级为 debug，
+                            # 仅在末尾统一去重汇总一条，避免每张瓦片刷屏。
+                            if is_tile:
+                                tile_request_failures.append(entry)
+                                logger.debug(
+                                    f"[灾害预警] 瓦片资源请求失败(已降级为debug): {entry}"
                                 )
                                 return
                             request_failures.append(entry)
@@ -828,12 +927,23 @@ class BrowserManager:
                     elapsed = time.time() - start_time
 
                     if os.path.exists(output_path):
+                        # 方案B：瓦片类失败按 URL->错误码 去重后汇总输出，避免逐条刷屏。
+                        tile_summary = self._dedupe_failures(tile_request_failures)
                         if request_failures:
                             logger.warning(
                                 f"[灾害预警] {label}渲染虽成功，但捕获到资源请求失败: "
                                 f"{' | '.join(request_failures[-5:])}"
                             )
-                        elif benign_request_failures:
+                        if tile_summary:
+                            logger.warning(
+                                f"[灾害预警] {label}渲染虽成功，但有 {len(tile_request_failures)} 个瓦片请求失败"
+                                f"（去重后 {len(tile_summary)} 项）: {' | '.join(tile_summary[-5:])}"
+                            )
+                        if (
+                            not request_failures
+                            and not tile_summary
+                            and benign_request_failures
+                        ):
                             logger.debug(
                                 f"[灾害预警] {label}渲染成功，已忽略 "
                                 f"{len(benign_request_failures)} 条可预期资源中止"
@@ -1162,7 +1272,24 @@ class BrowserManager:
             cleanup_errors.append(f"清理页面池失败: {e}")
             logger.warning(f"[灾害预警] 清理页面池时发生异常: {e}")
 
-        # 步骤 2: 关闭浏览器
+        # 步骤 2: 关闭共享 context（与页面池同生命周期，先于浏览器关闭）
+        # 加锁防止与 _ensure_local_context 的并发创建交错；并联动维护
+        # _context_closed 标志，供存活判断使用。
+        async with self._context_lock:
+            if self._context is not None:
+                try:
+                    await self._context.close()
+                except Exception as e:
+                    cleanup_errors.append(f"关闭浏览器上下文失败: {e}")
+                    logger.debug(f"[灾害预警] 关闭浏览器上下文失败: {e}")
+                finally:
+                    # 无论成败都置空，避免重建路径残留旧 context 引用。
+                    self._context = None
+            # 显式标记已关闭：.browser 属性在 close() 后仍可访问，
+            # 不能依赖属性探测判断存活，改由标志与清理路径联动。
+            self._context_closed = True
+
+        # 步骤 3: 关闭浏览器
         try:
             if self._browser:
                 await self._browser.close()
@@ -1173,7 +1300,7 @@ class BrowserManager:
             # 即使关闭失败,也强制置空引用,防止后续误用
             self._browser = None
 
-        # 步骤 3: 停止 Playwright
+        # 步骤 4: 停止 Playwright
         try:
             if self._playwright:
                 await self._playwright.stop()

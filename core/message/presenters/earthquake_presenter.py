@@ -14,6 +14,7 @@ from datetime import timezone as dt_timezone
 
 from ....utils.converters import ScaleConverter
 from ....utils.time_converter import TimeConverter
+from ...domain.earthquake.cmt_normalize import format_fault_type_label
 from ...domain.event_context import EarthquakeDisplayContext
 from ...services.geo.cn_district_intensity_service import (
     CnDistrictIntensityService,
@@ -840,7 +841,6 @@ class FssnCmtPresenter(BasePresenter):
         # 两个节面断层走向、倾角与滑动角
         plane1 = meta.get("nodal_plane1")
         plane2 = meta.get("nodal_plane2")
-        from ...domain.earthquake.cmt_normalize import format_fault_type_label
 
         if plane1:
             lines.append(

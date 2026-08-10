@@ -51,19 +51,17 @@ class SessionConfigManager:
     }
 
     # 仅允许全局配置修改的嵌套路径（会话 override 写入时强制剥离）。
-    # S-Net 轮询间隔、EQSC 通道鉴权/轮询参数影响全局运行态；
-    # typhoon / jma_tsunami 允许会话差异（部分会话可单独关闭推送）。
     GLOBAL_ONLY_NESTED_PATHS: tuple[tuple[str, ...], ...] = (
         ("data_sources", "snet", "poll_interval_seconds"),
-        ("data_sources", "eqsc", "enabled"),
-        ("data_sources", "eqsc", "base_url"),
         ("data_sources", "eqsc", "refresh_token"),
-        ("data_sources", "eqsc", "cache_ttl"),
-        ("data_sources", "eqsc", "tsunami_cache_ttl"),
-        ("data_sources", "eqsc", "jma_tsunami_poll_interval_seconds"),
+        # EQSC 统一轮询间隔影响全局运行态，不允许会话级覆写。
+        ("data_sources", "eqsc", "poll_interval_seconds"),
         # FAN Studio 鉴权影响全局 WebSocket 建连，不允许会话级覆写。
-        ("data_sources", "fan_studio", "app_id"),
         ("data_sources", "fan_studio", "api_key"),
+        # 浏览器页面池大小影响全局运行态，不允许会话级覆写。
+        ("message_format", "browser_pool_size"),
+        # 是否忽略 HTTPS 证书错误是浏览器启动级配置（context 全局创建），不允许会话级覆写
+        ("message_format", "browser_ignore_https_errors"),
     )
 
     def __init__(self, default_config_ref: dict[str, Any]):
