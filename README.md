@@ -738,6 +738,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
 - **浏览器页面池大小 (`browser_pool_size`)**:
   - **默认值**: `2`
   - **说明**: 控制后台同时存在的浏览器页面数量。增大此值可提高并发处理能力，但会显著增加内存占用。建议在内存充足 (>2GB) 的服务器上适当调大 (3-5)。
+- **忽略浏览器 HTTPS 证书错误 (`browser_ignore_https_errors`)**:
+  - **默认值**: `false`
+  - **说明**: 仅本地模式生效。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败（控制台出现 `ERR_CERT_DATE_INVALID`）时，开启后可继续加载底图；注意这会信任自签/过期证书，存在安全风险，请谨慎使用。
 
 ```json
 "message_format": {
@@ -750,7 +753,8 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202607111826_2_file/Earthquake_Pos.jp
   "detailed_jma_intensity": false,             // 是否显示全部 JMA 震度区域
   "use_global_quake_card": false,              // 是否启用 GQ 卡片渲染
   "global_quake_template": "Aurora",           // GQ 卡片视觉主题
-  "browser_pool_size": 2                       // 浏览器页面池大小 (默认2)
+  "browser_pool_size": 2,                      // 浏览器页面池大小 (默认2)
+  "browser_ignore_https_errors": false         // 是否忽略瓦片源 HTTPS 证书错误（默认关闭）
 }
 ```
 
