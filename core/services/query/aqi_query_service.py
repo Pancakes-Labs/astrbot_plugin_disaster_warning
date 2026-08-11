@@ -18,6 +18,7 @@ from collections import OrderedDict
 from typing import Any
 
 from ....utils.china_regions import province_short, resolve_province_full
+from ....utils.severity_emoji import AQI_LEVEL_DOT, aqi_level_emoji
 from ....utils.text_format_utils import format_iso_time
 from ...network.http.fan_aqi_client import FanAqiClient
 
@@ -59,16 +60,6 @@ CODE2PROV: dict[str, str] = {
 
 # 默认排行条数
 DEFAULT_RANK_LIMIT = 10
-
-# AQI 等级圆点（按 AQI 数值分档，参考 HJ 633-2012）
-_AQI_LEVEL_DOT = [
-    (0, 51, "🟢"),  # 优 0-50
-    (51, 101, "🟡"),  # 良 51-100
-    (101, 151, "🟠"),  # 轻度污染 101-150
-    (151, 201, "🔴"),  # 中度污染 151-200
-    (201, 301, "🟣"),  # 重度污染 201-300
-    (301, 10**9, "🟤"),  # 严重污染 301+
-]
 
 # 等级过滤词 -> 对应 AQI 数值区间
 _QUALITY_FILTER_RANGES: dict[str, tuple[int, int]] = {
@@ -159,17 +150,6 @@ def aqi_num(item: dict[str, Any]) -> int | None:
         return None
 
 
-def aqi_level_dot(item: dict[str, Any]) -> str:
-    """返回 AQI 等级圆点；缺测返回 ⬜。"""
-    aqi = aqi_num(item)
-    if aqi is None:
-        return "⬜"
-    for lo, hi, dot in _AQI_LEVEL_DOT:
-        if lo <= aqi < hi:
-            return dot
-    return "⬜"
-
-
 def quality_label(item: dict[str, Any]) -> str:
     """返回空气质量等级描述；缺测返回「数据缺失」。"""
     q = str(item.get("Quality") or "").strip()
@@ -227,7 +207,9 @@ def build_city_detail(item: dict[str, Any]) -> str:
         lines.append(f"⬜ AQI {aqi_text}  {q_label}")
     else:
         level = _safe_int(item.get("AqiLevel"), default=0) or 0
-        lines.append(f"{aqi_level_dot(item)} AQI {aqi_text}  {q_label}（{level}级）")
+        lines.append(
+            f"{aqi_level_emoji(item.get('AQI'))} AQI {aqi_text}  {q_label}（{level}级）"
+        )
     lines.append(f"首要污染物：{pp_label}")
     lines.append("")
     # 分指数：前缀独立一行，CO/NO2/O3 与 PM10/PM2.5/SO2 各占一行，不与前缀同行
@@ -271,20 +253,27 @@ def build_province_text(
         q = quality_label(item)
         pp = primary_pollutant_label(item)
         suffix = "" if pp in ("无", "-") else f" | {pp}"
-        lines.append(f"{aqi_level_dot(item)} {area} AQI {aqi} {q}{suffix}")
+        lines.append(f"{aqi_level_emoji(item.get('AQI'))} {area} AQI {aqi} {q}{suffix}")
     return "\n".join(lines)
 
 
 def build_nationwide_text(
     items: list[dict[str, Any]], time_point: str | None
 ) -> tuple[str, list[str]]:
-    """构建全国 AQI 概览文本（按等级分组）。
+    """构建全国 AQI 概览文本（按等级分块，块内按省份分组排序）。
+
+    展示结构：
+    - 先按空气质量等级分块（优/良/轻度污染…），每块一段；
+    - 等级内部按省份分组，省份按「省内最优 AQI」升序排列，
+      每省独占一行（含省份名、最优 AQI、城市数）；
+    - 同一省份内的城市按 AQI 升序排列，切行只在省内进行，
+      避免省份之间混行。
 
     Returns:
         (summary_text, blocks)：summary_text 为普通文本；blocks 为合并转发分块。
     """
     tp = format_iso_time(time_point)
-    groups: dict[str, list[str]] = {
+    groups: dict[str, list[dict[str, Any]]] = {
         q: []
         for q in [
             "优",
@@ -298,28 +287,59 @@ def build_nationwide_text(
     }
     for item in items:
         q = quality_label(item)
-        groups.setdefault(q, []).append(
-            f"{_area_short(str(item.get('Area') or '未知'))} {item.get('AQI') or 'NA'}"
-        )
+        groups.setdefault(q, []).append(item)
 
     summary = f"全国空气质量概览\n数据时间：{tp} | 覆盖 {len(items)} 个城市"
     blocks: list[str] = []
     for q in ["优", "良", "轻度污染", "中度污染", "重度污染", "严重污染", "数据缺失"]:
-        cities = groups.get(q)
-        if not cities:
+        city_items = groups.get(q)
+        if not city_items:
             continue
+        # 按等级名映射圆点：复用统一模块区间表（数据缺失固定 ⬜）
         dot = {
-            "优": "🟢",
-            "良": "🟡",
-            "轻度污染": "🟠",
-            "中度污染": "🔴",
-            "重度污染": "🟣",
-            "严重污染": "🟤",
+            "优": AQI_LEVEL_DOT[0][2],
+            "良": AQI_LEVEL_DOT[1][2],
+            "轻度污染": AQI_LEVEL_DOT[2][2],
+            "中度污染": AQI_LEVEL_DOT[3][2],
+            "重度污染": AQI_LEVEL_DOT[4][2],
+            "严重污染": AQI_LEVEL_DOT[5][2],
             "数据缺失": "⬜",
         }[q]
-        lines = [f"{dot} {q}（{len(cities)}城）："]
-        for i in range(0, len(cities), 8):
-            lines.append("  " + "、".join(cities[i : i + 8]))
+
+        # 等级内按省份聚合
+        prov_groups: dict[str, list[dict[str, Any]]] = {}
+        for item in city_items:
+            prov_groups.setdefault(code_to_prov(item.get("CityCode")), []).append(item)
+
+        # 省份排序：按省内最优 AQI 升序；省内城市按 AQI 升序（缺测排末位）
+        def _prov_best_key(pair: tuple[str, list[dict[str, Any]]]) -> tuple[int, str]:
+            prov, cities = pair
+            best = 10**9
+            for city in cities:
+                aqi = aqi_num(city)
+                if aqi is not None and aqi < best:
+                    best = aqi
+            return (best, prov)
+
+        def _city_sort_key(item: dict[str, Any]) -> tuple[int, str]:
+            aqi = aqi_num(item)
+            return (aqi if aqi is not None else 10**9, str(item.get("Area") or ""))
+
+        ordered_provs = sorted(prov_groups.items(), key=_prov_best_key)
+
+        lines = [f"{dot} {q}（{len(city_items)}城）："]
+        for prov, cities in ordered_provs:
+            valid = [a for a in (aqi_num(c) for c in cities) if a is not None]
+            best_text = f"最优 {min(valid)}" if valid else "无有效数据"
+            # 省份独占一行标题
+            lines.append(f"  【{prov}】{best_text}（{len(cities)}城）：")
+            city_texts = [
+                f"{_area_short(str(item.get('Area') or '未知'))} {item.get('AQI') or 'NA'}"
+                for item in sorted(cities, key=_city_sort_key)
+            ]
+            # 省内每行最多 6 个城市，切行只在省内进行（不跨省混行）
+            for i in range(0, len(city_texts), 6):
+                lines.append("    " + "、".join(city_texts[i : i + 6]))
         blocks.append("\n".join(lines))
     return summary, blocks
 
@@ -352,7 +372,9 @@ def _build_rank_block(
         q = quality_label(item)
         pp = primary_pollutant_label(item)
         suffix = "" if pp in ("无", "-") else f" | {pp}"
-        lines.append(f"{idx}. {aqi_level_dot(item)} {area} AQI {aqi} {q}{suffix}")
+        lines.append(
+            f"{idx}. {aqi_level_emoji(item.get('AQI'))} {area} AQI {aqi} {q}{suffix}"
+        )
     return "\n".join(lines)
 
 
@@ -700,7 +722,6 @@ AQI_HELP_TEXT = (
 __all__ = [
     "code_to_prov",
     "aqi_num",
-    "aqi_level_dot",
     "quality_label",
     "primary_pollutant_label",
     "build_city_detail",
