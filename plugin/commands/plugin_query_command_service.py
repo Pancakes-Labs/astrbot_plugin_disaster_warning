@@ -1528,7 +1528,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     "success": True,
                     "rank_type": rank_type,
                     "time_arg": bool(ymdh),
-                    "hour": hour,
+                    # 生效跨度：query_rank 内部已按要素默认值归一化（未指定时=1h）
+                    "hour": result.get("hour", hour),
                     "block_count": len(result.get("blocks") or []),
                     "item_count": len(result.get("raw_items") or []),
                 },

@@ -112,20 +112,24 @@ _RANK_KIND_KEYWORDS: dict[str, str] = {
     "风速排行榜": "wind",
 }
 
-# 各要素默认时间跨度（小时）。官网首页「实况排行」三档均可选：
+# 各要素默认时间跨度（小时）。官网首页「实况排行」三档均可选，
+# 四要素（maxtemp/mintemp/rain/wind）接口行为完全一致：
 # - 1h：逐小时实时（气温=当前气温、降水=1小时雨量、风速=瞬时风速）
 # - 6h：6 小时累计/极值（气温=6h 最高/最低）
 # - 24h：24 小时累计/极值（最低气温按日统计取 24h 档）
-# 无参查询默认 1h；用户可在命令中显式指定「6小时/24小时」等跨度。
+# 无参查询统一默认 1h（与官网首页默认行为一致）；
+# 需要日最低统计时显式指定「24小时」，返回昨 08/20 双日界时段。
 _RANK_DEFAULT_HOUR: dict[str, int] = {
     "temperature": 1,
-    "mintemperature": 24,
+    "mintemperature": 1,
     "rain": 1,
     "wind": 1,
 }
 
 # 时间跨度关键词 -> 跨度值（小时）。
-# 「日/24小时/24h/全天」归一为 24；「6小时/6h/六小时」归一为 6。
+# 「24小时/24h/二十四小时/全天」归一为 24；「6小时/6h/六小时」归一为 6。
+# 注意：刻意不含纯「时」结尾形式（如「6时/24时」），
+# 避免与纯时次（早上6点/次日0点）冲突。
 _HOUR_KEYWORDS: dict[str, int] = {
     "6小时": 6,
     "6h": 6,
@@ -136,9 +140,15 @@ _HOUR_KEYWORDS: dict[str, int] = {
     "全天": 24,
 }
 
-# 时间跨度正则：匹配「6小时」「24h」等跨度关键词。
-# 刻意不含「时」，避免与纯时次「6时/24时」（早上6点/次日0点）冲突。
-_HOUR_ARG_RE = re.compile(r"(?P<hour>6|24)\s*(?:小时|h)")
+# 时间跨度正则：由 _HOUR_KEYWORDS 表动态生成（按长度降序，优先匹配长别名）。
+# 左边界 (?<![\d一二三四五六七八九十百千万两]) 同时防止：
+# - 「16小时」被截取为「6小时」（半角数字前有 1）
+# - 「十六小时」被截取为「六小时」（中文数字前有「十」）
+_HOUR_ARG_RE = re.compile(
+    r"(?<![\d一二三四五六七八九十百千万两])(?:"
+    + "|".join(re.escape(k) for k in sorted(_HOUR_KEYWORDS, key=len, reverse=True))
+    + ")"
+)
 
 # 时次解析正则
 # 1) YYYYMMDDHH（如 2026080815）
@@ -180,10 +190,11 @@ def parse_rank_args(text: str | None) -> tuple[int | None, str | None]:
     s = str(text).strip()
     hour: int | None = None
 
-    # 提取跨度关键词（6小时/24h 等）
+    # 提取跨度关键词：匹配 _HOUR_KEYWORDS 表生成的统一正则
+    # （含「6小时/24h/六小时/全天」等别名，带数字/中文数字左边界防误截）。
     m = _HOUR_ARG_RE.search(s)
     if m:
-        hour = int(m.group("hour"))
+        hour = _HOUR_KEYWORDS[m.group(0)]
         s = (s[: m.start()] + " " + s[m.end() :]).strip()
 
     # 剩余部分去掉可能残留的空白，作为时次参数
@@ -429,7 +440,7 @@ def _build_rank_block(
     lines.append(header)
 
     for idx, it in enumerate(limit_items, 1):
-        station_text = _format_station_name(it["name"], it["pname"])
+        station_text = _format_station_name(it.get("name"), it.get("pname"))
         value_text = _format_value(it.get("value"), unit=unit)
         # 颜色圆点指示器（气温冷蓝暖红 / 降水绿蓝黄橙红紫 / 风速台风色板）
         emoji = rank_level_emoji(rank_type, it.get("value"), hour=hour)
@@ -548,7 +559,7 @@ async def query_rank(
         rank_type: 接口 type（maxtemp/mintemp/rain/wind）。
         ymdh: 时次，格式 YYYYMMDDHH；None 时使用当前整点。
         hour: 时间跨度（1/6/24）。None 时按要素选择默认跨度
-            （mintemp 为 24h 最低气温档，其余为 1h 逐小时档）。
+            （四要素统一默认 1h 逐小时档）。
         client: 复用客户端实例；None 时内部新建并自动关闭。
 
     Returns:
@@ -559,7 +570,7 @@ async def query_rank(
     if rank_type not in RANK_TYPES:
         return {"success": False, "error": f"不支持的排行类型: {rank_type}"}
 
-    # 归一化 hour：未指定时按要素默认跨度（mintemp=24h，其余=1h）
+    # 归一化 hour：未指定时按要素默认跨度（四要素统一默认 1h）
     if hour is None:
         hour = _RANK_DEFAULT_HOUR.get(
             next((k for k, v in _RANK_KIND_DEFS.items() if v["type"] == rank_type), ""),
@@ -591,7 +602,9 @@ async def query_rank(
     # 无参查询（未显式指定时次）时，允许数据未发布时自动回退前 1 小时。
     # 刚过整点时当前整点数据往往还没发布，接口会返回空数据，此时向前回退
     # 最多 AUTO_RETRY_HOURS 次；仅「暂无排行数据」这类空数据才回退。
-    auto_retry = ymdh is None
+    # 注意：24h 档默认按 08/20 两个日界整点滚动，不启用逐小时回退，
+    # 避免回退到 07/06 等非日界整点，破坏日界整点语义。
+    auto_retry = ymdh is None and hour < 24
 
     owned_client = client is None
     if owned_client:
@@ -663,13 +676,15 @@ async def query_rank(
         "blocks": blocks,
         "time": time_text,
         "raw_items": all_items,
+        # 生效跨度（归一化后），供命令侧埋点记录实际使用的跨度。
+        "hour": hour,
     }
 
 
 # 时次参数帮助文本：集中定义，减少帮助文本与实际解析行为不一致的风险。
 TIME_ARG_HELP = (
     "参数格式：\n"
-    "· 时间跨度：6小时 / 24小时（默认逐小时；最低气温默认 24小时）\n"
+    "· 时间跨度：6小时 / 24小时（缺省逐小时；24小时档返回昨 08/20 两个日界时段）\n"
     "· 时次：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时\n"
     "示例：/气温排行、/气温排行 24小时、/降水排行 24小时 08时、/风速排行 昨天15时"
 )
