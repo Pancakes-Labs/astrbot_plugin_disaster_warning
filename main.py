@@ -154,6 +154,8 @@ class DisasterWarningPlugin(Star):
 • /JMA震央分布绘图 [投影类型] [开始日期] [结束日期] - 绘制 JMA 震央分布图
 • /生成沙滩球 或 /沙滩球 <走向> <倾角> <滑动角> [大小] [线宽] - 生成震源机制沙滩球图片
 • /节面解析 <走向> <倾角> <滑动角> - 解析断层节面参数与运动分量
+• /地震动预测 <震中纬度> <震中经度> <震级> <震源深度> <预测点纬度> <预测点经度> （或引用地震消息自动提取参数）
+• /本地地震动预测 或 /本地预测 或 /卧槽 [<本地纬度>] [<本地经度>] - 按引用地震消息预测本地地震动（坐标默认取本地监控配置）
 • /灾害预警统计 - 查看详细的事件统计报告
 • /灾害预警统计清除 - 清除所有统计信息 (仅管理员)
 • /灾害预警推送开关 - 开启或关闭当前会话的推送 (仅管理员)
@@ -570,6 +572,47 @@ class DisasterWarningPlugin(Star):
         """查询空气质量支持的城市列表（可按省份过滤）"""
         async for result in self._query_command_service.handle_query_aqi_city_list(
             event, province=province
+        ):
+            yield result
+
+    @filter.command("地震动预测", alias={"地震动"})
+    async def ground_motion_predict(
+        self,
+        event: AstrMessageEvent,
+        lat: str = None,
+        lon: str = None,
+        magnitude: str = None,
+        depth: str = None,
+        point_lat: str = None,
+        point_lon: str = None,
+    ):
+        """地震动预测（可引用地震消息自动提取震中参数）"""
+        async for result in self._query_command_service.handle_ground_motion_predict(
+            event,
+            lat_str=lat,
+            lon_str=lon,
+            mag_str=magnitude,
+            depth_str=depth,
+            point_lat_str=point_lat,
+            point_lon_str=point_lon,
+        ):
+            yield result
+
+    @filter.command(
+        "本地地震动预测",
+        alias={"本地预测", "卧槽", "卧槽大大大", "本地地震动"},
+    )
+    async def local_ground_motion_predict(
+        self,
+        event: AstrMessageEvent,
+        lat: str = None,
+        lon: str = None,
+    ):
+        """本地地震动预测（引用地震消息，按本地监控坐标预测）"""
+        async for (
+            result
+        ) in self._query_command_service.handle_local_ground_motion_predict(
+            event, lat_str=lat, lon_str=lon
         ):
             yield result
 

@@ -39,6 +39,10 @@ from ...core.services.query.aqi_query_service import (
     query_aqi_city_list,
     query_aqi_rank,
 )
+from ...core.services.query.ground_motion_query_service import (
+    GroundMotionInput,
+    predict_ground_motion,
+)
 from ...core.services.query.jma_hypo_query_presenter import (
     build_jma_hypo_list_text,
     build_jma_hypo_plot_caption,
@@ -46,6 +50,9 @@ from ...core.services.query.jma_hypo_query_presenter import (
 from ...core.services.query.jma_hypo_query_service import (
     query_jma_hypo_list,
     query_jma_hypo_plot,
+)
+from ...core.services.query.quake_text_extractor import (
+    extract_quoted_quake_params,
 )
 from ...core.services.query.radar_query_service import (
     format_candidates_text,
@@ -1859,3 +1866,217 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             yield quoted_plain_result(
                 self.plugin, event, f"❌ 空气质量城市列表查询失败: {e}"
             )
+
+    async def handle_ground_motion_predict(
+        self,
+        event,
+        lat_str: str | None = None,
+        lon_str: str | None = None,
+        mag_str: str | None = None,
+        depth_str: str | None = None,
+        point_lat_str: str | None = None,
+        point_lon_str: str | None = None,
+    ):
+        """处理地震动预测命令（/地震动预测 <震中纬度> <震中经度> <震级> <深度> <预测点纬度> <预测点经度>）。
+
+        六个参数齐全时按手动模式计算；参数不足时尝试从引用消息提取地震参数
+        （此时预测点默认为本地配置坐标，未配置则要求手动提供预测点）。
+        """
+        try:
+            # 尝试手动参数：需要全部 6 个
+            manual = _try_parse_ground_motion_args(
+                lat_str, lon_str, mag_str, depth_str, point_lat_str, point_lon_str
+            )
+            if manual is not None:
+                result = predict_ground_motion(manual)
+                yield quoted_plain_result(
+                    self.plugin, event, result.format(display_timezone="UTC+8")
+                )
+                return
+
+            # 参数不足：尝试引用消息提取
+            params = await extract_quoted_quake_params(event)
+            if params is None or not params.is_valid:
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "❌ 参数不足。\n"
+                    "用法：/地震动预测 <震中纬度> <震中经度> <震级> <震源深度> "
+                    "<预测点纬度> <预测点经度>\n"
+                    "或引用一条地震消息（自动提取震中参数）。",
+                )
+                return
+
+            # 引用模式：预测点默认用本地配置坐标
+            point_lat, point_lon, _place = self._resolve_local_point(event)
+            gm_input = GroundMotionInput(
+                lat=params.lat,
+                lon=params.lon,
+                magnitude=params.magnitude,
+                depth_km=params.depth_km if params.depth_km is not None else 10.0,
+                point_lat=point_lat,
+                point_lon=point_lon,
+                occurred_at=params.occurred_at,
+            )
+            result = predict_ground_motion(gm_input)
+            text = result.format(display_timezone="UTC+8")
+            if params.place_name:
+                text = f"引用消息：{params.place_name}\n" + text
+            yield quoted_plain_result(self.plugin, event, text)
+        except Exception as e:
+            logger.error(f"[灾害预警] 地震动预测失败: {e}\n{traceback.format_exc()}")
+            yield quoted_plain_result(self.plugin, event, f"❌ 地震动预测失败: {e}")
+
+    async def handle_local_ground_motion_predict(
+        self,
+        event,
+        lat_str: str | None = None,
+        lon_str: str | None = None,
+    ):
+        """处理本地地震动预测命令（/本地地震动预测 [<本地纬度>] [<本地经度>]）。
+
+        优先用显式传入的本地坐标；未传入时用本地监控配置坐标；
+        震中参数来自引用消息（如 bot 推送的地震速报）。
+        """
+        try:
+            params = await extract_quoted_quake_params(event)
+            if params is None or not params.is_valid:
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "❌ 请引用一条包含震中参数的地震速报消息，再使用 /本地地震动预测。",
+                )
+                return
+
+            # 本地坐标：显式参数优先，其次本地监控配置
+            point_lat, point_lon, place = self._resolve_local_point(
+                event, lat_str, lon_str
+            )
+            if point_lat is None or point_lon is None:
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "❌ 未配置本地坐标。请使用：/本地地震动预测 <本地纬度> <本地经度>"
+                    "，或在配置中设置 local_monitoring.latitude/longitude。",
+                )
+                return
+
+            gm_input = GroundMotionInput(
+                lat=params.lat,
+                lon=params.lon,
+                magnitude=params.magnitude,
+                depth_km=params.depth_km if params.depth_km is not None else 10.0,
+                point_lat=point_lat,
+                point_lon=point_lon,
+                occurred_at=params.occurred_at,
+            )
+            result = predict_ground_motion(gm_input)
+            text = result.format(display_timezone="UTC+8")
+            yield quoted_plain_result(self.plugin, event, text)
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 本地地震动预测失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 本地地震动预测失败: {e}")
+
+    def _resolve_local_point(
+        self,
+        event,
+        lat_str: str | None = None,
+        lon_str: str | None = None,
+    ) -> tuple[float | None, float | None, str]:
+        """解析本地预测点坐标：显式参数 > 本地监控配置。
+
+        Returns:
+            (纬度, 经度, 地点名)；未解析到时为 (None, None, "")。
+        """
+        if lat_str is not None and lon_str is not None:
+            try:
+                lat = float(lat_str)
+                lon = float(lon_str)
+                if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                    return lat, lon, "本地"
+            except (TypeError, ValueError):
+                pass
+
+        # 本地监控配置：优先会话级有效配置，否则回退全局配置
+        try:
+            lm: dict = {}
+            service = getattr(self.plugin, "disaster_service", None)
+            session_manager = getattr(service, "session_config_manager", None)
+            if session_manager is not None and hasattr(
+                session_manager, "get_effective_config"
+            ):
+                try:
+                    target_session = getattr(event, "unified_msg_origin", None)
+                    runtime_config = session_manager.get_effective_config(
+                        target_session
+                    )
+                    if isinstance(runtime_config, dict):
+                        lm = runtime_config.get("local_monitoring", {})
+                        if not isinstance(lm, dict):
+                            lm = {}
+                except Exception:
+                    lm = {}
+            if not lm:
+                global_cfg = self.plugin.config.get("local_monitoring", {})
+                lm = global_cfg if isinstance(global_cfg, dict) else {}
+            enabled = bool(lm.get("enabled", False))
+            lat = lm.get("latitude")
+            lon = lm.get("longitude")
+            if enabled and lat is not None and lon is not None:
+                return float(lat), float(lon), str(lm.get("place_name") or "本地")
+        except Exception:
+            pass
+        return None, None, ""
+
+
+def _try_parse_ground_motion_args(
+    lat_str: str | None,
+    lon_str: str | None,
+    mag_str: str | None,
+    depth_str: str | None,
+    point_lat_str: str | None,
+    point_lon_str: str | None,
+) -> GroundMotionInput | None:
+    """解析手动地震动预测参数。
+
+    六个参数齐全且合法时返回 GroundMotionInput；否则返回 None（由调用方
+    回退到引用消息模式）。
+    """
+    values = [
+        lat_str,
+        lon_str,
+        mag_str,
+        depth_str,
+        point_lat_str,
+        point_lon_str,
+    ]
+    if any(v is None or not str(v).strip() for v in values):
+        return None
+    try:
+        lat = float(str(lat_str).strip())
+        lon = float(str(lon_str).strip())
+        mag = float(str(mag_str).strip())
+        depth = float(str(depth_str).strip())
+        p_lat = float(str(point_lat_str).strip())
+        p_lon = float(str(point_lon_str).strip())
+    except (TypeError, ValueError):
+        return None
+    # 基本范围校验
+    if not (-90.0 <= lat <= 90.0 and -90.0 <= p_lat <= 90.0):
+        return None
+    if not (-180.0 <= lon <= 180.0 and -180.0 <= p_lon <= 180.0):
+        return None
+    if not (0.0 <= mag <= 12.0):
+        return None
+    if depth < 0.0:
+        return None
+    return GroundMotionInput(
+        lat=lat,
+        lon=lon,
+        magnitude=mag,
+        depth_km=depth,
+        point_lat=p_lat,
+        point_lon=p_lon,
+    )
