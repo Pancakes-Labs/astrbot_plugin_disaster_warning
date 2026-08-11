@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from ....utils.severity_emoji import WEATHER_COLOR_LEVEL_EMOJI as COLOR_LEVEL_EMOJI
 from .weather_alarm_code_map import resolve_weather_icon_code
 
 WEATHER_EMOJI_MAP = {
@@ -141,14 +142,6 @@ _WEATHER_11B_BASE_TO_EMOJI: dict[str, str] = {
     "11E06": "🌊",  # 海浪
 }
 
-# 颜色等级图标映射，用于在标题后补充直观颜色提示。
-COLOR_LEVEL_EMOJI = {
-    "红色": "🔴",
-    "橙色": "🟠",
-    "黄色": "🟡",
-    "蓝色": "🔵",
-    "白色": "⚪",
-}
 
 # 默认描述最大长度，避免长篇气象正文把消息刷得过长。
 DEFAULT_MAX_DESCRIPTION_LENGTH = 384

@@ -9,17 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ....utils.severity_emoji import TYPHOON_LEVEL_EMOJI, typhoon_level_emoji
 from .typhoon_values import clean_text, to_float
-
-# 台风强度等级圆形指示器：蓝 → 绿 → 黄 → 橙 → 红 → 紫（由弱到强）
-TYPHOON_LEVEL_EMOJI: dict[str, str] = {
-    "热带低压": "🔵",
-    "热带风暴": "🟢",
-    "强热带风暴": "🟡",
-    "台风": "🟠",
-    "强台风": "🔴",
-    "超强台风": "🟣",
-}
 
 # 移动方向展示映射：仅用于展示本地化，不改动原始业务字段。
 MOVE_DIRECTION_DISPLAY_MAP: dict[str, str] = {
@@ -180,23 +171,7 @@ def format_wind_speed(wind_speed: float | None, power: int | None) -> str | None
 
 def get_typhoon_level_emoji(typhoon_type: str | None) -> str:
     """根据台风强度等级返回圆形颜色 emoji。"""
-    level = clean_text(typhoon_type)
-    if not level:
-        return ""
-    if level in TYPHOON_LEVEL_EMOJI:
-        return TYPHOON_LEVEL_EMOJI[level]
-    # 兼容包含关系：按强度从高到低匹配，避免“强台风”被“台风”抢先命中
-    for key in (
-        "超强台风",
-        "强台风",
-        "强热带风暴",
-        "热带风暴",
-        "热带低压",
-        "台风",
-    ):
-        if key in level:
-            return TYPHOON_LEVEL_EMOJI[key]
-    return ""
+    return typhoon_level_emoji(typhoon_type)
 
 
 def format_move_direction(direction: str | None) -> str:

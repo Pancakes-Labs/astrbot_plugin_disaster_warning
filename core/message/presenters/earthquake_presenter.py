@@ -13,6 +13,10 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 
 from ....utils.converters import ScaleConverter
+from ....utils.severity_emoji import (
+    INTENSITY_CIRCLE_EMOJIS,
+    INTENSITY_SQUARE_EMOJIS,
+)
 from ....utils.time_converter import TimeConverter
 from ...domain.earthquake.cmt_normalize import format_fault_type_label
 from ...domain.event_context import EarthquakeDisplayContext
@@ -39,9 +43,8 @@ def _get_intensity_emoji(value, is_eew: bool = True, is_shindo: bool = False) ->
         return ""
 
     # 预警场景与普通情报场景使用两套图形，便于视觉区分。
-    circles = ["⚪", "🔵", "🟢", "🟡", "🟠", "🔴", "🟣"]
-    squares = ["⬜", "🟦", "🟩", "🟨", "🟧", "🟥", "🟪"]
-    emojis = circles if is_eew else squares
+    # 色序统一由 utils.severity_emoji 维护。
+    emojis = INTENSITY_CIRCLE_EMOJIS if is_eew else INTENSITY_SQUARE_EMOJIS
 
     try:
         val_str = str(value)

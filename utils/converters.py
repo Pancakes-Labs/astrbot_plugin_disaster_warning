@@ -7,6 +7,8 @@ import math
 import re
 from typing import Any
 
+from .severity_emoji import INTENSITY_CIRCLE_EMOJIS
+
 
 def safe_float_convert(value: Any) -> float | None:
     """安全地将输入值转换为浮点数。"""
@@ -184,7 +186,7 @@ class ScaleConverter:
 
     @staticmethod
     def get_p2p_scale_emoji(scale_from: Any, scale_to: Any) -> str:
-        """根据 P2P 震度业务值选择展示 emoji。"""
+        """根据 P2P 震度业务值选择展示 emoji（色板复用统一震度色序）。"""
         candidates: list[float] = []
         for value in (scale_from, scale_to):
             raw_value = ScaleConverter.normalize_p2p_scale_value(value)
@@ -194,21 +196,24 @@ class ScaleConverter:
             if converted is not None:
                 candidates.append(converted)
         if not candidates:
-            return "⚪"
+            return INTENSITY_CIRCLE_EMOJIS[0]
         max_scale = max(candidates)
+        # 档位索引 → 统一圆形色序（白→蓝→绿→黄→橙→红→紫）
         if max_scale >= 6.5:
-            return "🟣"
-        if max_scale >= 5.5:
-            return "🔴"
-        if max_scale >= 4.5:
-            return "🟠"
-        if max_scale >= 3.5:
-            return "🟡"
-        if max_scale >= 2.5:
-            return "🟢"
-        if max_scale >= 1.5:
-            return "🔵"
-        return "⚪"
+            idx = 6
+        elif max_scale >= 5.5:
+            idx = 5
+        elif max_scale >= 4.5:
+            idx = 4
+        elif max_scale >= 3.5:
+            idx = 3
+        elif max_scale >= 2.5:
+            idx = 2
+        elif max_scale >= 1.5:
+            idx = 1
+        else:
+            idx = 0
+        return INTENSITY_CIRCLE_EMOJIS[idx]
 
     # 計測震度中“0以下”的阈值：与 S-Net/C0 图标区间（shindo < -0.5）对齐。
     MEASURED_INTENSITY_BELOW_ZERO = -0.5
