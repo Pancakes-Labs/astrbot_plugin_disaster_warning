@@ -614,6 +614,9 @@ async def query_rank(
     all_items: list[dict[str, Any]] = []
     all_time_text: str | None = None
     errors: list[str] = []
+    # 多时段查询（如 24h 无参默认昨 08/20 双日界）：任一必需时段失败即整体失败，
+    # 避免发送仅含单时段的残缺排行。
+    multi_bucket = len(ymdh_list) > 1
     try:
         for ymdh_i in ymdh_list:
             resolved = ymdh_i
@@ -640,6 +643,9 @@ async def query_rank(
                 )
             if not payload.get("success"):
                 errors.append(payload.get("error") or f"{ymdh_i} 无数据")
+                # 多时段场景任一必需时段失败即中止，整体返回失败。
+                if multi_bucket:
+                    break
                 continue
             items = payload.get("items") or []
             time_text_i = payload.get("format_time") or payload.get("time") or ""
@@ -655,7 +661,7 @@ async def query_rank(
         if owned_client and client is not None:
             await client.close()
 
-    if not all_items:
+    if not all_items or (multi_bucket and errors):
         if errors:
             return {
                 "success": False,
