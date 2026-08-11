@@ -742,11 +742,11 @@
           "max_batch_size": {
             "description": "单批最大聚合条数",
             "type": "int",
-            "default": 25,
+            "default": 20,
             "hint": "单次合并推送最多包含的气象预警条数。超过此数量时分批发送。仅在启用合并转发时生效。",
             "slider": {
               "min": 1,
-              "max": 25,
+              "max": 20,
               "step": 1
             }
           },
@@ -961,6 +961,12 @@
           "max": 1024,
           "step": 2
         }
+      },
+      "record_weather_description": {
+        "description": "记录气象预警正文",
+        "type": "bool",
+        "hint": "是否将气象预警完整正文写入数据库，供管理端回看。关闭后仅保存标题摘要。默认开启。",
+        "default": true
       },
       "enable_weather_icon": {
         "description": "显示预警图标",

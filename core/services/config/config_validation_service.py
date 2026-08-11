@@ -618,6 +618,7 @@ class ConfigValidator:
             cfg["max_description_length"] = 0
 
         ConfigValidator._ensure_bool(cfg, "enable_weather_icon", True)
+        ConfigValidator._ensure_bool(cfg, "record_weather_description", True)
 
         return cfg
 
@@ -1203,10 +1204,10 @@ class ConfigValidator:
             )
             agg["max_batch_size"] = int(
                 ConfigValidator._clamp_number(
-                    agg.get("max_batch_size", 25),
+                    agg.get("max_batch_size", 20),
                     minimum=1,
-                    maximum=25,
-                    default=25,
+                    maximum=20,
+                    default=20,
                     field_name="气象预警聚合单批最大条数",
                 )
             )
