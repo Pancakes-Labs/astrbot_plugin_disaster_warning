@@ -663,6 +663,16 @@ class DatabaseManager:
         }
     )
 
+    # 气象预警源：OQ/FAN 高频重推同一预警时，同内容指纹一致则不追加 event_updates，
+    # 避免每天 3000+ 条的气象预警在报次表中无限堆积重复快照。
+    _WEATHER_DEDUPE_SOURCES = frozenset(
+        {
+            "china_weather_openquake",
+            "china_weather_fanstudio",
+            "weather_alarm",
+        }
+    )
+
     @classmethod
     def _should_dedupe_list_poll_update(
         cls, source: str, event_data: dict[str, Any]
@@ -672,7 +682,8 @@ class DatabaseManager:
         覆盖：
         1. Wolfx 列表轮询源（定时重复拉取）
         2. 海啸源（重连补发 / 多通道同内容）
-        3. 显式 type=tsunami 的记录（兜底）
+        3. 气象预警源（高频重推同内容）
+        4. 显式 type=tsunami / weather / weather_alarm 的记录（兜底）
         """
         candidates = (
             source,
@@ -685,9 +696,13 @@ class DatabaseManager:
                 return True
             if key in cls._TSUNAMI_DEDUPE_SOURCES:
                 return True
+            if key in cls._WEATHER_DEDUPE_SOURCES:
+                return True
 
         event_type = str(event_data.get("type") or "").strip().lower()
         if event_type == "tsunami":
+            return True
+        if event_type in ("weather", "weather_alarm"):
             return True
         return False
 
@@ -1312,6 +1327,32 @@ class DatabaseManager:
             return await self._attach_history(events)
         except Exception as e:
             logger.error(f"[灾害预警] 查询最近气象事件失败: {e}")
+            return []
+
+    async def list_recent_weather_unique_ids(
+        self, limit: int = 10000
+    ) -> list[dict[str, Any]]:
+        """轻量拉取最近气象预警的唯一键，用于启动期恢复统计去重集合。
+
+        仅 SELECT 定位键（unique_id/real_event_id/source），不附加 history，
+        避免恢复上万条完整记录带来的内存与耗时开销。
+        """
+        try:
+            safe_limit = max(1, min(int(limit or 10000), 100_000))
+            cursor = await self.connection.cursor()
+            await cursor.execute(
+                """
+                SELECT unique_id, real_event_id, source_id, source
+                FROM events
+                WHERE type='weather' OR type='weather_alarm'
+                ORDER BY updated_at DESC, time DESC, id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"[灾害预警] 查询最近气象唯一键失败: {e}")
             return []
 
     async def find_typhoon_event_by_id(self, typhoon_id: str) -> dict[str, Any] | None:
