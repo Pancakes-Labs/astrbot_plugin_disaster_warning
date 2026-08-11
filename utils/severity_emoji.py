@@ -69,10 +69,12 @@ AQI_LEVEL_DOT: Final[list[tuple[int, int, str]]] = [
 
 
 def aqi_level_emoji(aqi: Any) -> str:
-    """按 AQI 数值返回等级圆点；缺测返回 ⬜。"""
+    """按 AQI 数值返回等级圆点；缺测/非有限值返回 ⬜。"""
     try:
         num = int(float(aqi))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return MISSING_EMOJI
+    if not math.isfinite(num):
         return MISSING_EMOJI
     for lo, hi, dot in AQI_LEVEL_DOT:
         if lo <= num < hi:
@@ -297,12 +299,12 @@ def _bracket_level_emoji(
 
 def rank_maxtemp_emoji(value: Any) -> str:
     """最高气温指示器。"""
-    return _bracket_level_emoji(value, RANK_MAXTEMP_LEVELS)
+    return _bracket_level_emoji(value, RANK_MAXTEMP_LEVELS, default=MISSING_EMOJI)
 
 
 def rank_mintemp_emoji(value: Any) -> str:
     """最低气温指示器。"""
-    return _bracket_level_emoji(value, RANK_MINTEMP_LEVELS)
+    return _bracket_level_emoji(value, RANK_MINTEMP_LEVELS, default=MISSING_EMOJI)
 
 
 def rank_rain_emoji(value: Any, *, hour: int = 1) -> str:

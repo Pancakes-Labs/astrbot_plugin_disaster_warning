@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 from typing import Any
 
@@ -119,13 +120,16 @@ _AREA_SUFFIXES = ("市", "地区", "自治州", "盟", "县")
 
 
 def _safe_int(v: Any, default: int | None = None) -> int | None:
-    """安全整数解析：非数字/缺测返回 default。"""
+    """安全整数解析：非数字/缺测/无穷大返回 default。"""
     if v is None or v == "":
         return default
     try:
-        return int(float(v))
+        num = float(v)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(num):
+        return default
+    return int(num)
 
 
 def code_to_prov(code: Any) -> str:
@@ -140,14 +144,17 @@ def code_to_prov(code: Any) -> str:
 
 
 def aqi_num(item: dict[str, Any]) -> int | None:
-    """提取 AQI 数值；缺测（NA/空/异常）返回 None。"""
+    """提取 AQI 数值；缺测（NA/空/异常/无穷大）返回 None。"""
     try:
         v = str(item.get("AQI") or "").strip()
         if not v or v.upper() in ("NA", "N/A", "-"):
             return None
-        return int(float(v))
+        num = float(v)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(num):
+        return None
+    return int(num)
 
 
 def quality_label(item: dict[str, Any]) -> str:
