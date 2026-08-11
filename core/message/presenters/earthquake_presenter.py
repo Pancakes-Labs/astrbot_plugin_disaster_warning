@@ -212,9 +212,9 @@ def _append_local_estimation(
     p_sec = local_est.get("p_travel_sec")
     s_sec = local_est.get("s_travel_sec")
     if p_sec is not None:
-        lines.append(f"⏱️预计P波到达：约 {p_sec:.0f} 秒")
+        lines.append(f"⏱️预计P波走时：约 {p_sec:.0f} 秒")
     if s_sec is not None:
-        lines.append(f"⏱️预计S波到达：约 {s_sec:.0f} 秒")
+        lines.append(f"⏱️预计S波走时：约 {s_sec:.0f} 秒")
 
     # S 波实时倒计时（近似实时预估）：
     # 保留上方两行绝对走时展示，这里额外追加一行基于「发震时间 + 当前墙钟」

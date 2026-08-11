@@ -397,8 +397,8 @@ def build_earthquake_simulation(
                 f"   ⦁ 距本地: {dist_str}",
                 f"   ⦁ 预估最大本地烈度: {inte_str}",
                 f"   ⦁ 本地烈度阈值: {local_monitor.threshold}",
-                f"   ⦁ 预计P波到达: {p_str}",
-                f"   ⦁ 预计S波到达: {s_str}",
+                f"   ⦁ 预计P波走时: {p_str}",
+                f"   ⦁ 预计S波走时: {s_str}",
             ]
         )
 
