@@ -251,7 +251,9 @@ class WebSocketReconnectService:
 
             # 评估是否需要对“短暂离线了较长时间，但仍未耗尽短时次数”的中间状态发送警报通知
             offline_elapsed = asyncio.get_running_loop().time() - offline_since
-            short_retry_notify_threshold = reconnect_interval * 3
+            # 阈值取“重连间隔 × 3”与 30 秒兜底的较大者：
+            # 避免重连间隔配置过小的情况下，离线仅数秒就触发“离线时间过长”通知。
+            short_retry_notify_threshold = max(reconnect_interval * 3, 30)
             short_retry_notified = bool(
                 connection_info.get("short_retry_notified", False)
             )
