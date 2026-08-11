@@ -215,6 +215,10 @@ class PluginLogger:
         is_silent_window 关键字，避免调用方透传触发底层 logger 的 TypeError
         （底层 Logger._log 不接受这些自定义关键字）。
         """
+        # 防御性兜底：即便调用方通过 **kwargs 显式传入这三个自定义关键字，
+        # 也先摘除再转发，避免底层 logger 因未知关键字抛 TypeError。
+        for key in ("is_event_linked", "event_stream", "is_silent_window"):
+            kwargs.pop(key, None)
         logger.error(msg, *args, **kwargs)
 
     def debug(
