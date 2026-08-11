@@ -1,9 +1,10 @@
 """
 实况排行查询服务。
 
-统一承接命令侧（/气温排行 /降水排行 /风速排行）的查询编排：
+统一承接命令侧（/气温排行 /最低气温排行 /降水排行 /风速排行）的查询编排：
 - 排行要素关键词解析（气温/温度、降水、风速）
 - 可选历史时次解析（如「08日15时」「2026080815」「今天15时」等）
+- 可选时间跨度（1h 逐小时 / 6h / 24h 累计）
 - 调用 NmcRealRankClient 抓取 /rest/realrank 接口数据
 - 文本格式化：站点名 + 省份右对齐、数值右对齐，输出 Top10
 
@@ -13,6 +14,9 @@
 实测接口行为：
 - 无需 Referer、无需登录，直接 GET 即可
 - 返回 Top10，字段 name（站点）、pname（省份）、value（数值）
+- 四要素（maxtemp/mintemp/rain/wind）均支持 1h / 6h / 24h 三档跨度
+- 6h/24h 跨度返回「起点时-终点时」滚动区间文本
+- 24h 降水按日界整点（如 08时）滚动累计
 - 支持按历史时次查询（如 08日15时 的气温排行）
 - 无数据/非法时次时 data 为空字符串，需防御处理
 - 单位由前端拼接：气温 ℃、降水 mm、风速 m/s
@@ -25,6 +29,9 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ....utils.severity_emoji import (
+    rank_level_emoji,
+)
 from ....utils.text_format_utils import (
     MISSING_VALUE,
 )
@@ -105,14 +112,33 @@ _RANK_KIND_KEYWORDS: dict[str, str] = {
     "风速排行榜": "wind",
 }
 
-# 各要素默认时间跨度（小时）。mintemp 走 24h 档（最低气温按日统计），
-# 其余走逐小时（1h）。maxtemp 逐小时即「当前最高气温」。
+# 各要素默认时间跨度（小时）。官网首页「实况排行」三档均可选：
+# - 1h：逐小时实时（气温=当前气温、降水=1小时雨量、风速=瞬时风速）
+# - 6h：6 小时累计/极值（气温=6h 最高/最低）
+# - 24h：24 小时累计/极值（最低气温按日统计取 24h 档）
+# 无参查询默认 1h；用户可在命令中显式指定「6小时/24小时」等跨度。
 _RANK_DEFAULT_HOUR: dict[str, int] = {
     "temperature": 1,
     "mintemperature": 24,
     "rain": 1,
     "wind": 1,
 }
+
+# 时间跨度关键词 -> 跨度值（小时）。
+# 「日/24小时/24h/全天」归一为 24；「6小时/6h/六小时」归一为 6。
+_HOUR_KEYWORDS: dict[str, int] = {
+    "6小时": 6,
+    "6h": 6,
+    "六小时": 6,
+    "24小时": 24,
+    "24h": 24,
+    "二十四小时": 24,
+    "全天": 24,
+}
+
+# 时间跨度正则：匹配「6小时」「24h」等跨度关键词。
+# 刻意不含「时」，避免与纯时次「6时/24时」（早上6点/次日0点）冲突。
+_HOUR_ARG_RE = re.compile(r"(?P<hour>6|24)\s*(?:小时|h)")
 
 # 时次解析正则
 # 1) YYYYMMDDHH（如 2026080815）
@@ -133,6 +159,39 @@ def _shift_day_ymdh(hour: int, days: int) -> str:
     """生成偏移 days 天的 YYYYMMDDHH 时次（按北京时间）。"""
     target = datetime.now(_CST) + timedelta(days=days)
     return f"{target.year:04d}{target.month:02d}{target.day:02d}{hour:02d}"
+
+
+def parse_rank_args(text: str | None) -> tuple[int | None, str | None]:
+    """从用户输入中解析（时间跨度, 时次）。
+
+    支持两种写法：
+    - 跨度优先：如「24小时」「6小时」→ (24, None)
+    - 跨度 + 时次：如「24小时 08时」「6h 昨天21时」→ (24, '昨天21时')
+    - 仅时次：如「08日15时」→ (None, '08日15时')（跨度取要素默认）
+
+    Args:
+        text: 用户输入的命令参数（原始字符串）。
+
+    Returns:
+        (hour, time_text)：hour 为 6/24 或 None；time_text 为剩余时次文本。
+    """
+    if not text or not str(text).strip():
+        return None, None
+    s = str(text).strip()
+    hour: int | None = None
+
+    # 提取跨度关键词（6小时/24h 等）
+    m = _HOUR_ARG_RE.search(s)
+    if m:
+        hour = int(m.group("hour"))
+        s = (s[: m.start()] + " " + s[m.end() :]).strip()
+
+    # 剩余部分去掉可能残留的空白，作为时次参数
+    time_text = s.strip() or None
+    if time_text:
+        # 跨度关键词与剩余时次之间可能夹了「的/的」等，简单容错
+        time_text = re.sub(r"^[\s的]+", "", time_text)
+    return hour, time_text
 
 
 def resolve_rank_kind(keyword: str) -> str | None:
@@ -299,39 +358,36 @@ def _normalize_time_text(time_text: str) -> str:
     return re.sub(r"\s*-\s*", " - ", s)
 
 
-def build_rank_text(
+def _build_rank_block(
     *,
     rank_type: str,
+    title: str,
+    unit: str,
     items: list[dict[str, Any]],
     time_text: str,
-    limit: int = DEFAULT_LIMIT,
-) -> str:
-    """构建排行文本（Top10 右对齐输出）。
+    limit: int,
+    hour: int,
+) -> list[str]:
+    """构建单个时段（或单块）的排行文本块。
 
     Args:
-        rank_type: 接口 type（maxtemp/rain/wind）。
-        items: 接口返回的排行条目列表。
-        time_text: 展示用时间文本（如「2026年08月08日 21时」）。
-        limit: 最多输出条数（默认 10）。
+        rank_type: 接口 type（maxtemp/mintemp/rain/wind）。
+        title: 排行标题（如「气温排行」）。
+        unit: 数值单位。
+        items: 排行条目列表。
+        time_text: 展示用时间文本。
+        limit: 最多输出条数。
+        hour: 时间跨度（1/6/24），用于降水指示器阈值选择。
 
     Returns:
-        格式化后的多行文本。
+        文本行列表（不含外层空行分隔）。
     """
-    kind_def = next(
-        (v for v in _RANK_KIND_DEFS.values() if v["type"] == rank_type),
-        None,
-    )
-    if kind_def is None:
-        kind_def = {"label": "排行", "type": rank_type, "unit": "", "title": "排行"}
-    title = kind_def["title"]
-    unit = kind_def["unit"]
-
     lines: list[str] = []
 
     if not items:
-        lines.append(f"{title} {time_text}")
+        lines.append(f"{title} {_normalize_time_text(time_text)}")
         lines.append("暂无数据")
-        return "\n".join(lines)
+        return lines
 
     # 站点名列宽度：复用 _format_station_name（空名会替换为「-」），
     # 保证宽度计算与实际渲染一致，避免空站点名时该行错位。
@@ -351,42 +407,132 @@ def build_rank_text(
     # 10 行用单一半角空格补位（不与别的空格连续，QQ 不会折叠），
     # 从而与 1-9 行地点列起点一致，看起来不会"多一个空格"。
     # 每行结构（显示宽度）：
-    #   {序号区:4} {站点:station_width} {数值:6} {单位}
-    # 数值右端所在显示宽度 = 4(序号区) + station_width + 1(空格) + 6(数值)
-    value_right = station_width + 11
+    #   {序号区:4} {emoji:2} {站点:station_width} {数值:6} {单位}
+    # 数值右端所在显示宽度 = 4(序号区) + 2(emoji) + station_width + 1(空格) + 6(数值)
+    value_right = station_width + 13
 
     # 标题行：日期文本规范化（连字符两侧加空格）。
     # 目标：日期右端精确对齐到数值列右端（value_right，与下方数值右对齐）；
     # 若「标题 + 2 空格 + 日期」整体宽度超过数值列右端（标题或日期过宽），
     # 则退化为「标题 + 2 空格 + 日期」保底分隔，日期右端随长度自然延伸。
-    # 注意：不能只用 pad_display_width(title, value_right - date_width)——
-    # 当目标宽度 ≤ 标题自身宽度时它不会填充任何空格，导致标题与日期
-    # 之间 0 空格粘连（如「最低气温排行」+ 较长日期）。
     display_time = _normalize_time_text(time_text)
     date_width = _display_width(display_time)
     title_width = _display_width(title)
     min_gap = 2
     if title_width + min_gap + date_width <= value_right:
-        # 宽度充足：标题填充到「数值列右端 - 日期宽」，日期贴右端精确对齐
         header = (
             _pad_display_width(title, value_right - date_width, align="left")
             + display_time
         )
     else:
-        # 宽度不足（标题或日期超宽）：标题 + 2 空格 + 日期（保底分隔）
         header = f"{title}  {display_time}"
     lines.append(header)
 
     for idx, it in enumerate(limit_items, 1):
         station_text = _format_station_name(it["name"], it["pname"])
         value_text = _format_value(it.get("value"), unit=unit)
+        # 颜色圆点指示器（气温冷蓝暖红 / 降水绿蓝黄橙红紫 / 风速台风色板）
+        emoji = rank_level_emoji(rank_type, it.get("value"), hour=hour)
         # 序号顶格，序号区固定 4 显示宽左对齐：
-        # "1." 补 1 个全角空格成 "1.　"、"10." 补 1 个半角空格成 "10. "
         idx_text = _pad_display_width(f"{idx}.", 4, align="left")
         padded_station = _pad_display_width(station_text, station_width, align="left")
-        lines.append(f"{idx_text}{padded_station} {value_text}")
+        # emoji 后接 1 个半角空格分隔，避免与站点名粘连
+        lines.append(f"{idx_text}{emoji} {padded_station} {value_text}")
 
-    return "\n".join(lines)
+    return lines
+
+
+def build_rank_blocks(
+    *,
+    rank_type: str,
+    items: list[dict[str, Any]],
+    time_text: str,
+    limit: int = DEFAULT_LIMIT,
+    hour: int = 1,
+) -> list[str]:
+    """构建排行文本块列表（每时段一个块，供合并转发分节点展示）。
+
+    Args:
+        rank_type: 接口 type（maxtemp/rain/wind）。
+        items: 接口返回的排行条目列表（可含多个时段，内部按时间分组）。
+        time_text: 展示用时间文本（如「2026年08月08日 21时」）。
+        limit: 最多输出条数（默认 10）。
+        hour: 时间跨度（1/6/24），用于降水指示器阈值选择。
+
+    Returns:
+        文本块列表：多时段时每个时段一个块；单时段只有一个块。
+    """
+    kind_def = next(
+        (v for v in _RANK_KIND_DEFS.values() if v["type"] == rank_type),
+        None,
+    )
+    if kind_def is None:
+        kind_def = {"label": "排行", "type": rank_type, "unit": "", "title": "排行"}
+    title = kind_def["title"]
+    unit = kind_def["unit"]
+
+    # 多时段支持：item 自带 time 字段（单个时段）时按时间分组展示。
+    # 单个时段（原有形态）直接作为一组。
+    if any(str(it.get("time") or "").strip() for it in items):
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for it in items:
+            grouped.setdefault(str(it.get("time") or "").strip(), []).append(it)
+        blocks: list[str] = []
+        for grp_time, grp_items in grouped.items():
+            grp_time_text = grp_time or time_text
+            block_lines = _build_rank_block(
+                rank_type=rank_type,
+                title=title,
+                unit=unit,
+                items=grp_items,
+                time_text=grp_time_text,
+                limit=limit,
+                hour=hour,
+            )
+            blocks.append("\n".join(block_lines))
+        return blocks
+
+    block_lines = _build_rank_block(
+        rank_type=rank_type,
+        title=title,
+        unit=unit,
+        items=items,
+        time_text=time_text,
+        limit=limit,
+        hour=hour,
+    )
+    return ["\n".join(block_lines)]
+
+
+def build_rank_text(
+    *,
+    rank_type: str,
+    items: list[dict[str, Any]],
+    time_text: str,
+    limit: int = DEFAULT_LIMIT,
+    hour: int = 1,
+) -> str:
+    """构建排行文本（Top10 右对齐输出，每行带颜色圆点指示器）。
+
+    Args:
+        rank_type: 接口 type（maxtemp/rain/wind）。
+        items: 接口返回的排行条目列表（可含多个时段，内部按时间分组）。
+        time_text: 展示用时间文本（如「2026年08月08日 21时」）。
+        limit: 最多输出条数（默认 10）。
+        hour: 时间跨度（1/6/24），用于降水指示器阈值选择。
+
+    Returns:
+        格式化后的多行文本（多时段以空行分隔拼接）。
+    """
+    return "\n\n".join(
+        build_rank_blocks(
+            rank_type=rank_type,
+            items=items,
+            time_text=time_text,
+            limit=limit,
+            hour=hour,
+        )
+    )
 
 
 async def query_rank(
@@ -426,80 +572,116 @@ async def query_rank(
     if hour not in RANK_HOURS:
         hour = 1
 
-    # 解析时次：未提供时取当前整点，并允许数据未发布时自动回退前 1 小时。
-    # 无参查询（ymdh 为 None）在刚过整点时当前整点数据往往还没发布，
-    # 接口会返回空数据，此时自动向前回退最多 AUTO_RETRY_HOURS 次。
-    auto_retry = ymdh is None
-    resolved_ymdh = ymdh
-    if not resolved_ymdh:
-        # 接口时次按北京时间（UTC+8）计算，避免容器时区差异导致取错时次
+    # 确定要抓取的时次列表：
+    # - 显式指定时次：只查该时次
+    # - 未指定 + 24h 档：默认抓「昨天 08 时」+「昨天 20 时」两个日界时段
+    #   （与官网前端固定时段入口一致），输出两个块
+    # - 未指定 + 1h/6h 档：取当前整点
+    if ymdh:
+        ymdh_list = [ymdh]
+    elif hour >= 24:
+        # 官网 24h 降水按 08/20 两个日界滚动，各覆盖 12 小时。
+        # 默认抓昨天 08 时 + 昨天 20 时（完整一个自然日），两个块都返回。
+        candidates = [8, 20]
+        ymdh_list = [_shift_day_ymdh(hh, -1) for hh in candidates]
+    else:
         now = datetime.now(_CST)
-        resolved_ymdh = f"{now.year:04d}{now.month:02d}{now.day:02d}{now.hour:02d}"
+        ymdh_list = [f"{now.year:04d}{now.month:02d}{now.day:02d}{now.hour:02d}"]
+
+    # 无参查询（未显式指定时次）时，允许数据未发布时自动回退前 1 小时。
+    # 刚过整点时当前整点数据往往还没发布，接口会返回空数据，此时向前回退
+    # 最多 AUTO_RETRY_HOURS 次；仅「暂无排行数据」这类空数据才回退。
+    auto_retry = ymdh is None
 
     owned_client = client is None
     if owned_client:
         client = NmcRealRankClient()
+
+    # 逐时段抓取，聚合 items（带 time 字段用于分组展示）
+    all_items: list[dict[str, Any]] = []
+    all_time_text: str | None = None
+    errors: list[str] = []
     try:
-        payload = await client.fetch_rank(
-            rank_type=rank_type,
-            hour=hour,
-            ymdh=resolved_ymdh,
-        )
-        # 无参查询且当前时次无数据时，自动回退前 1 小时重试。
-        # 仅「暂无排行数据」这类空数据才回退，网络/解析错误直接返回。
-        retry_used = 0
-        while (
-            auto_retry
-            and not payload.get("success")
-            and "暂无" in (payload.get("error") or "")
-            and retry_used < AUTO_RETRY_HOURS
-        ):
-            retry_used += 1
-            prev = datetime.strptime(resolved_ymdh, "%Y%m%d%H") - timedelta(hours=1)
-            resolved_ymdh = prev.strftime("%Y%m%d%H")
+        for ymdh_i in ymdh_list:
+            resolved = ymdh_i
             payload = await client.fetch_rank(
                 rank_type=rank_type,
                 hour=hour,
-                ymdh=resolved_ymdh,
+                ymdh=resolved,
             )
+            # 无参查询且当前时次无数据时，自动回退前 1 小时重试。
+            retry_used = 0
+            while (
+                auto_retry
+                and not payload.get("success")
+                and "暂无" in (payload.get("error") or "")
+                and retry_used < AUTO_RETRY_HOURS
+            ):
+                retry_used += 1
+                prev = datetime.strptime(resolved, "%Y%m%d%H") - timedelta(hours=1)
+                resolved = prev.strftime("%Y%m%d%H")
+                payload = await client.fetch_rank(
+                    rank_type=rank_type,
+                    hour=hour,
+                    ymdh=resolved,
+                )
+            if not payload.get("success"):
+                errors.append(payload.get("error") or f"{ymdh_i} 无数据")
+                continue
+            items = payload.get("items") or []
+            time_text_i = payload.get("format_time") or payload.get("time") or ""
+            if not time_text_i:
+                time_text_i = resolve_time_text(resolved)
+            for it in items:
+                item = dict(it)
+                item["time"] = time_text_i
+                all_items.append(item)
+            if all_time_text is None:
+                all_time_text = time_text_i
     finally:
         if owned_client and client is not None:
             await client.close()
 
-    if not payload.get("success"):
-        return {
-            "success": False,
-            "error": payload.get("error") or "排行查询失败",
-        }
+    if not all_items:
+        if errors:
+            return {
+                "success": False,
+                "error": "；".join(dict.fromkeys(errors)) or "排行查询失败",
+            }
+        return {"success": False, "error": "排行查询失败"}
 
-    items = payload.get("items") or []
-    time_text = payload.get("format_time") or payload.get("time") or ""
-    # 若接口没给时间文本，用本地格式化兜底
-    if not time_text:
-        time_text = resolve_time_text(resolved_ymdh)
-
-    text = build_rank_text(
+    time_text = all_time_text or ""
+    blocks = build_rank_blocks(
         rank_type=rank_type,
-        items=items,
+        items=all_items,
         time_text=time_text,
+        hour=hour,
     )
     return {
         "success": True,
-        "text": text,
+        "text": "\n\n".join(blocks),
+        "blocks": blocks,
         "time": time_text,
-        "raw_items": items,
+        "raw_items": all_items,
     }
 
 
 # 时次参数帮助文本：集中定义，减少帮助文本与实际解析行为不一致的风险。
-TIME_ARG_HELP = "时次格式：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时"
+TIME_ARG_HELP = (
+    "参数格式：\n"
+    "· 时间跨度：6小时 / 24小时（默认逐小时；最低气温默认 24小时）\n"
+    "· 时次：MM月DD日HH时 / YYYYMMDDHH / 今天HH时 / 昨天HH时\n"
+    "示例：/气温排行、/气温排行 24小时、/降水排行 24小时 08时、/风速排行 昨天15时"
+)
 
 __all__ = [
     "resolve_rank_kind",
     "resolve_rank_type",
     "resolve_time_text",
     "parse_time_arg",
+    "parse_rank_args",
     "build_rank_text",
+    "build_rank_blocks",
     "query_rank",
     "DEFAULT_LIMIT",
     "AUTO_RETRY_HOURS",

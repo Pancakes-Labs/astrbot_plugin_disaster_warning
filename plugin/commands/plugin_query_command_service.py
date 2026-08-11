@@ -56,6 +56,7 @@ from ...core.services.query.radar_query_service import (
 )
 from ...core.services.query.realrank_query_service import (
     TIME_ARG_HELP,
+    parse_rank_args,
     parse_time_arg,
     query_rank,
     resolve_rank_type,
@@ -1471,12 +1472,12 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         rank_keyword: str,
         time_arg: str | None = None,
     ):
-        """处理实况排行查询命令（气温/最低气温/降水/风速），支持可选历史时次。
+        """处理实况排行查询命令（气温/最低气温/降水/风速），支持可选跨度与时次。
 
         Args:
             event: 消息事件。
             rank_keyword: 排行要素关键词，如「气温」「最低气温」「降水」「风速」。
-            time_arg: 可选历史时次，如「08日15时」「2026080815」「今天15时」。
+            time_arg: 可选跨度或时次，如「24小时」「6h 08时」「08日15时」。
         """
         try:
             # 解析排行要素类型
@@ -1485,21 +1486,25 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 yield quoted_plain_result(
                     self.plugin,
                     event,
-                    "用法：/气温排行 [时次] | /最低气温排行 [时次] | /降水排行 [时次] | /风速排行 [时次]\n"
-                    "示例：/气温排行、/最低气温排行、/降水排行 08日15时、/风速排行 2026080815\n"
+                    "用法：/气温排行 [跨度] [时次] | /最低气温排行 [跨度] [时次] | "
+                    "/降水排行 [跨度] [时次] | /风速排行 [跨度] [时次]\n"
+                    "示例：/气温排行、/降水排行 24小时、/降水排行 6h 昨天20时、/风速排行 昨天15时\n"
                     + TIME_ARG_HELP,
                 )
                 return
 
+            # 解析「跨度 + 时次」混合参数（如「24小时 08时」）
+            hour, time_text = parse_rank_args(time_arg)
+
             # 解析可选时次
             ymdh = None
-            if time_arg and str(time_arg).strip():
-                ymdh = parse_time_arg(str(time_arg).strip())
+            if time_text:
+                ymdh = parse_time_arg(time_text)
                 if not ymdh:
                     yield quoted_plain_result(
                         self.plugin,
                         event,
-                        f"❌ 无法识别时间参数「{time_arg}」，可用格式：\n"
+                        f"❌ 无法识别时间参数「{time_text}」，可用格式：\n"
                         "· MM月DD日HH时（如 08日15时）\n"
                         "· YYYYMMDDHH（如 2026080815）\n"
                         "· 今天HH时 / 昨天HH时（如 今天15时）",
@@ -1507,7 +1512,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     return
 
             # 查询排行
-            result = await query_rank(rank_type=rank_type, ymdh=ymdh)
+            result = await query_rank(rank_type=rank_type, ymdh=ymdh, hour=hour)
 
             if not result.get("success"):
                 yield quoted_plain_result(
@@ -1523,9 +1528,29 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     "success": True,
                     "rank_type": rank_type,
                     "time_arg": bool(ymdh),
+                    "hour": hour,
+                    "block_count": len(result.get("blocks") or []),
                     "item_count": len(result.get("raw_items") or []),
                 },
             )
+
+            # 多时段（如 24h 双时段 08/20）显式走合并转发，每时段一个节点；
+            # 失败或单时段回退普通引用回复。
+            blocks = result.get("blocks") or []
+            if len(blocks) > 1:
+                try:
+                    ok = await send_forward_blocks(
+                        self.plugin,
+                        event,
+                        blocks,
+                        name="灾害预警",
+                    )
+                    if ok:
+                        return
+                except Exception as fwd_error:
+                    logger.warning(
+                        f"[灾害预警] 排行合并转发失败，回退文本: {fwd_error}"
+                    )
             yield quoted_plain_result(self.plugin, event, result.get("text", ""))
         except Exception as e:
             logger.error(f"[灾害预警] 排行查询失败: {e}\n{traceback.format_exc()}")
