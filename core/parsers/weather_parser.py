@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections import deque
+import time
 from datetime import datetime
 from typing import Any
 
@@ -28,8 +28,11 @@ class WeatherAlarmParser(BaseParser):
     def __init__(self, source_id: str = "china_weather_fanstudio", message_logger=None):
         """初始化气象预警解析器与短期重复记录缓存。"""
         super().__init__(source_id, message_logger)
-        # 用双端队列在内存中缓存最近 10 条已处理过气象预警标识，用于快速防重过滤
-        self._processed_weather_ids = deque(maxlen=10)
+        # 短窗去重缓存：{预警 id: 最近处理时间戳}。
+        # 带时间窗 + 容量上限，避免高频重推旧预警在重载后被反复放行。
+        self._processed_weather_ids: dict[str, float] = {}
+        self._WEATHER_DEDUPE_WINDOW_SECONDS = 600  # 10 分钟短窗
+        self._WEATHER_DEDUPE_MAX_ENTRIES = 512
 
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析中国气象局气象预警数据。"""
@@ -57,7 +60,7 @@ class WeatherAlarmParser(BaseParser):
             # 内存中判定当前事件ID是否已被处理过，避免同一预警短时多次派发
             # 这里也属于去重阶段的日志，如果提示检测到重复，应由 plugin_logger 输出
             weather_id = msg_data.get("id")
-            if weather_id and weather_id in self._processed_weather_ids:
+            if weather_id and self._is_weather_duplicate(str(weather_id)):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
                     is_event_linked=True,
@@ -192,7 +195,7 @@ class WeatherAlarmParser(BaseParser):
 
             # 加入防重去噪队列中
             if envelope.id:
-                self._processed_weather_ids.append(envelope.id)
+                self._remember_weather_id(str(envelope.id))
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 生效时间: {issue_time}",
@@ -207,6 +210,28 @@ class WeatherAlarmParser(BaseParser):
                 f"[灾害预警] {self.source_id} 解析气象预警数据失败: {exc}, 数据内容: {data}"
             )
             return None
+
+    def _is_weather_duplicate(self, weather_id: str) -> bool:
+        """判断预警 id 是否处于短窗去重窗口内。"""
+        if not weather_id:
+            return False
+        last_ts = self._processed_weather_ids.get(weather_id)
+        if last_ts is None:
+            return False
+        return (time.monotonic() - last_ts) <= self._WEATHER_DEDUPE_WINDOW_SECONDS
+
+    def _remember_weather_id(self, weather_id: str) -> None:
+        """登记预警 id 的处理时间，并控制缓存容量。"""
+        if not weather_id:
+            return
+        self._processed_weather_ids[weather_id] = time.monotonic()
+        if len(self._processed_weather_ids) > self._WEATHER_DEDUPE_MAX_ENTRIES:
+            # 超出容量上限时清理最旧的记录，避免内存无限增长。
+            oldest_key = min(
+                self._processed_weather_ids,
+                key=self._processed_weather_ids.get,
+            )
+            self._processed_weather_ids.pop(oldest_key, None)
 
     def _extract_realtime_payload(
         self, data: dict[str, Any]

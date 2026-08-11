@@ -200,8 +200,25 @@ class PluginLogger:
         else:
             logger.warning(msg, *args, **kwargs)
 
-    def error(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        """记录 ERROR 级别日志。错误日志由于其关键性，不受简洁模式限制。"""
+    def error(
+        self,
+        msg: str,
+        *args: Any,
+        is_event_linked: bool = False,
+        event_stream: str | None = None,
+        is_silent_window: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """记录 ERROR 级别日志。错误日志由于其关键性，不受简洁模式限制。
+
+        与 info/warning/debug 对齐，显式消费 is_event_linked / event_stream /
+        is_silent_window 关键字，避免调用方透传触发底层 logger 的 TypeError
+        （底层 Logger._log 不接受这些自定义关键字）。
+        """
+        # 防御性兜底：即便调用方通过 **kwargs 显式传入这三个自定义关键字，
+        # 也先摘除再转发，避免底层 logger 因未知关键字抛 TypeError。
+        for key in ("is_event_linked", "event_stream", "is_silent_window"):
+            kwargs.pop(key, None)
         logger.error(msg, *args, **kwargs)
 
     def debug(

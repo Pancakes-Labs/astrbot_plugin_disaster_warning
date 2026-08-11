@@ -17,6 +17,7 @@ from ...message.presenters.weather_constants import (
     SORTED_WEATHER_TYPES,
 )
 from ...services.identity.event_classifier import is_major_record
+from ..source_compat import normalize_source_name
 from .typhoon_stats_accumulator import record_typhoon_observation
 
 
@@ -51,6 +52,11 @@ class StatsLoadService:
             db_events = await self.manager.db.get_recent_events(500)
             time_series_counts = await self.manager.db.get_time_series_counts()
             rebuild_events = await self.manager.db.get_statistics_rebuild_events()
+            # 气象预警每天数千条，仅恢复最近 500 条通用事件不够：
+            # 重载后上游重推超出窗口的旧预警会被统计成新事件。
+            # 这里按 type 轻量拉取最近 10000 条气象唯一键，补进统计去重集合。
+            weather_keys = await self.manager.db.list_recent_weather_unique_ids(10000)
+            self._restore_weather_unique_ids(weather_keys)
             if db_events:
                 # 数据库是当前版本的主要历史来源，命中后优先以数据库结果覆盖近期事件缓存。
                 logger.debug(f"[灾害预警] 从数据库加载了 {len(db_events)} 条历史记录")
@@ -152,6 +158,28 @@ class StatsLoadService:
                     self.manager._recorded_source_event_ids.add(
                         f"{source_key}:{unique_id}"
                     )
+
+    def _restore_weather_unique_ids(self, weather_keys: list[dict[str, Any]]) -> None:
+        """把气象唯一键补进统计去重集合，扩大重载后的防重复窗口。
+
+        气象源高频且量大，仅靠通用 recent_events(500) 无法覆盖
+        重载后被上游重推的旧预警，这里单独把气象键批量登记，
+        避免重载后统计虚增（total_events / by_type / by_source / 时间序列）。
+        """
+        for row in weather_keys or []:
+            unique_id = str(row.get("unique_id") or "").strip()
+            real_event_id = str(row.get("real_event_id") or "").strip()
+            raw_source = str(row.get("source_id") or row.get("source") or "").strip()
+            # 与统计聚合器 by_source 键口径保持一致：
+            # build_source_stats_key 对非台风源返回 normalize_source_name(source)。
+            source_key = normalize_source_name(raw_source) if raw_source else ""
+            # unique_id 与 real_event_id 都可能作为事件唯一键使用，一并登记。
+            for key in (unique_id, real_event_id):
+                if not key:
+                    continue
+                self.manager._recorded_event_ids.add(key)
+                if source_key:
+                    self.manager._recorded_source_event_ids.add(f"{source_key}:{key}")
 
     async def refresh_derived_stats_from_database(self) -> None:
         """从数据库全量刷新统计卡片依赖的聚合与派生统计。"""

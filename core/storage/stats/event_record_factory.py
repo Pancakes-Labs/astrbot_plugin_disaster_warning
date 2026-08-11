@@ -181,6 +181,8 @@ class EventRecordFactory:
     def apply_weather_fields(
         record: dict[str, Any],
         event: EventEnvelope,
+        *,
+        record_weather_description: bool = True,
     ) -> dict[str, Any]:
         """填充气象预警专有字段。"""
         envelope = _adapt_event_envelope(event)
@@ -203,6 +205,13 @@ class EventRecordFactory:
             or payload.get("detail")
             or ""
         )
+        # 关闭正文记录时只保留标题摘要，避免每天数千条完整正文撑大数据库。
+        if not record_weather_description:
+            description = (
+                domain_event.title
+                or domain_event.headline
+                or (description[:64] + "…" if len(description) > 64 else description)
+            )
         record.update(
             {
                 "subtitle": domain_event.headline or "",
@@ -846,6 +855,7 @@ class EventRecordFactory:
         event_unique_id: str,
         description: str,
         earthquake_level: float | None = None,
+        record_weather_description: bool = True,
     ) -> dict[str, Any]:
         """构建基础统计记录。"""
         envelope = _adapt_event_envelope(event)
@@ -874,7 +884,11 @@ class EventRecordFactory:
             )
         elif isinstance(envelope.event, WeatherEvent):
             # 气象事件重点补充副标题、详细说明、颜色级别和类型编码。
-            EventRecordFactory.apply_weather_fields(record, event)
+            EventRecordFactory.apply_weather_fields(
+                record,
+                event,
+                record_weather_description=record_weather_description,
+            )
         elif isinstance(envelope.event, TsunamiEvent):
             # 海啸事件补充发布时间、等级、震中与区域摘要（优先 EQSC 字段）。
             EventRecordFactory.apply_tsunami_fields(record, event)

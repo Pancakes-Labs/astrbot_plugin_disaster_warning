@@ -56,6 +56,7 @@ from ..services.snet.snet_poll_service import SnetPollService
 from ..sources.source_catalog import SOURCE_CATALOG
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
+from ..storage.source_compat import normalize_source_name
 from ..storage.statistics_manager import StatisticsManager
 from .pipeline.event_pipeline import EventPipeline
 from .runtime.disaster_service_cache import DisasterServiceCacheService
@@ -427,12 +428,48 @@ class DisasterWarningService:
         与主入口 _handle_disaster_event 的静默分支保持语义一致。
         """
         self._seed_event_for_silence(event)
+        # 静默期吸收的气象事件同样登记进统计去重集合，
+        # 避免重载后上游重推同 id 预警被统计成新事件。
+        self._seed_weather_stats_identity(event)
         coordinator = getattr(self, "startup_silence", None)
         if coordinator is not None:
             try:
                 coordinator.note_event_absorbed(event)
             except Exception as exc:
                 logger.debug(f"[灾害预警] 静默吸收推进门闩失败（已忽略）: {exc}")
+
+    def _seed_weather_stats_identity(self, event: EventEnvelope) -> None:
+        """把气象事件的唯一键登记进统计去重集合。
+
+        与统计侧 resolve_event_unique_key 口径保持一致：
+        优先使用 identity.event_id，缺失时回退到来源+生效时间+标题。
+        """
+        from ..services.identity.event_identity import (
+            resolve_event_unique_key,
+            resolve_source_id,
+        )
+
+        # 与统计聚合器 by_source 键口径保持一致，需要来源归一化。
+        try:
+            stats_manager = getattr(self, "statistics_manager", None)
+            if stats_manager is None:
+                return
+            event_type = str(getattr(event, "event_type", "") or "")
+            if event_type != "weather_alarm":
+                return
+            unique_key = resolve_event_unique_key(event)
+            if not unique_key:
+                return
+            raw_source = resolve_source_id(event)
+            # 与统计聚合器 by_source 键口径一致（非台风源 => normalize_source_name）。
+            source_key = normalize_source_name(raw_source) if raw_source else ""
+            stats_manager._recorded_event_ids.add(unique_key)
+            if source_key:
+                stats_manager._recorded_source_event_ids.add(
+                    f"{source_key}:{unique_key}"
+                )
+        except Exception as exc:
+            logger.debug(f"[灾害预警] 静默登记气象统计去重键失败（已忽略）: {exc}")
 
     def _register_handlers(self):
         """注册消息调度处理器。"""

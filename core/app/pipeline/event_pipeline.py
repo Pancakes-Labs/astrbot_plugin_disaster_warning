@@ -305,15 +305,15 @@ class EventPipeline:
         # 统一会话日志字符串（私聊/群聊 ID (备注名)），与推送执行链保持一致。
         session_log = message_manager._get_session_log_str(session)
 
-        # 聚合配置：单批节点上限（默认 25，对齐 schema 默认值）
+        # 聚合配置：单批节点上限（默认 20，对齐 schema 默认值）
         agg_config = (runtime_config.get("push_frequency_control", {}) or {}).get(
             "weather_aggregation", {}
         )
         if not isinstance(agg_config, dict):
             agg_config = {}
-        max_batch = int(agg_config.get("max_batch_size", 25) or 25)
+        max_batch = int(agg_config.get("max_batch_size", 20) or 20)
         if max_batch < 1:
-            max_batch = 25
+            max_batch = 20
 
         # 并发执行规则链复核与消息构建，避免大量条目串行 await 拉散发送节奏
         async def _review_and_build(

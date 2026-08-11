@@ -42,6 +42,8 @@ class StatsRecordService:
                 event
             )
         )
+        # 气象正文是否入库由配置 weather_config.record_weather_description 控制。
+        record_weather_description = self.manager.record_weather_description
         earthquake_level = (
             self.manager.event_support_service.get_earthquake_level(event.event)
             if isinstance(event.event, EarthquakeEvent)
@@ -56,6 +58,7 @@ class StatsRecordService:
             current_time=current_time,
             description=description,
             earthquake_level=earthquake_level,
+            record_weather_description=record_weather_description,
         )
 
         if updated_record is not None:
@@ -74,6 +77,7 @@ class StatsRecordService:
                 event_unique_id=event_unique_id,
                 description=description,
                 earthquake_level=earthquake_level,
+                record_weather_description=record_weather_description,
             )
             target_list.insert(0, push_record)
 

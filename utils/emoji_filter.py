@@ -9,6 +9,11 @@ from __future__ import annotations
 import re
 from typing import Final
 
+# 统一从 utils.severity_emoji 派生，避免与各模块指示器口径漂移。
+from .severity_emoji import (
+    SEVERITY_INDICATOR_EMOJIS as SEVERITY_INDICATOR_EMOJIS,  # noqa: E402
+)
+
 # 配置项可选值（与 _conf_schema.json 保持一致）
 EMOJI_FILTER_MODE_DEFAULT: Final[str] = "默认"
 EMOJI_FILTER_MODE_MINIMAL: Final[str] = "简洁"
@@ -37,31 +42,6 @@ _EMOJI_FILTER_MODE_ALIASES: Final[dict[str, str]] = {
 }
 
 # 简洁模式白名单：烈度/震度方形/圆形指示器，以及气象/台风等严重性颜色指示图标。
-# 与 earthquake_presenter / weather_constants / typhoon_display_format 中的指示器对齐。
-SEVERITY_INDICATOR_EMOJIS: Final[frozenset[str]] = frozenset(
-    {
-        # 圆形颜色指示（EEW / 气象颜色 / 台风等级）
-        "⚪",
-        "⚫",
-        "🔴",
-        "🟠",
-        "🟡",
-        "🟢",
-        "🔵",
-        "🟣",
-        "🟤",
-        # 方形颜色指示（地震情报场景）
-        "⬜",
-        "⬛",
-        "🟥",
-        "🟧",
-        "🟨",
-        "🟩",
-        "🟦",
-        "🟪",
-        "🟫",
-    }
-)
 
 # 覆盖推送文本中常见的 emoji 序列。
 # 刻意不整段吞并箭头/杂项技术符号区，避免把正文中的 → 等普通符号误删。

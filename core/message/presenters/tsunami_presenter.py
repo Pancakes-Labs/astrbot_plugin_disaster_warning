@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....utils.severity_emoji import (
+    CN_TSUNNAMI_LEVEL_EMOJI,
+    JP_TSUNNAMI_LEVEL_EMOJI,
+    cn_tsunami_level_emoji,
+)
 from ....utils.time_converter import TimeConverter
 from ...domain.event_context import TsunamiDisplayContext
 from ...domain.tsunami.jma_tsunami_normalize import GRADE_TITLE_MAP, coerce_bool
@@ -19,52 +24,26 @@ from ...domain.tsunami.tsunami_levels import (
 from ...sources.source_catalog import get_source_entry
 from .base_presenter import BasePresenter
 
-# 中国海啸颜色圆形 emoji（与气象预警一致）
-CN_LEVEL_EMOJI: dict[str, str] = {
-    "信息": "⚪",
-    "蓝色": "🔵",
-    "黄色": "🟡",
-    "橙色": "🟠",
-    "红色": "🔴",
-    "解除": "",
-}
-
-# 日本海啸等级圆形 emoji：
-# 若干海面变动灰、注意黄、警报橙、大津波红；None/Unknown/解除不着色
-JP_LEVEL_EMOJI: dict[str, str] = {
-    "Minor": "⚪",
-    "Watch": "🟡",
-    "Warning": "🟠",
-    "MajorWarning": "🔴",
-    "None": "",
-    "Unknown": "",
-    "解除": "",
-}
-
 
 def _cn_level_emoji(level: Any) -> str:
+    """返回中国海啸等级对应的颜色圆点 emoji。
+
+    先按归一化等级查统一映射表，未命中时回退到纯文本匹配。
+    """
     normalized = normalize_cn_tsunami_level(level)
-    if normalized in CN_LEVEL_EMOJI:
-        return CN_LEVEL_EMOJI[normalized]
-    text = str(level or "")
-    for color, emoji in (
-        ("红色", "🔴"),
-        ("橙色", "🟠"),
-        ("黄色", "🟡"),
-        ("蓝色", "🔵"),
-        ("信息", "⚪"),
-    ):
-        if color in text:
-            return emoji
-    return ""
+    if normalized in CN_TSUNNAMI_LEVEL_EMOJI:
+        return CN_TSUNNAMI_LEVEL_EMOJI[normalized]
+    return cn_tsunami_level_emoji(level)
 
 
 def _jp_level_emoji(level: Any, *, cancelled: bool = False) -> str:
+    """返回日本海啸等级对应的颜色圆点 emoji（解除/未知不着色）。"""
     normalized = normalize_jp_tsunami_level(level, cancelled=cancelled)
-    return JP_LEVEL_EMOJI.get(normalized, "")
+    return JP_TSUNNAMI_LEVEL_EMOJI.get(normalized, "")
 
 
 def _jp_level_label(level: Any, *, cancelled: bool = False) -> str:
+    """返回日本海啸等级的展示标签（日文官方用语，未知值原样回退）。"""
     normalized = normalize_jp_tsunami_level(level, cancelled=cancelled)
     if cancelled or normalized == "解除":
         return GRADE_TITLE_MAP.get("解除", "津波予報（解除）")
@@ -89,6 +68,7 @@ class TsunamiAlertPresenter(BasePresenter):
         display_context: TsunamiDisplayContext,
         options: dict[str, Any],
     ) -> str:
+        """解析展示时区：优先用户配置，缺省按数据源（日本 UTC+9 / 其他 UTC+8）。"""
         timezone = options.get("timezone")
         if timezone:
             return str(timezone)
@@ -105,6 +85,7 @@ class TsunamiAlertPresenter(BasePresenter):
         display_context: TsunamiDisplayContext,
         options: dict | None = None,
     ) -> str:
+        """格式化通用海啸预警/信息消息文本。"""
         options = options or {}
         target_timezone = cls._resolve_timezone(display_context, options)
 
@@ -248,6 +229,7 @@ class TsunamiAlertPresenter(BasePresenter):
         display_context: TsunamiDisplayContext,
         options: dict | None = None,
     ) -> str:
+        """展示入口：合并上下文默认选项后格式化消息。"""
         merged_options = dict(display_context.options or {})
         if options:
             merged_options.update(options)
@@ -274,6 +256,7 @@ class JmaTsunamiPresenter(BasePresenter):
 
     @staticmethod
     def _meta(display_context: TsunamiDisplayContext) -> dict[str, Any]:
+        """提取上下文元数据字典（非 dict 时返回空字典）。"""
         metadata = display_context.metadata
         return metadata if isinstance(metadata, dict) else {}
 
@@ -555,6 +538,7 @@ class JmaTsunamiPresenter(BasePresenter):
         display_context: TsunamiDisplayContext,
         options: dict | None = None,
     ) -> str:
+        """展示入口：合并上下文默认选项后格式化消息。"""
         merged_options = dict(display_context.options or {})
         if options:
             merged_options.update(options)
