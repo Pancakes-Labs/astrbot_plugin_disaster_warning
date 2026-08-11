@@ -30,6 +30,7 @@ class EventRecordMerger:
         current_time: str,
         description: str,
         earthquake_level: float | None = None,
+        record_weather_description: bool = True,
     ) -> dict[str, Any] | None:
         if isinstance(event.event, EarthquakeEvent):
             # 地震事件允许保留报次演进历史，因此走专门的合并分支。
@@ -74,6 +75,7 @@ class EventRecordMerger:
                 event_unique_id=event_unique_id,
                 current_time=current_time,
                 description=description,
+                record_weather_description=record_weather_description,
             )
 
         return None
@@ -354,6 +356,7 @@ class EventRecordMerger:
         event_unique_id: str,
         current_time: str,
         description: str,
+        record_weather_description: bool = True,
     ) -> dict[str, Any] | None:
         for i, record in enumerate(target_list):
             rec_source = record.get("source")
@@ -376,7 +379,11 @@ class EventRecordMerger:
             record.pop("history", None)
 
             if isinstance(event.event, WeatherEvent):
-                EventRecordFactory.apply_weather_fields(record, event)
+                EventRecordFactory.apply_weather_fields(
+                    record,
+                    event,
+                    record_weather_description=record_weather_description,
+                )
             elif isinstance(event.event, TsunamiEvent):
                 EventRecordFactory.apply_tsunami_fields(record, event)
             elif isinstance(event.event, TyphoonEvent):

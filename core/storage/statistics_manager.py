@@ -46,6 +46,14 @@ class StatisticsManager:
         self.data_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
         self.stats_file = self.data_dir / "statistics.json"
 
+        # 气象预警正文是否入库：默认记录完整正文供管理端回看。
+        weather_config = self.config.get("weather_config", {})
+        if not isinstance(weather_config, dict):
+            weather_config = {}
+        self.record_weather_description = bool(
+            weather_config.get("record_weather_description", True)
+        )
+
         # 数据库负责保存历史事件明细与更新轨迹，供恢复与查询流程复用。
         self.db = DatabaseManager(self.data_dir / "events.db")
         self._db_initialized = False
