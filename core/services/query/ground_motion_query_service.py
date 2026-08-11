@@ -139,10 +139,10 @@ class GroundMotionResult:
             f"    S波: {self._fmt_wave('S', self.s_travel_sec, display_timezone)}"
         )
         lines.append(
-            f"    PKP波: {self._fmt_wave('PKP', self.pkp_travel_sec, display_timezone)}"
+            f"    PKP波: {self._fmt_wave('PKP', self.pkp_travel_sec, display_timezone, unreachable=True)}"
         )
         lines.append(
-            f"    PKIKP波: {self._fmt_wave('PKIKP', self.pkikp_travel_sec, display_timezone)}"
+            f"    PKIKP波: {self._fmt_wave('PKIKP', self.pkikp_travel_sec, display_timezone, unreachable=True)}"
         )
 
         return "\n".join(lines)
@@ -181,16 +181,31 @@ class GroundMotionResult:
         return base.astimezone(timezone.utc) + timedelta(seconds=travel_sec)
 
     def _fmt_wave(
-        self, name: str, travel_sec: float | None, display_timezone: str
+        self,
+        name: str,
+        travel_sec: float | None,
+        display_timezone: str,
+        *,
+        unreachable: bool = False,
     ) -> str:
-        """格式化单个震相到达时间行。"""
+        """格式化单个震相到达时间行。
+
+        Args:
+            name: 震相名（P/S/PKP/PKIKP）。
+            travel_sec: 走时（秒）；None 表示无走时数据。
+            display_timezone: 展示时区。
+            unreachable: 是否因物理原因不可达（如 PKP 需震中距 ≥105°）。
+                为 True 时 None 展示为「不会到达」，否则展示为「数据不足」。
+        """
         if travel_sec is None:
-            return "（不会到达）"
+            return "（不会到达）" if unreachable else "（数据不足）"
         arrival = self._arrival_datetime(travel_sec)
         if arrival is None:
-            return "（不会到达）"
-        local = arrival.astimezone(TimeConverter._get_timezone(display_timezone))
-        time_str = TimeConverter._safe_strftime(local, "%Y-%m-%d %H:%M:%S")
+            return "（不会到达）" if unreachable else "（数据不足）"
+        # 使用公开方法 convert_timezone 转换时区；格式串为纯 ASCII，
+        # 不涉及 Windows 中文编码问题，可直接 strftime
+        local = TimeConverter.convert_timezone(arrival, display_timezone)
+        time_str = local.strftime("%Y-%m-%d %H:%M:%S")
         return f"{time_str}（{travel_sec:.1f} 秒）"
 
 
@@ -215,7 +230,9 @@ def csis_to_grade(csis: float) -> int:
     if csis < 0.5:
         return 0
     # 十二级烈度，每级大致区间 0.5 ~ 1.5
-    grade = int(round(csis))
+    # 使用 floor(x + 0.5) 替代 int(round())，规避 Python 银行家舍入
+    # （round(2.5)=2、round(3.5)=4）导致的 .5 边界向下/向偶数取整不一致。
+    grade = math.floor(csis + 0.5)
     return max(1, min(12, grade))
 
 

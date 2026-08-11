@@ -1909,6 +1909,17 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
             # 引用模式：预测点默认用本地配置坐标
             point_lat, point_lon, _place = self._resolve_local_point(event)
+            if point_lat is None or point_lon is None:
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    "❌ 未配置本地坐标，无法确定预测点。请使用：\n"
+                    "/地震动预测 <震中纬度> <震中经度> <震级> <震源深度> "
+                    "<预测点纬度> <预测点经度>\n"
+                    "或 /本地地震动预测 [<本地纬度>] [<本地经度>]，"
+                    "或在配置中设置本地经纬度。",
+                )
+                return
             gm_input = GroundMotionInput(
                 lat=params.lat,
                 lon=params.lon,
@@ -1989,46 +2000,84 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
         Returns:
             (纬度, 经度, 地点名)；未解析到时为 (None, None, "")。
+            解析失败时区分「未配置」与「系统出错」并输出分级日志，
+            便于排查配置问题，避免静默失败。
         """
         if lat_str is not None and lon_str is not None:
             try:
                 lat = float(lat_str)
                 lon = float(lon_str)
-                if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                if (
+                    math.isfinite(lat)
+                    and math.isfinite(lon)
+                    and -90.0 <= lat <= 90.0
+                    and -180.0 <= lon <= 180.0
+                ):
                     return lat, lon, "本地"
             except (TypeError, ValueError):
-                pass
+                logger.warning(
+                    f"[灾害预警] 显式本地坐标解析失败: 纬度为 {lat_str!r}, 经度为 {lon_str!r}"
+                    "，将回退到本地监控配置"
+                )
 
         # 本地监控配置：优先会话级有效配置，否则回退全局配置
-        try:
-            lm: dict = {}
-            service = getattr(self.plugin, "disaster_service", None)
-            session_manager = getattr(service, "session_config_manager", None)
-            if session_manager is not None and hasattr(
-                session_manager, "get_effective_config"
-            ):
-                try:
-                    target_session = getattr(event, "unified_msg_origin", None)
-                    runtime_config = session_manager.get_effective_config(
-                        target_session
-                    )
-                    if isinstance(runtime_config, dict):
-                        lm = runtime_config.get("local_monitoring", {})
-                        if not isinstance(lm, dict):
-                            lm = {}
-                except Exception:
-                    lm = {}
-            if not lm:
+        lm: dict = {}
+        service = getattr(self.plugin, "disaster_service", None)
+        session_manager = getattr(service, "session_config_manager", None)
+        if session_manager is not None and hasattr(
+            session_manager, "get_effective_config"
+        ):
+            try:
+                target_session = getattr(event, "unified_msg_origin", None)
+                runtime_config = session_manager.get_effective_config(target_session)
+                if isinstance(runtime_config, dict):
+                    lm = runtime_config.get("local_monitoring", {})
+                    if not isinstance(lm, dict):
+                        lm = {}
+            except Exception as e:
+                logger.warning(
+                    f"[灾害预警] 获取会话级本地监控配置失败: {e}，将回退到全局配置"
+                )
+                lm = {}
+        if not lm:
+            try:
                 global_cfg = self.plugin.config.get("local_monitoring", {})
                 lm = global_cfg if isinstance(global_cfg, dict) else {}
-            enabled = bool(lm.get("enabled", False))
-            lat = lm.get("latitude")
-            lon = lm.get("longitude")
-            if enabled and lat is not None and lon is not None:
-                return float(lat), float(lon), str(lm.get("place_name") or "本地")
-        except Exception:
-            pass
-        return None, None, ""
+            except Exception as e:
+                logger.warning(f"[灾害预警] 读取全局本地监控配置失败: {e}")
+                lm = {}
+        if not lm:
+            logger.warning("[灾害预警] 未配置本地监控坐标，本地坐标不可用")
+            return None, None, ""
+
+        enabled = bool(lm.get("enabled", False))
+        lat = lm.get("latitude")
+        lon = lm.get("longitude")
+        if not enabled:
+            logger.debug("[灾害预警] 本地监控未启用，本地坐标不可用")
+            return None, None, ""
+        if lat is None or lon is None:
+            logger.info("[灾害预警] 本地监控配置缺少经度或纬度，本地坐标不可用")
+            return None, None, ""
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"[灾害预警] 本地监控坐标格式错误: 纬度为 {lat!r}, 经度为 {lon!r}"
+            )
+            return None, None, ""
+        if not (
+            math.isfinite(lat_f)
+            and math.isfinite(lon_f)
+            and -90.0 <= lat_f <= 90.0
+            and -180.0 <= lon_f <= 180.0
+        ):
+            logger.warning(
+                f"[灾害预警] 本地监控坐标越界或非有限值: 纬度为 {lat_f!r}, 经度为 {lon_f!r}"
+            )
+            return None, None, ""
+        return lat_f, lon_f, str(lm.get("place_name") or "本地")
 
 
 def _try_parse_ground_motion_args(
@@ -2062,6 +2111,9 @@ def _try_parse_ground_motion_args(
         p_lat = float(str(point_lat_str).strip())
         p_lon = float(str(point_lon_str).strip())
     except (TypeError, ValueError):
+        return None
+    # 拒绝 nan/inf 等非有限数值（nan 比较恒 False 会绕过下方范围校验）
+    if not all(math.isfinite(v) for v in (lat, lon, mag, depth, p_lat, p_lon)):
         return None
     # 基本范围校验
     if not (-90.0 <= lat <= 90.0 and -90.0 <= p_lat <= 90.0):

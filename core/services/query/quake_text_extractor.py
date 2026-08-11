@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -42,8 +43,22 @@ class QuotedQuakeParams:
 
     @property
     def is_valid(self) -> bool:
-        """是否具备可预测的最小参数（至少震级 + 震中）。"""
+        """是否具备可预测的最小参数（至少震级 + 震中，且数值有限、范围合法）。"""
         if self.magnitude is None or self.lat is None or self.lon is None:
+            return False
+        # 拒绝 nan/inf 等非有限数值，避免无效预测
+        if not all(math.isfinite(v) for v in (self.magnitude, self.lat, self.lon)):
+            return False
+        if self.depth_km is not None and (
+            not math.isfinite(self.depth_km) or self.depth_km < 0.0
+        ):
+            return False
+        # 震级与经纬度范围校验
+        if not (0.0 <= self.magnitude <= 12.0):
+            return False
+        if not (-90.0 <= self.lat <= 90.0):
+            return False
+        if not (-180.0 <= self.lon <= 180.0):
             return False
         return True
 
@@ -117,8 +132,9 @@ def extract_params_from_text(text: str) -> QuotedQuakeParams | None:
     # 经纬度
     m = _RE_COORDS.search(raw)
     if m:
-        lat = float(m.group("lat"))
-        lon = float(m.group("lon"))
+        # 先取绝对值，再按方向后缀设置符号，避免 "-20S" 被二次取负成 "+20"
+        lat = abs(float(m.group("lat")))
+        lon = abs(float(m.group("lon")))
         if m.group("lat_dir").upper() == "S":
             lat = -lat
         if m.group("lon_dir").upper() == "W":
