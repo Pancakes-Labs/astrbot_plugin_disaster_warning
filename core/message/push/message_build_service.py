@@ -471,11 +471,12 @@ class MessageBuildService:
         # 同步构建路径只生成文本消息，适用于不需要额外附件的轻量场景。
         source_id = self._resolve_source_id(event)
         message_format_config = self.manager.config.get("message_format", {})
-        return self.manager.text_message_builder.build(
+        chain = self.manager.text_message_builder.build(
             event,
             source_id,
             message_format_config,
         )
+        return self._apply_simulation_prefix(event, chain)
 
     async def build_message_async(
         self,
@@ -534,7 +535,7 @@ class MessageBuildService:
         await self._append_tsunami_media_if_needed(chain, event)
         # 台湾正式地震报告图片与等震度图附加
         await self._append_cwa_report_media_if_needed(chain, event, source_id)
-        return chain
+        return self._apply_simulation_prefix(event, chain)
 
     async def push_split_map(
         self,
@@ -592,6 +593,39 @@ class MessageBuildService:
                     logger.error(f"[灾害预警] 分离地图发送到 {session_log} 失败: {e}")
         except Exception as e:
             logger.error(f"[灾害预警] 异步地图渲染任务失败: {e}")
+
+    @staticmethod
+    def _apply_simulation_prefix(
+        event: EventEnvelope, chain: MessageChain
+    ) -> MessageChain:
+        """为模拟事件的消息链首行注入 [模拟] 标识。
+
+        统一在消息构建出口拦截，不侵入各 presenter 的渲染逻辑，
+        所有灾种 / 所有卡片 / 所有源自动生效。预览与发送共用同一出口。
+        """
+        if not isinstance(event, EventEnvelope):
+            return chain
+        metadata = getattr(event, "metadata", None)
+        if not (isinstance(metadata, dict) and metadata.get("simulation")):
+            return chain
+
+        try:
+            chain_items = getattr(chain, "chain", None)
+            if not isinstance(chain_items, list) or not chain_items:
+                return chain
+            first_text = getattr(chain_items[0], "text", None)
+            # 首个节点已是纯文本：直接前缀（避免消息链结构被破坏）
+            if isinstance(first_text, str) and first_text.strip():
+                if not first_text.startswith("[模拟]"):
+                    # Plain 组件由 astrbot 提供，这里仅做前缀拼接不改字段语义
+                    chain_items[0] = Comp.Plain(f"[模拟] {first_text}")
+                return chain
+            # 首个节点非文本（如图片/卡片）：在链首插入独立的 [模拟] 文本节点
+            chain_items.insert(0, Comp.Plain("[模拟]"))
+            return chain
+        except Exception:
+            # 前缀注入失败不影响主链路（降级为不注入）
+            return chain
 
     async def render_map_image(
         self,
