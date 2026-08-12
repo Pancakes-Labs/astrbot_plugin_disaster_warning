@@ -657,6 +657,7 @@ function SimulationStepEditor({ schema, step, onChange }) {
     const [jsonErrors, setJsonErrors] = useState({});
     const [weatherCodeSuggestions, setWeatherCodeSuggestions] = useState([]);
     const [weatherCodeBusy, setWeatherCodeBusy] = useState(false);
+    const [geoBusy, setGeoBusy] = useState(false);
 
     // 同步外部 step 变化（只监听 step_id，避免编辑中途被外部覆盖）
     useEffect(() => {
@@ -884,6 +885,54 @@ function SimulationStepEditor({ schema, step, onChange }) {
     };
 
     /**
+     * 判断当前数据源是否包含经纬度基础参数（决定是否展示定位按钮）
+     */
+    const sourceHasGeo = useMemo(() => {
+        const keys = new Set((fields || []).map(f => f.key));
+        return keys.has('latitude') && keys.has('longitude');
+    }, [fields]);
+
+    /**
+     * 调用定位服务，解析当前 IP 经纬度并回填震中位置与经纬度
+     */
+    const handleGeoLocate = async () => {
+        const statusApi = window.DisasterStatusApi;
+        if (!statusApi || typeof statusApi.getGeoLocation !== 'function') {
+            showToast && showToast('定位服务不可用', 'error');
+            return;
+        }
+        setGeoBusy(true);
+        try {
+            const result = await statusApi.getGeoLocation();
+            const data = result?.data || result || {};
+            const latitude = data.latitude;
+            const longitude = data.longitude;
+            if (latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
+                showToast && showToast('获取位置失败: 未返回有效坐标', 'error');
+                return;
+            }
+            const location = `${data.province || ''} ${data.city || ''}`.trim() || '当前位置';
+            const nextParams = {
+                ...params,
+                latitude,
+                longitude,
+            };
+            // 仅当源含 place_name 字段时回填位置描述
+            if ((fields || []).some(f => f.key === 'place_name')) {
+                nextParams.place_name = location;
+            }
+            setParams(nextParams);
+            emitChange(disasterType, sourceId, nextParams);
+            showToast && showToast(`已定位：${location}`, 'success');
+        } catch (e) {
+            console.error('定位失败', e);
+            showToast && showToast('定位失败: ' + (e.message || e), 'error');
+        } finally {
+            setGeoBusy(false);
+        }
+    };
+
+    /**
      * 按字段类型渲染控件（外包宽度类 div）
      */
     const renderField = (field, isOrchestration) => {
@@ -1025,8 +1074,32 @@ function SimulationStepEditor({ schema, step, onChange }) {
                 break;
             case 'text':
             default:
-                // 气象预警编码：手动输入 + 自动生成按钮 + 建议 chips
-                if (key === 'weather_code') {
+                // 震中/震源位置：手动输入 + 定位按钮（不平分宽度，输入框自动填满剩余空间）
+                if (key === 'place_name' && sourceHasGeo && !isOrchestration) {
+                    control = (
+                        <div key={key} className="sim-geo-locate-field">
+                            <TextField
+                                fullWidth
+                                size="small"
+                                label={label}
+                                value={value ?? ''}
+                                placeholder={placeholder}
+                                onChange={(e) => handleChange(e.target.value)}
+                            />
+                            <Tooltip title="使用当前 IP 自动定位填充经纬度">
+                                <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={handleGeoLocate}
+                                    disabled={geoBusy}
+                                    className="sim-geo-locate-btn"
+                                >
+                                    <span className="sim-geo-locate-icon">{geoBusy ? '⏳' : '📍'}</span>
+                                </IconButton>
+                            </Tooltip>
+                        </div>
+                    );
+                } else if (key === 'weather_code') {
                     control = (
                         <div key={key} className="sim-weather-code-field">
                             <Box className="sim-weather-code-input-row">
