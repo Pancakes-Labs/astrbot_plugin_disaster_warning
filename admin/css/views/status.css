@@ -1,61 +1,7 @@
 /* 运行状态视图样式 (Service Status View Styles) */
 
 /* ==========================================================================
-   1. 灾害数据模拟发送弹窗样式 (Simulation Dispatcher Modal)
-   ========================================================================== */
-.simulation-modal-body {
-    padding: 16px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-/* 模拟发送下方低对比度提示说明 */
-.simulation-modal-hint {
-    margin-top: 4px !important;
-    margin-left: 12px !important;
-}
-
-.simulation-modal-section-title {
-    font-weight: 600 !important;
-}
-
-/* 模拟参数控制表单垂直列表 */
-.simulation-modal-form-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-/* 地震模拟行（纬度、经度、深度） */
-.simulation-modal-quake-row {
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    flex-wrap: wrap;
-}
-
-.simulation-modal-field--geo {
-    flex: 1.2 1 180px;
-}
-
-.simulation-modal-field--metric {
-    flex: 0.8 1 140px;
-}
-
-/* 位置选取或获取定位地图触发小按钮 */
-.simulation-modal-geo-button {
-    border: 1px solid var(--md-sys-color-outline-variant) !important;
-    border-radius: 8px !important;
-    padding: 8px !important;
-}
-
-.simulation-modal-geo-icon {
-    font-size: 1.1rem;
-}
-
-/* ==========================================================================
-   2. 系统状态监控小卡片组件 (System Status Cards)
+   1. 系统状态监控小卡片组件 (System Status Cards)
    ========================================================================== */
 .status-card-fill {
     height: 100%;
@@ -172,7 +118,7 @@
 }
 
 /* ==========================================================================
-   3. 地震预警应急事件状态显示 (EEW Real-time Response)
+   2. 地震预警应急事件状态显示 (EEW Real-time Response)
    ========================================================================== */
 .eew-empty-text {
     opacity: 0.75;
@@ -202,7 +148,7 @@
 }
 
 /* ==========================================================================
-   4. WebSocket 灾害发布接口多路监听状态网格 (Disaster Source WS Connect Grid)
+   3. WebSocket 灾害发布接口多路监听状态网格 (Disaster Source WS Connect Grid)
    ========================================================================== */
 .status-connections-grid {
     display: grid;
@@ -508,7 +454,7 @@ body.dark-theme .connection-item {
 }
 
 /* ==========================================================================
-   5. 数据源细分子接口通道状态列表 (Sub Sources Connections)
+   4. 数据源细分子接口通道状态列表 (Sub Sources Connections)
    ========================================================================== */
 .connection-sub-source-section {
     margin-top: 8px;
@@ -654,7 +600,7 @@ body.dark-theme .connection-sub-source-off-badge {
 }
 
 /* ==========================================================================
-   6 FAN Studio 翻转卡片 (Front: 主通道 / Back: CENC 烈度速报独立 WS)
+   5. FAN Studio 翻转卡片 (Front: 主通道 / Back: CENC 烈度速报独立 WS)
    ========================================================================== */
 .connection-item--flippable {
     /* 翻转壳：保留原 connection-item 命中区域，内部做 3D 翻面 */
@@ -885,7 +831,7 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 }
 
 /* ==========================================================================
-   7. 顶部三栏竖向滚动跑马灯 (Vertical News Ticker: 地震 / 气象 / 海啸+台风)
+   6. 顶部三栏竖向滚动跑马灯 (Vertical News Ticker: 地震 / 气象 / 海啸+台风)
    ========================================================================== */
 .news-ticker-card {
     --hover-lift: 0px;
@@ -1184,7 +1130,7 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 }
 
 /* ==========================================================================
-   8. 快速操作控制卡片 (Status Quick Actions Card)
+   7. 快速操作控制卡片 (Status Quick Actions Card)
    ========================================================================== */
 .status-quick-actions-card {
     height: 100%;
@@ -1223,7 +1169,7 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
 }
 
 /* ==========================================================================
-   9. 通道健康 Statuspage（90 天条带 + 事故）
+   8. 通道健康 Statuspage（90 天条带 + 事故）
    视觉：经典 statuspage 条带 + 管理端 surface/圆角体系
    ========================================================================== */
 .connection-health-panel {

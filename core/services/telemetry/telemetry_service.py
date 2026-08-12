@@ -44,7 +44,6 @@ class TelemetryManager:
     # 特定高频事件的最小加入队列间隔（秒），用于在内存中提前丢弃同质化冗余遥测
     _THROTTLE_CONFIG = {
         "feature:push_result": 30.0,  # 地震等高频新报的推送结果，30秒内仅保留第一笔
-        "feature:web_simulation_result": 10.0,  # 推送模拟
         "feature:command_status_query": 10.0,  # 指令状态查询
         "feature:command_stats_query": 10.0,  # 统计查询
         "heartbeat": 60.0,  # 心跳事件强制限制
