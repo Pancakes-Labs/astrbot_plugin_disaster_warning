@@ -740,6 +740,35 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
                     required=False,
                     placeholder='{"type":"FeatureCollection","features":[...]} 烈度等震线 GeoJSON',
                     rows=3,
+                    json_table={
+                        "kind": "array_in_object",
+                        "array_key": "features",
+                        "add_label": "➕ 添加等震线",
+                        "empty_hint": "暂无等震线，点击下方按钮添加",
+                        "columns": [
+                            {
+                                "key": "properties.intensity",
+                                "label": "烈度",
+                                "type": "number",
+                                "min": 1,
+                                "max": 12,
+                                "step": 0.1,
+                            },
+                            {
+                                "key": "properties.INT",
+                                "label": "烈度(备选)",
+                                "type": "number",
+                                "min": 1,
+                                "max": 12,
+                                "step": 0.1,
+                            },
+                            {
+                                "key": "geometry.type",
+                                "label": "几何类型",
+                                "type": "text",
+                            },
+                        ],
+                    },
                 )
             )
             fields.append(
@@ -793,6 +822,35 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
                     required=False,
                     placeholder='GeoJSON FeatureCollection；如 {"type":"FeatureCollection","features":[...]}',
                     rows=3,
+                    json_table={
+                        "kind": "array_in_object",
+                        "array_key": "features",
+                        "add_label": "➕ 添加等震线",
+                        "empty_hint": "暂无等震线，点击下方按钮添加",
+                        "columns": [
+                            {
+                                "key": "properties.intensity",
+                                "label": "烈度",
+                                "type": "number",
+                                "min": 1,
+                                "max": 12,
+                                "step": 0.1,
+                            },
+                            {
+                                "key": "properties.INT",
+                                "label": "烈度(备选)",
+                                "type": "number",
+                                "min": 1,
+                                "max": 12,
+                                "step": 0.1,
+                            },
+                            {
+                                "key": "geometry.type",
+                                "label": "几何类型",
+                                "type": "text",
+                            },
+                        ],
+                    },
                 )
             )
             fields.append(
