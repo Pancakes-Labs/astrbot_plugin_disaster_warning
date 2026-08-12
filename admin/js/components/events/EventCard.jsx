@@ -174,14 +174,13 @@ function EventCard({
         )
         : '';
     // 短编号字段优先级与查询面板/后端对齐：eqsc_id → typhoon_id → real_event_id → unique_id
-    // event_id 仅作事件卡片兜底（查询结果项通常无此字段）
+    // 注意：绝不把 event_id 作为候选传入——它是数据库自增主键，会被纯数字规则误截断成随机短编号，历史报次快照尤其容易踩坑。
     const typhoonShortId = isTyphoon && typhoonFormatters?.formatTyphoonShortId
         ? typhoonFormatters.formatTyphoonShortId(
             evt.eqsc_id,
             evt.typhoon_id,
             evt.real_event_id,
             evt.unique_id,
-            evt.event_id,
         )
         : '';
     const typhoonMeta = isTyphoon

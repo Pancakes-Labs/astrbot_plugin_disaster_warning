@@ -54,6 +54,20 @@ function EventGroupTimeline({ group, displayTimezone }) {
             info_type: evt.info_type || latest.info_type,
             weather_type_code: evt.weather_type_code || latest.weather_type_code,
             icon_url: evt.icon_url || latest.icon_url,
+            // 台风编号属于身份字段：历史快照（event_updates 行）可能缺
+            // real_event_id / typhoon_id / eqsc_id，必须继承主事件编号。
+            real_event_id: hasOwn('real_event_id')
+                ? evt.real_event_id
+                : (latest.real_event_id || evt.real_event_id || ''),
+            unique_id: hasOwn('unique_id')
+                ? evt.unique_id
+                : (latest.unique_id || evt.unique_id || ''),
+            typhoon_id: hasOwn('typhoon_id')
+                ? evt.typhoon_id
+                : (latest.typhoon_id || evt.typhoon_id || ''),
+            eqsc_id: hasOwn('eqsc_id')
+                ? evt.eqsc_id
+                : (latest.eqsc_id || evt.eqsc_id || ''),
             description: hasOwn('description') ? evt.description : (isLatestRow ? latest.description : (evt.description || '')),
             subtitle: hasOwn('subtitle') ? evt.subtitle : (isLatestRow ? latest.subtitle : (evt.subtitle || '')),
             level: hasOwn('level') ? evt.level : (isLatestRow ? latest.level : (evt.level || '')),
