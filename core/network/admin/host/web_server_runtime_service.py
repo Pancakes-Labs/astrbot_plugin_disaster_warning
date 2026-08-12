@@ -31,6 +31,7 @@ from ..api.notification_routes import register_notification_routes
 from ..api.runtime_admin_routes import register_runtime_admin_routes
 from ..api.runtime_routes import register_runtime_routes
 from ..api.session_config_routes import register_session_config_routes
+from ..api.simulation_routes import register_simulation_routes
 from ..api.status_routes import register_status_routes
 from ..api.utility_routes import register_utility_routes
 from ..payloads.api_response import ApiResponse
@@ -107,6 +108,11 @@ class WebServerRuntimeService:
         register_analytics_routes(app, disaster_service=self.server.disaster_service)
         register_notification_routes(app, disaster_service=self.server.disaster_service)
         register_runtime_routes(
+            app,
+            disaster_service=self.server.disaster_service,
+            config=self.server.config,
+        )
+        register_simulation_routes(
             app,
             disaster_service=self.server.disaster_service,
             config=self.server.config,
@@ -202,6 +208,25 @@ class WebServerRuntimeService:
         await self.server._ws_hub.broadcast_event(
             self.server.get_realtime_data, event_data
         )
+
+    async def notify_simulation_progress(self, run) -> None:
+        """向前端广播模拟执行进度（专用消息类型，不触发事件/状态副作用）。"""
+        if not self.server._ws_hub.connections:
+            return
+        to_dict = getattr(run, "to_dict", None)
+        payload = to_dict() if callable(to_dict) else dict(run or {})
+        message = {
+            "type": "simulation_progress",
+            "data": payload,
+        }
+        disconnected = []
+        for websocket in list(self.server._ws_hub.connections):
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                disconnected.append(websocket)
+        for websocket in disconnected:
+            self.server._ws_hub.remove(websocket)
 
     async def run_broadcast_loop(self, interval_seconds: int = 30) -> None:
         """后台广播循环。"""
