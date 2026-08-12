@@ -155,7 +155,7 @@ SOURCE_DISPLAY_MAP: dict[str, str] = {
     "cwa_wolfx": "台湾中央气象署: 强震即时警报 - Wolfx",
     "cenc_wolfx": "中国地震台网地震测定 - Wolfx",
     "jma_wolfx_info": "日本气象厅地震情报 - Wolfx",
-    "global_quake": "Global Quake",
+    "global_quake": "Global Quake - OQ",
     "sc_eew": "四川地震局",
     "fj_eew": "福建地震局",
     "kma_earthquake": "韩国气象厅 (KMA)",
