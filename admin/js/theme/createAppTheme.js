@@ -43,10 +43,54 @@
                     contrastText: tokens.errorContrast,
                 },
                 // 成功色调：用于在线心跳和安全运行指示
+                // 补充 dark 键：MUI Button outlined/contained 的 hover 态会访问 palette.success.dark，
+                // 缺失时某些按钮（如 JSON 编辑器的"应用并返回可视化"）在 hover 时抛
+                // "Cannot read properties of undefined (reading 'main')"。
                 success: {
                     main: tokens.success,
                     light: tokens.successLight,
+                    dark: tokens.success,
                     contrastText: tokens.successContrast,
+                },
+                // 信息/警告色调：MUI 组件（Chip/Button/Alert 等）会访问 palette.X.main，
+                // 缺失会导致 "Cannot read properties of undefined (reading 'main')"
+                info: {
+                    main: themeMode === 'dark' ? '#A8C7FA' : '#00639B',
+                    light: themeMode === 'dark' ? '#D8E2FF' : '#5CB0F7',
+                    dark: themeMode === 'dark' ? '#7C9BD6' : '#00426B',
+                    contrastText: themeMode === 'dark' ? '#001D36' : '#FFFFFF',
+                },
+                warning: {
+                    main: themeMode === 'dark' ? '#FFB74D' : '#E65100',
+                    light: themeMode === 'dark' ? '#FFD180' : '#FF9800',
+                    dark: themeMode === 'dark' ? '#C43E00' : '#BF360C',
+                    contrastText: themeMode === 'dark' ? '#4A1E00' : '#FFFFFF',
+                },
+                // 灰色系色板：MUI 组件（Switch/IconButton/Skeleton/Chip 等）会访问
+                // theme.palette.grey[50..900]，缺失会抛 "Cannot read properties of undefined"
+                grey: {
+                    50: themeMode === 'dark' ? '#2A2A2E' : '#FAFAFA',
+                    100: themeMode === 'dark' ? '#3A3A3F' : '#F5F5F5',
+                    200: themeMode === 'dark' ? '#4A4A50' : '#EEEEEE',
+                    300: themeMode === 'dark' ? '#5A5A60' : '#E0E0E0',
+                    400: themeMode === 'dark' ? '#6A6A70' : '#BDBDBD',
+                    500: themeMode === 'dark' ? '#7A7A80' : '#9E9E9E',
+                    600: themeMode === 'dark' ? '#8A8A90' : '#757575',
+                    700: themeMode === 'dark' ? '#9A9AA0' : '#616161',
+                    800: themeMode === 'dark' ? '#AAAAAF' : '#424242',
+                    900: themeMode === 'dark' ? '#BABABF' : '#212121',
+                    A100: themeMode === 'dark' ? '#CACACF' : '#F5F5F5',
+                    A200: themeMode === 'dark' ? '#DADADF' : '#EEEEEE',
+                    A400: themeMode === 'dark' ? '#EAEAF0' : '#BDBDBD',
+                    A700: themeMode === 'dark' ? '#FAFAFF' : '#616161',
+                },
+                // 动作/交互色板：MUI 组件访问 theme.palette.action 系列
+                action: {
+                    active: themeMode === 'dark' ? '#D0BCFF' : '#49454F',
+                    hover: themeMode === 'dark' ? 'rgba(208, 188, 255, 0.08)' : 'rgba(73, 69, 79, 0.08)',
+                    selected: themeMode === 'dark' ? 'rgba(208, 188, 255, 0.16)' : 'rgba(73, 69, 79, 0.16)',
+                    disabled: themeMode === 'dark' ? 'rgba(255, 255, 255, 0.3)' : 'rgba(29, 27, 32, 0.38)',
+                    disabledBackground: themeMode === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(29, 27, 32, 0.12)',
                 },
                 // 背景色彩定义
                 background: {

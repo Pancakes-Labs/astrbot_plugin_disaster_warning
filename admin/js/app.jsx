@@ -6,8 +6,50 @@
  *           监听主视区滚动位置以便记忆还原、注册侧边栏菜单及渲染模态框等全局挂载组件。
  */
 
-const { ThemeProvider, CssBaseline } = MaterialUI;
-const { useState, useMemo } = React;
+const { ThemeProvider, CssBaseline, Typography, Button } = MaterialUI;
+const { useState, useMemo, Component } = React;
+
+/**
+ * 全局渲染错误边界：任何子视图渲染异常时降级显示错误卡片而非整页白屏。
+ * 项目此前没有任何 ErrorBoundary，子组件（如 JSON 编辑器）一旦抛错，
+ * React 会卸载整棵组件树导致管理端白屏，必须重载网页。
+ */
+class AppErrorBoundary extends Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, message: '' };
+    }
+    static getDerivedStateFromError(error) {
+        return { hasError: true, message: String(error && error.message ? error.message : error) };
+    }
+    componentDidCatch(error) {
+        console.error('视图渲染异常（已被错误边界拦截）', error);
+    }
+    handleReload = () => {
+        window.location.reload();
+    };
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="app-error-boundary">
+                    <Typography variant="h6" className="app-error-boundary-title">
+                        ⚠️ 视图渲染出错
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" className="app-error-boundary-desc">
+                        界面组件遇到异常，已阻止白屏。可尝试切换视图或刷新页面恢复。
+                    </Typography>
+                    <Typography variant="caption" className="app-error-boundary-msg">
+                        {this.state.message}
+                    </Typography>
+                    <Button variant="contained" color="primary" size="small" onClick={this.handleReload}>
+                        🔄 刷新页面
+                    </Button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 /**
  * 应用程序主应用壳组件
@@ -22,9 +64,6 @@ function App() {
     
     // 初始化本地存储记忆的视图键值，默认展示 status 即运行健康面板
     const { currentView, setCurrentView } = usePersistedViewState('currentView', 'status');
-    
-    // 控制模拟预警仿真模态窗口的开启与关闭状态
-    const [showSimulation, setShowSimulation] = useState(false);
 
     // 绑定防抖滚动位置记录钩子，在切换事件与统计图表数据时，保留物理滚动条位置，防止用户阅读中断
     const mainContentRef = useMainScrollMemory({
@@ -47,8 +86,7 @@ function App() {
     const renderView = () => {
         const viewDefinition = window.ViewRegistry.getViewDefinition(currentView);
         return viewDefinition.component({
-            onOpenSimulation: () => setShowSimulation(true), // 打开模拟仿真面板
-            onRefresh: refreshData,                          // 手动触发全局数据同步
+            onRefresh: refreshData, // 手动触发全局数据同步
         });
     };
 
@@ -71,9 +109,6 @@ function App() {
                         {renderView()}
                     </div>
                 </div>
-
-                {/* 浮动仿真模拟控制弹出层 */}
-                <SimulationModal open={showSimulation} onClose={() => setShowSimulation(false)} />
             </div>
         </ThemeProvider>
     );
@@ -91,12 +126,15 @@ function AuthWrapper() {
     if (!ready) return null;
 
     return (
-        // 嵌套注入全局上下文总线及系统 Toast 消息吐司服务
-        <AppProvider>
-            <ToastProvider>
-                <App />
-            </ToastProvider>
-        </AppProvider>
+        // 全局错误边界兜底：子组件渲染异常时不白屏，降级显示错误卡片
+        <AppErrorBoundary>
+            {/* 嵌套注入全局上下文总线及系统 Toast 消息吐司服务 */}
+            <AppProvider>
+                <ToastProvider>
+                    <App />
+                </ToastProvider>
+            </AppProvider>
+        </AppErrorBoundary>
     );
 }
 
