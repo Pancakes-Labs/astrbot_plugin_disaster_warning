@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,15 @@ class SimulationStorage:
     """模拟流草稿持久化存储。"""
 
     def __init__(self, data_dir: Path | str | None = None):
+        # 存储类在构造时自持数据目录，不依赖外部装配；调用方未传 data_dir 时
+        # 兜底回退到 StarTools 插件数据目录，避免“只写内存不落盘、重载后丢失”。
+        if data_dir is None:
+            try:
+                from astrbot.api.star import StarTools
+
+                data_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
+            except Exception:
+                data_dir = None
         self.data_dir = Path(data_dir) if data_dir is not None else None
         self._file_path: Path | None = None
         # 进程内草稿索引：flow_id -> SimulationFlow（内存态为真源，落盘为镜像）
@@ -65,7 +75,11 @@ class SimulationStorage:
             self._flows = {}
 
     def _save_to_disk(self) -> None:
-        """把内存索引落盘。"""
+        """把内存索引落盘（临时文件 + 原子替换）。"""
+        # 防御：data_dir 已配置但 file_path 尚未配置时自动补齐，
+        # 避免草稿只写内存不落盘。
+        if self._file_path is None and self.data_dir is not None:
+            self._file_path = self.data_dir / _DEFAULT_FILENAME
         if self._file_path is None:
             return
         try:
@@ -75,12 +89,29 @@ class SimulationStorage:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "flows": [flow.to_dict() for flow in self._flows.values()],
             }
-            self._file_path.write_text(
+            temp_file = self._file_path.with_suffix(".json.tmp")
+            temp_file.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # 原子替换：避免写入中途进程退出导致草稿文件损坏/半写
+            if self._file_path.exists():
+                os.replace(temp_file, self._file_path)
+            else:
+                os.rename(temp_file, self._file_path)
         except Exception as exc:
             logger.error(f"[灾害预警] 保存模拟流草稿失败: {exc}")
+            # 清理残留临时文件
+            try:
+                temp_file = (
+                    self._file_path.with_suffix(".json.tmp")
+                    if self._file_path
+                    else None
+                )
+                if temp_file and temp_file.exists():
+                    temp_file.unlink()
+            except Exception:
+                pass
 
     def list_flows(self) -> list[dict[str, Any]]:
         """返回全部草稿（降序：最近更新在前）。"""

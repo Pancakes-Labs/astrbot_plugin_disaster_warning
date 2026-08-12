@@ -83,6 +83,15 @@ def _get_storage(disaster_service) -> SimulationStorage:
     storage = getattr(disaster_service, "simulation_storage", None)
     if storage is None:
         data_dir = getattr(disaster_service, "storage_dir", None)
+        # 兜底：storage_dir 缺失（服务初始化异常/早期装配）时，
+        # 回退到 StarTools 数据目录，确保草稿始终可落盘，避免重载后丢失。
+        if not data_dir:
+            try:
+                from astrbot.api.star import StarTools
+
+                data_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
+            except Exception:
+                data_dir = None
         storage = SimulationStorage(data_dir)
         disaster_service.simulation_storage = storage
     return storage
