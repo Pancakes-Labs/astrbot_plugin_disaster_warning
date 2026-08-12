@@ -29,7 +29,7 @@
             label: '运行状态',
             icon: '📊',
             title: '运行状态',
-            component: (props = {}) => <StatusView onOpenSimulation={props.onOpenSimulation} />,
+            component: () => <StatusView />,
         },
         {
             id: 'events',
@@ -66,6 +66,13 @@
             icon: '⚙️',
             title: '配置管理',
             component: () => <ConfigView />,
+        },
+        {
+            id: 'simulation',
+            label: '模拟预警',
+            icon: '🧪',
+            title: '模拟预警',
+            component: () => <SimulationView />,
         },
     ];
 

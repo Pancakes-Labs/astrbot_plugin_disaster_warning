@@ -42,6 +42,7 @@
     <link rel="stylesheet" href="css/views/notifications.css">
     <link rel="stylesheet" href="css/views/markdown.css">
     <link rel="stylesheet" href="css/views/config.css">
+    <link rel="stylesheet" href="css/views/simulation.css">
 
     <!-- 核心 React 及 UI 框架运行时预加载 -->
     <link rel="preload" href="lib/react.production.min.js" as="script">
@@ -134,6 +135,7 @@
     <script src="js/services/notificationApi.js" defer></script>
     <script src="js/services/statsNormalizer.js" defer></script>
     <script src="js/services/webSocketClient.js" defer></script>
+    <script src="js/services/simulationApi.js" defer></script>
 
     <!-- 4. 全局 Reducer 状态管理与数据总线 -->
     <script src="js/context/appState.js" defer></script>
@@ -188,10 +190,14 @@
     <script type="text/babel" src="js/components/status/ConnectionsGrid.jsx" defer></script>
     <script type="text/babel" src="js/components/status/ConnectionHealthPanel.jsx" defer></script>
     <script type="text/babel" src="js/components/status/NewsTicker.jsx" defer></script>
-    <script type="text/babel" src="js/components/status/SimulationModal.jsx" defer></script>
     <script type="text/babel" src="js/components/status/EewStatusCard.jsx" defer></script>
 
-    <!-- 13. 图表统计与报表页专属子组件 -->
+    <!-- 13. 模拟实验系统专属子组件 -->
+    <script type="text/babel" src="js/components/simulation/SimulationStepList.jsx" defer></script>
+    <script type="text/babel" src="js/components/simulation/SimulationStepEditor.jsx" defer></script>
+    <script type="text/babel" src="js/components/simulation/SimulationRunConsole.jsx" defer></script>
+
+    <!-- 14. 图表统计与报表页专属子组件 -->
     <script type="text/babel" src="js/components/stats/StatsCard.jsx" defer></script>
     <script type="text/babel" src="js/components/stats/MagnitudeChart.jsx" defer></script>
     <script type="text/babel" src="js/components/stats/TrendChart.jsx" defer></script>
@@ -206,7 +212,7 @@
     <script type="text/babel" src="js/components/stats/TyphoonWindKingCard.jsx" defer></script>
     <script type="text/babel" src="js/components/stats/TyphoonLevelCard.jsx" defer></script>
 
-    <!-- 14. 历史事件记录与天气数据页专属子组件 -->
+    <!-- 15. 历史事件记录与天气数据页专属子组件 -->
     <script type="text/babel" src="js/components/events/HorizontalTimeline.jsx" defer></script>
     <script type="text/babel" src="js/components/events/WeatherQueryPanel.jsx" defer></script>
     <script type="text/babel" src="js/components/events/TyphoonQueryPanel.jsx" defer></script>
@@ -215,7 +221,7 @@
     <script type="text/babel" src="js/components/events/EventGroupTimeline.jsx" defer></script>
     <script type="text/babel" src="js/components/events/EventsList.jsx" defer></script>
 
-    <!-- 15. 可视化参数配置面板专属子组件 -->
+    <!-- 16. 可视化参数配置面板专属子组件 -->
     <script type="text/babel" src="js/components/config/ConfigFieldLayout.jsx" defer></script>
     <script type="text/babel" src="js/components/config/ConfigObjectGroup.jsx" defer></script>
     <script type="text/babel" src="js/components/config/ConfigPrimitiveFields.jsx" defer></script>
@@ -225,18 +231,19 @@
     <script type="text/babel" src="js/components/config/ConfigBackupPanel.jsx" defer></script>
     <script type="text/babel" src="js/components/config/ConfigRenderer.jsx" defer></script>
 
-    <!-- 16. 主路由各个大视图容器组件 -->
+    <!-- 17. 主路由各个大视图容器组件 -->
     <script type="text/babel" src="js/views/StatusView.jsx" defer></script>
     <script type="text/babel" src="js/views/EventsView.jsx" defer></script>
     <script type="text/babel" src="js/views/StatsView.jsx" defer></script>
     <script type="text/babel" src="js/views/NotificationsView.jsx" defer></script>
     <script type="text/babel" src="js/views/MarkdownDocsView.jsx" defer></script>
     <script type="text/babel" src="js/views/ConfigView.jsx" defer></script>
+    <script type="text/babel" src="js/views/SimulationView.jsx" defer></script>
 
-    <!-- 17. 路由映射配置注册表 -->
+    <!-- 18. 路由映射配置注册表 -->
     <script type="text/babel" src="js/routes/viewRegistry.jsx" defer></script>
 
-    <!-- 18. 主程序入口脚本与首屏平滑过渡加载器控制 -->
+    <!-- 19. 主程序入口脚本与首屏平滑过渡加载器控制 -->
     <script type="text/babel" src="js/app.jsx" defer></script>
     <script src="js/utils/bootloader.js"></script>
 </body>
