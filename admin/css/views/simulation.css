@@ -1288,30 +1288,18 @@
     font-family: 'Consolas', 'Menlo', 'Courier New', monospace;
 }
 
-/* 修复 JSON 视图 TextField 的浮动 label 框线缺口：MUI 的 legend 缺口宽度
-   依赖 label 文字的实际测量（JS 按 label scrollWidth 设置 width）。
-   中文长 label（如"警报区域 (JSON数组)"）在 shrink 态下若测量偏小，
-   框线缺口就会比文字窄，导致框线与文字重叠。
-   这里用 min-width: max-content 兜底——无论 JS 计算的宽度多小，
-   缺口至少与文字内容等宽；同时强制单行、保留 padding 贴合文字边缘。 */
-.sim-json-text-area .MuiOutlinedInput-notchedOutline legend {
-    width: auto;
-    max-width: none;
-    min-width: max-content;
-    padding: 0 4px;
+/* JSON 视图 TextField 浮动 label 缺口
+   缺口宽度由 MUI JS 测量后内联写入 legend，CSS 不做任何覆盖（恢复原生机制）。
+   仅保留 label 不换行（nowrap）+ 不截断，确保测量到完整文字宽度；
+   字体加载完成后由组件内 useLayoutEffect 重新测量并精确写回缺口宽度。 */
+.sim-json-text-area .MuiOutlinedInput-root .MuiInputLabel-outlined {
     white-space: nowrap;
+    max-width: none;
 }
 
 .sim-json-text-area .MuiInputLabel-shrink {
     transform-origin: top left;
     white-space: nowrap;
-}
-
-.sim-json-text-area .MuiOutlinedInput-root .MuiInputLabel-outlined {
-    white-space: nowrap;
-    /* 长 label 在 shrink 时会被 MUI 截断（overflow hidden），
-       限制 max-width 保证文字完整显示，避免缺口计算仍按截断后宽度 */
-    max-width: calc(100% - 24px);
 }
 
 .sim-json-text-area textarea {

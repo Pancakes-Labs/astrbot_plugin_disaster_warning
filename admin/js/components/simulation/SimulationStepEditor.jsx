@@ -168,9 +168,12 @@ function JsonArrayTableEditor({ field, value, onChange }) {
     const columns = meta.columns || [];
     // 对象模式：json_table.kind === 'object' 时按"键值对"编辑（一行一个键），
     // 数组模式（默认）按"行"编辑，用于数组元素列表。
-    const isObjectMode = meta.kind === 'object';
+    // 内嵌数组模式：json_table.array_key 存在时，value 是对象外壳（如 GeoJSON
+    // FeatureCollection），仅编辑 array_key 指向的数组子集（如 features）。
+    const arrayKey = meta.array_key || null;
+    const isObjectMode = meta.kind === 'object' && !arrayKey;
     const [tab, setTab] = useState('table');
-    // JSON 视图 TextField 的根容器 ref（用于修正 NotchedOutline 缺口宽度）
+    // JSON 视图 TextField 的根容器 ref（供字体就绪后重新测量缺口宽度）
     const jsonTextAreaRef = useRef(null);
     // 用 safeJsonString 归一化：历史草稿可能把 JSON 字段存成对象/数组，
     // String() 会产出 "[object Object]" 非法文本，导致 JSON.parse 阶段异常。
@@ -186,21 +189,37 @@ function JsonArrayTableEditor({ field, value, onChange }) {
     const [error, setError] = useState('');
     const [pretty, setPretty] = useState(true);
 
-    // 解析当前值（容错，渲染期不抛错）：数组模式解析数组，对象模式解析对象
-    const items = isObjectMode ? [] : safeParseArray(value);
+    // 解析当前值（容错，渲染期不抛错）：
+    // - 数组模式：value 直接是数组
+    // - 对象模式：value 是对象（键值对表格）
+    // - 内嵌数组模式：value 是对象外壳，提取 arrayKey 子集作为表格行
+    const containerValue = arrayKey ? safeParseObject(value) : null;
+    const items = isObjectMode
+        ? []
+        : (arrayKey
+            ? (Array.isArray(containerValue?.[arrayKey]) ? containerValue[arrayKey] : [])
+            : safeParseArray(value));
     const objectValue = isObjectMode ? safeParseObject(value) : null;
 
     const emitItems = useCallback((nextItems) => {
         try {
-            const text = JSON.stringify(nextItems);
+            let text;
+            if (arrayKey) {
+                // 内嵌数组模式：保留对象外壳（type 等顶层字段），仅更新数组子集
+                const container = safeParseObject(value);
+                container[arrayKey] = nextItems;
+                text = JSON.stringify(container);
+            } else {
+                text = JSON.stringify(nextItems);
+            }
             onChange(text);
             // 美观打印开启时同步本地视图为缩进形态，保持开关状态一致
-            setLocalText(pretty ? JSON.stringify(nextItems, null, 2) : text);
+            setLocalText(pretty ? JSON.stringify(JSON.parse(text), null, 2) : text);
             setError('');
         } catch (e) {
             setError(String(e.message || e));
         }
-    }, [onChange, pretty]);
+    }, [onChange, pretty, arrayKey, value]);
 
     // 对象模式：把整个对象序列化回父级（保留全部键，仅更新被编辑的键）
     const emitObject = useCallback((nextObj) => {
@@ -235,45 +254,54 @@ function JsonArrayTableEditor({ field, value, onChange }) {
     }, [value]);
 
     /**
-     * JSON 视图框线缺口修正。
+     * JSON 视图缺口宽度精确修复。
      *
-     * MUI 的 NotchedOutline legend 宽度由 JS 按 label 的 offsetWidth 测量后写入
-     * inline style；但中文长 label 在 shrink 态下会被 `max-width: calc(100% - 24px)`
-     * 截断（overflow hidden），导致测量宽度 < 文字真实宽度，框线缺口比文字窄而重叠。
+     * MUI 的 NotchedOutline 缺口宽度 = JS 在渲染时测量 label.offsetWidth 并
+     * 内联写入 legend.style.width。若测量发生在 Web 字体（Outfit）加载完成前，
+     * label 以回退字体渲染，测出的宽度偏小并写死；字体加载完成后 label 变宽，
+     * 缺口就比文字窄 → 框线与文字重叠。JSON 字段 label 长（如"烈度等震线
+     * (JSON对象)"），字体差异被放大，所以只有这里出现肉眼可见的重叠。
      *
-     * 这里在每次进入 JSON 视图 / label 变化时，用 label.scrollWidth（完整内容宽度）
-     * 强制覆盖 legend 宽度（仅当缺口偏窄时），并用 ResizeObserver 持续跟进
-     * （字体加载、主题切换、窗口缩放等导致的宽度变化）。
+     * 根治：等 document.fonts.ready 后再读 label 的真实 offsetWidth，
+     * 精确写回 legend.style.width，并在后续字体变化/主题切换时跟进。
      */
     useEffect(() => {
         if (tab !== 'json') return;
-        let rafId = null;
-        let observer = null;
+        let cancelled = false;
         const fixNotch = () => {
             const wrap = jsonTextAreaRef.current;
             if (!wrap) return;
             const legend = wrap.querySelector('.MuiOutlinedInput-notchedOutline legend');
             const labelEl = wrap.querySelector('.MuiInputLabel-root');
             if (!legend || !labelEl) return;
-            const contentWidth = labelEl.scrollWidth || 0;
-            // 仅在缺口偏窄时修正：避免每次 render 都改写 MUI 计算值，保留其自适应能力
-            if (contentWidth > 0 && legend.offsetWidth < contentWidth) {
-                legend.style.width = `${contentWidth + 8}px`;
+            // 以 label 的完整渲染宽度为准（含字体加载后的最终值）
+            const width = labelEl.getBoundingClientRect().width || 0;
+            if (width > 0) {
+                legend.style.width = `${Math.round(width)}px`;
             }
         };
-        // 等 DOM 就绪（字体 / label 布局完成）后再测量
-        rafId = requestAnimationFrame(() => {
-            fixNotch();
-            const wrap = jsonTextAreaRef.current;
-            const labelEl = wrap && wrap.querySelector('.MuiInputLabel-root');
-            if (labelEl && typeof ResizeObserver === 'function') {
-                observer = new ResizeObserver(fixNotch);
-                observer.observe(labelEl);
+        const run = async () => {
+            // 等字体加载完成，确保测到的是最终宽度而非回退字体宽度
+            if (document.fonts && typeof document.fonts.ready?.then === 'function') {
+                await document.fonts.ready;
             }
-        });
+            if (cancelled) return;
+            // 双 rAF：确保 layout 完成后再测量
+            requestAnimationFrame(() => requestAnimationFrame(fixNotch));
+        };
+        run();
+        // 监听字体加载完成事件（部分浏览器 fonts.ready 不触发）
+        const onFontsChange = () => requestAnimationFrame(fixNotch);
+        if (document.fonts) {
+            document.fonts.addEventListener('loadingdone', onFontsChange);
+        }
+        window.addEventListener('resize', onFontsChange);
         return () => {
-            if (rafId) cancelAnimationFrame(rafId);
-            if (observer) observer.disconnect();
+            cancelled = true;
+            if (document.fonts) {
+                document.fonts.removeEventListener('loadingdone', onFontsChange);
+            }
+            window.removeEventListener('resize', onFontsChange);
         };
     }, [tab, field.label]);
 
@@ -305,7 +333,8 @@ function JsonArrayTableEditor({ field, value, onChange }) {
         try {
             if (text.trim()) {
                 const parsed = JSON.parse(text);
-                if (isObjectMode) {
+                const expectObject = isObjectMode || arrayKey;
+                if (expectObject) {
                     setError(
                         parsed && typeof parsed === 'object' && !Array.isArray(parsed)
                             ? ''
@@ -338,9 +367,12 @@ function JsonArrayTableEditor({ field, value, onChange }) {
     };
 
     const addRow = () => {
-        const blank = {};
+        // 支持点路径 key（如 properties.intensity）：用 setNestedValue 构建嵌套结构，
+        // 避免产生字面量键 "properties.intensity" 导致后端无法识别。
+        let blank = {};
         columns.forEach((col) => {
-            blank[col.key] = col.type === 'number' ? 0 : '';
+            const defaultVal = col.type === 'number' ? 0 : '';
+            blank = setNestedValue(blank, col.key, defaultVal);
         });
         emitItems([...items, blank]);
     };
@@ -482,14 +514,15 @@ function JsonArrayTableEditor({ field, value, onChange }) {
                         onClick={() => {
                             try {
                                 const parsed = JSON.parse(localText);
-                                const valid = isObjectMode
+                                const expectObject = isObjectMode || arrayKey;
+                                const valid = expectObject
                                     ? parsed && typeof parsed === 'object' && !Array.isArray(parsed)
                                     : Array.isArray(parsed);
                                 if (valid) {
                                     setTab('table');
                                     setError('');
                                 } else {
-                                    setError(isObjectMode ? '必须是 JSON 对象' : '必须是 JSON 数组');
+                                    setError(expectObject ? '必须是 JSON 对象' : '必须是 JSON 数组');
                                 }
                             } catch (e) {
                                 setError('JSON 格式有误');
@@ -616,7 +649,7 @@ function JsonArrayTableEditor({ field, value, onChange }) {
                             maxRows={(field.rows || 6) + 8}
                             className="sim-json-text-area"
                             onChange={(e) => handleTextChange(e.target.value)}
-                            // inputRef 拿到 textarea 后向上取根容器，供缺口修正使用
+                            // inputRef 拿到根容器，供字体就绪后的缺口精确测量使用
                             inputRef={(node) => {
                                 jsonTextAreaRef.current = node
                                     ? node.closest('.sim-json-text-area')
