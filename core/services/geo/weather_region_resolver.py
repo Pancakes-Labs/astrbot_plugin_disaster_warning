@@ -90,9 +90,13 @@ _RE_PLACE = re.compile(
 # 兜底正则：匹配"XX气象局/气象台/气象站"前的机构名（去掉尾缀后作为备选地名）。
 _RE_ORG_TAIL = re.compile(r"([\u4e00-\u9fa5]{2,30}?)气象(?:局|台|站|中心)")
 
-# 地名中的无意义修饰词，命中即视为噪声候选
+# 地名中的无意义修饰词，命中即视为噪声候选。
+# "局"覆盖气象局/资源局/分局等机构署名（联合发布场景），
+# "与"覆盖"XX局与XX区气象局"这类联合署名连接词。
 _NOISE_PATTERNS = [
     re.compile(r"气象(?:局|台|站|中心)"),
+    re.compile(r"局"),
+    re.compile(r"与"),
     re.compile(r"发布"),
     re.compile(r"更新"),
     re.compile(r"预警"),
@@ -153,19 +157,25 @@ class WeatherRegionResolver:
 
         优先使用行政区划后缀正则抽取（非贪婪），
         失败时回退到"气象局/气象台"前的机构名。
+
+        联合署会把多个机构名用"与"拼接，若整体喂给正则会把整串误判为地名。
+        因此先按"与"拆分成独立机构/地名段，再逐段提取，避免误提取联合署名串。
         """
         if not headline_text:
             return None
 
-        # 第一步：行政区划后缀正则抽取，跳过噪声片段
-        for place in _RE_PLACE.findall(headline_text):
-            if self._is_noise_place(place):
-                continue
-            # 跳过含省级名称的宽泛匹配（如"河北省石家庄市"），
-            # 优先更细的区县名（如"新华区"），避免带省份前缀导致外部查询失败
-            if self.extract_province(place):
-                continue
-            return place
+        # 第一步：行政区划后缀正则抽取，跳过噪声片段。
+        # 先按"与"拆分联合署名，逐段提取，避免整串机构名被误判为地名。
+        segments = [seg for seg in re.split(r"与", headline_text) if seg.strip()]
+        for segment in segments:
+            for place in _RE_PLACE.findall(segment):
+                if self._is_noise_place(place):
+                    continue
+                # 跳过含省级名称的宽泛匹配（如"河北省石家庄市"），
+                # 优先更细的区县名（如"新华区"），避免带省份前缀导致外部查询失败
+                if self.extract_province(place):
+                    continue
+                return place
 
         # 第二步：兜底截取"XX气象局/气象台"前的机构名作为备选地名
         org_match = _RE_ORG_TAIL.search(headline_text)
