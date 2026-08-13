@@ -916,9 +916,26 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             session_config_manager = self.plugin.disaster_service.session_config_manager
             runtime_config = session_config_manager.get_effective_config(target_session)
 
-            # --- 数据源置于末尾：arg5 是数据源（所有灾种统一约定） ---
-            if arg5:
-                source = arg5
+            # --- 数据源置于末尾：从最后一个非空参数中识别数据源 ---
+            # 气象/台风业务参数较少（3 个），数据源通常落在 arg4 而非 arg5；
+            # 地震/海啸省略可选参数（深度/源震级）后数据源同样会前移。
+            # 因此从尾部反向扫描第一个合法数据源标识作为 source，
+            # 并将其从参数列表剔除，剩余参数再按灾种解析。
+            args_list = [arg1, arg2, arg3, arg4, arg5]
+            source_arg_index = -1
+            for idx in range(len(args_list) - 1, -1, -1):
+                candidate = args_list[idx]
+                if candidate and get_source_entry(candidate) is not None:
+                    source = candidate
+                    source_arg_index = idx
+                    break
+            # 末尾存在非空参数但未被识别为合法数据源 → 视为用户写错的数据源
+            if source_arg_index < 0 and args_list[-1]:
+                source = args_list[-1]
+                source_arg_index = len(args_list) - 1
+            if source_arg_index >= 0:
+                args_list[source_arg_index] = None
+            arg1, arg2, arg3, arg4, arg5 = args_list
 
             # --- 数据源预校验：无效源直接报错，避免后续静默回退地震 ---
             source_entry = get_source_entry(source)
