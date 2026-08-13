@@ -195,7 +195,8 @@ async def build_precip_gif_result(
         )
 
     gif_bytes, actual_frames = await _render_gif(data_list)
-    if gif_bytes is None:
+    # 合成失败，或解码后实际帧数仍不足（输入帧可能被跳过），统一降级为单图
+    if gif_bytes is None or actual_frames < MIN_GIF_FRAMES:
         return _degraded_single_result(
             product=product, frame=frames[0], image_bytes=data_list[0]
         )
