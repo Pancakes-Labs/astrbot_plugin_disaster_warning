@@ -282,9 +282,7 @@ def _resolve_event_time(step: SimulationStep) -> datetime:
     return base
 
 
-def _resolve_update_time(
-    step: SimulationStep, fallback: datetime | None = None
-) -> datetime:
+def _resolve_update_time(step: SimulationStep) -> datetime:
     """解析消息发布时间（更新时间）。
 
     时间参数在 schema 中属于 time 分组，由前端编辑器写入 params；
@@ -293,8 +291,7 @@ def _resolve_update_time(
     2. params.update_time_offset_seconds 或 step.update_time_offset_seconds 回退秒数
     3. params.update_time_delay_seconds 或 step.update_time_delay_seconds 延迟秒数
        （叠加在绝对时间 / 当前时间之上，模拟未来发布时刻）
-    4. fallback（发震时间，用于未配置更新时间偏移时的语义统一）
-    5. 当前时间
+    4. 当前时间
 
     优先级：绝对时间 > 回退 > 当前时间；延迟在最终基准上向后叠加。
     """
@@ -388,7 +385,7 @@ class SimulationBuilder:
         now = _resolve_event_time(step)
         # 更新时间默认取当前执行时刻（消息发布时刻），与发震时间独立。
         # 仅在显式配置 update_time_offset_seconds 时才回退到过去。
-        update_time = _resolve_update_time(step, fallback=None)
+        update_time = _resolve_update_time(step)
         build_result = factory(step, source_entry, now, update_time=update_time)
 
         # 统一模拟元数据 + 灾种特有元数据
@@ -819,10 +816,21 @@ class SimulationBuilder:
                 for s in stations
                 if float(s.get("shindo") or 0.0) >= min(station_min_shindo, min_shindo)
             ]
-            # 领域事件坐标取最高震度测站（对齐 snet_parser：latitude/longitude 取 top）
+            # 领域事件坐标取最高震度测站（对齐 snet_parser：latitude/longitude 取 top）。
+            # 测站缺经纬度时回退到参考经纬度（用户自定义震中），避免事件坐标退化到 (0,0)。
             if top is not None:
-                domain_event.latitude = float(top.get("lat") or 0.0)
-                domain_event.longitude = float(top.get("lon") or 0.0)
+                top_lat = _safe_float(top.get("lat"), None)
+                top_lon = _safe_float(top.get("lon"), None)
+                domain_event.latitude = (
+                    top_lat
+                    if top_lat is not None
+                    else _safe_float(params.get("latitude"), 35.0)
+                )
+                domain_event.longitude = (
+                    top_lon
+                    if top_lon is not None
+                    else _safe_float(params.get("longitude"), 140.0)
+                )
                 domain_event.place_name = "日本海沟 S-Net 海底观测网"
             domain_event.magnitude = None
             domain_event.depth = None
@@ -1007,14 +1015,12 @@ class SimulationBuilder:
         lon = _safe_float(params.get("longitude"), 140.0)
         magnitude = _safe_float(params.get("magnitude"), 7.5)
 
-        message_type = "warning"
+        # 日本海啸 Minor 视为“若干海面变动”，与信息同级不触发 warning 文案；
+        # “解除”为解除通告。仅当等级为实际警报/注意报级别（或标题含警报/预警）时
+        # 才使用 warning 文案，其余（信息 / Minor / 解除）回退到 info。
+        message_type = "info"
         normalized_level = level.replace("级", "")
-        # 日本海啸 Minor 视为“若干海面变动”，与信息同级不触发 warning 文案
-        if (
-            normalized_level
-            and normalized_level not in {"信息"}
-            and normalized_level != "Minor"
-        ):
+        if normalized_level and normalized_level not in {"信息", "Minor", "解除"}:
             message_type = "warning"
         if "警报" in title or "预警" in title:
             message_type = "warning"
@@ -1252,12 +1258,14 @@ class SimulationBuilder:
 
         # 按数据源家族区分台风元数据：FAN 走 fan_studio 语义，
         # EQSC 轮询源（typhoon_eqsc）复用其直构链路的 data_source 语义。
+        # 注意：typhoon_fanstudio 也以 "typhoon_" 开头，必须显式排除，
+        # 否则会被误判为 EQSC 源。
         data_source = "fan_studio"
         source_family = "fan_studio"
-        if step.source_id == "typhoon_eqsc":
-            data_source = "eqsc"
-            source_family = "eqsc"
-        elif step.source_id.startswith("typhoon_"):
+        if (
+            step.source_id.startswith("typhoon_")
+            and step.source_id != "typhoon_fanstudio"
+        ):
             data_source = "eqsc"
             source_family = "eqsc"
 

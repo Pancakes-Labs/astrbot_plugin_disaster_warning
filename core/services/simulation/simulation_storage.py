@@ -94,11 +94,8 @@ class SimulationStorage:
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            # 原子替换：避免写入中途进程退出导致草稿文件损坏/半写
-            if self._file_path.exists():
-                os.replace(temp_file, self._file_path)
-            else:
-                os.rename(temp_file, self._file_path)
+            # 原子替换，避免写入中途进程退出导致草稿文件损坏/半写
+            os.replace(temp_file, self._file_path)
         except Exception as exc:
             logger.error(f"[灾害预警] 保存模拟流草稿失败: {exc}")
             # 清理残留临时文件

@@ -38,6 +38,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from ...message.presenters.weather_alarm_code_map import (
@@ -2273,13 +2274,10 @@ def build_simulation_schema(
         # 且 SimulationBuilder 灾种工厂尚未按该源特化适配时才排除。
         # 当前目录中 parser_name 为空的只有 typhoon_eqsc（EQSC 轮询直构），
         # 其台风工厂为通用适配，可直接模拟，故不排除。
-        _SIM_UNBUILDABLE_SOURCES: set[str] = set()
         source_defs = []
         for source_id in source_ids:
             entry = SOURCE_CATALOG.get(source_id)
             if entry is None:
-                continue
-            if source_id in _SIM_UNBUILDABLE_SOURCES:
                 continue
             builder = _FIELD_BUILDERS.get(disaster_key)
             fields = builder(source_id) if builder else list(_event_key_fields())
@@ -2349,7 +2347,7 @@ def build_simulation_schema(
     return {
         "target_sessions": target_sessions,
         "disaster_types": disaster_types,
-        "timestamp": __import__("datetime").datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
