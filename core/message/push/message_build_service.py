@@ -496,7 +496,9 @@ class MessageBuildService:
             message_format_config=message_format_config,
         )
         if global_quake_card is not None:
-            return global_quake_card
+            # Global Quake 卡片路径提前返回，需在此处应用 [模拟] 前缀，
+            # 否则模拟的 Global Quake 事件会发送无标识的卡片。
+            return self._apply_simulation_prefix(event, global_quake_card)
 
         # 否则常规构建普通文本消息
         chain = self.manager.text_message_builder.build(

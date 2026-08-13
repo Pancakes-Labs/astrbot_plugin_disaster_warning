@@ -585,11 +585,15 @@ class DisasterWarningService:
                 except Exception as exc:
                     logger.debug(f"[灾害预警] 静默播种去重指纹失败（已忽略）: {exc}")
 
-    def notify_simulation_progress(self, run) -> None:
+    async def notify_simulation_progress(self, run) -> None:
         """模拟执行进度回调：转发给管理端 WebSocket 实时推送。
 
         由 SimulationRunner 在每步状态变更后触发；web_admin_server 可能尚未
         启动（执行器懒装配时），缺省静默忽略。
+
+        注意：必须为 async 并直接 await 管理端推送。runner 的 _notify_progress
+        会 await 本回调的返回值，若在内部 ensure_future 转后台任务，多个步骤
+        的进度推送会并发执行、顺序不定，且未登记的任务可能被 GC 导致消息丢失。
         """
         server = getattr(self, "web_admin_server", None)
         if server is None:
@@ -597,9 +601,7 @@ class DisasterWarningService:
         notify = getattr(server, "notify_simulation_progress", None)
         if callable(notify):
             try:
-                result = notify(run)
-                if hasattr(result, "__await__"):
-                    asyncio.ensure_future(result)
+                await notify(run)
             except Exception as exc:
                 logger.debug(f"[灾害预警] 模拟进度推送失败（已忽略）: {exc}")
 
