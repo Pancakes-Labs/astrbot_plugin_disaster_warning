@@ -162,6 +162,8 @@ class DisasterWarningPlugin(Star):
 • /雷达 <名称> - 查询最新一帧气象雷达图（如：/雷达 北京、/雷达 全国）
 • /雷达动图 <名称> - 查询最近多帧合成循环动图（如：/雷达动图 北京）
 • /雷达列表 - 查看全部雷达站点列表
+• /降水量预报 [24h|6h] [时次] - 查询单张降水量预报图
+• /降水量预报动图 [24h|6h] - 查询降水量预报全时次循环动图
 • /气温排行 [跨度] [时次] - 查询全国实况气温排行 Top10（如：/气温排行、/气温排行 24小时）
 • /最低气温排行 [跨度] [时次] - 查询全国实况最低气温排行 Top10（缺省逐小时；如：/最低气温排行、/最低气温排行 24小时）
 • /降水排行 [跨度] [时次] - 查询全国实况降水排行 Top10（如：/降水排行、/降水排行 24小时、/降水排行 6h 08时）
@@ -442,6 +444,34 @@ class DisasterWarningPlugin(Star):
         """查询最近多帧合成循环动图"""
         async for result in self._query_command_service.handle_query_radar_gif(
             event, name=name
+        ):
+            yield result
+
+    @filter.command("降水量预报", alias={"降水量预报图", "降水预报图", "降水预报"})
+    async def precipitation_image(
+        self,
+        event: AstrMessageEvent,
+        product_keyword: str = None,
+        hour_keyword: str = None,
+    ):
+        """查询单张降水量预报图"""
+        async for result in self._query_command_service.handle_query_precipitation(
+            event,
+            product_keyword=product_keyword,
+            hour_keyword=hour_keyword,
+        ):
+            yield result
+
+    @filter.command("降水量预报动图", alias={"降水预报动图"})
+    async def precipitation_gif(
+        self,
+        event: AstrMessageEvent,
+        product_keyword: str = None,
+    ):
+        """查询降水量预报全时次循环动图"""
+        async for result in self._query_command_service.handle_query_precipitation_gif(
+            event,
+            product_keyword=product_keyword,
         ):
             yield result
 
