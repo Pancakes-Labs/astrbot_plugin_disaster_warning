@@ -52,10 +52,12 @@ _UA = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-# 匹配 .time 元素的 data-img（降水产品图片 URL），兼容 data-index 有无引号
-_TIME_IMG_RE = re.compile(
-    r'class="col-xs-12 time [^"]*" data-time="[^"]*" data-index="?\d+"? data-fffmm=(\d+) data-img="([^"]+)"'
-)
+# 匹配 .time 元素的开标签（宽松 class，不依赖属性顺序与引号格式）
+_TIME_ELEM_RE = re.compile(r'<div class="col-xs-12 time[^"]*"[^>]*>')
+# 在元素块内提取 data-fffmm（兼容有无引号）
+_FFFMM_ATTR_RE = re.compile(r'data-fffmm="?(\d+)"?')
+# 在元素块内提取 data-img（降水产品图片 URL）
+_IMG_ATTR_RE = re.compile(r'data-img="([^"]+)"')
 # 兜底：直接匹配页面中任意 image.nmc.cn 的 JPG 图片地址
 _ANY_IMG_RE = re.compile(r'data-img="([^"]+\.JPG[^"]*)"', re.IGNORECASE)
 # 从 URL 提取 ER 产品码（ER24 / ER6T06 ...）
@@ -174,20 +176,24 @@ class NmcPrecipitationClient:
     def _parse_frames(self, html: str) -> list[PrecipitationFrame]:
         """从页面 HTML 解析降水帧列表（保持页面顺序）。
 
-        优先解析 .time 元素的 data-fffmm + data-img 结构化信息；
-        若结构化解析失败（页面改版），回退到任意 image.nmc.cn JPG 图片 URL。
+        先按 .time 元素块切分，再分别提取 data-fffmm 与 data-img，
+        不依赖属性顺序与引号格式；结构化解析失败（页面改版）时
+        回退到任意 image.nmc.cn JPG 图片 URL。
         """
         frames: list[PrecipitationFrame] = []
         seen: set[str] = set()
 
-        for m in _TIME_IMG_RE.finditer(html):
-            fffmm_raw = m.group(1)
-            raw_url = m.group(2)
+        for m in _TIME_ELEM_RE.finditer(html):
+            block = m.group(0)
+            fffmm_m = _FFFMM_ATTR_RE.search(block)
+            img_m = _IMG_ATTR_RE.search(block)
+            if not fffmm_m or not img_m:
+                continue
             try:
-                fffmm = int(fffmm_raw)
+                fffmm = int(fffmm_m.group(1))
             except (ValueError, TypeError):
                 continue
-            u = self._sanitize_url(raw_url)
+            u = self._sanitize_url(img_m.group(1))
             if u is None:
                 continue
             # 页面内嵌的是 /medium/ 缩略图，去掉该段取原图
@@ -225,8 +231,13 @@ class NmcPrecipitationClient:
 
     @staticmethod
     def strip_medium(url: str) -> str:
-        """去掉图片 URL 中的 /medium 路径段（仅替换一次），取原图。"""
-        return (url or "").replace("/medium", "", 1)
+        """去掉图片 URL 中的 /medium/ 路径段，取原图。
+
+        用 "/" 替换 /medium/，保留路径分隔符（STFC/medium/SEVP → STFC/SEVP），
+        避免删除后路径被拼坏（STFC/medium/SEVP → STFCSEVP）。
+        同时限定 /medium/ 边界，避免误伤 /mediumres/ 等相似前缀目录。
+        """
+        return (url or "").replace("/medium/", "/", 1)
 
     @staticmethod
     def _sanitize_url(raw_url: str) -> str | None:
