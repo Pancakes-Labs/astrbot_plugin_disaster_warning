@@ -172,7 +172,11 @@ class DisasterWarningPlugin(Star):
 • /空气质量 或 /AQI <城市|省份|全国> [等级] - 查询空气质量（如：/空气质量 北京、/空气质量 全国 优）
 • /空气质量排行 或 /空气榜 [最好|最差] - 查询空气质量排行榜 Top10
 • /空气质量列表 或 /AQI列表 [省份] - 查看空气质量支持的城市列表（如：/空气质量列表 新疆）
-• /灾害预警模拟 <纬度> <经度> <震级> [深度] [数据源] - 模拟地震事件
+• /灾害预警模拟 <参数...> [数据源] - 模拟灾害事件
+   · 地震源: /灾害预警模拟 <纬度> <经度> <震级> [深度] [数据源]
+   · 海啸源: /灾害预警模拟 [标题] [等级] [位置] [源震级] [数据源]
+   · 气象源: /灾害预警模拟 [标题] [正文] [预警编码] [数据源]
+   · 台风源: /灾害预警模拟 [编号] [名称] [强度] [数据源]
 • /灾害预警配置 查看 [全局|当前|会话UMO] - 查看配置（会话模式返回差异覆写）(仅管理员)
 • /灾害预警日志 - 查看原始消息日志统计摘要 (仅管理员)
 • /灾害预警日志开关 - 开关原始消息日志记录 (仅管理员)
@@ -477,23 +481,30 @@ class DisasterWarningPlugin(Star):
             yield result
 
     @filter.command("灾害预警模拟")
-    async def simulate_earthquake(
+    async def simulate_disaster(
         self,
         event: AstrMessageEvent,
-        lat: float,
-        lon: float,
-        magnitude: float,
-        depth: float = 10.0,
-        source: str = "cea_fanstudio",
+        arg1: str = None,
+        arg2: str = None,
+        arg3: str = None,
+        arg4: str = None,
+        arg5: str = None,
     ):
-        """模拟地震事件测试预警响应"""
+        """模拟灾害事件测试预警响应。
+
+        用法（数据源置于末尾，灾种由数据源自动决定）：
+        - /灾害预警模拟 纬度 经度 震级 [深度] [数据源]   (地震源，默认)
+        - /灾害预警模拟 标题 等级 位置 [源震级] [数据源] (海啸源)
+        - /灾害预警模拟 标题 正文 [预警编码] [数据源]   (气象源)
+        - /灾害预警模拟 编号 名称 [强度] [数据源]       (台风源)
+        """
         async for result in self._query_command_service.handle_simulate_disaster(
             event,
-            lat=lat,
-            lon=lon,
-            magnitude=magnitude,
-            depth=depth,
-            source=source,
+            arg1=arg1,
+            arg2=arg2,
+            arg3=arg3,
+            arg4=arg4,
+            arg5=arg5,
         ):
             yield result
 

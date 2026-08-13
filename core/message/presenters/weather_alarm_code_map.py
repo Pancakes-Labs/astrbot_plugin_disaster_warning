@@ -286,6 +286,40 @@ def _resolve_from_title(title: str, headline: str) -> str | None:
     return f"{base_11b}_{color_suffix}"
 
 
+# 颜色后缀 → 紧凑 11B 末两位颜色码（01=蓝 02=黄 03=橙 04=红）
+# 与 _COMPACT_11B_COLOR_TO_SUFFIX 为互逆映射（同源同语义）。
+_COLOR_SUFFIX_TO_COMPACT_DIGITS: dict[str, str] = {
+    "blue": "01",
+    "yellow": "02",
+    "orange": "03",
+    "red": "04",
+}
+
+
+def suggest_compact_weather_code(title: str = "", headline: str = "") -> str:
+    """从预警标题/副标题提取灾害类型与颜色，生成紧凑 11B 编码（如 11B2002）。
+
+    与 _resolve_from_title 共用同一套关键词表与排除规则（同源同语义），
+    仅输出形态不同：这里是紧凑编码（11B2002），供模拟表单默认值与
+    schema 图标资源命名使用；无法识别类型或颜色时返回空字符串。
+
+    Args:
+        title: 预警标题（如 靖远县气象台继续发布雷雨大风黄色预警信号）
+        headline: 副标题（可空，用于补充匹配）
+
+    Returns:
+        紧凑 11B 编码（如 "11B2002"）；无法识别时返回空字符串。
+    """
+    code = _resolve_from_title(title, headline)
+    if not code:
+        return ""
+    base, _, color_suffix = code.partition("_")
+    digits = _COLOR_SUFFIX_TO_COMPACT_DIGITS.get(color_suffix)
+    if not base or not digits:
+        return ""
+    return f"{base}{digits}"
+
+
 # ---------------------------------------------------------------------------
 # 本地图标目录解析：将 11B 完整码映射为 resources/weatheralarm_logo 下的文件。
 # ---------------------------------------------------------------------------

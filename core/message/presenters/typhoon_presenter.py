@@ -77,9 +77,10 @@ class TyphoonPresenter(BasePresenter):
         if display_context.source_id:
             source_entry = get_source_entry(display_context.source_id)
             if source_entry and source_entry.display_name:
-                # catalog 可能是“中国气象局：实时活跃台风 - Fan”，推送标题固定机构名为“中国气象局”
+                # catalog 可能是“中国气象局（实时活跃台风）”，推送标题固定机构名为“中国气象局”
                 name = source_entry.display_name
                 for token in (
+                    "（实时活跃台风）",
                     "：实时活跃台风",
                     ": 实时活跃台风",
                     " - Fan+EQSC",

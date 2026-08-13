@@ -1144,6 +1144,17 @@ class DatabaseManager:
                         snapshot["source_id"] = parent_source_id
                     if not snapshot.get("type"):
                         snapshot["type"] = parent_type
+                    # 台风历史快照缺少业务编号列；继承父事件 real_event_id / unique_id，
+                    # 避免前端把 event_updates.event_id（数据库主键）误当作台风编号展示。
+                    if event_type == "typhoon":
+                        parent_real_id = str(event.get("real_event_id") or "").strip()
+                        if not snapshot.get("real_event_id"):
+                            snapshot["real_event_id"] = parent_real_id
+                        if not snapshot.get("unique_id"):
+                            snapshot["unique_id"] = event.get("unique_id")
+                        if not snapshot.get("eqsc_id"):
+                            # eqsc_id 统一规范为 4 位（Fan 6 位编号转 EQSC 4 位）
+                            snapshot["eqsc_id"] = to_eqsc_id(parent_real_id)
                     enriched_updates.append(snapshot)
 
                 if event_type == "typhoon":

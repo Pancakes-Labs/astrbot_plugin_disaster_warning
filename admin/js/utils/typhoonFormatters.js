@@ -157,7 +157,10 @@
      * 统一输出台风短编号（优先 4 位 EQSC 形态，如 2609）。
      * 兼容 6 位 Fan 编号、NAMELESS 无名低压，以及 eqsc_id / typhoon_id / real_event_id 等字段。
      *
-     * 注意：NAMELESS_2604 不能再抽成 2604，否则会与正式编号 202604（森拉克）冲突。
+     * 注意：NAMELESS_2604 不能再抽成 2604，否则会与正式编号冲突。
+     *
+     * 重要：event_id 是数据库自增主键，并非台风业务编号，
+     * 严禁传入本函数，否则纯数字规则会被误命中并截断成错误的短编号。
      * @param {...(string|number|null|undefined)} candidates
      * @returns {string}
      */

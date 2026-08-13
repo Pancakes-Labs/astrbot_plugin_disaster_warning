@@ -79,7 +79,15 @@ from ...core.services.query.weather_query_service import query_weather_alarm_dat
 from ...core.services.query.weather_station_query_service import (
     WeatherStationQueryService,
 )
-from ...core.services.simulation.simulation_service import build_earthquake_simulation
+from ...core.services.simulation.flow_models import (
+    DISASTER_TYPE_EARTHQUAKE,
+    DISASTER_TYPE_TSUNAMI,
+    DISASTER_TYPE_TYPHOON,
+    DISASTER_TYPE_WEATHER,
+    SimulationStep,
+)
+from ...core.services.simulation.simulation_builder import SimulationBuilder
+from ...core.sources.source_catalog import SOURCE_CATALOG, get_source_entry
 from .forward_helper import send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 from .typhoon_query_image_helper import append_typhoon_track_image
@@ -869,13 +877,27 @@ class PluginQueryCommandService(CommandTelemetryMixin):
     async def handle_simulate_disaster(
         self,
         event,
-        lat: float,
-        lon: float,
-        magnitude: float,
-        depth: float,
+        arg1: str = None,
+        arg2: str = None,
+        arg3: str = None,
+        arg4: str = None,
+        arg5: str = None,
+        lat: float = None,
+        lon: float = None,
+        magnitude: float = None,
+        depth: float = None,
         source: str = "cea_fanstudio",
     ):
-        """处理虚拟地震模拟命令，构建事件包并运行规则评估与渲染效果测试。"""
+        """处理模拟灾害命令。
+
+        参数按数据源动态解析（数据源置于末尾 arg5，决定灾种与参数格式）：
+        - 地震源: arg1=纬度 arg2=经度 arg3=震级 arg4=深度 arg5=数据源
+        - 海啸源: arg1=标题 arg2=等级 arg3=位置 arg4=源震级 arg5=数据源
+        - 气象源: arg1=标题 arg2=正文 arg3=预警编码 arg5=数据源
+        - 台风源: arg1=编号 arg2=名称 arg3=强度 arg5=数据源
+
+        所有灾种统一走完整规则链评估，通过后推送展示（含 [模拟] 前缀）。
+        """
 
         def _quoted_plain_result(text: str):
             return quoted_plain_result(self.plugin, event, text)
@@ -893,20 +915,174 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
             session_config_manager = self.plugin.disaster_service.session_config_manager
             runtime_config = session_config_manager.get_effective_config(target_session)
-            simulation_result = build_earthquake_simulation(
-                manager,
-                lat=lat,
-                lon=lon,
-                magnitude=magnitude,
-                depth=depth,
-                source=source,
-                runtime_config=runtime_config,
+
+            # --- 数据源置于末尾：从最后一个非空参数中识别数据源 ---
+            # 气象/台风业务参数较少（3 个），数据源通常落在 arg4 而非 arg5；
+            # 地震/海啸省略可选参数（深度/源震级）后数据源同样会前移。
+            # 因此从尾部反向扫描第一个合法数据源标识作为 source，
+            # 并将其从参数列表剔除，剩余参数再按灾种解析。
+            args_list = [arg1, arg2, arg3, arg4, arg5]
+            source_arg_index = -1
+            for idx in range(len(args_list) - 1, -1, -1):
+                candidate = args_list[idx]
+                if candidate and get_source_entry(candidate) is not None:
+                    source = candidate
+                    source_arg_index = idx
+                    break
+            # 末尾存在非空参数但未被识别为合法数据源 → 视为用户写错的数据源
+            if source_arg_index < 0 and args_list[-1]:
+                source = args_list[-1]
+                source_arg_index = len(args_list) - 1
+            if source_arg_index >= 0:
+                args_list[source_arg_index] = None
+            arg1, arg2, arg3, arg4, arg5 = args_list
+
+            # --- 数据源预校验：无效源直接报错，避免后续静默回退地震 ---
+            source_entry = get_source_entry(source)
+            if source_entry is None:
+                valid_sources = ", ".join(sorted(SOURCE_CATALOG.keys()))
+                yield _quoted_plain_result(
+                    f"❌ 无效的数据源: {source}\n可用数据源: {valid_sources}"
+                )
+                return
+
+            # --- 按数据源动态解析灾种（决定参数格式，命令层不再传灾种） ---
+            source_type = source_entry.source_type.value
+            if source_type == "tsunami":
+                disaster_type = DISASTER_TYPE_TSUNAMI
+            elif source_type == "weather":
+                disaster_type = DISASTER_TYPE_WEATHER
+            elif source_type == "typhoon":
+                disaster_type = DISASTER_TYPE_TYPHOON
+            else:
+                disaster_type = DISASTER_TYPE_EARTHQUAKE
+
+            # --- 按灾种解析 arg1-4 参数 ---
+            # 数字参数安全解析：非数字返回 None，由调用方回退默认值或报错
+            def _safe_arg_float(value):
+                if value is None or value == "":
+                    return None
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            if disaster_type == DISASTER_TYPE_EARTHQUAKE:
+                lat = (
+                    lat
+                    if lat is not None
+                    else (_safe_arg_float(arg1) if arg1 else 39.9)
+                )
+                lon = (
+                    lon
+                    if lon is not None
+                    else (_safe_arg_float(arg2) if arg2 else 116.4)
+                )
+                magnitude = (
+                    magnitude
+                    if magnitude is not None
+                    else (_safe_arg_float(arg3) if arg3 else 5.5)
+                )
+                depth = (
+                    depth
+                    if depth is not None
+                    else (_safe_arg_float(arg4) if arg4 else 10.0)
+                )
+
+                # 用户显式传了参数但解析失败 → 报错而非静默回退
+                if (
+                    (arg1 and lat is None)
+                    or (arg2 and lon is None)
+                    or (arg3 and magnitude is None)
+                    or (arg4 and depth is None)
+                ):
+                    yield _quoted_plain_result(
+                        "❌ 地震模拟参数无效，请检查：纬度/经度/震级/深度 应为数字"
+                    )
+                    return
+
+                params = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "magnitude": magnitude,
+                    "depth": depth,
+                }
+            # 海啸：arg1=标题 arg2=等级 arg3=位置 arg4=源震级
+            elif disaster_type == DISASTER_TYPE_TSUNAMI:
+                tsunami_magnitude = _safe_arg_float(arg4)
+                # 用户显式传了参数但解析失败 → 报错而非静默回退（与地震分支一致）
+                if arg4 and tsunami_magnitude is None:
+                    yield _quoted_plain_result(
+                        "❌ 海啸模拟参数无效，请检查：源震级 应为数字"
+                    )
+                    return
+                params = {
+                    "title": arg1 or "海啸警报",
+                    "level": arg2 or "警报",
+                    "place_name": arg3 or "模拟海域",
+                    "magnitude": tsunami_magnitude
+                    if tsunami_magnitude is not None
+                    else 7.5,
+                }
+            # 气象：arg1=标题 arg2=正文 arg3=预警编码
+            elif disaster_type == DISASTER_TYPE_WEATHER:
+                params = {
+                    "title": arg1 or "暴雨橙色预警",
+                    "headline": arg1 or "暴雨橙色预警",
+                    "description": arg2 or "预计未来6小时降雨量将达50毫米以上。",
+                    "weather_code": arg3 or "11B0302",
+                }
+            # 台风：arg1=编号 arg2=名称 arg3=强度
+            elif disaster_type == DISASTER_TYPE_TYPHOON:
+                params = {
+                    "typhoon_id": arg1 or "2501",
+                    "name": arg2 or "模拟台风",
+                    "name_en": "SIM",
+                    "typhoon_type": arg3 or "台风",
+                }
+            else:
+                yield _quoted_plain_result(f"❌ 暂不支持的模拟灾种: {disaster_type}")
+                return
+
+            # --- 用 SimulationBuilder 构建合法事件（含模拟标记） ---
+            builder = SimulationBuilder()
+            step = SimulationStep.create(
+                disaster_type=disaster_type,
+                source_id=source,
+                params=params,
+                report_num=1,
+            )
+            envelope = builder.build_step_envelope(step)
+
+            # --- 统一走完整规则链评估（产出各规则判定报告） ---
+            effective_runtime_config = dict(runtime_config)
+            effective_runtime_config["__simulation_bypass_regular_filters"] = True
+            final_decision = manager.evaluate_push_decision(
+                envelope,
+                runtime_config=effective_runtime_config,
+                session_id=target_session,
+                emit_filter_log=False,
+                commit_state=False,
             )
 
-            # 模拟时评估过滤决策
-            if simulation_result.global_pass and simulation_result.local_pass:
+            report_lines = [
+                f"🧪 灾害预警模拟报告 ({disaster_type})",
+                f"Source: {source}",
+            ]
+            detail_suffix = (
+                f"（{final_decision.detail}）" if final_decision.detail else ""
+            )
+            if final_decision.accepted:
+                report_lines.append(f"✅ 规则链: 通过 ({final_decision.reason})")
+            else:
+                report_lines.append(
+                    f"❌ 规则链: 拦截 ({final_decision.reason}{detail_suffix})"
+                )
+
+            # --- 通过后走完整推送链路 ---
+            if final_decision.accepted:
                 push_result = await manager.push_event(
-                    simulation_result.disaster_event,
+                    envelope,
                     target_sessions=[target_session],
                     session_config_getter=session_config_manager.get_effective_config,
                     commit_state=False,
@@ -925,17 +1101,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         "success": True,
                         "triggered": bool(push_success),
                         "source": str(source or "unknown"),
-                        "magnitude_bucket": round(magnitude),
-                        "depth_bucket": int(depth // 10 * 10),
+                        "disaster_type": str(disaster_type),
                     },
                 )
                 if push_success:
-                    simulation_result.report_lines.append(
+                    report_lines.append(
                         f"\n✅ 正式模拟报文已发送到当前会话: {target_session}"
                     )
-                    yield _quoted_plain_result(
-                        "\n".join(simulation_result.report_lines)
-                    )
+                    yield _quoted_plain_result("\n".join(report_lines))
                     return
 
                 failure_reason = ""
@@ -944,26 +1117,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         push_result.get("final_failure_reason") or ""
                     ).strip()
                 if not failure_reason:
-                    effective_runtime_config = dict(runtime_config)
-                    # 模拟绕过去重标志
-                    effective_runtime_config["__simulation_bypass_regular_filters"] = (
-                        True
-                    )
-                    final_decision = manager.evaluate_push_decision(
-                        simulation_result.disaster_event,
-                        runtime_config=effective_runtime_config,
-                        session_id=target_session,
-                        emit_filter_log=False,
-                        commit_state=False,
-                    )
-                    detail_suffix = (
-                        f"（{final_decision.detail}）" if final_decision.detail else ""
-                    )
-                    failure_reason = f"{final_decision.reason}{detail_suffix}"
-                simulation_result.report_lines.append(
+                    failure_reason = final_decision.reason
+                report_lines.append(
                     f"\n⛔ 结论: 当前会话发送阶段仍被拦截：{failure_reason}"
                 )
-                yield _quoted_plain_result("\n".join(simulation_result.report_lines))
+                yield _quoted_plain_result("\n".join(report_lines))
                 return
 
             await self._track_command_feature(
@@ -972,11 +1130,10 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     "success": True,
                     "triggered": False,
                     "source": str(source or "unknown"),
-                    "magnitude_bucket": round(magnitude),
-                    "depth_bucket": int(depth // 10 * 10),
+                    "disaster_type": str(disaster_type),
                 },
             )
-            yield _quoted_plain_result("\n".join(simulation_result.report_lines))
+            yield _quoted_plain_result("\n".join(report_lines))
         except Exception as e:
             logger.error(f"[灾害预警] 模拟预警失败: {e}\n{traceback.format_exc()}")
             yield _quoted_plain_result(f"❌ 模拟失败: {e}")

@@ -194,6 +194,10 @@ class WebAdminServer:
         """当有新灾害事件时，立即向所有客户端推送事件更新。"""
         await self._runtime_service.notify_event(event_data)
 
+    async def notify_simulation_progress(self, run):
+        """当模拟事件流执行进度变更时，向所有客户端推送实时进度。"""
+        await self._runtime_service.notify_simulation_progress(run)
+
     def _get_data_source_host(self, source_name: str) -> str | None:
         """获取数据源的主机名，供延迟探测使用。"""
         return self._source_health_monitor.get_data_source_host(source_name)

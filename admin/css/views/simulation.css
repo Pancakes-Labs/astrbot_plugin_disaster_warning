@@ -1,0 +1,1521 @@
+/* 模拟预警视图样式 (Simulation View Styles) */
+
+/* ==========================================================================
+   1. 模板一键操作下拉框
+   ========================================================================== */
+.sim-view-template-select {
+    min-width: 150px;
+    max-width: 260px;
+    font-size: 13px;
+}
+
+.sim-view-template-placeholder {
+    opacity: 0.75;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.sim-view-template-option {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sim-view-template-desc {
+    font-size: 11px;
+    opacity: 0.65;
+}
+
+/* ==========================================================================
+   2. 视图容器与工具栏
+   ========================================================================== */
+.simulation-view {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 100%;
+    max-width: 100%;
+}
+
+.sim-view-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.08));
+}
+
+.sim-view-toolbar-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.sim-view-title {
+    font-weight: 800 !important;
+}
+
+.sim-view-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-end;
+}
+
+/* 工具栏操作分组：编辑 / 单步执行 / 整流执行 */
+.sim-view-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.sim-view-toolbar-divider {
+    margin: 0 4px !important;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   3. 草稿选择栏
+   ========================================================================== */
+.sim-view-draft-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.08));
+}
+
+/* 草稿箱下拉框：固定宽度，永不收缩（避免被流名称挤扁） */
+.sim-view-draft-select {
+    flex: 0 0 220px;
+    min-width: 220px;
+}
+
+.sim-view-flow-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
+}
+
+/* 流名称：弹性占满剩余空间，但保底 160px 防止过度收缩 */
+.sim-view-flow-name {
+    flex: 1 1 220px;
+    min-width: 160px;
+    max-width: 100%;
+}
+
+/* 目标会话：可弹性收缩但保底 180px */
+.sim-view-flow-session {
+    flex: 0 1 240px;
+    min-width: 180px;
+}
+
+/* ==========================================================================
+   4. 主编辑区布局
+   ========================================================================== */
+.sim-view-main {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .sim-view-main {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.sim-view-left,
+.sim-view-right {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.08));
+    min-width: 0;
+    /* 防止长内容把卡片撑爆 */
+}
+
+.sim-view-section-title {
+    font-weight: 700 !important;
+    border-bottom: 1px solid var(--divider, rgba(0, 0, 0, 0.08));
+    padding-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.sim-view-editor-empty {
+    padding: 24px 8px;
+    text-align: center;
+}
+
+/* ==========================================================================
+   5. 步骤列表
+   ========================================================================== */
+.sim-step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 520px;
+    overflow-y: auto;
+    padding-right: 4px;
+    min-width: 0;
+}
+
+.sim-step-empty {
+    padding: 24px 8px;
+    text-align: center;
+}
+
+/* 步骤组（事件键分组包装） */
+.sim-step-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.sim-step-group-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary, #1976d2);
+    background: rgba(25, 118, 210, 0.08);
+    border-left: 3px solid var(--primary, #1976d2);
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.sim-step-item {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    border: 1px solid var(--divider, rgba(0, 0, 0, 0.1));
+    border-radius: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    min-width: 0;
+    /* 整卡作为拖拽手柄：禁止浏览器把 pointer 事件接管为滚动/文本选择，
+       触屏上按住卡片任意区域（操作区除外）即可拖拽排序 */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.sim-step-item:hover {
+    border-color: var(--primary, #1976d2);
+}
+
+.sim-step-item.is-selected {
+    border-color: var(--primary, #1976d2);
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
+}
+
+.sim-step-index {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--primary, #1976d2);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: 2px;
+    flex-shrink: 0;
+    cursor: grab;
+    /* 序号圆点垂直居中（卡片整体为 flex 布局，覆盖 margin-top 偏移） */
+    align-self: center;
+    /* 关键修复：禁止浏览器把手柄上的 pointer 事件接管为滚动/文本选择，
+       否则触屏拖拽会触发页面滚动而不是排序；桌面端可防止拖拽中选中文本 */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* 卡片主体：点击选中，不显示拖拽抓手（拖拽提示由序号圆点的 grab 光标承担） */
+.sim-step-body {
+    cursor: pointer;
+}
+
+.sim-step-index:active {
+    cursor: grabbing;
+}
+
+.sim-step-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    /* 允许正文占满可用宽度 */
+}
+
+.sim-step-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.sim-step-title {
+    font-weight: 600 !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.sim-step-badge {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--primary-light, rgba(25, 118, 210, 0.12));
+    color: var(--primary, #1976d2);
+    flex-shrink: 0;
+}
+
+.sim-step-badge--final {
+    background: rgba(156, 39, 176, 0.12);
+    color: #9c27b0;
+}
+
+.sim-step-badge--delay {
+    background: rgba(0, 0, 0, 0.06);
+    color: inherit;
+}
+
+/* 步骤计划执行时间 */
+.sim-step-schedule {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: block;
+    opacity: 0.6;
+    font-size: 11px;
+}
+
+.sim-step-source-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: block;
+}
+
+.sim-step-event-key {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: block;
+}
+
+/* 操作按钮：水平排列，不再挤压正文 */
+.sim-step-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.sim-step-actions .MuiIconButton-root {
+    padding: 4px;
+}
+
+/* ==========================================================================
+   6. 步骤编辑器
+   ========================================================================== */
+.sim-step-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+/* 字段分组容器（时间 / 基础 / 特有 / 编排） */
+.sim-editor-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-editor-group-title {
+    font-weight: 700 !important;
+    font-size: 13px !important;
+}
+
+.sim-editor-group-hint {
+    opacity: 0.65;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+/* 时间参数分组：浅底色卡片突出 */
+.sim-editor-group--time {
+    background: rgba(25, 118, 210, 0.04);
+    border: 1px solid rgba(25, 118, 210, 0.12);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+/* 时间参数用法说明（第二行小字）：与前文提示分隔开，视觉更清晰 */
+.sim-editor-group-hint--usage {
+    display: block;
+    margin-top: -4px;
+    padding-bottom: 2px;
+}
+
+/* 时间参数分组专用网格：绝对时间占半宽（2fr），回退/延迟各占四分之一（1fr）。
+   第一行 = 事件时间 + 回退 + 延迟；第二行 = 更新时间 + 回退 + 延迟。
+   仅对 time 分组生效，不影响普通参数的两列网格。 */
+.sim-editor-time-grid {
+    grid-template-columns: 2fr 1fr 1fr !important;
+}
+
+.sim-field-quarter {
+    grid-column: span 1;
+}
+
+@media (max-width: 640px) {
+    .sim-editor-time-grid {
+        grid-template-columns: 1fr 1fr !important;
+    }
+
+    /* 窄屏下绝对时间字段占满整行，回退/延迟各占半行 */
+    .sim-editor-time-grid .sim-field-half {
+        grid-column: 1 / -1;
+    }
+}
+
+/* 编排分组容器（虚线边框卡片） */
+.sim-editor-group--orchestration {
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px dashed var(--divider, rgba(0, 0, 0, 0.12));
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 0;
+}
+
+/* 两列主表单布局：左列基础参数 + 右列特有参数 */
+.sim-editor-two-col {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    min-width: 0;
+}
+
+.sim-editor-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-editor-col--source {
+    border-left: 1px solid var(--divider, rgba(0, 0, 0, 0.08));
+    padding-left: 14px;
+}
+
+@media (max-width: 900px) {
+    .sim-editor-two-col {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sim-editor-col--source {
+        border-left: none;
+        padding-left: 0;
+        border-top: 1px dashed var(--divider, rgba(0, 0, 0, 0.12));
+        padding-top: 10px;
+    }
+}
+
+/* 数据源下拉分组标题 */
+.sim-source-group-header {
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    color: var(--md-sys-color-primary, #1976d2) !important;
+    background: rgba(0, 0, 0, 0.03);
+    line-height: 30px !important;
+    padding: 0 12px !important;
+}
+
+[data-theme='dark'] .sim-source-group-header {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* 数据源下拉选项：label + family 后缀 */
+.sim-source-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-source-option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sim-source-option-family {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--md-sys-color-primary, #1976d2);
+    font-weight: 600;
+}
+
+/* 数据源描述中的"支持报数语义"标签 */
+.sim-editor-desc-tag {
+    color: var(--md-sys-color-primary, #1976d2);
+    font-weight: 600;
+}
+
+/* 事件键辅助条 */
+.sim-editor-event-key-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sim-editor-event-key-help {
+    font-size: 11px;
+}
+
+.sim-editor-event-key-gen {
+    text-transform: none !important;
+    font-size: 12px;
+}
+
+/* JSON 表格编辑器 */
+.sim-json-table-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.sim-json-table-label {
+    font-weight: 600 !important;
+    opacity: 0.8;
+}
+
+.sim-json-table-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.sim-json-table-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* 美观打印开关：flex spacer 撑开，开关右对齐 */
+.sim-json-table-tabs-spacer {
+    flex: 1;
+    min-width: 8px;
+}
+
+.sim-json-table-tabs .MuiButton-root {
+    text-transform: none !important;
+    font-size: 12px;
+    min-height: 28px;
+    padding: 2px 10px;
+}
+
+/* 视图切换按钮：SVG 图标与文字垂直居中 */
+.sim-json-tab-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+}
+
+.sim-json-tab-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
+}
+
+/* 美观打印开关：紧凑样式 */
+.sim-json-pretty-switch {
+    margin: 0 !important;
+    margin-left: 4px !important;
+}
+
+.sim-json-pretty-switch .MuiFormControlLabel-label {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.sim-json-pretty-switch .MuiSwitch-root {
+    margin-right: 4px;
+}
+
+/* 对象模式键值表：字段名列样式 */
+.sim-json-table-grid--object .sim-json-table-key-cell {
+    white-space: nowrap;
+    font-weight: 700;
+    opacity: 0.85;
+}
+
+/* 对象模式"字段"列表头：对应下方字段名文本（非输入框），
+   不继承 18px 输入框对齐偏移，与字段名左对齐 */
+.sim-json-table-grid--object th.sim-json-table-key-cell {
+    padding-left: 4px;
+}
+
+.sim-json-table {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.sim-json-table-empty {
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 6px;
+    text-align: center;
+}
+
+/* JSON 编辑器局部渲染错误降级提示（错误边界兜底） */
+.sim-json-table-empty .MuiButton-root {
+    text-transform: none !important;
+    font-size: 12px;
+    min-height: 28px;
+}
+
+.sim-json-table-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    min-width: 0;
+}
+
+.sim-json-table-grid th {
+    text-align: left;
+    font-weight: 700;
+    padding: 4px 6px;
+    /* 表头文字右移对齐：下方输入框（OutlinedInput）文字距左缘约 18px
+       （框线 1px + 内部 padding 14px + input padding），
+       表头仅靠 6px 内边距时文字视觉明显偏左，padding-left 微调对齐 */
+    padding-left: 18px;
+    border-bottom: 2px solid var(--divider, rgba(0, 0, 0, 0.12));
+    white-space: nowrap;
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.sim-json-table-grid td {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--divider, rgba(0, 0, 0, 0.06));
+    vertical-align: middle;
+}
+
+.sim-json-table-input .MuiInputBase-root {
+    font-size: 12px;
+}
+
+.sim-json-table-ops-col {
+    width: 90px;
+}
+
+.sim-json-table-ops {
+    white-space: nowrap;
+    text-align: right;
+}
+
+.sim-json-table-ops .MuiIconButton-root {
+    padding: 3px;
+    font-size: 13px;
+}
+
+.sim-json-table-add {
+    align-self: flex-start;
+    text-transform: none !important;
+    font-size: 12px;
+}
+
+/* 灾种 + 数据源选择行：两列并排 */
+.sim-editor-select-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    min-width: 0;
+}
+
+@media (max-width: 480px) {
+    .sim-editor-select-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.sim-editor-select {
+    min-width: 0;
+}
+
+.sim-editor-desc {
+    opacity: 0.7;
+    word-break: break-all;
+}
+
+.sim-editor-divider {
+    margin: 4px 0 !important;
+}
+
+.sim-editor-section-title {
+    font-weight: 700 !important;
+}
+
+/* 参数表单网格：短字段并排、长字段全宽 */
+.sim-editor-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 14px;
+    min-width: 0;
+}
+
+@media (max-width: 480px) {
+    .sim-editor-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 网格字段宽度类 */
+.sim-field {
+    min-width: 0;
+}
+
+.sim-field-full {
+    grid-column: 1 / -1;
+}
+
+.sim-field-half {
+    grid-column: span 1;
+}
+
+.sim-field-third {
+    grid-column: span 1;
+}
+
+/* 编排分组：改为纯 flex 单行布局。
+   报数 (report_num) 固定窄宽、事件键 (event_key) 弹性占满、
+   最终报 (is_final) 固定窄宽，三者 + 生成按钮 全部同一行。
+   （"执行前等待"已移除，不再有延迟字段。） */
+.sim-editor-orchestration {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px dashed var(--divider, rgba(0, 0, 0, 0.12));
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.sim-editor-orchestration .sim-field {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    flex: 0 0 auto;
+}
+
+/* 报数：固定窄宽 */
+.sim-editor-orchestration .sim-field-third--report {
+    flex: 0 0 130px;
+}
+
+/* 事件键：弹性占满剩余宽度 */
+.sim-editor-orchestration .sim-field-half--event {
+    flex: 1 1 260px;
+    min-width: 180px;
+}
+
+/* 最终报开关：固定窄宽 */
+.sim-editor-orchestration .sim-field-third--final {
+    flex: 0 0 130px;
+}
+
+/* 最终报开关（FormControlLabel）：不拉伸、保持左对齐、垂直居中 */
+.sim-editor-orchestration .sim-field-third--final .MuiFormControlLabel-root {
+    margin: 0;
+    white-space: nowrap;
+}
+
+/* 编排网格字段内的子控件撑满可用宽度（TextField/FormControl 等） */
+.sim-editor-orchestration .sim-field > * {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+}
+
+@media (max-width: 640px) {
+    .sim-editor-orchestration {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sim-editor-orchestration .sim-field {
+        flex: 1 1 auto !important;
+    }
+}
+
+.sim-editor-empty {
+    padding: 24px 8px;
+    text-align: center;
+}
+
+/* 编排字段单行容器：字段 flex 行 + 事件键操作按钮 同行紧凑排布 */
+.sim-editor-orchestration-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+/* 编排字段 flex 行：弹性占满剩余宽度，最小宽度避免按钮挤压 */
+.sim-editor-orchestration-row .sim-editor-orchestration {
+    flex: 1 1 420px;
+    min-width: 0;
+}
+
+/* 事件键操作区：说明 chip + 生成按钮 垂直靠右排布 */
+.sim-editor-event-key-ops {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.sim-editor-event-key-ops .sim-editor-event-key-help {
+    min-width: 28px;
+}
+
+@media (max-width: 640px) {
+    .sim-editor-orchestration-row .sim-editor-orchestration {
+        flex: 1 1 100%;
+    }
+}
+
+/* ==========================================================================
+   7. 执行控制台
+   ========================================================================== */
+.sim-view-console {
+    padding: 12px 16px;
+    background: var(--card-bg, #ffffff);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.08));
+    min-width: 0;
+}
+
+.sim-run-console-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--divider, rgba(0, 0, 0, 0.08));
+    padding-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.sim-run-console-title {
+    font-weight: 700 !important;
+}
+
+.sim-run-console-spinner {
+    margin-left: 4px;
+}
+
+.sim-run-console-cancel {
+    margin-left: auto !important;
+    text-transform: none !important;
+    flex-shrink: 0;
+}
+
+.sim-run-console-empty {
+    padding: 16px 8px;
+    text-align: center;
+}
+
+.sim-run-console-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.sim-run-console-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sim-run-status-tag {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 10px;
+}
+
+.sim-run-status-tag.is-pending {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.sim-run-status-tag.is-running {
+    background: rgba(25, 118, 210, 0.15);
+    color: #1976d2;
+}
+
+.sim-run-status-tag.is-success {
+    background: rgba(76, 175, 80, 0.15);
+    color: #2e7d32;
+}
+
+.sim-run-status-tag.is-failed {
+    background: rgba(211, 47, 47, 0.15);
+    color: #c62828;
+}
+
+.sim-run-status-tag.is-cancelled {
+    background: rgba(158, 158, 158, 0.15);
+    color: #757575;
+}
+
+.sim-run-console-count {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.sim-run-step-results {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sim-run-step-result {
+    border: 1px solid var(--divider, rgba(0, 0, 0, 0.1));
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.sim-run-step-result.is-success {
+    border-left: 3px solid #4caf50;
+}
+
+.sim-run-step-result.is-failed {
+    border-left: 3px solid #f44336;
+}
+
+.sim-run-step-result.is-running {
+    border-left: 3px solid #2196f3;
+}
+
+.sim-run-step-result.is-cancelled {
+    border-left: 3px solid #9e9e9e;
+    opacity: 0.6;
+}
+
+/* 步骤变更后旧快照：可跳转的结果项（可点击样式）与孤儿项（灰化） */
+.sim-run-step-result.is-clickable {
+    cursor: pointer;
+}
+
+.sim-run-step-result.is-clickable:hover {
+    border-color: var(--primary, #1976d2);
+}
+
+.sim-run-step-result.is-orphan {
+    opacity: 0.55;
+}
+
+.sim-run-step-orphan-hint {
+    display: block;
+    margin-top: 4px;
+    opacity: 0.7;
+    font-size: 11px;
+}
+
+/* 步骤已变更警告条 */
+.sim-run-console-stale {
+    display: block;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: rgba(237, 108, 2, 0.1);
+    border: 1px solid rgba(237, 108, 2, 0.25);
+}
+
+/* 清除结果按钮 */
+.sim-run-console-clear {
+    margin-left: auto !important;
+    text-transform: none !important;
+    flex-shrink: 0;
+}
+
+.sim-run-step-result-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-run-step-index {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.sim-run-step-result-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.sim-run-step-result-title {
+    font-weight: 600 !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sim-run-step-status {
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.75;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* 执行控制台：步骤启动偏移时间 */
+.sim-run-step-schedule {
+    display: block;
+    opacity: 0.55;
+    font-size: 11px;
+}
+
+.sim-run-step-result-detail {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-top: 1px dashed var(--divider, rgba(0, 0, 0, 0.08));
+    padding-top: 6px;
+    min-width: 0;
+}
+
+.sim-run-preview-text {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 12px;
+    line-height: 1.6;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 6px;
+    padding: 8px;
+    margin: 0;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+/* ==========================================================================
+   8. JSON 编辑字段
+   ========================================================================== */
+.sim-editor-json-field {
+    width: 100%;
+    min-width: 0;
+}
+
+.sim-editor-json-field .MuiFormHelperText-root {
+    font-size: 11px;
+    word-break: break-all;
+}
+
+/* ==========================================================================
+   9. 草稿栏补充
+   ========================================================================== */
+.sim-view-flow-count {
+    height: 28px;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   10. 单步预览对话框
+   ========================================================================== */
+.sim-view-preview-dialog-text {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 13px;
+    line-height: 1.7;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 0;
+    max-height: 480px;
+    overflow-y: auto;
+    font-family: inherit;
+}
+
+/* ==========================================================================
+   11. 明暗主题适配（预览文本/编排分组底色）
+   ========================================================================== */
+[data-theme='dark'] .sim-view-preview-dialog-text,
+[data-theme='dark'] .sim-run-preview-text {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='dark'] .sim-editor-orchestration {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+/* 暗色适配：时间分组 / 编排分组 / JSON 表格 / 数据源后缀 */
+[data-theme='dark'] .sim-editor-group--time {
+    background: rgba(33, 150, 243, 0.08);
+    border-color: rgba(33, 150, 243, 0.2);
+}
+
+[data-theme='dark'] .sim-editor-group--orchestration {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme='dark'] .sim-json-table-grid th {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='dark'] .sim-json-table-empty {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme='dark'] .sim-source-option-family {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ==========================================================================
+   12. 全局响应式收尾
+   ========================================================================== */
+@media (max-width: 700px) {
+    .sim-view-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sim-view-toolbar-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .sim-view-toolbar-group {
+        width: 100%;
+    }
+}
+
+/* ==========================================================================
+   13. 执行控制台操作条（整流 + 单步操作下沉至控制台）
+   ========================================================================== */
+.sim-run-console-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--divider, rgba(0, 0, 0, 0.08));
+    margin-bottom: 8px;
+}
+
+.sim-run-console-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.sim-run-console-actions-divider {
+    margin: 0 2px !important;
+    flex-shrink: 0;
+}
+
+.sim-run-console-actions-count {
+    margin-left: auto !important;
+    flex-shrink: 0;
+}
+
+.sim-run-console-actions .MuiButton-root {
+    text-transform: none !important;
+    min-height: 30px;
+}
+
+/* Tooltip 包裹 span 保持默认 inline（宽度=按钮内容宽度，按钮本身撑开 span），
+   不要设置 width:100%——flex 容器中会撑满整行导致按钮换行竖排 + hover 区域异常。 */
+
+/* ==========================================================================
+   14. JSON 可视化编辑增强（美观打印 + 滚动容器 + 更大文本域 + 全宽独立区）
+   ========================================================================== */
+/* JSON 可视化独立分组：完全脱离两列容器，占满步骤编辑区全宽 */
+.sim-json-visual-group {
+    width: 100%;
+    min-width: 0;
+}
+
+.sim-json-visual-group .sim-editor-group-title {
+    margin-bottom: 10px;
+}
+
+/* JSON 可视化字段独立全宽渲染区（普通文本框保持两列，JSON 区占满分组宽度） */
+.sim-json-visual-section {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-top: 12px;
+    padding: 16px;
+    border: 1px solid var(--divider, rgba(0, 0, 0, 0.1));
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.015);
+    min-width: 0;
+}
+
+[data-theme='dark'] .sim-json-visual-section {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* JSON 字段内的控件占满全宽 */
+.sim-json-visual-section .sim-field-full {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+/* JSON 编辑器内部容器撑满宽度，表格/文本域占满整个可视化编辑区 */
+.sim-json-visual-section .sim-json-table-wrap,
+.sim-json-visual-section .sim-json-table-field,
+.sim-json-visual-section .sim-json-table,
+.sim-json-visual-section .sim-json-text-wrap {
+    width: 100%;
+    min-width: 0;
+}
+
+.sim-json-visual-section .sim-json-table-scroll {
+    width: 100%;
+}
+
+/* 表格单元格输入框不被挤压，最小可用宽度 */
+.sim-json-visual-section .sim-json-table-grid {
+    min-width: 0;
+    width: 100%;
+    table-layout: auto;
+}
+
+.sim-json-visual-section .sim-json-table-input {
+    min-width: 120px;
+}
+.sim-json-table-scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    min-width: 0;
+    border: 1px solid var(--divider, rgba(0, 0, 0, 0.08));
+    border-radius: 6px;
+    /* 表格内容与滚动容器边缘留出呼吸感，避免贴边 */
+    padding: 2px 4px;
+    box-sizing: border-box;
+}
+
+.sim-json-text-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.sim-json-text-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sim-json-text-tools .MuiButton-root {
+    text-transform: none !important;
+    font-size: 12px;
+    min-height: 28px;
+    padding: 2px 10px;
+}
+
+.sim-json-text-area .MuiInputBase-root {
+    font-size: 12px;
+    line-height: 1.6;
+    font-family: 'Consolas', 'Menlo', 'Courier New', monospace;
+}
+
+/* JSON 视图 TextField 浮动 label 缺口
+   缺口宽度由 MUI JS 测量后内联写入 legend，CSS 不做任何覆盖（恢复原生机制）。
+   仅保留 label 不换行（nowrap）+ 不截断，确保测量到完整文字宽度；
+   字体加载完成后由组件内 useLayoutEffect 重新测量并精确写回缺口宽度。 */
+.sim-json-text-area .MuiOutlinedInput-root .MuiInputLabel-outlined {
+    white-space: nowrap;
+    max-width: none;
+}
+
+.sim-json-text-area .MuiInputLabel-shrink {
+    transform-origin: top left;
+    white-space: nowrap;
+}
+
+.sim-json-text-area textarea {
+    tab-size: 2;
+}
+
+/* ==========================================================================
+   15. 气象预警编码字段（手动输入 + 自动生成 + 建议 chips）
+   ========================================================================== */
+.sim-weather-code-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.sim-weather-code-input-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-weather-code-gen {
+    text-transform: none !important;
+    flex-shrink: 0;
+    white-space: nowrap;
+    min-height: 38px;
+    margin-top: 4px;
+}
+
+.sim-weather-code-suggestions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.sim-weather-code-suggest-label {
+    flex-shrink: 0;
+}
+
+.sim-weather-code-chip {
+    cursor: pointer;
+    font-size: 11px;
+}
+
+/* 震中/震源位置定位字段：输入框自动填满剩余宽度，定位按钮不平分宽度 */
+.sim-geo-locate-field {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.sim-geo-locate-btn {
+    flex-shrink: 0;
+    border: 1px solid var(--md-sys-color-outline-variant, rgba(0, 0, 0, 0.12)) !important;
+    border-radius: 8px !important;
+    padding: 7px !important;
+    margin-top: 4px;
+    min-width: 36px;
+}
+
+.sim-geo-locate-icon {
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+/* ==========================================================================
+   16. 步骤卡片增强（独立卡片质感 + 渐变序号徽章 + 文本 title 提示）
+   ========================================================================== */
+.sim-step-item {
+    position: relative;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15));
+    border: 1px solid var(--divider, rgba(0, 0, 0, 0.1));
+    border-radius: 12px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.sim-step-item:hover {
+    border-color: var(--primary, #1976d2);
+    box-shadow: 0 2px 8px rgba(25, 118, 210, 0.12);
+    transform: translateY(-1px);
+}
+
+.sim-step-item.is-selected {
+    border-color: var(--primary, #1976d2);
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.18), 0 2px 8px rgba(25, 118, 210, 0.1);
+}
+
+.sim-step-index {
+    background: linear-gradient(135deg, var(--primary, #1976d2), #42a5f5);
+    box-shadow: 0 1px 3px rgba(25, 118, 210, 0.35);
+}
+
+.sim-step-title {
+    font-weight: 700 !important;
+}
+
+/* 暗色主题适配 */
+[data-theme='dark'] .sim-step-item {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+}
+
+/* ==========================================================================
+   17. 自定义拖拽增强（Pointer Events 独立跟随卡片，无浏览器半透明虚影）
+   ========================================================================== */
+.sim-step-list--dragging {
+    cursor: grabbing;
+    /* 拖拽期间禁止列表内文本被选中，避免干扰指针位移计算 */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* 被拖拽的原卡片：降为占位（保留高度与结构、内容虚化，无缩放跳动） */
+.sim-step-item.is-dragging {
+    opacity: 0.3;
+    border-style: dashed;
+    border-color: var(--primary, #1976d2);
+}
+
+/* 其他卡片实时让位：拖拽经过时平滑位移（过渡动画避免生硬跳变） */
+.sim-step-item {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.18s ease;
+}
+
+.sim-step-item.is-drag-over {
+    border-color: var(--primary, #1976d2);
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.25);
+    transform: translateY(6px);
+}
+
+/* 实时预览让位：拖拽目标上方/下方的卡片按方向轻微位移，直观指示插入位 */
+.sim-step-item.is-drag-shift-up {
+    transform: translateY(-6px);
+}
+
+.sim-step-item.is-drag-shift-down {
+    transform: translateY(6px);
+}
+
+/* 拖拽跟随卡片：fixed 定位、完全不透明、实时跟随指针。
+   保持与原卡片一致的尺寸（宽高由 JS 内联样式按原卡片 rect 设置），
+   去掉了旋转与缩放，拖起来更贴近"拿起原卡片"的直觉。 */
+.sim-step-drag-ghost {
+    position: fixed;
+    z-index: 1400;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--card-bg, #ffffff);
+    border: 2px solid var(--primary, #1976d2);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(25, 118, 210, 0.28);
+    pointer-events: none;
+    opacity: 1;
+    transform: none;
+    transition: none;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.sim-step-drag-ghost .sim-step-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.sim-step-drag-ghost .sim-step-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.sim-step-drag-ghost .sim-step-title {
+    font-weight: 700 !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sim-step-drag-ghost .sim-step-badge {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--primary-light, rgba(25, 118, 210, 0.12));
+    color: var(--primary, #1976d2);
+    flex-shrink: 0;
+}
+
+.sim-step-drag-ghost .sim-step-badge--final {
+    background: rgba(156, 39, 176, 0.12);
+    color: #9c27b0;
+}
+
+.sim-step-drag-ghost .sim-step-source-label,
+.sim-step-drag-ghost .sim-step-schedule {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: block;
+    opacity: 0.7;
+    font-size: 11px;
+}
+
+/* 暗色主题：拖拽跟随卡片 */
+[data-theme='dark'] .sim-step-drag-ghost {
+    background: #1e1e1e;
+    border-color: #42a5f5;
+}

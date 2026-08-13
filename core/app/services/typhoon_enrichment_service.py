@@ -305,6 +305,12 @@ class TyphoonEnrichmentService:
         if not isinstance(envelope.event, TyphoonEvent):
             return envelope
 
+        # 模拟事件跳过外部富化：模拟台风已自带完整轨迹/风圈，
+        # 且富化需要 EQSC token，会改写 typhoon_data_mode 为 enriched。
+        metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
+        if metadata.get("simulation") or metadata.get("skip_enrich"):
+            return envelope
+
         # EQSC 未启用或未配置，直接回退
         if not self.is_enabled:
             return envelope
