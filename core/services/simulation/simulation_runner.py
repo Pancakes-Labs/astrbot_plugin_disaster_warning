@@ -148,16 +148,31 @@ class SimulationRunner:
             )
             return [r.to_dict() for r in runs[:limit]]
 
+    # 运行态索引容量上限：超出后按创建时间淘汰最旧记录，避免内存单调增长
+    _MAX_RUNS = 50
+
     def _register_run(self, run: SimulationRun) -> None:
-        """登记运行态。"""
+        """登记运行态（超出容量上限时淘汰最旧记录）。"""
         with self._runs_lock:
             self._runs[run.run_id] = run
+            if len(self._runs) > self._MAX_RUNS:
+                # 按创建时间升序淘汰，保留最近 _MAX_RUNS 条
+                oldest_ids = sorted(
+                    self._runs, key=lambda rid: self._runs[rid].created_at
+                )[: len(self._runs) - self._MAX_RUNS]
+                for rid in oldest_ids:
+                    self._runs.pop(rid, None)
 
     def cancel_run(self, run_id: str) -> bool:
-        """取消执行（只标记取消，由执行协程在步骤间隙检查）。"""
+        """取消执行（只标记取消，由执行协程在步骤间隙检查）。
+
+        已结束的运行返回 False，避免调用方误报"取消成功"。
+        """
         with self._runs_lock:
             run = self._runs.get(run_id)
             if run is None:
+                return False
+            if run.status in ("completed", "failed", "cancelled"):
                 return False
             run.cancelled = True
             return True
@@ -322,6 +337,17 @@ class SimulationRunner:
 
         if not target_session:
             target_session = str(step.params.get("target_session") or "").strip()
+
+        # 会话白名单校验：仅允许推送到已配置的目标会话，避免任意会话标识被滥用
+        if self.session_config_manager is not None:
+            allowed_sessions = set(
+                self.session_config_manager.list_target_sessions() or []
+            )
+            if allowed_sessions and target_session not in allowed_sessions:
+                raise ValueError(
+                    f"目标会话 {target_session!r} 不在已配置的目标会话列表中，拒绝发送"
+                )
+
         if not target_session and self.session_config_manager is not None:
             target_sessions = self.session_config_manager.list_target_sessions()
             target_session = target_sessions[0] if target_sessions else ""

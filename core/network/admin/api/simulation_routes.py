@@ -100,12 +100,18 @@ def _get_storage(disaster_service) -> SimulationStorage:
 def _resolve_target_session(
     config: dict[str, Any], target_session: str = ""
 ) -> str | None:
-    """解析模拟发送目标会话（显式指定优先，否则回退首个配置会话）。"""
+    """解析模拟发送目标会话（显式指定优先，否则回退首个配置会话）。
+
+    白名单校验：显式传入的目标会话必须属于 config["target_sessions"]，
+    不在白名单内返回 None（调用处返回 400），避免把模拟消息推送到任意会话。
+    """
+    target_sessions = [str(s) for s in config.get("target_sessions", [])]
     if target_session:
+        if target_sessions and target_session not in target_sessions:
+            return None
         return target_session
-    target_sessions = config.get("target_sessions", [])
     if target_sessions:
-        return str(target_sessions[0])
+        return target_sessions[0]
     return None
 
 
@@ -329,9 +335,13 @@ def register_simulation_routes(app, disaster_service, config: dict[str, Any]):
                     }
                 )
 
-            # 发送模式：解析目标会话后推送
+            # 发送模式：解析目标会话后推送（含白名单校验）
             target_session = data.get("target_session") or ""
             final_target_session = _resolve_target_session(config, target_session)
+            if target_session and final_target_session is None:
+                return ApiResponse.error(
+                    "目标会话不在已配置的目标会话列表中", status_code=400
+                )
             if not final_target_session:
                 return ApiResponse.error("未配置目标会话", status_code=400)
 
