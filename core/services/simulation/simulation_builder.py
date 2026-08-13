@@ -31,6 +31,7 @@ from ...domain.event_models import (
 )
 from ...domain.event_payload import SourcePayload
 from ...sources.source_catalog import SOURCE_CATALOG, get_source_entry
+from ...sources.source_entry import SourceType
 from ..geo.region_service import region_service
 from .flow_models import (
     DISASTER_TYPE_EARTHQUAKE,
@@ -40,6 +41,15 @@ from .flow_models import (
     SimulationStep,
     generate_sim_id,
 )
+
+# SourceType 枚举 -> 灾种字符串键（与 simulation_schema 同源同语义）
+_SOURCE_TYPE_TO_DISASTER_TYPE: dict[SourceType, str] = {
+    SourceType.EARTHQUAKE_WARNING: DISASTER_TYPE_EARTHQUAKE,
+    SourceType.EARTHQUAKE_INFO: DISASTER_TYPE_EARTHQUAKE,
+    SourceType.TSUNAMI: DISASTER_TYPE_TSUNAMI,
+    SourceType.WEATHER: DISASTER_TYPE_WEATHER,
+    SourceType.TYPHOON: DISASTER_TYPE_TYPHOON,
+}
 
 # 进程内模拟事件递增计数器：避免同秒多次触发时 ID 冲突
 _sim_event_sequence = 0
@@ -369,6 +379,15 @@ class SimulationBuilder:
             valid_sources = ", ".join(sorted(SOURCE_CATALOG.keys()))
             raise ValueError(
                 f"无效的数据源: {step.source_id}，可用数据源: {valid_sources}"
+            )
+
+        # 校验数据源领域类型与灾种的一致性：REST 请求可组合"气象源 + 地震灾种"，
+        # 若不校验会生成 event_type 与 source_id 语义矛盾的事件并进入推送链路。
+        expected_disaster = _SOURCE_TYPE_TO_DISASTER_TYPE.get(source_entry.source_type)
+        if expected_disaster is not None and expected_disaster != step.disaster_type:
+            raise ValueError(
+                f"数据源 {step.source_id} 属于 {expected_disaster} 灾种，"
+                f"与请求的灾种 {step.disaster_type} 不一致"
             )
 
         # 按灾种分派到领域事件工厂回调
