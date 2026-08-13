@@ -20,7 +20,8 @@
             method: 'POST',
             body: flow,
         }),
-        deleteFlow: (flowId) => client.request(`/simulation/flows/${flowId}`, {
+        // 路径参数必须 URL 编码：flowId/runId 若含 / ? # 等字符会破坏请求路径
+        deleteFlow: (flowId) => client.request(`/simulation/flows/${encodeURIComponent(flowId)}`, {
             method: 'DELETE',
         }),
 
@@ -28,8 +29,8 @@
             method: 'POST',
             body: data,
         }),
-        getRun: (runId) => client.request(`/simulation/run/${runId}`),
-        cancelRun: (runId) => client.request(`/simulation/run/${runId}/cancel`, {
+        getRun: (runId) => client.request(`/simulation/run/${encodeURIComponent(runId)}`),
+        cancelRun: (runId) => client.request(`/simulation/run/${encodeURIComponent(runId)}/cancel`, {
             method: 'POST',
         }),
         listRuns: () => client.request('/simulation/runs'),

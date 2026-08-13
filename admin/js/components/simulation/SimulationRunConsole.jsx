@@ -22,15 +22,27 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
     const [expandedStep, setExpandedStep] = useState(null);
     const [cancelling, setCancelling] = useState(false);
     const runIdRef = React.useRef(runId);
+    // 轮询定时器句柄（WebSocket 收到进度后需取消待执行轮询，避免重复请求）
+    const pollTimerRef = React.useRef(null);
 
     runIdRef.current = runId;
+
+    // 归一化执行结果：WebSocket 推送的 msg.data 可能缺少 step_results，
+    // 渲染层直接访问会抛 TypeError 白屏，这里统一兜底为数组。
+    const setRunSafe = (data) => {
+        if (!data) return;
+        setRun({
+            ...data,
+            step_results: Array.isArray(data.step_results) ? data.step_results : [],
+        });
+    };
 
     const fetchRun = async (id) => {
         if (!id) return;
         try {
             const fetcher = getRun || ((rid) => window.DisasterSimulationApi.getRun(rid));
             const result = await fetcher(id);
-            setRun(result);
+            setRunSafe(result);
             return result;
         } catch (e) {
             console.error('查询执行进度失败', e);
@@ -45,7 +57,6 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
             return;
         }
         let cancelled = false;
-        let timer = null;
 
         const poll = async () => {
             const result = await fetchRun(runId);
@@ -56,13 +67,14 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
                 return;
             }
             setPolling(true);
-            timer = setTimeout(poll, 1500);
+            pollTimerRef.current = setTimeout(poll, 1500);
         };
         poll();
 
         return () => {
             cancelled = true;
-            if (timer) clearTimeout(timer);
+            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
         };
     }, [runId]);
 
@@ -76,9 +88,12 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
                 if (!msg || msg.type !== 'simulation_progress') return;
                 const data = msg.data || {};
                 if (runIdRef.current && data.run_id === runIdRef.current) {
-                    setRun(data);
-                    setPolling(false);
-                    // 完成后清除轮询
+                    setRunSafe(data);
+                    // WebSocket 已拿到最新进度，取消待执行的轮询定时器，避免重复请求；
+                    // 若推送中断（非终态），下次 poll 会重新调度。
+                    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+                    pollTimerRef.current = null;
+                    // 完成后保持轮询停止；非终态时等待下次轮询周期
                     if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
                         setPolling(false);
                     } else {
@@ -114,6 +129,8 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
         pending: { label: '待执行', className: 'is-pending' },
         running: { label: '执行中', className: 'is-running' },
         success: { label: '成功', className: 'is-success' },
+        // 后端运行级终态使用 completed，需映射为中文展示并复用成功样式
+        completed: { label: '已完成', className: 'is-success' },
         failed: { label: '失败', className: 'is-failed' },
         cancelled: { label: '已取消', className: 'is-cancelled' },
     };
@@ -281,7 +298,7 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
                     {runIsStale && (
                         <Typography
                             variant="caption"
-                            color="warning"
+                            sx={{ color: "warning.main" }}
                             className="sim-run-console-stale"
                         >
                             ⚠️ 当前事件流步骤已变更，以下结果为旧快照，可能不再对应。可点击结果跳转到对应步骤，或点「清除结果」刷新。

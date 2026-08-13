@@ -45,12 +45,19 @@ function SimulationView() {
 
     // localStorage 即时草稿（防抖保存）
     const draftTimerRef = useRef(null);
+    // 清除草稿时抑制下一次防抖持久化，若不清除定时器会把刚删除的草稿在 1200ms 后重新写回。
+    const suppressNextPersistRef = useRef(false);
 
     /**
      * 防抖写入 localStorage 即时草稿
      */
     const persistDraft = useCallback((flow) => {
         if (!flow) return;
+        // 抑制标记置位时跳过本次持久化（清除草稿后不把旧数据写回）
+        if (suppressNextPersistRef.current) {
+            suppressNextPersistRef.current = false;
+            return;
+        }
         if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
         draftTimerRef.current = setTimeout(() => {
             try {
@@ -77,9 +84,12 @@ function SimulationView() {
     }, []);
 
     /**
-     * 清空 localStorage 即时草稿
+     * 清空 localStorage 即时草稿（同时取消挂起的防抖定时器并抑制下次持久化）
      */
     const clearLocalDraft = useCallback(() => {
+        if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+        suppressNextPersistRef.current = true;
         try {
             localStorage.removeItem(SIM_DRAFT_LS_KEY);
         } catch (e) {
@@ -562,7 +572,9 @@ function SimulationView() {
                 <FormControl size="small" className="sim-view-draft-select">
                     <InputLabel>草稿箱</InputLabel>
                     <Select
-                        value={currentFlow?.flow_id || ''}
+                        // 当前流可能来自 localStorage 即时草稿或新建草稿（flow_id 不在 flows 中），
+                        // 越界时回退为空值，避免 MUI out-of-range 警告与空白显示
+                        value={flows.some(f => f.flow_id === currentFlow?.flow_id) ? currentFlow.flow_id : ''}
                         label="草稿箱"
                         displayEmpty
                         onChange={(e) => {

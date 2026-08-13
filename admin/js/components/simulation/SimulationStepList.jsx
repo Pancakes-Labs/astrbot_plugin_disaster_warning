@@ -248,9 +248,26 @@ function SimulationStepList({ steps, onChange, onSelect, schema, selectedStepId,
             }, 80);
         };
 
+        const onBlur = () => {
+            // 窗口失焦兜底：切换标签页/系统弹窗抢焦点时浏览器不派发 pointerup，
+            // 若不结束拖拽，ghost 会一直停留在页面上。此时按未激活处理结束拖拽。
+            if (rafRef.current) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+            }
+            dragIndexRef.current = null;
+            overIndexRef.current = null;
+            dragActiveRef.current = false;
+            setDragActive(false);
+            setDragIndex(null);
+            setDragPos(null);
+            setOverIndex(null);
+        };
+
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
+        window.addEventListener('blur', onBlur);
         // 兜底：指针可能因 iframe/滚动条等未触发 window 级 pointerup，
         // 再挂一层 document 级监听，保证拖拽必然能结束
         document.addEventListener('pointerup', onUp);
@@ -263,6 +280,7 @@ function SimulationStepList({ steps, onChange, onSelect, schema, selectedStepId,
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
+            window.removeEventListener('blur', onBlur);
             document.removeEventListener('pointerup', onUp);
             document.removeEventListener('pointercancel', onUp);
         };
@@ -340,11 +358,21 @@ function SimulationStepList({ steps, onChange, onSelect, schema, selectedStepId,
                                 dragShiftClass,
                             ].filter(Boolean).join(' ')}
                             title={fullHint}
+                            role="button"
+                            tabIndex={0}
                             onPointerDown={(e) => handlePointerDown(e, index)}
                             onClick={() => {
                                 // 整卡点击选中：拖拽激活过则抑制该次 click（拖后不误选）
                                 if (suppressClickRef.current) return;
                                 onSelect && onSelect(step.step_id);
+                            }}
+                            onKeyDown={(e) => {
+                                // 键盘可访问性：Enter / Space 触发选中（与鼠标点击一致）
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    if (suppressClickRef.current) return;
+                                    onSelect && onSelect(step.step_id);
+                                }
                             }}
                         >
                             {/* 步骤序号（兼作拖拽手柄，点击整卡其他区域同样可拖） */}
