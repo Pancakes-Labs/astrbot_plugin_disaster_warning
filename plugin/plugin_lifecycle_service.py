@@ -189,6 +189,20 @@ class PluginLifecycleService:
                 # 会话已关闭，清除懒加载引用，避免停机后残留已失效的服务实例
                 self.plugin._weather_station_query_service = None
 
+        # 降水量预报客户端若已懒加载过，需显式关闭其 aiohttp 会话，
+        # 避免插件重载时残留未关闭连接导致会话泄漏。
+        precipitation_client = getattr(self.plugin, "_precipitation_client", None)
+        if precipitation_client is not None:
+            try:
+                await precipitation_client.close()
+            except Exception as pce:
+                logger.debug(
+                    f"[灾害预警] 降水量预报客户端会话关闭时出错（已忽略）: {pce}"
+                )
+            finally:
+                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的客户端实例
+                self.plugin._precipitation_client = None
+
         if self.plugin.telemetry:
             try:
                 await self.plugin.telemetry.close()
