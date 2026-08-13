@@ -168,8 +168,55 @@ body.dark-theme .top-bar::before {
         scrollbar-width: thin;
     }
 
+    /* 侧栏页脚：不再整块隐藏，改为按钮横向排布 + 隐藏求星文案，
+       保留「打开插件文件目录」与 GitHub 两个入口在移动端的可达性 */
     .sidebar > div:nth-child(3) {
-        display: none; /* 侧边栏最下方求星GitHub条直接隐藏 */
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 0;
+    }
+
+    /* 两个按钮在移动端等宽并排，充分利用横向空间 */
+    .sidebar > div:nth-child(3) > .sidebar-plugin-dir-button {
+        flex: 1 1 0;
+        min-width: 0;
+        margin-bottom: 0;
+        padding: 8px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card__icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* 移动端 GitHub 卡片文本压缩为单行省略，防止两行撑高按钮 */
+    .sidebar > div:nth-child(3) > .github-btn .github-card__authors {
+        font-size: 0.7rem !important;
+        max-width: none;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card__version {
+        display: none !important;
+    }
+
+    /* 移动端直接隐藏求星文案，避免冗余占位 */
+    .sidebar > div:nth-child(3) > .sidebar-star-hint {
+        display: none !important;
     }
 
     /* 此时顶部条不再绝对定位悬浮，而是自然占位堆叠，不需要遮罩 */
@@ -232,6 +279,26 @@ body.dark-theme .top-bar::before {
         font-size: 0.7rem;
     }
 
+    /* 超小屏：按钮文字缩小，防止「打开插件文件目录」被截断 */
+    .sidebar > div:nth-child(3) > .sidebar-plugin-dir-button {
+        font-size: 11px;
+        padding: 8px;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card {
+        padding: 8px;
+        gap: 6px;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card__icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card__authors {
+        font-size: 0.65rem !important;
+    }
+
     .top-bar {
         padding: 10px 12px;
         min-height: 56px;
@@ -264,6 +331,24 @@ body.dark-theme .top-bar::before {
     .sidebar-logo-img {
         width: 32px;
         height: 32px;
+    }
+
+    /* 极窄屏：footer 两个按钮改回纵向堆叠，避免横向空间不足被严重挤压 */
+    .sidebar > div:nth-child(3) {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .sidebar > div:nth-child(3) > .sidebar-plugin-dir-button,
+    .sidebar > div:nth-child(3) > .github-btn {
+        width: 100%;
+        flex: none;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn .github-card__authors {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
     }
 
     .top-bar {
@@ -302,6 +387,18 @@ body.dark-theme .top-bar::before {
 
     .sidebar > div:nth-child(3) {
         display: block; /* 恢复显示底部GitHub条 */
+    }
+
+    /* 220px 窄侧栏下恢复按钮纵向堆叠，避免两个入口被横向挤压 */
+    .sidebar > div:nth-child(3) > .sidebar-plugin-dir-button {
+        flex: none;
+        width: 100%;
+        margin-bottom: 12px;
+    }
+
+    .sidebar > div:nth-child(3) > .github-btn {
+        flex: none;
+        width: 100%;
     }
 
     .top-bar {
