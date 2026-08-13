@@ -40,6 +40,12 @@
             body: data,
         }),
 
+        // 实时推文预览：复用模拟构建 + 消息 + 规则链链路
+        preview: (data) => client.request('/simulation/preview', {
+            method: 'POST',
+            body: data,
+        }),
+
         suggestWeatherCode: (query) => client.request('/simulation/weather-code-suggest', {
             method: 'GET',
             query,
