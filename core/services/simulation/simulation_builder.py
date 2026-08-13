@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ....utils.converters import ScaleConverter
+from ...domain.earthquake.cmt_normalize import parse_nodal_plane
 from ...domain.event_identity import EventIdentity
 from ...domain.event_models import (
     EarthquakeEvent,
@@ -483,6 +484,8 @@ class SimulationBuilder:
         place_name = str(params.get("place_name") or "").strip()
         if not place_name:
             place_name = region_service.translate_place_name("模拟震中", lat, lon)
+        # 省份/行政区划：对齐真实解析器（china_eew_parser），驱动推文标题的『XX地震局』
+        province = str(params.get("province") or "").strip() or None
 
         domain_event = EarthquakeEvent(
             occurred_at=now,
@@ -491,6 +494,7 @@ class SimulationBuilder:
             depth=depth,
             magnitude=magnitude,
             place_name=place_name,
+            province=province,
             metadata={},
         )
 
@@ -576,7 +580,10 @@ class SimulationBuilder:
                             group = {
                                 "range_text": range_text,
                                 "scale_from": scale_from or 0,
-                                "emoji": "⚪",
+                                # 与真实解析链路一致：按 P2P 档位选择震度色板 emoji，
+                                "emoji": ScaleConverter.get_p2p_scale_emoji(
+                                    scale_from, scale_to
+                                ),
                                 "areas": [],
                             }
                             groups.append(group)
@@ -712,12 +719,15 @@ class SimulationBuilder:
                     "centroid_depth": str(
                         params.get("centroid_depth") or max(0.0, depth - 2.0)
                     ).strip(),
-                    "nodal_plane1": {"strike": strike, "dip": dip, "rake": rake},
-                    "nodal_plane2": {
-                        "strike": strike2,
-                        "dip": dip2,
-                        "rake": rake2,
-                    },
+                    # 与真实解析链路一致：通过 parse_nodal_plane 派生断层类型
+                    "nodal_plane1": parse_nodal_plane(
+                        {"strike": strike, "dip": dip, "rake": rake}
+                    )
+                    or {"strike": strike, "dip": dip, "rake": rake},
+                    "nodal_plane2": parse_nodal_plane(
+                        {"strike": strike2, "dip": dip2, "rake": rake2}
+                    )
+                    or {"strike": strike2, "dip": dip2, "rake": rake2},
                     "beachball_ready": True,
                     "is_supplement_product": True,
                 }
