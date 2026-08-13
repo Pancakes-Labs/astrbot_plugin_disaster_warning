@@ -33,6 +33,7 @@ from ...core.message.presenters.weather_alarm_code_map import (
 from ...core.message.push.message_build_service import MessageBuildService
 from ...core.message.render.beachball_renderer import BeachballRenderer
 from ...core.message.render.jma_hypo_renderer import JmaHypoRenderer
+from ...core.network.http.nmc_precipitation_client import NmcPrecipitationClient
 from ...core.network.http.nmc_radar_client import NmcRadarClient
 from ...core.services.query.aqi_query_service import (
     query_aqi,
@@ -50,6 +51,12 @@ from ...core.services.query.jma_hypo_query_presenter import (
 from ...core.services.query.jma_hypo_query_service import (
     query_jma_hypo_list,
     query_jma_hypo_plot,
+)
+from ...core.services.query.precipitation_query_service import (
+    query_precip_gif,
+    query_precip_image,
+    resolve_frame_hour,
+    resolve_product,
 )
 from ...core.services.query.quake_text_extractor import (
     extract_quoted_quake_params,
@@ -1626,6 +1633,129 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
             )
             yield quoted_plain_result(self.plugin, event, f"❌ 雷达列表查询失败: {e}")
+
+    # ------------------------------------------------------------------
+    # 降水量预报查询（/降水量预报 /降水量预报动图）
+    # ------------------------------------------------------------------
+    def _get_precipitation_client(self) -> NmcPrecipitationClient:
+        """获取降水量预报客户端实例（懒加载并缓存到插件上，复用会话）。"""
+        client = getattr(self.plugin, "_precipitation_client", None)
+        if client is None:
+            client = NmcPrecipitationClient()
+            self.plugin._precipitation_client = client
+        return client
+
+    async def handle_query_precipitation(
+        self,
+        event,
+        product_keyword: str | None = None,
+        hour_keyword: str | None = None,
+    ):
+        """处理 /降水量预报 <产品> [时次] 命令：查询单张降水量预报图。
+
+        产品：24h（默认）/ 6h
+        时次：数字（如 72）或自然语言（明天/后天），默认最新一帧
+        产品参数无法识别时，尝试将该参数当作时次关键词解析。
+        """
+        try:
+            product = resolve_product(product_keyword)
+            if product is None:
+                # 产品参数无法识别（如「/降水量预报 明天」），回退 24h，
+                # 并把该参数当作时次关键词解析，避免静默吞掉时次。
+                product = resolve_product("24h")
+                hour_keyword = product_keyword if not hour_keyword else hour_keyword
+            hour = resolve_frame_hour(hour_keyword, product)
+
+            client = self._get_precipitation_client()
+            result = await query_precip_image(
+                client=client,
+                product=product,
+                hour=hour,
+            )
+
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 降水量预报查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            image_comp = Comp.Image.fromBase64(result["image_base64"])
+
+            await self._track_command_feature(
+                "command_query_precipitation",
+                {
+                    "success": True,
+                    "product": result.get("product"),
+                    "fffmm": result.get("fffmm"),
+                    "nearest": bool(result.get("nearest")),
+                },
+            )
+
+            # 只发送降水量预报图片，不附带文字说明
+            yield event.chain_result(
+                self.plugin._with_quote_reply(
+                    event,
+                    [image_comp],
+                )
+            )
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 降水量预报查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(self.plugin, event, f"❌ 降水量预报查询失败: {e}")
+
+    async def handle_query_precipitation_gif(
+        self,
+        event,
+        product_keyword: str | None = None,
+    ):
+        """处理 /降水量预报动图 <产品> 命令：查询全部时次合成循环 GIF。
+
+        产品：24h（默认）/ 6h
+        GIF 每秒一帧（duration=1000ms），从早到晚循环播放。
+        """
+        try:
+            product = resolve_product(product_keyword) or resolve_product("24h")
+
+            client = self._get_precipitation_client()
+            result = await query_precip_gif(client=client, product=product)
+
+            if not result.get("success"):
+                yield quoted_plain_result(
+                    self.plugin,
+                    event,
+                    f"❌ 降水量预报动图查询失败：{result.get('error', '未知错误')}",
+                )
+                return
+
+            image_comp = Comp.Image.fromBase64(result["image_base64"])
+
+            await self._track_command_feature(
+                "command_query_precipitation_gif",
+                {
+                    "success": True,
+                    "product": result.get("product"),
+                    "frames": result.get("frames"),
+                    "degraded": bool(result.get("degraded")),
+                },
+            )
+
+            # 只发送降水量预报动图，不附带文字说明
+            yield event.chain_result(
+                self.plugin._with_quote_reply(
+                    event,
+                    [image_comp],
+                )
+            )
+        except Exception as e:
+            logger.error(
+                f"[灾害预警] 降水量预报动图查询失败: {e}\n{traceback.format_exc()}"
+            )
+            yield quoted_plain_result(
+                self.plugin, event, f"❌ 降水量预报动图查询失败: {e}"
+            )
 
     # ------------------------------------------------------------------
     # 实况排行查询（/气温排行 /降水排行 /风速排行）
