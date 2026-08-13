@@ -489,19 +489,17 @@ class DisasterWarningPlugin(Star):
         arg3: str = None,
         arg4: str = None,
         arg5: str = None,
-        disaster_type: str = "earthquake",
     ):
         """模拟灾害事件测试预警响应。
 
-        用法：
-        - /灾害预警模拟 纬度 经度 震级 [深度] [数据源]   (地震，默认)
-        - /灾害预警模拟 海啸 [标题] [等级] [位置]         (海啸)
-        - /灾害预警模拟 气象 [标题] [正文] [预警编码]     (气象预警)
-        - /灾害预警模拟 台风 [编号] [名称] [强度]         (台风)
+        用法（数据源置于末尾，灾种由数据源自动决定）：
+        - /灾害预警模拟 纬度 经度 震级 [深度] [数据源]   (地震源，默认)
+        - /灾害预警模拟 标题 等级 位置 [源震级] [数据源] (海啸源)
+        - /灾害预警模拟 标题 正文 [预警编码] [数据源]   (气象源)
+        - /灾害预警模拟 编号 名称 [强度] [数据源]       (台风源)
         """
         async for result in self._query_command_service.handle_simulate_disaster(
             event,
-            disaster_type=disaster_type,
             arg1=arg1,
             arg2=arg2,
             arg3=arg3,

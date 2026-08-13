@@ -877,7 +877,6 @@ class PluginQueryCommandService(CommandTelemetryMixin):
     async def handle_simulate_disaster(
         self,
         event,
-        disaster_type: str = DISASTER_TYPE_EARTHQUAKE,
         arg1: str = None,
         arg2: str = None,
         arg3: str = None,
@@ -891,11 +890,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
     ):
         """处理模拟灾害命令。
 
-        参数按数据源动态解析：
+        参数按数据源动态解析（数据源置于末尾 arg5，决定灾种与参数格式）：
         - 地震源: arg1=纬度 arg2=经度 arg3=震级 arg4=深度 arg5=数据源
-        - 海啸源: arg1=标题 arg2=等级 arg3=位置 arg4=源震级
-        - 气象源: arg1=标题 arg2=正文 arg3=预警编码
-        - 台风源: arg1=编号 arg2=名称 arg3=强度
+        - 海啸源: arg1=标题 arg2=等级 arg3=位置 arg4=源震级 arg5=数据源
+        - 气象源: arg1=标题 arg2=正文 arg3=预警编码 arg5=数据源
+        - 台风源: arg1=编号 arg2=名称 arg3=强度 arg5=数据源
 
         所有灾种统一走完整规则链评估，通过后推送展示（含 [模拟] 前缀）。
         """
@@ -930,7 +929,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 )
                 return
 
-            # --- 按数据源动态解析灾种（决定参数格式） ---
+            # --- 按数据源动态解析灾种（决定参数格式，命令层不再传灾种） ---
             source_type = source_entry.source_type.value
             if source_type == "tsunami":
                 disaster_type = DISASTER_TYPE_TSUNAMI
@@ -993,11 +992,20 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 }
             # 海啸：arg1=标题 arg2=等级 arg3=位置 arg4=源震级
             elif disaster_type == DISASTER_TYPE_TSUNAMI:
+                tsunami_magnitude = _safe_arg_float(arg4)
+                # 用户显式传了参数但解析失败 → 报错而非静默回退（与地震分支一致）
+                if arg4 and tsunami_magnitude is None:
+                    yield _quoted_plain_result(
+                        "❌ 海啸模拟参数无效，请检查：源震级 应为数字"
+                    )
+                    return
                 params = {
                     "title": arg1 or "海啸警报",
                     "level": arg2 or "警报",
                     "place_name": arg3 or "模拟海域",
-                    "magnitude": float(arg4) if arg4 else 7.5,
+                    "magnitude": tsunami_magnitude
+                    if tsunami_magnitude is not None
+                    else 7.5,
                 }
             # 气象：arg1=标题 arg2=正文 arg3=预警编码
             elif disaster_type == DISASTER_TYPE_WEATHER:
