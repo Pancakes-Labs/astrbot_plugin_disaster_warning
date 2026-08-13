@@ -34,7 +34,12 @@ def _next_flow_sequence() -> int:
 
 def generate_sim_id(prefix: str = "sim") -> str:
     """生成稳定的模拟标识（时间戳 + 序号 + 短随机，避免跨重启冲突）。"""
-    return f"{prefix}_{int(datetime.now(timezone.utc).timestamp())}_{_next_flow_sequence()}"
+    # 随机分量保证插件重载后同秒内也不会与历史 ID 冲突：
+    # 进程内序号在重启后从 0 重新计数，仅靠"时间戳 + 序号"可能重复。
+    return (
+        f"{prefix}_{int(datetime.now(timezone.utc).timestamp())}_"
+        f"{_next_flow_sequence()}_{uuid.uuid4().hex[:6]}"
+    )
 
 
 @dataclass(slots=True)
@@ -119,25 +124,45 @@ class SimulationStep:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimulationStep:
-        """从字典恢复步骤（兼容缺省字段）。"""
+        """从字典恢复步骤（兼容缺省字段，非法数值安全回退默认值）。
+
+        该方法直接消费 REST 请求体与磁盘草稿，数值字段若直接 float()/int()，
+        非法输入（如 "abc"、{}）会抛异常：路由层收敛为 500、磁盘侧整包重置。
+        因此统一做安全转换：解析失败时回退到缺省值。
+        """
         data = dict(data or {})
+
+        def _safe_int(value: Any, default: int) -> int:
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_float(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         return cls.create(
             step_id=str(data.get("step_id") or uuid.uuid4().hex[:12]),
             disaster_type=str(data.get("disaster_type") or "earthquake"),
             source_id=str(data.get("source_id") or ""),
             params=dict(data.get("params") or {}),
-            report_num=int(data.get("report_num") or 1),
+            report_num=_safe_int(data.get("report_num"), 1),
             is_final=bool(data.get("is_final", False)),
             event_key=str(data.get("event_key") or ""),
             event_time=str(data.get("event_time") or ""),
-            time_offset_seconds=float(data.get("time_offset_seconds") or 0.0),
-            event_time_delay_seconds=float(data.get("event_time_delay_seconds") or 0.0),
-            update_time=str(data.get("update_time") or ""),
-            update_time_offset_seconds=float(
-                data.get("update_time_offset_seconds") or 0.0
+            time_offset_seconds=_safe_float(data.get("time_offset_seconds"), 0.0),
+            event_time_delay_seconds=_safe_float(
+                data.get("event_time_delay_seconds"), 0.0
             ),
-            update_time_delay_seconds=float(
-                data.get("update_time_delay_seconds") or 0.0
+            update_time=str(data.get("update_time") or ""),
+            update_time_offset_seconds=_safe_float(
+                data.get("update_time_offset_seconds"), 0.0
+            ),
+            update_time_delay_seconds=_safe_float(
+                data.get("update_time_delay_seconds"), 0.0
             ),
         )
 
@@ -196,12 +221,19 @@ class SimulationFlow:
 
         def _parse_dt(value: Any) -> datetime:
             if isinstance(value, datetime):
+                # 无时区信息时统一补齐 UTC，避免与 aware datetime 混合比较抛 TypeError
+                if value.tzinfo is None:
+                    return value.replace(tzinfo=timezone.utc)
                 return value
             if isinstance(value, str):
                 try:
-                    return datetime.fromisoformat(value)
+                    parsed = datetime.fromisoformat(value)
                 except (ValueError, TypeError):
                     pass
+                else:
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    return parsed
             return datetime.now(timezone.utc)
 
         return cls(
