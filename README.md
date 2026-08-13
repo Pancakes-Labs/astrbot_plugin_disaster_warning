@@ -1634,7 +1634,7 @@ flowchart TB
         I2["事件接口<br/>/api/events / events/major / weather/query"]
         I3["配置接口<br/>/api/config-schema / full-config / session-config"]
         I4["通知与文档接口<br/>/api/notifications / markdown-files"]
-        I5["运维接口<br/>/api/simulate / reconnect / maintenance"]
+        I5["运维接口<br/>/api/simulation / reconnect / maintenance"]
         I6["实时通道<br/>/ws<br/>全量快照 + 增量事件推送"]
     end
 
