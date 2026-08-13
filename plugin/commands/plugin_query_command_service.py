@@ -1637,6 +1637,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
     # ------------------------------------------------------------------
     # 降水量预报查询（/降水量预报 /降水量预报动图）
     # ------------------------------------------------------------------
+    def _get_precipitation_client(self) -> NmcPrecipitationClient:
+        """获取降水量预报客户端实例（懒加载并缓存到插件上，复用会话）。"""
+        client = getattr(self.plugin, "_precipitation_client", None)
+        if client is None:
+            client = NmcPrecipitationClient()
+            self.plugin._precipitation_client = client
+        return client
+
     async def handle_query_precipitation(
         self,
         event,
@@ -1647,20 +1655,23 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
         产品：24h（默认）/ 6h
         时次：数字（如 72）或自然语言（明天/后天），默认最新一帧
+        产品参数无法识别时，尝试将该参数当作时次关键词解析。
         """
         try:
-            product = resolve_product(product_keyword) or resolve_product("24h")
+            product = resolve_product(product_keyword)
+            if product is None:
+                # 产品参数无法识别（如「/降水量预报 明天」），回退 24h，
+                # 并把该参数当作时次关键词解析，避免静默吞掉时次。
+                product = resolve_product("24h")
+                hour_keyword = product_keyword if not hour_keyword else hour_keyword
             hour = resolve_frame_hour(hour_keyword, product)
 
-            client = NmcPrecipitationClient()
-            try:
-                result = await query_precip_image(
-                    client=client,
-                    product=product,
-                    hour=hour,
-                )
-            finally:
-                await client.close()
+            client = self._get_precipitation_client()
+            result = await query_precip_image(
+                client=client,
+                product=product,
+                hour=hour,
+            )
 
             if not result.get("success"):
                 yield quoted_plain_result(
@@ -1708,11 +1719,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         try:
             product = resolve_product(product_keyword) or resolve_product("24h")
 
-            client = NmcPrecipitationClient()
-            try:
-                result = await query_precip_gif(client=client, product=product)
-            finally:
-                await client.close()
+            client = self._get_precipitation_client()
+            result = await query_precip_gif(client=client, product=product)
 
             if not result.get("success"):
                 yield quoted_plain_result(
