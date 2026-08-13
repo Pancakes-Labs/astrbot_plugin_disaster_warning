@@ -490,11 +490,18 @@ function SimulationView() {
         }
         const prev = steps[idx - 1];
         const curr = steps[idx];
+        // 同一事件键必须为同一灾种：不同灾种共享事件 ID 会导致
+        // 构建器生成语义矛盾的事件（如地震与台风共用一个事件）
+        if (prev.disaster_type !== curr.disaster_type) {
+            showToast('无法归并：相邻步骤灾种不一致，同一事件键必须为同一灾种', 'warning');
+            return;
+        }
         const nextKey = prev.event_key || `ev${Date.now()}`;
-        // 若前一步无事件键，先给它补一个
+        // 当前步骤报数 = 前一步报数 + 1（与"自动递增第几报"的声明一致）；
+        // 若前一步无事件键，先给它补一个并固定为第 1 报
         const merged = steps.map((s, i) => {
-            if (i === idx - 1 && !s.event_key) return { ...s, event_key: nextKey };
-            if (i === idx) return { ...s, event_key: nextKey };
+            if (i === idx - 1 && !s.event_key) return { ...s, event_key: nextKey, report_num: 1 };
+            if (i === idx) return { ...s, event_key: nextKey, report_num: (prev.report_num || 1) + 1 };
             return s;
         });
         handleStepsChange(merged);
