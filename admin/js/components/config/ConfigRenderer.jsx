@@ -4,16 +4,14 @@ const { useRef, useLayoutEffect, useEffect } = React;
 /**
  * 核心配置渲染器组件 (ConfigRenderer)
  * 作为全局配置管理视图的主入口，它不进行具体的业务逻辑计算，
- * 而是依靠 `useConfigEditor` ViewModel 钩子接管并消费包括：
- * 加载骨架屏、配置异常排版、全局/会话差异化模式切换、展开折叠列表状态、表单保存、草稿控制、以及滚动条记忆持久化等全部状态。
+ * 而是消费由父级（ConfigView）提升上来的 `useConfigEditor` ViewModel 状态，
+ * 负责：加载骨架屏、配置异常排版、展开折叠列表状态、表单保存、草稿控制、以及滚动条记忆持久化等全部渲染细节。
+ *
+ * @param {Object} props
+ * @param {Object} props.editor useConfigEditor 返回的编辑器状态与控制器集合
+ * @param {Function} [props.onConfigDraftChange] 草稿变化时上报给父级（供推文预览联动）
  */
-function ConfigRenderer() {
-    // 实例化轻量 Toast 控制器
-    const { showToast } = useToast();
-    
-    // 驱动配置视图状态的主驱动 ViewModel Hook
-    const editor = useConfigEditor(showToast);
-    
+function ConfigRenderer({ editor, onConfigDraftChange } = {}) {
     // 指向可滚动主区域容器的 React Ref，用于控制和恢复滚动条的垂直位移
     const scrollContainerRef = useRef(null);
 
@@ -27,12 +25,7 @@ function ConfigRenderer() {
         saving,
         loadError,
         mode,
-        setMode,
-        sessions,
         selectedSession,
-        setSelectedSession,
-        sessionLoading,
-        selectedSessionMeta,
         visibleSchema,
         initializePage,
         handleToggleExpand,
@@ -44,6 +37,18 @@ function ConfigRenderer() {
         restoreScrollPosition,
         bindScrollPersistence,
     } = editor;
+
+    // 上报配置草稿变化给父级（ConfigView 的实时推文预览面板消费）
+    useEffect(() => {
+        if (typeof onConfigDraftChange === 'function' && !loading) {
+            onConfigDraftChange({
+                config,
+                mode,
+                selectedSession,
+                ready: Boolean(schema && config),
+            });
+        }
+    }, [config, mode, selectedSession, schema, loading, onConfigDraftChange]);
 
     // 布局同步副作用：在加载完毕或切换模式/会话后，同步恢复先前滚动条所处的高度，杜绝闪烁和视线丢失
     useLayoutEffect(() => {
@@ -83,18 +88,18 @@ function ConfigRenderer() {
                         {loadError || '未能从服务端获取有效的配置 Schema 或配置对象。'}
                     </Typography>
                     <Box className="config-renderer-error-card__actions">
-                        <Button 
-                            variant="contained" 
-                            onClick={initializePage} 
-                            startIcon={<span>🔄</span>} 
+                        <Button
+                            variant="contained"
+                            onClick={initializePage}
+                            startIcon={<span>🔄</span>}
                             className="config-renderer-error-card__btn"
                         >
                             重新加载配置
                         </Button>
-                        <Button 
-                            variant="outlined" 
-                            onClick={() => { setMode('global'); setSelectedSession(''); initializePage(); }} 
-                            startIcon={<span>🏠</span>} 
+                        <Button
+                            variant="outlined"
+                            onClick={() => { setMode('global'); setSelectedSession(''); initializePage(); }}
+                            startIcon={<span>🏠</span>}
                             className="config-renderer-error-card__btn"
                         >
                             回到全局配置重试
@@ -119,18 +124,7 @@ function ConfigRenderer() {
 
     return (
         <Box className="config-renderer-shell">
-            {/* 顶栏：全局配置与特定会话筛选切换条 */}
-            <ConfigModeToolbar
-                mode={mode}
-                setMode={setMode}
-                sessions={sessions}
-                selectedSession={selectedSession}
-                setSelectedSession={setSelectedSession}
-                selectedSessionMeta={selectedSessionMeta}
-                sessionLoading={sessionLoading}
-            />
-
-            {/* 中间：带有滚动持久化的可拖拽表单滚动区域 */}
+            {/* 中间：带有滚动持久化的可拖拽表单滚动区域（模式切换已提升至顶栏，此处不再渲染工具栏层） */}
             <Box ref={scrollContainerRef} className="config-renderer-scroll-area">
                 <Box className="config-renderer-field-list">
                     {/* 会话差异配置模式：置顶渲染备注名输入框 */}
