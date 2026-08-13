@@ -89,14 +89,15 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
                 const data = msg.data || {};
                 if (runIdRef.current && data.run_id === runIdRef.current) {
                     setRunSafe(data);
-                    // WebSocket 已拿到最新进度，取消待执行的轮询定时器，避免重复请求；
-                    // 若推送中断（非终态），下次 poll 会重新调度。
-                    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-                    pollTimerRef.current = null;
-                    // 完成后保持轮询停止；非终态时等待下次轮询周期
+                    // 终态：停止轮询
                     if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                        if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+                        pollTimerRef.current = null;
                         setPolling(false);
                     } else {
+                        // 非终态：保留既有轮询定时器。轮询是 WebSocket 中断时的
+                        // 状态恢复路径，若在此取消且不重新调度，WebSocket 断连后
+                        // 控制台会一直显示过期状态。
                         setPolling(true);
                     }
                 }
