@@ -63,7 +63,6 @@ _PRODUCT_ALIASES = {
 
 # 自然语言时次（仅对 24h 产品语义明确）
 _NATURAL_HOURS = {
-    "今天": 0,  # 今天 → 最新（实际取最近一帧）
     "明天": 24,
     "后天": 48,
     "大后天": 72,
@@ -93,7 +92,8 @@ def resolve_frame_hour(
     if not keyword:
         return None
     text = str(keyword).strip().lower()
-    if text in ("最新", "latest"):
+    # 「今天/最新/latest」语义均为取最近一帧，直接返回 None（不触发 nearest 标记）
+    if text in ("最新", "latest", "今天"):
         return None
     if text.isdigit():
         return int(text)
@@ -183,8 +183,9 @@ async def build_precip_gif_result(
     """用多帧合成循环 GIF 并返回结果。
 
     frames 与 data_list 必须按同一帧序对应（由调用方保证）。
-    frames 按时间正序（时效递增，最新时次在前，即 frames[0] 为最近一帧）。
-    降级单图时取最近一帧（时间序列第一个）。
+    frames 按页面顺序（时效递增：24h 为 024→168，6h 为 006→024），
+    frames[0] 为最近起报的最短时效帧（有效时间最早），即默认单图的取帧语义。
+    降级单图时取 frames[0]。
     """
     if not frames:
         return {"success": False, "error": "无可用降水图像帧"}
@@ -193,7 +194,7 @@ async def build_precip_gif_result(
             product=product, frame=frames[0], image_bytes=data_list[0]
         )
 
-    gif_bytes = await _render_gif(data_list)
+    gif_bytes, actual_frames = await _render_gif(data_list)
     if gif_bytes is None:
         return _degraded_single_result(
             product=product, frame=frames[0], image_bytes=data_list[0]
@@ -209,7 +210,7 @@ async def build_precip_gif_result(
         "name": product.get("name"),
         "time": _format_bj_time(valid) if valid else "",
         "init_time": _format_bj_time(init) if init else "",
-        "frames": len(frames),
+        "frames": actual_frames,
         "duration_ms": GIF_DURATION_MS,
         "image_base64": base64.b64encode(gif_bytes).decode(),
     }
@@ -231,40 +232,55 @@ def _degraded_single_result(
     return result
 
 
-def _render_gif_sync(frames: list[bytes]) -> bytes | None:
-    """同步合成循环 GIF（Pillow CPU 密集操作，每秒一帧）。"""
+def _render_gif_sync(frames: list[bytes]) -> tuple[bytes | None, int]:
+    """同步合成循环 GIF（Pillow CPU 密集操作，每秒一帧）。
+
+    Returns:
+        (gif_bytes, actual_frame_count)：合成失败返回 (None, 0)。
+        actual_frame_count 为实际成功合成进 GIF 的帧数（可能小于输入帧数）。
+    """
     pil_frames = []
     for data in frames:
         try:
             img = Image.open(io.BytesIO(data))
-            img = img.convert("P", palette=Image.Palette.ADAPTIVE, colors=256)
+            img = img.convert("P", palette=Image.ADAPTIVE, colors=256)
             pil_frames.append(img)
         except Exception as e:
             logger.warning(f"[灾害预警] 降水帧解析失败: {e}")
     if not pil_frames:
-        return None
+        return None, 0
 
     buf = io.BytesIO()
-    # 统一各帧尺寸，保证 GIF 可正常播放
-    base_w, base_h = pil_frames[0].size
-    normalized = []
-    for img in pil_frames:
-        if img.size != (base_w, base_h):
-            img = img.resize((base_w, base_h), Image.Resampling.LANCZOS)
-        normalized.append(img)
-    normalized[0].save(
-        buf,
-        format="GIF",
-        save_all=True,
-        append_images=normalized[1:],
-        duration=GIF_DURATION_MS,
-        loop=0,
-        optimize=False,
-    )
-    return buf.getvalue()
+    try:
+        # 统一各帧尺寸，保证 GIF 可正常播放。
+        # 先在 RGB 模式缩放，再转回 P 模式，避免 P 模式下 LANCZOS 被降级为 NEAREST。
+        base_w, base_h = pil_frames[0].size
+        normalized = []
+        for img in pil_frames:
+            if img.size != (base_w, base_h):
+                img = (
+                    img.convert("RGB")
+                    .resize((base_w, base_h), Image.Resampling.LANCZOS)
+                    .convert("P", palette=Image.ADAPTIVE, colors=256)
+                )
+            normalized.append(img)
+        normalized[0].save(
+            buf,
+            format="GIF",
+            save_all=True,
+            append_images=normalized[1:],
+            duration=GIF_DURATION_MS,
+            loop=0,
+            optimize=False,
+        )
+        return buf.getvalue(), len(normalized)
+    except Exception as e:
+        # 尺寸统一或保存阶段异常时兜底返回 None，由调用方降级为单图
+        logger.warning(f"[灾害预警] 降水 GIF 合成失败: {e}")
+        return None, 0
 
 
-async def _render_gif(frames: list[bytes]) -> bytes | None:
+async def _render_gif(frames: list[bytes]) -> tuple[bytes | None, int]:
     """异步包装 GIF 合成，避免阻塞事件循环线程。"""
     return await asyncio.to_thread(_render_gif_sync, frames)
 
