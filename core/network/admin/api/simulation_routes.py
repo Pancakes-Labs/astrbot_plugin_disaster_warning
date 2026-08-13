@@ -31,6 +31,7 @@ except ImportError:
 
 from ....services.simulation.flow_models import SimulationFlow, SimulationStep
 from ....services.simulation.simulation_builder import SimulationBuilder
+from ....services.simulation.simulation_preview import build_config_preview
 from ....services.simulation.simulation_runner import SimulationRunner
 from ....services.simulation.simulation_schema import (
     build_simulation_schema,
@@ -418,4 +419,80 @@ def register_simulation_routes(app, disaster_service, config: dict[str, Any]):
             )
         except Exception as e:
             logger.error(f"[灾害预警] 单步模拟执行失败: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+
+    # ------------------------------------------------------------------
+    # 配置页实时推文预览（复用模拟构建 + 消息 + 规则链链路）
+    # ------------------------------------------------------------------
+    @app.post("/api/simulation/preview")
+    async def preview_simulation_message(data: dict[str, Any]):
+        """配置管理页实时推文预览。
+
+        请求体：
+        {
+            "disaster_type": "earthquake",
+            "source_id": "cea_fanstudio",
+            "params": { ... },        # 数据源示例参数（默认取自 schema）
+            "runtime_config": { ... }, # 前端编辑中的配置草稿（未保存）
+            "target_session": ""       # 可选：会话级配置合并用
+        }
+
+        返回：
+        {
+            "event_id": str,
+            "preview_text": str,
+            "media_notice": str,
+            "has_images": int,
+            "image_render_enabled": bool,
+            "decision": {"accepted": bool, "reason": str, "detail": str},
+        }
+        """
+        try:
+            message_manager = _current_message_manager()
+            if message_manager is None:
+                return ApiResponse.error("消息推送管理器不可用", status_code=503)
+
+            disaster_type = str(data.get("disaster_type") or "").strip()
+            source_id = str(data.get("source_id") or "").strip()
+            params = data.get("params")
+            if not disaster_type or not source_id:
+                return ApiResponse.error("缺少灾种或数据源标识", status_code=400)
+            if not isinstance(params, dict):
+                return ApiResponse.error("缺少参数对象 (params)", status_code=400)
+
+            # 会话级配置：session 模式下前端编辑的就是 effective 配置
+            # （global + override 已由后端合并），因此直接采用前端草稿即可；
+            # 若前端未传（缺省），则按会话获取完整生效配置。
+            runtime_config = data.get("runtime_config")
+            if not isinstance(runtime_config, dict):
+                runtime_config = None
+            session_config_manager = _current_session_config_manager()
+            target_session = str(data.get("target_session") or "").strip()
+            if (
+                runtime_config is None
+                and target_session
+                and session_config_manager is not None
+            ):
+                try:
+                    runtime_config = session_config_manager.get_effective_config(
+                        target_session
+                    )
+                except Exception:
+                    runtime_config = None
+
+            step = SimulationStep.create(
+                disaster_type=disaster_type,
+                source_id=source_id,
+                params=params,
+                report_num=1,
+            )
+            result = await build_config_preview(
+                message_manager=message_manager,
+                step=step,
+                runtime_config=runtime_config,
+                session_id=target_session,
+            )
+            return ApiResponse.success(result)
+        except Exception as e:
+            logger.error(f"[灾害预警] 配置预览失败: {e}")
             return ApiResponse.error(str(e), status_code=500)
