@@ -22,7 +22,8 @@ def register_backup_routes(app, *, disaster_service):
     @app.get("/api/backup/export")
     def export_backup(
         targets: str = Query(
-            None, description="需要备份的部分，以逗号分隔，如 'db,sessions,stats'"
+            None,
+            description="需要备份的部分，以逗号分隔",
         ),
     ):
         """导出指定数据的备份压缩包 (ZIP)"""
