@@ -136,8 +136,18 @@ function ensureMermaidLoaded() {
         const script = document.createElement('script');
         script.src = 'lib/mermaid.min.js';
         script.async = true;
-        script.onload = () => resolve(Boolean(window.mermaid));
-        script.onerror = () => resolve(false);
+        // 超时保护：脚本请求长期 pending（本地文件偶发异常）时，
+        // 通过 resolve(false) 走失败重试路径，避免卡死整个重试链
+        const timeoutId = setTimeout(() => {
+            resolve(false);
+        }, 10000);
+
+        const settle = (value) => {
+            clearTimeout(timeoutId);
+            resolve(value);
+        };
+        script.onload = () => settle(Boolean(window.mermaid));
+        script.onerror = () => settle(false);
         document.head.appendChild(script);
     }).finally(() => {
         // 无论成败都清理引用：成功后走 window.mermaid 短路，失败后允许下次重试
@@ -152,8 +162,15 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
     const [mermaidReady, setMermaidReady] = React.useState(Boolean(window.mermaid));
 
     React.useEffect(() => {
+        // 已就绪则无需再加载
         if (window.mermaid) {
             setMermaidReady(true);
+            return;
+        }
+        // 仅当文档中实际存在 Mermaid 图表容器时才按需加载（约 2.5MB），
+        // 无图表的文档不触发加载与重试，避免无谓带宽与重试
+        const articleEl = articleRef.current;
+        if (!articleEl || !articleEl.querySelector('.notification-md-mermaid[data-mermaid-source]')) {
             return;
         }
         let cancelled = false;
@@ -184,7 +201,9 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
             cancelled = true;
             if (retryTimer) clearTimeout(retryTimer);
         };
-    }, []);
+        // renderedHtml 变化（切换文档）时重新评估是否触发加载，
+        // 避免首次加载失败后后续文档出现 Mermaid 内容却不再加载
+    }, [articleRef, renderedHtml]);
 
     React.useEffect(() => {
         if (!mermaidReady) return;
