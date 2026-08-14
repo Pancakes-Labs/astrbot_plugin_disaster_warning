@@ -19,7 +19,11 @@ function ConfigBackupPanel() {
     const [backupTargets, setBackupTargets] = useState({
         db: true,
         sessions: true,
-        stats: true
+        stats: true,
+        caches: true,
+        simulations: true,
+        notifications: true,
+        logs: true
     });
 
     // 触发导出备份（支持自定义选项）
@@ -147,7 +151,7 @@ function ConfigBackupPanel() {
             
             <Typography variant="body2" className="config-backup-desc">
                 对插件运行时产生的数据进行备份和配置迁移。
-                <strong>全量备份</strong>将包含 SQLite 本地历史数据库、会话差异配置和统计快照。
+                <strong>全量备份</strong>将包含 SQLite 本地历史数据库、会话差异配置、统计快照、运行时缓存、模拟流草稿、通知缓存与日志统计。
             </Typography>
 
             <Divider className="config-backup-divider" />
@@ -157,7 +161,7 @@ function ConfigBackupPanel() {
                 <Box className="config-backup-card">
                     <Typography variant="subtitle2" className="config-backup-card-title">数据备份 (ZIP)</Typography>
                     <Typography variant="caption" className="config-backup-card-desc" display="block">
-                        支持自定义备份历史事件数据库、会话差异配置和统计数据，适合进行异地容灾还原和服务器迁移。
+                        支持自定义备份，适合进行异地容灾还原和服务器迁移。
                     </Typography>
                     <Box className="config-backup-btn-group">
                         <Button 
@@ -240,7 +244,7 @@ function ConfigBackupPanel() {
                 <DialogTitle style={{ fontSize: '16px', fontWeight: 700 }}>确认导入备份数据</DialogTitle>
                 <DialogContent>
                     <Typography variant="body2" color="error" style={{ fontWeight: 600, marginBottom: '8px' }}>
-                        警告：导入备份会根据备份包来选择性的覆盖当前的事件历史库、会话差异配置以及统计快照！
+                        警告：导入备份会根据备份包来选择性的覆盖数据内容！
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                         为了系统安全，覆盖操作前系统会在后台自动为您当前的本地数据创建 .bak 临时回滚快照。如果导入失败，数据将自动还原至当前状态。您是否要继续？
@@ -282,13 +286,53 @@ function ConfigBackupPanel() {
                         />
                         <FormControlLabel
                             control={
-                                <Checkbox 
-                                    checked={backupTargets.stats} 
-                                    onChange={handleCheckboxChange('stats')} 
-                                    color="primary" 
+                                <Checkbox
+                                    checked={backupTargets.stats}
+                                    onChange={handleCheckboxChange('stats')}
+                                    color="primary"
                                 />
                             }
                             label={<Typography variant="body2"><strong>历史数据统计快照 (statistics.json)</strong> - 包含内存聚合的统计大屏基础数据</Typography>}
+                        />
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={backupTargets.caches}
+                                    onChange={handleCheckboxChange('caches')}
+                                    color="primary"
+                                />
+                            }
+                            label={<Typography variant="body2"><strong>运行时缓存 (earthquake_lists_cache.json / eew_query_cache.json)</strong> - 包含地震列表与EEW查询状态，防止迁移后重复推送</Typography>}
+                        />
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={backupTargets.simulations}
+                                    onChange={handleCheckboxChange('simulations')}
+                                    color="primary"
+                                />
+                            }
+                            label={<Typography variant="body2"><strong>模拟流草稿 (simulation_flows.json)</strong> - 包含您在模拟系统中创建的推送流程草稿</Typography>}
+                        />
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={backupTargets.notifications}
+                                    onChange={handleCheckboxChange('notifications')}
+                                    color="primary"
+                                />
+                            }
+                            label={<Typography variant="body2"><strong>通知缓存 (notifications_cache.json)</strong> - 包含通知中心列表与已读状态</Typography>}
+                        />
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={backupTargets.logs}
+                                    onChange={handleCheckboxChange('logs')}
+                                    color="primary"
+                                />
+                            }
+                            label={<Typography variant="body2"><strong>日志统计 (logger_stats.json)</strong> - 包含原始消息过滤统计摘要</Typography>}
                         />
                     </FormGroup>
                 </DialogContent>
