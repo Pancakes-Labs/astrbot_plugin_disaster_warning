@@ -50,8 +50,13 @@
         // 重复请求（selectSource 已即时发起，避免同一 sourceId 发两次 /simulation/preview）
         const immediateFiredSourceRef = useRef('');
 
+        // Schema 重试令牌：瞬时加载失败后可重新拉取 Schema（独立于预览重试）
+        const [schemaRetryToken, setSchemaRetryToken] = useState(0);
+
         /**
-         * 初始化：拉取模拟 Schema（含全部数据源默认示例参数）
+         * 初始化：拉取模拟 Schema（含全部数据源默认示例参数）。
+         * 依赖 schemaRetryToken：瞬时失败后可通过 reloadSchema 重新拉取，
+         * 避免 Schema 加载失败后预览永久无法恢复。
          */
         useEffect(() => {
             let cancelled = false;
@@ -76,7 +81,8 @@
                 }
             })();
             return () => { cancelled = true; };
-        }, []);
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [schemaRetryToken]);
 
         /**
          * 根据选中的数据源，从 schema 提取该源的示例参数（字段默认值）
@@ -148,18 +154,19 @@
          */
         useEffect(() => {
             // 作用域切换（切换会话 / 全局↔会话）：立即作废旧结果与挂起请求，
-            // 并跳过本轮防抖（此时 runtimeConfig/targetSession 仍是上一作用域的旧值，
-            // 直接 return 避免用旧配置发起请求；新草稿到达后 effect 会再次触发）。
+            // 并清除"已立即触发"标记，让当前输入也能进入防抖调度。
+            // 切换瞬间 runtimeConfig/targetSession 可能仍是上一作用域的旧值，
+            // 但新草稿到达后 effect 会再次触发并以最新输入覆盖，预览不会卡空。
             if (scopeKey !== prevScopeKeyRef.current) {
                 prevScopeKeyRef.current = scopeKey;
                 previewSeqRef.current += 1; // 使旧请求失效
                 if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+                immediateFiredSourceRef.current = '';
                 setPreview(null);
                 setError('');
                 setLoading(false);
-                return;
             }
-            if (!enabled || !selectedSourceId || schemaLoading) return;
+            if (!enabled || !selectedSourceId || !schema || schemaLoading) return;
             if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
             // 数据源切换已在 selectSource 中即时触发预览，跳过本次防抖，避免重复请求
             if (immediateFiredSourceRef.current === selectedSourceId) {
@@ -172,7 +179,7 @@
             return () => {
                 if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
             };
-        }, [enabled, selectedSourceId, runtimeConfig, targetSession, schemaLoading, refreshToken, scopeKey, firePreview]);
+        }, [enabled, selectedSourceId, runtimeConfig, targetSession, schemaLoading, schema, refreshToken, scopeKey, firePreview]);
 
         /**
          * 手动切换数据源（滑条点击时立即触发，无需等防抖）
@@ -210,6 +217,12 @@
             return list;
         }, [schema]);
 
+        // Schema 独立重试：仅重新拉取 Schema 并重置预览错误，不重复预览请求
+        const reloadSchema = useCallback(() => {
+            setError('');
+            setSchemaRetryToken((prev) => prev + 1);
+        }, []);
+
         return {
             schema,
             schemaLoading,
@@ -220,6 +233,7 @@
             loading,
             error,
             retry: () => firePreview(selectedSourceId, runtimeConfig, targetSession),
+            reloadSchema,
         };
     }
 

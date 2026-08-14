@@ -171,6 +171,7 @@ function ConfigView() {
                             preview={previewState.preview}
                             loading={previewState.loading}
                             error={previewState.error}
+                            onReloadSchema={previewState.reloadSchema}
                         />
                     </div>
                 </div>

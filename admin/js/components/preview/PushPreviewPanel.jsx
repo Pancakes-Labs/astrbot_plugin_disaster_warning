@@ -14,7 +14,7 @@
  * 共用部分：过滤判定徽章 + 推文展示 + 图片降级提示。
  */
 (function () {
-    const { Box, Typography, Chip, CircularProgress } = MaterialUI;
+    const { Box, Typography, Chip, CircularProgress, Button } = MaterialUI;
     const { useState, useMemo, useEffect } = React;
 
     /**
@@ -152,7 +152,7 @@
     /**
      * 预览内容主体（两种场景共用）
      */
-    function PreviewBody({ preview, loading, error, showBadge }) {
+    function PreviewBody({ preview, loading, error, showBadge, onReloadSchema }) {
         if (loading) {
             return (
                 <Box className="pp-loading">
@@ -165,6 +165,16 @@
             return (
                 <Box className="pp-error">
                     <Typography variant="body2" color="error">⚠️ {error}</Typography>
+                    {typeof onReloadSchema === 'function' && (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<span>🔄</span>}
+                            onClick={onReloadSchema}
+                        >
+                            重新加载推文预览
+                        </Button>
+                    )}
                 </Box>
             );
         }
@@ -217,6 +227,7 @@
      * @param {Object|null} props.preview 预览结果 { preview_text, decision, media_notice, ... }
      * @param {boolean} props.loading 是否加载中
      * @param {string} props.error 错误信息
+     * @param {Function} [props.onReloadSchema] Schema 独立重试回调（config 场景错误态展示）
      * @param {string} props.title 面板标题
      * @param {boolean} props.showBadge 是否展示过滤判定徽章（plain 场景可关闭）
      */
@@ -228,6 +239,7 @@
         preview = null,
         loading = false,
         error = '',
+        onReloadSchema,
         title = '实时推文预览',
         showBadge = true,
     }) {
@@ -263,6 +275,7 @@
                         loading={loading}
                         error={error}
                         showBadge={showBadge}
+                        onReloadSchema={onReloadSchema}
                     />
                 </Box>
             </Box>
