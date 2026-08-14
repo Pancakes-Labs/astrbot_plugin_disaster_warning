@@ -83,23 +83,18 @@
             return ordered;
         }, [sourceList]);
 
-        // 初始化/兜底：默认选中第一个灾种；当前选中源切换灾种时自动跟随。
-        // 仅在"需要修正"时 setState，避免每次渲染都触发（防止重渲染循环）。
-        const activeGroup = activeType ? groups.find((g) => g.typeKey === activeType) || groups[0] : groups[0];
-        const needsActive = activeGroup && !activeGroup.items.some((i) => i.sourceId === selectedSourceId);
-        const targetType = needsActive
-            ? (groups.find((g) => g.items.some((i) => i.sourceId === selectedSourceId))?.typeKey || activeGroup?.typeKey)
-            : activeGroup?.typeKey;
+        // 灾种跟随采用"受控派生值"模式，不再写回 state：
+        // - activeType 仅记录用户显式点击的灾种（用户意图覆盖）
+        // - 若当前选中源不在该灾种下（如父级 onSelect 同步选中源），
+        //   自动跟随选中源所在灾种作为渲染用灾种，避免 state 同步回环与回拉风险。
+        const selectedGroup = (groups || []).find((g) => g.items.some((i) => i.sourceId === selectedSourceId));
+        const activeGroup = selectedGroup || (activeType ? groups.find((g) => g.typeKey === activeType) || groups[0] : groups[0]);
+        // 仅初始化时兜底设置 activeType（用户点击前无显式意图）
         useEffect(() => {
-            if (groups.length === 0) return;
-            if (!activeType || !groups.some((g) => g.typeKey === activeType)) {
+            if (groups.length > 0 && (!activeType || !groups.some((g) => g.typeKey === activeType))) {
                 setActiveType(groups[0].typeKey);
-                return;
             }
-            if (targetType && targetType !== activeType) {
-                setActiveType(targetType);
-            }
-        }, [groups, activeType, targetType]);
+        }, [groups, activeType]);
 
         if (groups.length === 0) return null;
 

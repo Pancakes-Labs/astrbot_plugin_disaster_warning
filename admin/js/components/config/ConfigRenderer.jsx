@@ -98,7 +98,7 @@ function ConfigRenderer({ editor, onConfigDraftChange } = {}) {
                         </Button>
                         <Button
                             variant="outlined"
-                            onClick={() => { setMode('global'); setSelectedSession(''); initializePage(); }}
+                            onClick={() => { editor.setMode('global'); editor.setSelectedSession(''); initializePage(); }}
                             startIcon={<span>🏠</span>}
                             className="config-renderer-error-card__btn"
                         >

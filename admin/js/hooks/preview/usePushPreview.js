@@ -46,6 +46,9 @@
         const debounceTimerRef = useRef(null);
         // 上次作用域键：变化时作废旧结果（多会话/全局-会话切换隔离）
         const prevScopeKeyRef = useRef(scopeKey);
+        // 数据源切换时"已立即触发预览"的标记：防抖 effect 跳过紧随其后的
+        // 重复请求（selectSource 已即时发起，避免同一 sourceId 发两次 /simulation/preview）
+        const immediateFiredSourceRef = useRef('');
 
         /**
          * 初始化：拉取模拟 Schema（含全部数据源默认示例参数）
@@ -145,7 +148,8 @@
          */
         useEffect(() => {
             // 作用域切换（切换会话 / 全局↔会话）：立即作废旧结果与挂起请求，
-            // 避免异步加载间隙用上一个作用域的配置评估（多会话差异混淆根因）。
+            // 并跳过本轮防抖（此时 runtimeConfig/targetSession 仍是上一作用域的旧值，
+            // 直接 return 避免用旧配置发起请求；新草稿到达后 effect 会再次触发）。
             if (scopeKey !== prevScopeKeyRef.current) {
                 prevScopeKeyRef.current = scopeKey;
                 previewSeqRef.current += 1; // 使旧请求失效
@@ -153,9 +157,15 @@
                 setPreview(null);
                 setError('');
                 setLoading(false);
+                return;
             }
             if (!enabled || !selectedSourceId || schemaLoading) return;
             if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+            // 数据源切换已在 selectSource 中即时触发预览，跳过本次防抖，避免重复请求
+            if (immediateFiredSourceRef.current === selectedSourceId) {
+                immediateFiredSourceRef.current = '';
+                return;
+            }
             debounceTimerRef.current = setTimeout(() => {
                 firePreview(selectedSourceId, runtimeConfig, targetSession);
             }, PREVIEW_DEBOUNCE_MS);
@@ -169,6 +179,8 @@
          */
         const selectSource = useCallback((sourceId) => {
             if (sourceId === selectedSourceId) return;
+            // 标记"已立即触发"，让紧随其后的防抖 effect 跳过，避免重复请求
+            immediateFiredSourceRef.current = sourceId;
             setSelectedSourceId(sourceId);
             // 数据源切换立即预览（不等防抖窗口）
             firePreview(sourceId, runtimeConfig, targetSession);
