@@ -298,12 +298,6 @@ class DisasterWarningService:
             logger.warning(
                 f"[灾害预警] 以下数据源缺少 SOURCE_CATALOG.source_enum 定义: {missing_source_enum}"
             )
-        if (
-            not unresolved_presenters
-            and not missing_text_presenters
-            and not missing_source_enum
-        ):
-            logger.debug("[灾害预警] source catalog / presenter 注册完整性自检通过")
 
     def set_telemetry(self, telemetry: Optional["TelemetryManager"]):
         """设置遥测管理器引用。"""

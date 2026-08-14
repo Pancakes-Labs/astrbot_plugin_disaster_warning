@@ -142,15 +142,13 @@ class RawMessageLoggingService:
         filter_reason: str,
     ) -> None:
         """处理被过滤消息的统计与日志输出。"""
+        # 心跳/类型/P2P/重复事件等高频过滤逐条打日志会刷屏，统计由 filter_stats 汇总承担；
+        # 仅对低频过滤原因留一条 debug 便于排障。
         is_high_frequency = any(
             keyword in filter_reason
             for keyword in ["消息类型过滤", "P2P节点状态", "心跳", "重复事件"]
         )
-        if is_high_frequency:
-            logger.debug(
-                f"[灾害预警] 过滤消息 - 来源: {source}, 类型: {message_type}, 原因: {filter_reason}"
-            )
-        else:
+        if not is_high_frequency:
             logger.debug(
                 f"[灾害预警] 过滤日志消息 - 来源: {source}, 类型: {message_type}, 原因: {filter_reason}"
             )

@@ -260,14 +260,13 @@ class EventPipeline:
         target_sessions = (
             self.service.session_config_manager.list_target_sessions()
         )  # 获取所有目标会话
-        push_result = await self.service.message_manager.push_event(
+        # 未推送不一定代表异常，常见原因包括规则过滤未命中、会话未订阅，或事件被静默策略抑制。
+        # 未推送明细由 _log_filter_summary 的 INFO 汇总（会话筛选结果）承担，此处不再单独兜底。
+        await self.service.message_manager.push_event(
             event,
             target_sessions=target_sessions,
             session_config_getter=self.service.session_config_manager.get_effective_config,
         )
-        if not push_result:
-            # 未推送不一定代表异常，常见原因包括规则过滤未命中、会话未订阅，或事件被静默策略抑制。
-            logger.debug(f"[灾害预警] 事件未产生实际推送: {envelope.id}")
 
     async def _flush_weather_buffer(
         self,
