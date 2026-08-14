@@ -71,9 +71,11 @@ class WebSocketDispatchService:
                     # 抛出 socket 传输错误
                     raise msg.data
                 elif msg.type == WSMsgType.CLOSED:
-                    logger.debug(
-                        f"[灾害预警] WebSocket {name} 的连接已收到关闭帧，关闭码为 {websocket.close_code}"
-                    )
+                    # 正常关闭码由 handle_close_code 的 INFO 汇总承担，此处仅保留非正常关闭码明细
+                    if websocket.close_code not in self._NORMAL_CLOSE_CODES:
+                        logger.debug(
+                            f"[灾害预警] WebSocket {name} 的连接已收到关闭帧，关闭码为 {websocket.close_code}"
+                        )
                     break
                 elif msg.type in {WSMsgType.PING, WSMsgType.PONG}:
                     # 保活心跳帧，只需刷新该连接的活跃时间即可

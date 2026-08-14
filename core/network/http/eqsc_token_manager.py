@@ -139,17 +139,11 @@ class EqscTokenManager:
         if not force_refresh:
             cached = self._cached_token_if_usable(require_advance_margin=True)
             if cached:
-                logger.debug(
-                    f"[灾害预警] EQSC 复用缓存 AccessToken {self._mask_token(cached)}"
-                )
+                # 有效期内复用为高频常态，无需逐一记录
                 return cached
         elif stale:
             cached = self._cached_token_if_usable(require_advance_margin=False)
             if cached and cached != stale:
-                logger.debug(
-                    "[灾害预警] EQSC 强制刷新前发现已有更新令牌，直接复用 "
-                    f"{self._mask_token(cached)}"
-                )
                 return cached
 
         async with self._lock:
@@ -160,10 +154,6 @@ class EqscTokenManager:
                     current_time=current_time, require_advance_margin=True
                 )
                 if cached:
-                    logger.debug(
-                        "[灾害预警] EQSC 复用缓存 AccessToken "
-                        f"{self._mask_token(cached)}"
-                    )
                     return cached
             else:
                 # 401 并发刷新：若锁内已有可用令牌且不是传入的 stale 令牌，说明别人刚换发成功，复用新令牌。
