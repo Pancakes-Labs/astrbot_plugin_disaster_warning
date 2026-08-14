@@ -220,6 +220,10 @@ class EqscTyphoonPollService:
                         logger.debug("[灾害预警] EQSC 台风已禁用，跳过本轮轮询")
                         self._disabled_logged = True
                     continue
+                if self._disabled_logged:
+                    # 从禁用状态恢复：重置无变化计数器，避免禁用期的旧累计值
+                    # 导致恢复后立即打印"无变化"汇总日志
+                    self._no_change_log_rounds = 0
                 self._disabled_logged = False
                 await self.fetch_once(emit_event=True)
             except asyncio.CancelledError:

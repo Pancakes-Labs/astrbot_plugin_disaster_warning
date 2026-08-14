@@ -186,6 +186,10 @@ class EqscTsunamiPollService:
                         logger.debug("[灾害预警] EQSC 海啸已禁用，跳过本轮轮询")
                         self._disabled_logged = True
                     continue
+                if self._disabled_logged:
+                    # 从禁用状态恢复：重置无变化计数器，避免禁用期的旧累计值
+                    # 导致恢复后立即打印"无变化"汇总日志
+                    self._no_change_log_rounds = 0
                 self._disabled_logged = False
                 await self.fetch_once(emit_event=True)
             except asyncio.CancelledError:
@@ -244,6 +248,8 @@ class EqscTsunamiPollService:
         if is_training and not self._resolve_include_training():
             # 主动忽略训练报时仍提交指纹，避免每轮重复解析同一训练快照。
             self._last_payload_fingerprint = fingerprint
+            # 新快照（含训练报）到达即视为"有变化"，重置无变化计数器
+            self._no_change_log_rounds = 0
             self._notify_silence_fetch_completed(success=True)
             return raw
 
@@ -258,6 +264,8 @@ class EqscTsunamiPollService:
 
         if not emit_event:
             self._last_payload_fingerprint = fingerprint
+            # 新快照到达即视为"有变化"，重置无变化计数器
+            self._no_change_log_rounds = 0
             self._notify_silence_fetch_completed(success=True)
             return raw
 
@@ -277,6 +285,8 @@ class EqscTsunamiPollService:
             return raw
         self._last_payload_fingerprint = fingerprint
         self._last_event_id = str(event_id) if event_id else None
+        # 新快照成功处理即视为"有变化"，重置无变化计数器
+        self._no_change_log_rounds = 0
         self._notify_silence_fetch_completed(success=True)
         return raw
 

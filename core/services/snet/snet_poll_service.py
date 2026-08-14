@@ -395,25 +395,35 @@ class SnetPollService:
                     ts = try_ts.strftime("%Y%m%d%H%M00")
                     tiles: dict[str, str] = {}
                     failed_tiles = 0
+                    # 失败详情仅在"本轮未拿到完整瓦片"时输出，避免成功路径刷屏
+                    failed_details: list[str] = []
                     for tile_name, tile_y in self.TILE_NAMES:
                         url = f"{MSIL_TILE_BASE}/{ts}/{ts}/5/28/{tile_y}.png"
                         try:
                             async with session.get(url) as resp:
                                 if resp.status != 200:
                                     failed_tiles += 1
+                                    failed_details.append(
+                                        f"{tile_name} HTTP {resp.status}"
+                                    )
                                     continue
                                 content = await resp.read()
                                 if not content:
                                     failed_tiles += 1
+                                    failed_details.append(f"{tile_name} 响应为空")
                                     continue
                                 tiles[tile_name] = base64.b64encode(content).decode(
                                     "ascii"
                                 )
-                        except Exception:
+                        except Exception as exc:
                             failed_tiles += 1
+                            failed_details.append(f"{tile_name} 异常: {exc}")
                     if failed_tiles and len(tiles) < 2:
+                        # 本轮未拿到完整瓦片属真实故障：DEBUG 下输出详情便于定位；
+                        # 成功拿到 ≥2 张时不打日志，维持无故障期节流。
                         logger.debug(
-                            f"[灾害预警] S-Net 瓦片获取失败，共 {failed_tiles} 张"
+                            f"[灾害预警] S-Net 瓦片获取失败，共 {failed_tiles} 张，"
+                            f"详情: {'; '.join(failed_details)}"
                         )
                     if len(tiles) >= 2:
                         self._store_snapshot(timestamp=ts, tiles=tiles)
