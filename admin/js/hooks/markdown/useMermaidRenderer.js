@@ -32,8 +32,9 @@ function isDarkThemeActive(theme) {
  *
  * 背景：README 等文档硬编码浅色 classDef（fill:#E3F2FD 等），mermaid 会将其写为节点
  * 的 fill 属性/内联样式；且带 <br/> 的节点标签走 <foreignObject> + HTML 元素而非 <text>。
- * 因此这里全量扫描 SVG：
- * - 所有偏亮的 fill 统一压暗为“保留原色相的深色变体”（暗蓝/暗绿/暗紫…），既可读又保留层次；
+ * 因此这里全量扫描 SVG，通过 setProperty(..., 'important') 内联覆盖（优先级最高，
+ * 高于外部样式表的 !important）统一重写为深底浅字，保证 100% 生效：
+ * - 所有节点形状统一深底 + 浅紫描边；
  * - 所有文字（含 foreignObject 内 HTML）统一浅色；
  * - 连线、箭头统一浅紫。
  */
@@ -44,74 +45,12 @@ function applyMermaidDarkAdaptation(svgEl) {
     }
 
     const stats = { shapes: 0, texts: 0, htmlTexts: 0, edges: 0, stylesRemoved: 0 };
-    const countAndApply = (el, prop, value) => {
-        el.style.setProperty(prop, value, 'important');
-    };
 
+    // 暗色配色常量：与 admin/css/views/markdown.css 中的暗色适配值保持一致
     const DARK_TEXT_FILL = '#ece7f6';
     const DARK_STROKE = '#9a8fc0';
     const DARK_EDGE = '#b9a8e0';
     const DARK_NODE_FILL = '#241f31';
-
-    const parseRgb = (raw) => {
-        if (!raw) return null;
-        const text = String(raw).trim();
-        let m = text.match(/^#([0-9a-f]{6})$/i);
-        if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
-        m = text.match(/^#([0-9a-f]{3})$/i);
-        if (m) {
-            const r = parseInt(m[1][0] + m[1][0], 16);
-            const g = parseInt(m[1][1] + m[1][1], 16);
-            const b = parseInt(m[1][2] + m[1][2], 16);
-            return [r, g, b];
-        }
-        m = text.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
-        if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
-        return null;
-    };
-
-    const rgbToHsl = ([r, g, b]) => {
-        const rr = r / 255; const gg = g / 255; const bb = b / 255;
-        const max = Math.max(rr, gg, bb); const min = Math.min(rr, gg, bb);
-        let h = 0; const l = (max + min) / 2; let s = 0;
-        if (max !== min) {
-            const d = max - min;
-            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-            if (max === rr) h = (gg - bb) / d + (gg < bb ? 6 : 0);
-            else if (max === gg) h = (bb - rr) / d + 2;
-            else h = (rr - gg) / d + 4;
-            h /= 6;
-        }
-        return [h * 360, s, l];
-    };
-
-    const hslToRgb = ([h, s, l]) => {
-        const hh = h / 360;
-        const hue2rgb = (p, q, t) => {
-            let tt = t;
-            if (tt < 0) tt += 1;
-            if (tt > 1) tt -= 1;
-            if (tt < 1 / 6) return p + (q - p) * 6 * tt;
-            if (tt < 1 / 2) return q;
-            if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
-            return p;
-        };
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        return [
-            Math.round(hue2rgb(p, q, hh + 1 / 3) * 255),
-            Math.round(hue2rgb(p, q, hh) * 255),
-            Math.round(hue2rgb(p, q, hh - 1 / 3) * 255),
-        ];
-    };
-
-    const darkenColor = (raw, targetLightness) => {
-        const rgb = parseRgb(raw);
-        if (!rgb) return null;
-        const [h, s] = rgbToHsl(rgb);
-        const [r2, g2, b2] = hslToRgb([h, Math.min(1, Math.max(0.35, s)), targetLightness]);
-        return `rgb(${r2},${g2},${b2})`;
-    };
 
     // 1. 删除 SVG 内嵌 <style> 标签中「带具体浅色值」的 classDef 规则块：
     //    mermaid 会把 classDef 的 fill:#E3F2FD 等写进内嵌 <style>，这些规则优先级高于
@@ -176,10 +115,35 @@ function applyMermaidDarkAdaptation(svgEl) {
         stats.edges += 1;
     });
 
-    console.log(
+    console.debug(
         `[Mermaid] 暗色适配统计：形状=${stats.shapes} 文字=${stats.texts} HTML文字=${stats.htmlTexts} ` +
         `连线=${stats.edges} 移除样式规则=${stats.stylesRemoved}`
     );
+}
+
+// Mermaid 按需加载的共享 Promise：加载中复用同一 Promise，避免重复注入 <script>；
+// 加载完成后清理，失败时允许后续重新尝试加载（不会像布尔标记那样永久卡死）。
+let mermaidLoadPromise = null;
+
+function ensureMermaidLoaded() {
+    if (window.mermaid) {
+        return Promise.resolve(true);
+    }
+    if (mermaidLoadPromise) {
+        return mermaidLoadPromise;
+    }
+    mermaidLoadPromise = new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = 'lib/mermaid.min.js';
+        script.async = true;
+        script.onload = () => resolve(Boolean(window.mermaid));
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+    }).finally(() => {
+        // 无论成败都清理引用：成功后走 window.mermaid 短路，失败后允许下次重试
+        mermaidLoadPromise = null;
+    });
+    return mermaidLoadPromise;
 }
 
 function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
@@ -192,14 +156,13 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
             setMermaidReady(true);
             return;
         }
-        if (window.__DISASTER_MERMAID_LOADING__) return;
-        window.__DISASTER_MERMAID_LOADING__ = true;
-        const script = document.createElement('script');
-        script.src = 'lib/mermaid.min.js';
-        script.async = true;
-        script.onload = () => setMermaidReady(Boolean(window.mermaid));
-        script.onerror = () => setMermaidReady(false);
-        document.head.appendChild(script);
+        let cancelled = false;
+        ensureMermaidLoaded().then((ready) => {
+            if (!cancelled) setMermaidReady(ready);
+        });
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     React.useEffect(() => {
@@ -230,13 +193,15 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
         }
         if (window.__DISASTER_MERMAID_INITIALIZED_THEME__ !== theme) {
             window.__DISASTER_MERMAID_INITIALIZED_THEME__ = theme;
-            // 主题变化时清空已渲染的 SVG，交由下方 renderAllMermaidBlocks 按新主题重绘
+            // 主题变化时清空已渲染的 SVG，交由下方 renderAllMermaidBlocks 按新主题重绘。
+            // 这里仅需清空容器：data-mermaid-source 是 Mermaid 源码文本而非 HTML，
+            // 用 textContent 写入避免标签解析与文档内容到 DOM 的注入路径。
             mermaidBlocks.forEach((block) => {
                 const viewport = block.querySelector('.notification-md-mermaid-viewport');
                 const svg = viewport ? viewport.querySelector('svg') : block.querySelector('svg');
                 if (svg) {
                     const container = viewport || block;
-                    container.innerHTML = block.getAttribute('data-mermaid-source') || '';
+                    container.textContent = '';
                 }
             });
         }
@@ -288,7 +253,7 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
                     if (isDarkTheme) {
                         const movedSvg = block.querySelector('.notification-md-mermaid-viewport svg');
                         applyMermaidDarkAdaptation(movedSvg || block.querySelector('svg'));
-                        console.log('[Mermaid] 暗色适配已应用（节点底/文字/连线已重写）');
+                        console.debug('[Mermaid] 暗色适配已应用（节点底/文字/连线已重写）');
                     }
 
                     // 延迟兜底：待浏览器完成 SVG 挂载与样式计算后再次强制覆盖，
