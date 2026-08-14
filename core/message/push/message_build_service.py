@@ -1193,7 +1193,6 @@ class MessageBuildService:
             if appended:
                 return
 
-
     async def _append_tsunami_media_if_needed(
         self,
         chain: MessageChain,

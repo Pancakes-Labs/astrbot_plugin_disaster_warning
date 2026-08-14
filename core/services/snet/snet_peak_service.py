@@ -10,8 +10,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from astrbot.api import logger
-
 from ....utils.converters import ScaleConverter
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
 from ...storage.snet_peak_repository import SnetPeakRepository

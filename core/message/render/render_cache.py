@@ -10,8 +10,6 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 
-from astrbot.api import logger
-
 
 class RenderImageCache:
     """渲染图片缓存器。"""

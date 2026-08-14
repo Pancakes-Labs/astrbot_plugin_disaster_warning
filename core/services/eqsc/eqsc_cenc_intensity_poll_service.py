@@ -201,7 +201,9 @@ class EqscCencIntensityPollService:
                 if not self.is_enabled():
                     # 仅首次禁用时打一次，避免配置禁用后每轮刷屏
                     if not self._disabled_logged:
-                        logger.debug("[灾害预警] EQSC CENC 烈度速报已禁用，跳过本轮轮询")
+                        logger.debug(
+                            "[灾害预警] EQSC CENC 烈度速报已禁用，跳过本轮轮询"
+                        )
                         self._disabled_logged = True
                     continue
                 self._disabled_logged = False
@@ -388,7 +390,9 @@ class EqscCencIntensityPollService:
             self._no_change_log_rounds += 1
             if self._no_change_log_rounds >= self._no_change_log_interval:
                 self._no_change_log_rounds = 0
-                plugin_logger.debug("[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送")
+                plugin_logger.debug(
+                    "[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送"
+                )
         return items
 
 
