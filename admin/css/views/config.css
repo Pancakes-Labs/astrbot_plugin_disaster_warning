@@ -96,6 +96,34 @@ body.dark-theme .config-header {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* 暗色主题：配置页表单字段行、动作底栏与备份面板补强。
+   原样式使用浅色 rgba 底与固定阴影，暗色下底色发白/阴影生硬 */
+body.dark-theme .config-action-bar {
+    background-color: var(--md-sys-color-surface);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.32);
+}
+
+body.dark-theme .config-backup-panel {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, var(--md-sys-color-surface)) !important;
+    border-color: rgba(208, 188, 255, 0.14) !important;
+}
+
+body.dark-theme .config-backup-card {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+body.dark-theme .config-object-details,
+body.dark-theme .config-object-details.MuiAccordionDetails-root {
+    background: var(--md-sys-color-background);
+}
+
+/* 配置页输入控件跟随暗色渲染（下拉弹层/日期选择器不发白） */
+body.dark-theme .config-view-main input,
+body.dark-theme .config-view-main select,
+body.dark-theme .config-view-main textarea {
+    color-scheme: dark;
+}
+
 /* 标题行排布 */
 .config-view-title-row {
     display: flex;

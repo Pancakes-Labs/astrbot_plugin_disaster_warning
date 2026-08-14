@@ -296,7 +296,9 @@ body.dark-theme .github-card:hover {
     fill: #000000;
 }
 
-.github-btn[data-theme='dark'] .github-card__icon {
+.github-btn[data-theme='dark'] .github-card__icon,
+html.theme-dark .github-btn .github-card__icon,
+body.dark-theme .github-btn .github-card__icon {
     fill: #E6E1E5;
 }
 
@@ -431,6 +433,7 @@ body.dark-theme .github-card:hover {
     color: inherit;
     font-size: 13px;
     font-weight: 600;
+    min-height: 36px;
 }
 
 .pagination-input--jump {
@@ -447,6 +450,20 @@ body.dark-theme .github-card:hover {
     opacity: 1;
     font-weight: 600;
     font-size: 13px;
+    min-height: 36px;
+}
+
+/* 移动端：分页按钮触控目标至少 44x44px，避免误触 */
+@media (max-width: 768px) {
+    .pagination-button,
+    .pagination-input {
+        min-height: 44px;
+        font-size: 14px;
+    }
+
+    .pagination-button--page {
+        min-width: 44px;
+    }
 }
 
 .pagination-button:disabled {
@@ -479,6 +496,21 @@ body.dark-theme .github-card:hover {
 @media (max-width: 768px) {
     .header-actions {
         gap: 12px;
+    }
+
+    /* 移动端触控目标放大：时钟与状态芯片整体点击区域不小于 44px */
+    .real-time-clock {
+        min-height: 40px;
+        margin-right: 8px;
+    }
+
+    /* Toast 在移动端底部弹出更符合拇指操作习惯，且不遮挡顶部标题 */
+    .toast-stack {
+        top: auto;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        right: 12px;
+        left: 12px;
+        max-width: none;
     }
 
     /* 移动端下侧边栏收回，主导航变为横向滑动条 */
@@ -516,5 +548,13 @@ body.dark-theme .github-card:hover {
 
     .sidebar-footer {
         display: block;
+    }
+}
+
+/* 超窄屏（普通手机竖屏）：顶部栏空间紧张，隐藏大块实时时钟，
+   仅保留 WS 状态芯片与主题切换按钮，避免标题被挤到换行/溢出 */
+@media (max-width: 480px) {
+    .real-time-clock {
+        display: none;
     }
 }

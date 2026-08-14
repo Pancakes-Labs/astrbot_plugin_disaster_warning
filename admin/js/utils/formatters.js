@@ -179,6 +179,31 @@ function formatTimeFriendly(isoString, timeZone = 'UTC+8', sourceHint = '') {
  * @param {string} sourceHint - 数据源标识，用于无时区时间解析
  * @returns {string} 格式化后的时间字符串 (e.g., "02-13 14:30")
  */
+// Intl.DateTimeFormat 实例缓存：同一时区与年份组合只构建一次，
+// 避免列表/时间轴渲染时为每一条时间文本重复创建格式化器（大量事件卡片渲染时的常见开销）。
+const _intlFormatterCache = new Map();
+
+function _getCachedIntlFormatter(timeZone, includeYear) {
+    const cacheKey = `${timeZone}|${includeYear ? 'y' : 'n'}`;
+    let formatter = _intlFormatterCache.get(cacheKey);
+    if (!formatter) {
+        const options = {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone: timeZone,
+        };
+        if (includeYear) {
+            options.year = 'numeric';
+        }
+        formatter = new Intl.DateTimeFormat('zh-CN', options);
+        _intlFormatterCache.set(cacheKey, formatter);
+    }
+    return formatter;
+}
+
 function formatTimeWithZone(isoString, timeZone = 'UTC+8', includeYear = false, sourceHint = '') {
     if (!isoString) return '--';
     try {
@@ -204,21 +229,8 @@ function formatTimeWithZone(isoString, timeZone = 'UTC+8', includeYear = false, 
             }
         }
 
-        // 使用 Intl.DateTimeFormat 处理 IANA 时区 (Asia/Shanghai 等)
-        const options = {
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-            timeZone: timeZone
-        };
-
-        if (includeYear) {
-            options.year = 'numeric';
-        }
-
-        const formatter = new Intl.DateTimeFormat('zh-CN', options);
+        // 使用 Intl.DateTimeFormat 处理 IANA 时区 (Asia/Shanghai 等)，实例按 (时区, 年份) 缓存复用
+        const formatter = _getCachedIntlFormatter(timeZone, includeYear);
         const parts = formatter.formatToParts(date);
 
         let y, m, d, h, min;

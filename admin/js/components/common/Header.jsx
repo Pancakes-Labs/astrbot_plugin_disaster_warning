@@ -39,7 +39,8 @@ function RealTimeClock({ timeZone }) {
     if (!timeStr) return null;
 
     return (
-        <div className="real-time-clock">
+        // 时钟每秒自动刷新且为纯装饰信息，对读屏用户无意义，整体标记为 aria-hidden 避免朗读噪音
+        <div className="real-time-clock" aria-hidden="true">
             <span className="real-time-clock__label">当前时间 🕒</span>
             <span className="real-time-clock__value">
                 {timeStr}
@@ -98,8 +99,8 @@ function Header({ currentView }) {
                     <RealTimeClock timeZone={displayTimezone} />
 
                     {/* WebSocket 连接状态指示芯片 */}
-                    <div className={`ws-status-chip ${state.wsConnected ? 'is-connected' : 'is-disconnected'}`}>
-                        <div className="ws-status-chip__dot"></div>
+                    <div className={`ws-status-chip ${state.wsConnected ? 'is-connected' : 'is-disconnected'}`} role="status" aria-live="polite">
+                        <div className="ws-status-chip__dot" aria-hidden="true"></div>
                         <Typography variant="body2" className="ws-status-chip__label">
                             {state.wsConnected ? '已连接' : '未连接'}
                         </Typography>
@@ -109,8 +110,10 @@ function Header({ currentView }) {
                     <IconButton
                         onClick={toggleTheme}
                         className="theme-toggle-button"
+                        aria-label={state.theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+                        aria-pressed={state.theme === 'dark'}
                     >
-                        <span className="theme-toggle-button__icon">
+                        <span className="theme-toggle-button__icon" aria-hidden="true">
                             {state.theme === 'dark' ? '🌞' : '🌙'}
                         </span>
                     </IconButton>

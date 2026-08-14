@@ -943,6 +943,31 @@ body.dark-theme .notification-md-mermaid-tool-btn {
     background: rgba(255, 255, 255, 0.08);
 }
 
+/* 暗色模式：内层 mermaid 画布容器必须覆盖为深色底。 */
+body.dark-theme .notification-md-mermaid {
+    background:
+        radial-gradient(circle at top right, rgba(208, 188, 255, 0.07), transparent 34%),
+        linear-gradient(180deg, rgba(30, 27, 38, 0.98), rgba(20, 18, 24, 0.98));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* 暗色模式：Mermaid 图表的暗色适配由 useMermaidRenderer.js 的
+   applyMermaidDarkAdaptation() 统一负责——它以 setProperty(..., 'important')
+   写内联样式，优先级高于此处外部样式表的 !important 规则。
+   因此节点形状、文字、连线的强制覆盖规则不再在此重复维护（运行时不会生效），
+   仅保留 JS 未覆盖的部分：a 链接颜色与边标签背景。 */
+
+/* 暗色模式：锚点/链接文字与背景边框同步浅色化，避免深底上的深色文字看不清 */
+body.dark-theme .notification-md-mermaid svg a {
+    fill: #D8B4FE;
+    stroke: none;
+}
+
+/* 边标签背景：JS 暗色适配未覆盖，保持深色半透明底以区分标签与画布 */
+body.dark-theme .notification-md-mermaid svg .edgeLabels .edgeLabel {
+    background: rgba(30, 27, 38, 0.92);
+}
+
 /* ==========================================================================
    10. 响应式分栏断点媒体查询适配
    ========================================================================== */

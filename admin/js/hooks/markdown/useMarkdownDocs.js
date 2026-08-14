@@ -15,10 +15,29 @@ function useMarkdownDocs() {
     const selectedMarkdownPath = String(state.selectedMarkdownPath || '');
     const [loadingList, setLoadingList] = React.useState(false);
     const [loadingDocument, setLoadingDocument] = React.useState(false);
+    // Markdown 增强依赖（marked / DOMPurify）是否就绪。
+    // renderedHtml 在渲染期同步读取 window.marked，若脚本就绪晚于文档内容到达，
+    // 组件不会自动重渲染而停留在降级渲染；用该 state 触发一次就绪后的重渲染。
+    const [libsReady, setLibsReady] = React.useState(
+        Boolean(window.MarkdownRenderUtil
+            && window.marked
+            && window.DOMPurify)
+    );
 
     /**
      * 异步拉取可读的 Markdown 说明书相对路径列表
      */
+    // 进入文档浏览页时，按需动态加载 marked / DOMPurify 增强依赖（本地化脚本，异步注入）。
+    // 加载失败时 renderMarkdownToHtml 自动降级到内置渲染器，不阻塞页面。
+    React.useEffect(() => {
+        const markdownUtil = window.MarkdownRenderUtil;
+        if (markdownUtil && typeof markdownUtil.ensureMarkdownLibs === 'function') {
+            markdownUtil.ensureMarkdownLibs().then((ready) => {
+                setLibsReady(Boolean(ready));
+            }).catch(() => {});
+        }
+    }, []);
+
     const loadMarkdownFiles = React.useCallback(async () => {
         setLoadingList(true);
         try {

@@ -40,27 +40,29 @@ function Sidebar({ currentView, onViewChange }) {
                 </div>
             </div>
 
-            {/* 动态导航菜单列表 (Nav Items) */}
-            <Box className="sidebar-nav">
+            {/* 动态导航菜单列表 (Nav Items)：使用 nav + button 语义化，支持键盘 Tab 聚焦与读屏朗读 */}
+            <nav className="sidebar-nav" aria-label="主导航">
                 {menuItems.map((item) => (
-                    <div 
-                        key={item.id} 
+                    <button
+                        key={item.id}
+                        type="button"
                         className={`nav-item ${currentView === item.id ? 'active' : ''}`}
                         onClick={() => onViewChange(item.id)}
+                        aria-current={currentView === item.id ? 'page' : undefined}
+                        aria-label={item.badge > 0 ? `${item.label}，${item.badge} 条未读` : item.label}
                     >
-                        <span className="nav-item__icon">{item.icon}</span>
-                        <Typography variant="body2" className="nav-item__label">
-                            {item.label}
-                        </Typography>
-                        {/* 如果存在大于0的徽标角标，则显示未读数（最大99+） */}
+                        <span className="nav-item__icon" aria-hidden="true">{item.icon}</span>
+                        <span className="nav-item__label">{item.label}</span>
+                        {/* 如果存在大于0的徽标角标，则显示未读数（最大99+）。
+                            aria-label 已合并未读数，徽标本身仅作视觉指示，读屏不重复播报 */}
                         {item.badge > 0 && (
-                            <span className="nav-badge">
+                            <span className="nav-badge" aria-hidden="true">
                                 {item.badge > 99 ? '99+' : item.badge}
                             </span>
                         )}
-                    </div>
+                    </button>
                 ))}
-            </Box>
+            </nav>
 
             {/* 底部功能按钮与贡献者栏 (Footer) */}
             <Box className="sidebar-footer">

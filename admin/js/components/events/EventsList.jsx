@@ -265,6 +265,7 @@ function EventsList() {
                                                 role={isExpandable ? 'button' : undefined}
                                                 tabIndex={isExpandable ? 0 : undefined}
                                                 aria-expanded={isExpandable ? false : undefined}
+                                                aria-label={isExpandable ? '展开事件详情' : undefined}
                                                 onClick={() => isExpandable && toggleGroup()}
                                                 onKeyDown={onExpandKeyDown}
                                             >

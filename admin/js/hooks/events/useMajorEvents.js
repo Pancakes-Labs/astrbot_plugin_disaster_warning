@@ -9,6 +9,12 @@ function useMajorEvents(displayLimit, refreshSignal) {
     const eventsApi = window.DisasterEventsApi;
     const [majorEvents, setMajorEvents] = React.useState([]); // 重大灾害队列
     const [loading, setLoading] = React.useState(false);       // 重大事件加载状态
+    // 记录上一次已消费的刷新信号：displayLimit 变化会重建 fetchMajorEvents，
+    // 导致「挂载/上限变化」与「刷新信号」两个 effect 同时触发。
+    // 仅在刷新信号「后续发生变化且非 null」时才执行静默请求，避免首帧/重复请求。
+    // 注意：ref 只能在 effect 内更新，若在渲染期同步会导致 effect 内
+    // 比较永远相等、静默请求永不触发。
+    const lastSignalRef = React.useRef(refreshSignal);
 
     /**
      * 并发拉取最近发生的重大事件
@@ -44,8 +50,15 @@ function useMajorEvents(displayLimit, refreshSignal) {
         fetchMajorEvents(false);
     }, [fetchMajorEvents]);
 
-    // 当触发外部业务刷新信号时触发静默重拉，不让界面闪烁或导致 Scroll Container 被卸载
+    // 当触发外部业务刷新信号时触发静默重拉，不让界面闪烁或导致 Scroll Container 被卸载。
+    // - 挂载首帧 refreshSignal 为 null（mount 时 lastEvent 尚无值）时跳过本次调用；
+    // - 仅处理「后续发生变化」的信号：displayLimit 变化会重建 fetchMajorEvents，
+    //   导致两个 effect 同时触发，这里通过 lastSignalRef 判别真正的信号变化
+    //   （ref 与当前信号相同则跳过），避免与上方「挂载/上限变化」的非静默拉取重复请求。
     React.useEffect(() => {
+        if (refreshSignal == null) return;
+        if (refreshSignal === lastSignalRef.current) return;
+        lastSignalRef.current = refreshSignal;
         fetchMajorEvents(true);
     }, [refreshSignal, fetchMajorEvents]);
 

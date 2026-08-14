@@ -26,8 +26,10 @@ function HorizontalTimeline({ style }) {
     // 状态：条数限制下拉菜单是否打开
     const [isLimitMenuOpen, setIsLimitMenuOpen] = useState(false);
     
-    // 自定义 Hook 获取重大事件源，内部响应式侦听 events 列表实时推送
-    const { majorEvents, loading } = useMajorEvents(displayLimit, state.events);
+    // 自定义 Hook 获取重大事件源，内部响应式侦听实时推送。
+    // 刷新信号改用 lastEvent：lastEvent 仅在真正发生新事件（ADD_EVENT）时更新，
+    // 避免 WS 心跳广播刷新 statistics 导致 events 数组引用变化时，时间轴被反复静默重拉。
+    const { majorEvents, loading } = useMajorEvents(displayLimit, state.lastEvent);
 
     // 将拉取到的事件按发生时间正序重排列（旧 -> 新），以符合时间轴从左往右的顺序
     const timelineItems = useMemo(() => {
