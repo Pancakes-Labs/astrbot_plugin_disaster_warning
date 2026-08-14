@@ -8,7 +8,19 @@
 .app {
     display: flex;
     height: 100vh;
+    height: 100dvh; /* 移动端动态视口高度：地址栏收起/展开时避免底部内容被遮挡或留白 */
     overflow: hidden; /* 保证应用整体不产生全局滚动，滚动仅由主体视窗承载 */
+}
+
+/* 底部安全区（iOS 刘海屏/Home 指示条）适配：主内容与侧栏在底部留出安全间距 */
+@media (max-width: 768px) {
+    .main-content {
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .sidebar {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    }
 }
 
 /* 侧边导航栏面板 */
@@ -119,7 +131,8 @@ body.dark-theme .top-bar::before {
     }
 
     .main-content {
-        padding: 0 24px 24px;
+        /* 1024px 断点下 top-bar 仍为绝对定位悬浮层，必须保留顶部预留高度，否则首行卡片会被悬浮顶栏遮挡 */
+        padding: var(--top-bar-height) 24px 24px;
     }
 }
 
@@ -130,6 +143,7 @@ body.dark-theme .top-bar::before {
         flex-direction: column;
         height: auto;
         min-height: 100vh;
+        min-height: 100dvh;
     }
 
     /* 侧栏拉伸成横条 */
@@ -155,8 +169,10 @@ body.dark-theme .top-bar::before {
         height: 40px;
     }
 
-    /* 侧栏导航菜单单行横向排开 */
-    .sidebar > div:nth-child(2) {
+    /* 侧栏导航菜单单行横向排开（兼容 nav 语义化后的结构） */
+    .sidebar > div:nth-child(2),
+    .sidebar > nav:nth-child(2),
+    .sidebar-nav {
         display: flex;
         flex-direction: row;
         gap: 8px;
@@ -166,6 +182,8 @@ body.dark-theme .top-bar::before {
         padding-bottom: 4px;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: thin;
+        -webkit-mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
+        mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
     }
 
     /* 侧栏页脚：不再整块隐藏，改为按钮横向排布 + 隐藏求星文案，
@@ -302,6 +320,7 @@ body.dark-theme .top-bar::before {
     .top-bar {
         padding: 10px 12px;
         min-height: 56px;
+        padding-top: calc(10px + env(safe-area-inset-top, 0px));
     }
 
     .top-bar > h5 {
@@ -379,7 +398,9 @@ body.dark-theme .top-bar::before {
         padding-bottom: 16px;
     }
 
-    .sidebar > div:nth-child(2) {
+    .sidebar > div:nth-child(2),
+    .sidebar > nav:nth-child(2),
+    .sidebar-nav {
         flex-direction: column;
         overflow-x: visible;
         overflow-y: auto;

@@ -577,9 +577,9 @@ html.theme-dark .connection-sub-source-item.is-disabled:hover {
 /* 被管理员禁用的提示芯片 */
 .connection-sub-source-off-badge {
     font-size: 10px !important;
-    color: rgba(0, 0, 0, 0.38);
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 45%, transparent);
     font-weight: 700 !important;
-    background: rgba(0, 0, 0, 0.05);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, transparent);
     border: 1px solid transparent;
     padding: 2px 6px;
     border-radius: 6px;
@@ -1119,6 +1119,39 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     .news-ticker-card {
         height: 56px;
         padding: 0 14px !important;
+    }
+
+    /* 移动端跑马灯：压缩标题与栏间距，保证三栏文字可读 */
+    .news-ticker-head {
+        gap: 4px;
+    }
+
+    .news-ticker-head__icon {
+        font-size: 15px;
+    }
+
+    .news-ticker-v-grid {
+        gap: 8px;
+        grid-template-columns: 7fr 9fr 5fr;
+    }
+
+    .news-ticker-time {
+        font-size: 11px;
+    }
+
+    .news-ticker-desc {
+        font-size: 12px;
+    }
+
+    /* 触屏设备：连接项点击区域至少 48px 高，避免误触 */
+    .connection-item,
+    .connection-item--compact {
+        min-height: 48px;
+    }
+
+    .connection-flip-toggle {
+        width: 28px;
+        height: 28px;
     }
 }
 

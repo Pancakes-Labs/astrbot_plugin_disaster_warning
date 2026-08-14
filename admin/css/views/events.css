@@ -259,6 +259,7 @@
 body.dark-theme .badge-earthquake { background: transparent; color: inherit; }
 body.dark-theme .badge-tsunami { background: #01579B; color: #B3E5FC; }
 body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
+body.dark-theme .badge-unknown { background: #33313A; color: #CAC4D0; }
 
 /* 悬停事件卡片：仅视觉面/内容横移，命中壳不动 */
 .event-card:hover::before,
@@ -1010,6 +1011,14 @@ html.theme-dark .event-filter-source-menu {
     background: var(--md-sys-color-surface);
     border-color: rgba(208, 188, 255, 0.12);
     box-shadow: 0 22px 40px rgba(0,0,0,0.34);
+}
+
+/* 暗色模式：原生 datetime-local 日期选择控件跟随暗色渲染（日历弹层不发白） */
+body.dark-theme .event-filter-datetime-input,
+html.theme-dark .event-filter-datetime-input,
+body.dark-theme .event-filter-source-summary,
+html.theme-dark .event-filter-source-summary {
+    color-scheme: dark;
 }
 
 .horizontal-timeline-display-label {
@@ -2994,6 +3003,30 @@ body.dark-theme .weather-query-error {
     .events-filters-header {
         gap: 14px;
         margin-bottom: 24px;
+    }
+
+    /* 时间轴翻页按钮移动端触控放大：保证至少 44x44px 命中区 */
+    .horizontal-timeline-nav-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* 事件卡片展开徽章触控区域放大，便于拇指点击 */
+    .update-badge {
+        min-height: 36px;
+        padding: 6px 14px;
+    }
+
+    /* 时间轴展示数量下拉触发按钮放大触控目标 */
+    .horizontal-timeline-limit-trigger {
+        min-height: 40px;
+        min-width: 96px;
+    }
+
+    /* 天气/台风查询按钮移动端触控目标统一 44px */
+    .weather-query-btn,
+    .typhoon-query-submit-btn {
+        min-height: 44px;
     }
 
     .event-filters-footer-row {
