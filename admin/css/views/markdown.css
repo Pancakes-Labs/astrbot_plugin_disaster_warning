@@ -951,10 +951,11 @@ body.dark-theme .notification-md-mermaid {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-/* 暗色模式：SVG 文本笔画颜色统一继承为浅色，保证 dark 主题下所有节点文字可读 */
-body.dark-theme .notification-md-mermaid svg text {
-    fill: #ECE7F6;
-}
+/* 暗色模式：Mermaid 图表的暗色适配由 useMermaidRenderer.js 的
+   applyMermaidDarkAdaptation() 统一负责——它以 setProperty(..., 'important')
+   写内联样式，优先级高于此处外部样式表的 !important 规则。
+   因此节点形状、文字、连线的强制覆盖规则不再在此重复维护（运行时不会生效），
+   仅保留 JS 未覆盖的部分：a 链接颜色与边标签背景。 */
 
 /* 暗色模式：锚点/链接文字与背景边框同步浅色化，避免深底上的深色文字看不清 */
 body.dark-theme .notification-md-mermaid svg a {
@@ -962,50 +963,7 @@ body.dark-theme .notification-md-mermaid svg a {
     stroke: none;
 }
 
-/* 暗色模式：强制覆盖 mermaid 节点框的内联浅色样式。
-   这里用 !important 压掉浅色填充/描边/文字，统一转为深底浅字，
-   并用轻微透明度保留不同节点类之间的层次区分。 */
-body.dark-theme .notification-md-mermaid svg .node rect,
-body.dark-theme .notification-md-mermaid svg .node polygon,
-body.dark-theme .notification-md-mermaid svg .node circle,
-body.dark-theme .notification-md-mermaid svg .node path,
-body.dark-theme .notification-md-mermaid svg .cluster rect,
-body.dark-theme .notification-md-mermaid svg .cluster polygon,
-body.dark-theme .notification-md-mermaid svg .cluster circle,
-body.dark-theme .notification-md-mermaid svg .cluster path {
-    fill: rgba(40, 36, 52, 0.92) !important;
-    stroke: rgba(208, 188, 255, 0.55) !important;
-}
-
-/* 节点标签文字与子图标题：统一浅色，保证在深色节点/画布上清晰 */
-body.dark-theme .notification-md-mermaid svg .nodeLabel,
-body.dark-theme .notification-md-mermaid svg .edgeLabel,
-body.dark-theme .notification-md-mermaid svg .cluster-label span,
-body.dark-theme .notification-md-mermaid svg .cluster > text {
-    fill: #ECE7F6 !important;
-    color: #ECE7F6 !important;
-}
-
-/* 节点内文本会以 inline style 直接写入 <text>，必须用 !important 压成浅色 */
-body.dark-theme .notification-md-mermaid svg .node text,
-body.dark-theme .notification-md-mermaid svg .nodeLabel > tspan {
-    fill: #ECE7F6 !important;
-}
-
-/* 带 <br/> 的节点标签走 foreignObject + HTML，文字颜色需单独覆盖（含其内联 color 属性） */
-body.dark-theme .notification-md-mermaid svg foreignObject div,
-body.dark-theme .notification-md-mermaid svg foreignObject span,
-body.dark-theme .notification-md-mermaid svg foreignObject p {
-    color: #ECE7F6 !important;
-}
-
-/* 连接线、箭头与边标签：统一浅紫，保证在深色画布上可见 */
-body.dark-theme .notification-md-mermaid svg .edgePath path,
-body.dark-theme .notification-md-mermaid svg .flowchart-link,
-body.dark-theme .notification-md-mermaid svg .edgePaths path,
-body.dark-theme .notification-md-mermaid svg marker path {
-    stroke: #C4B5FD !important;
-}
+/* 边标签背景：JS 暗色适配未覆盖，保持深色半透明底以区分标签与画布 */
 body.dark-theme .notification-md-mermaid svg .edgeLabels .edgeLabel {
     background: rgba(30, 27, 38, 0.92);
 }

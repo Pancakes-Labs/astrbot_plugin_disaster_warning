@@ -268,7 +268,10 @@ body.dark-theme .top-bar::before {
     }
 
     .main-content {
-        padding: 16px;
+        /* 保留底部安全区：上方 @media (max-width: 768px) 中设置的
+           padding-bottom: calc(16px + env(safe-area-inset-bottom)) 会被此处
+           padding 简写覆盖，需显式保留，避免移动端底部控件被 Home 指示条遮挡 */
+        padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
         overflow-y: visible;
         height: auto;
     }
