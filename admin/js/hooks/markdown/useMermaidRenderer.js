@@ -157,11 +157,32 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
             return;
         }
         let cancelled = false;
-        ensureMermaidLoaded().then((ready) => {
-            if (!cancelled) setMermaidReady(ready);
-        });
+        let retryTimer = null;
+        let retryCount = 0;
+        const MAX_RETRIES = 2;      // 有限重试次数
+        const RETRY_DELAY_MS = 2000; // 重试间隔
+
+        const attemptLoad = () => {
+            if (cancelled) return;
+            ensureMermaidLoaded().then((ready) => {
+                if (cancelled) return;
+                if (ready) {
+                    setMermaidReady(true);
+                    return;
+                }
+                // 加载失败：当前挂载周期内有限次延迟重试，
+                // 避免首帧瞬断（本地库文件偶发加载失败）后一直停留在降级文本
+                retryCount += 1;
+                if (retryCount <= MAX_RETRIES) {
+                    retryTimer = setTimeout(attemptLoad, RETRY_DELAY_MS);
+                }
+            });
+        };
+
+        attemptLoad();
         return () => {
             cancelled = true;
+            if (retryTimer) clearTimeout(retryTimer);
         };
     }, []);
 

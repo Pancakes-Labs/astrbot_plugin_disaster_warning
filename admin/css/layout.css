@@ -150,7 +150,10 @@ body.dark-theme .top-bar::before {
     .sidebar {
         width: 100%;
         height: auto;
-        padding: 12px 16px;
+        /* 保留底部安全区：上方 @media (max-width: 768px) 中设置的
+           padding-bottom: calc(12px + env(safe-area-inset-bottom)) 会被
+           此处 padding 简写覆盖，需显式保留 */
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
         border-right: none;
         border-bottom: 1px solid var(--glass-border);
         flex-direction: column;
