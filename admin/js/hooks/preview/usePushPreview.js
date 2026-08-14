@@ -40,6 +40,9 @@
         const [preview, setPreview] = useState(null); // { preview_text, decision, media_notice, has_images, ... }
         const [loading, setLoading] = useState(false);
         const [error, setError] = useState('');
+        // 错误来源类型：'' | 'schema' | 'preview' | 'source'
+        // 用于让调用方按错误来源展示对应的重试动作（schema 重载 / 预览重试）
+        const [errorKind, setErrorKind] = useState('');
 
         // 请求时序保护：只有最新一次请求允许写入状态
         const previewSeqRef = useRef(0);
@@ -75,7 +78,10 @@
                         }
                     }
                 } catch (e) {
-                    if (!cancelled) setError('加载数据源列表失败: ' + (e.message || e));
+                    if (!cancelled) {
+                        setError('加载数据源列表失败: ' + (e.message || e));
+                        setErrorKind('schema');
+                    }
                 } finally {
                     if (!cancelled) setSchemaLoading(false);
                 }
@@ -111,6 +117,7 @@
             const seq = ++previewSeqRef.current;
             setLoading(true);
             setError('');
+            setErrorKind('');
             // 记录本次请求起始时刻，保证加载动画最短展示 MIN_LOADING_MS
             const startedAt = Date.now();
             try {
@@ -119,6 +126,7 @@
                     if (seq === previewSeqRef.current) {
                         setPreview(null);
                         setError('未找到该数据源的参数定义');
+                        setErrorKind('source');
                     }
                     return;
                 }
@@ -141,6 +149,7 @@
                 if (seq === previewSeqRef.current) {
                     setPreview(null);
                     setError('预览生成失败: ' + (e.message || e));
+                    setErrorKind('preview');
                 }
             } finally {
                 if (seq === previewSeqRef.current) {
@@ -164,6 +173,7 @@
                 immediateFiredSourceRef.current = '';
                 setPreview(null);
                 setError('');
+                setErrorKind('');
                 setLoading(false);
             }
             if (!enabled || !selectedSourceId || !schema || schemaLoading) return;
@@ -220,6 +230,7 @@
         // Schema 独立重试：仅重新拉取 Schema 并重置预览错误，不重复预览请求
         const reloadSchema = useCallback(() => {
             setError('');
+            setErrorKind('');
             setSchemaRetryToken((prev) => prev + 1);
         }, []);
 
@@ -232,6 +243,7 @@
             preview,
             loading,
             error,
+            errorKind,
             retry: () => firePreview(selectedSourceId, runtimeConfig, targetSession),
             reloadSchema,
         };

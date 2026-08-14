@@ -152,7 +152,7 @@
     /**
      * 预览内容主体（两种场景共用）
      */
-    function PreviewBody({ preview, loading, error, showBadge, onReloadSchema }) {
+    function PreviewBody({ preview, loading, error, errorKind, showBadge, onReloadSchema, onRetry }) {
         if (loading) {
             return (
                 <Box className="pp-loading">
@@ -162,19 +162,34 @@
             );
         }
         if (error) {
+            // 按错误来源展示对应重试动作：
+            // - 'schema'：数据源列表加载失败 → 重新加载数据源（重拉 Schema）
+            // - 'preview'/'source'：预览请求失败或数据源参数缺失 → 直接重试预览
+            const isSchemaError = errorKind === 'schema';
             return (
                 <Box className="pp-error">
                     <Typography variant="body2" color="error">⚠️ {error}</Typography>
-                    {typeof onReloadSchema === 'function' && (
-                        <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<span>🔄</span>}
-                            onClick={onReloadSchema}
-                        >
-                            重新加载推文预览
-                        </Button>
-                    )}
+                    {isSchemaError
+                        ? (typeof onReloadSchema === 'function' && (
+                            <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<span>🔄</span>}
+                                onClick={onReloadSchema}
+                            >
+                                重新加载数据源
+                            </Button>
+                        ))
+                        : (typeof onRetry === 'function' && (
+                            <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<span>🔄</span>}
+                                onClick={onRetry}
+                            >
+                                重试加载推文预览
+                            </Button>
+                        ))}
                 </Box>
             );
         }
@@ -227,7 +242,9 @@
      * @param {Object|null} props.preview 预览结果 { preview_text, decision, media_notice, ... }
      * @param {boolean} props.loading 是否加载中
      * @param {string} props.error 错误信息
-     * @param {Function} [props.onReloadSchema] Schema 独立重试回调（config 场景错误态展示）
+     * @param {string} [props.errorKind] 错误来源：'' | 'schema' | 'preview' | 'source'
+     * @param {Function} [props.onReloadSchema] Schema 独立重试回调（schema 错误展示）
+     * @param {Function} [props.onRetry] 预览重试回调（preview/source 错误展示）
      * @param {string} props.title 面板标题
      * @param {boolean} props.showBadge 是否展示过滤判定徽章（plain 场景可关闭）
      */
@@ -239,7 +256,9 @@
         preview = null,
         loading = false,
         error = '',
+        errorKind = '',
         onReloadSchema,
+        onRetry,
         title = '实时推文预览',
         showBadge = true,
     }) {
@@ -274,8 +293,10 @@
                         preview={preview}
                         loading={loading}
                         error={error}
+                        errorKind={errorKind}
                         showBadge={showBadge}
                         onReloadSchema={onReloadSchema}
+                        onRetry={onRetry}
                     />
                 </Box>
             </Box>
