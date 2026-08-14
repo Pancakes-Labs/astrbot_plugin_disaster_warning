@@ -82,6 +82,11 @@ class SourceMessageRouter:
         self._dispatch_service = service.event_ingress_dispatch_service
         self._side_effect_service = service.source_ingress_side_effect_service
         self._source_runtime_query = service.source_runtime_query
+        # Wolfx 未知消息节流：连续未知类型仅首次与每 N 轮各打一次，
+        # 避免极端情况下高频未知类型逐条刷屏，同时保留排查价值。
+        self._wolfx_unknown_logged = False
+        self._wolfx_unknown_rounds = 0
+        self._wolfx_unknown_log_interval = 60
 
     def register_all(self, ws_manager: WebSocketManager):
         """把各连接族处理器注册到 WebSocket 管理器。"""
@@ -547,9 +552,25 @@ class SourceMessageRouter:
                 # 获取 Wolfx 当前子报文类型对应的系统内 source_id
                 source_id = get_wolfx_source_id(msg_type)
                 if source_id is None:
-                    plugin_logger.debug(
-                        f"[灾害预警] Wolfx 消息类型 {msg_type} 暂未识别，来源连接为 {connection_name}"
-                    )
+                    # 未知类型属罕见异常态，但为防极端情况下高频未知类型刷屏，
+                    # 连续未知仅在首次与每 _wolfx_unknown_log_interval 轮各打一次。
+                    if not self._wolfx_unknown_logged:
+                        plugin_logger.debug(
+                            f"[灾害预警] Wolfx 消息类型 {msg_type} 暂未识别，"
+                            f"来源连接为 {connection_name}"
+                        )
+                        self._wolfx_unknown_logged = True
+                    else:
+                        self._wolfx_unknown_rounds += 1
+                        if (
+                            self._wolfx_unknown_rounds
+                            >= self._wolfx_unknown_log_interval
+                        ):
+                            self._wolfx_unknown_rounds = 0
+                            plugin_logger.debug(
+                                f"[灾害预警] Wolfx 连续 {self._wolfx_unknown_log_interval} 轮 "
+                                f"未识别消息类型，最近为 {msg_type}"
+                            )
                     return None
 
                 if not self._is_source_routable(source_id, msg_type):
