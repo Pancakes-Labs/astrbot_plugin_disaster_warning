@@ -712,11 +712,18 @@ function SimulationView() {
                 </DialogActions>
             </Dialog>
 
-            {/* 单步预览对话框*/}
+            {/* 单步预览对话框（复用共享预览面板，纯展示模式） */}
             <Dialog open={Boolean(previewDialog)} onClose={() => setPreviewDialog(null)} maxWidth="md" fullWidth>
                 <DialogTitle>{previewDialog?.title || '预览'}</DialogTitle>
                 <DialogContent>
-                    <pre className="sim-view-preview-dialog-text">{previewDialog?.text || ''}</pre>
+                    <window.PushPreviewPanel
+                        variant="plain"
+                        title="单步推文预览"
+                        preview={previewDialog?.text ? { preview_text: previewDialog.text } : null}
+                        loading={false}
+                        error=""
+                        showBadge={false}
+                    />
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setPreviewDialog(null)}>关闭</Button>

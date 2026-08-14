@@ -115,6 +115,158 @@ class MessageBuildService:
         }
 
     @staticmethod
+    def resolve_image_flags(
+        source_id: str,
+        active_config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        event: EventEnvelope | None = None,
+    ) -> list[str]:
+        """解析指定数据源在当前配置与事件元数据下会附加的图片/卡片类型列表。
+
+        作为"图片附件判定"的唯一事实来源，与 build_message_async 的真实附加
+        链路严格对齐，供配置页实时推文预览（simulation_preview）复用，
+        避免预览与实际发送之间的配置偏差。
+
+        Args:
+            source_id: 数据源标识。
+            active_config: 生效配置快照（可为前端编辑中的草稿）。
+            metadata: 事件元数据（domain + envelope 合并视图），用于判断
+                "有数据才附加"的媒体类型；未传时若提供 event 则自动合并。
+            event: 事件信封（可选）。提供时复用 _get_event_metadata 统一
+                合并元数据视图，并可从 domain 事件读取字段，以对齐真实链路的可渲染条件。
+
+        Returns:
+            图片/卡片类型中文标签列表，顺序与真实附加顺序一致。
+        """
+        cfg = active_config if isinstance(active_config, dict) else {}
+        meta = (
+            metadata
+            if isinstance(metadata, dict)
+            else (
+                MessageBuildService._get_event_metadata(event)
+                if event is not None
+                else {}
+            )
+        )
+        flags: list[str] = []
+        domain_event = getattr(event, "event", None) if event is not None else None
+
+        def _flag(section, key, default=False) -> bool:
+            if not isinstance(section, dict):
+                return bool(default)
+            if key in section:
+                return bool(section.get(key))
+            return bool(default)
+
+        message_format = (
+            cfg.get("message_format")
+            if isinstance(cfg.get("message_format"), dict)
+            else {}
+        )
+
+        # 1. Global Quake 卡片 / 通用地图（地震系）
+        if source_id == "global_quake":
+            if _flag(message_format, "use_global_quake_card", False):
+                flags.append("Global Quake 卡片")
+            elif _flag(message_format, "include_map", False):
+                flags.append("通用地图")
+            return flags
+
+        # 2. S-Net 测站分布图（缺省开；有测站数据才附加）
+        if source_id == "snet_msil":
+            stations = meta.get("stations")
+            if isinstance(stations, list) and stations:
+                data_sources = (
+                    cfg.get("data_sources")
+                    if isinstance(cfg.get("data_sources"), dict)
+                    else {}
+                )
+                snet_cfg = (
+                    data_sources.get("snet")
+                    if isinstance(data_sources.get("snet"), dict)
+                    else {}
+                )
+                if _flag(snet_cfg, "include_station_map", True):
+                    flags.append("S-Net 测站分布图")
+            return flags
+
+        # 3. FSSN CMT 震源球（无开关；有节面数据才渲染）
+        if source_id == "fssn_cmt_fanstudio":
+            plane1 = meta.get("nodal_plane1")
+            if (
+                isinstance(plane1, dict)
+                and plane1.get("strike") is not None
+                and plane1.get("dip") is not None
+                and plane1.get("rake") is not None
+            ):
+                flags.append("震源球图")
+            return flags
+
+        # 4. 台风路径图（缺省开）
+        if source_id in ("typhoon_fanstudio", "typhoon_eqsc"):
+            typhoon_cfg = (
+                cfg.get("typhoon_config")
+                if isinstance(cfg.get("typhoon_config"), dict)
+                else {}
+            )
+            if _flag(typhoon_cfg, "include_track_map", True):
+                # 与真实链路对齐，无有效历史轨迹时不会附加路径图，预览也不应提示。
+                # can_render 要求至少 1 个有效历史节点，此处用 history_track 非空近似。
+                history_track = getattr(domain_event, "history_track", None)
+                has_track = bool(
+                    isinstance(history_track, (list, tuple)) and history_track
+                )
+                if has_track:
+                    flags.append("台风路径图")
+            return flags
+
+        # 5. CWA 台湾正式地震报告图件（无开关；有图件 URI 才附加）
+        if source_id == "cwa_fanstudio_report":
+            has_report_media = any(
+                isinstance(meta.get(key), str) and str(meta.get(key)).strip()
+                for key in ("image_uri", "shakemap_uri")
+            )
+            if has_report_media:
+                flags.append("地震报告图件")
+            return flags
+
+        # 6. 气象预警图标（缺省开；有预警编码才附加）
+        if (
+            source_id.startswith("china_weather")
+            or source_id == "china_weather_openquake"
+        ):
+            weather_cfg = (
+                cfg.get("weather_config")
+                if isinstance(cfg.get("weather_config"), dict)
+                else {}
+            )
+            weather_code = (
+                meta.get("weather_code")
+                or meta.get("type")
+                or meta.get("alert_code")
+                or meta.get("code")
+            )
+            if _flag(weather_cfg, "enable_weather_icon", True) and weather_code:
+                flags.append("气象预警图标")
+            return flags
+
+        # 7. 海啸图件（无开关；有 map_urls 数据才附加）
+        if "tsunami" in source_id:
+            map_urls = meta.get("map_urls")
+            if isinstance(map_urls, dict) and any(
+                isinstance(map_urls.get(k), str) and map_urls.get(k).strip()
+                for k in ("earthquake", "amplitude", "coastal")
+            ):
+                flags.append("海啸图件")
+            return flags
+
+        # 8. 其余地震源：通用地图（缺省关；EEW 分离地图源不在此标记，
+        if _flag(message_format, "include_map", False):
+            if source_id not in MessageBuildService._get_split_map_source_ids():
+                flags.append("通用地图")
+        return flags
+
+    @staticmethod
     def _resolve_source_id(event: EventEnvelope) -> str:
         """统一解析执行路径中的 source_id。"""
         return (getattr(event, "source_id", "") or "").strip()

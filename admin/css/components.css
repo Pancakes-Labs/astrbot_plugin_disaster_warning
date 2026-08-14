@@ -197,6 +197,25 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
+    transition:
+        background-color 0.2s ease-out,
+        border-color 0.2s ease-out,
+        transform 0.2s ease-out,
+        box-shadow 0.2s ease-out;
+}
+
+.sidebar-plugin-dir-button:hover {
+    background: rgba(0, 0, 0, 0.08);
+    transform: translateY(-1px);
+}
+
+.sidebar-plugin-dir-button:active {
+    transform: translateY(0);
+}
+
+.sidebar-plugin-dir-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
+    outline-offset: 2px;
 }
 
 body.dark-theme .sidebar-plugin-dir-button {
@@ -204,14 +223,27 @@ body.dark-theme .sidebar-plugin-dir-button {
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+body.dark-theme .sidebar-plugin-dir-button:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Emoji 图标垂直居中修正：
+   单独包一层 inline-flex 并强制行高 1，避免 emoji 字体基线偏移导致
+   在按钮内视觉上偏上/偏下；margin-left 修正文字对齐时 emoji 自身的视觉重心。 */
 .sidebar-plugin-dir-button__icon {
     font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(-0.5px);
     margin-left: -6px;
 }
 
 /* GitHub跳转链接容器 */
 .github-btn {
     text-decoration: none;
+    display: block;
 }
 
 /* 底部作者与仓库链接卡片 */
@@ -222,14 +254,41 @@ body.dark-theme .sidebar-plugin-dir-button {
     padding: 12px;
     background: rgba(0, 0, 0, 0.03);
     border-radius: 12px;
-    transition: all 0.2s ease;
+    transition:
+        background-color 0.2s ease-out,
+        border-color 0.2s ease-out,
+        transform 0.2s ease-out,
+        box-shadow 0.2s ease-out;
     border: 1px solid rgba(0, 0, 0, 0.06);
     cursor: pointer;
+}
+
+.github-card:hover {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    transform: translateY(-1px);
+}
+
+.github-card:active {
+    transform: translateY(0);
+}
+
+.github-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
+    outline-offset: 2px;
+    border-radius: 12px;
 }
 
 body.dark-theme .github-card {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+body.dark-theme .github-card:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 38%, transparent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .github-card__icon {
@@ -435,8 +494,15 @@ body.dark-theme .github-card {
         scrollbar-width: thin;
     }
 
+    /* 移动端不再整块隐藏页脚：改为横向排布「打开目录 + GitHub」两个入口，
+       保留快捷操作可达性；求星文案与版本行已在 layout.css 对应断点隐藏 */
     .sidebar-footer {
-        display: none; /* 移动端在屏幕较窄时，侧栏页脚自动隐藏，保持界面清爽 */
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 0;
     }
 }
 

@@ -841,7 +841,9 @@ body.dark-theme .connection-item--flippable:hover .connection-flip-face {
     align-items: center;
     gap: 16px;
     overflow: hidden;
-    margin-bottom: 16px;
+    /* 不追加底部外边距：跑马灯与下方卡片的间距统一交给
+       .dashboard-grid 的 gap（24px）接管 */
+    margin-bottom: 0;
 }
 
 /* 加载骨架态：保持单行横排布局 */
