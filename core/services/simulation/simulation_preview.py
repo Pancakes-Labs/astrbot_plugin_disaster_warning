@@ -23,107 +23,45 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...message.push.message_build_service import MessageBuildService
 from .flow_models import SimulationStep
 from .simulation_builder import SimulationBuilder
 
 
+def _get_merged_metadata(envelope) -> dict[str, Any]:
+    """合并事件 domain 与 envelope 层级的 metadata（envelope 覆盖 domain）。"""
+    merged: dict[str, Any] = {}
+    domain_event = getattr(envelope, "event", None)
+    domain_meta = getattr(domain_event, "metadata", None)
+    if isinstance(domain_meta, dict):
+        merged.update(domain_meta)
+    env_meta = getattr(envelope, "metadata", None)
+    if isinstance(env_meta, dict):
+        merged.update(env_meta)
+    return merged
+
+
 def _get_image_flags(
-    runtime_config: dict[str, Any] | None, source_id: str
+    runtime_config: dict[str, Any] | None,
+    source_id: str,
+    envelope=None,
 ) -> list[str]:
-    """按数据源精确判断该源在当前配置下会附加哪些图片/卡片附件。
-
-    语义：不同源类型的图片渲染由不同配置节控制，各源互不污染：
-    - Global Quake 卡片（use_global_quake_card，缺省关）→ 开卡片则优先卡片；
-      未开卡片时若 include_map 开则附加通用地图
-    - 通用地震地图（include_map，缺省关）：其余地震源
-    - S-Net 测站分布图（data_sources.snet.include_station_map，缺省开）
-    - 台风路径图（typhoon_config.include_track_map，缺省开）
-    - FSSN CMT 震源球（无开关，有节面数据即渲染）
-    - CWA 台湾正式地震报告图件（无开关，有 image_uri/shakemap_uri 即附加）
-    - 气象预警图标（weather_config.enable_weather_icon，缺省开）
-    - 海啸图件（无开关，有 map_urls 即附加）
-
-    默认值语义与 message_build_service 真实链路保持一致（缺省 true 的源
-    在未显式配置时真实发送也含图，因此预览需提示；缺省 false 的源则反之）。
-    """
-    cfg = runtime_config if isinstance(runtime_config, dict) else {}
-    flags: list[str] = []
-
-    def _flag(section, key, default=False) -> bool:
-        if not isinstance(section, dict):
-            return bool(default)
-        if key in section:
-            return bool(section.get(key))
-        return bool(default)
-
-    message_format = (
-        cfg.get("message_format") if isinstance(cfg.get("message_format"), dict) else {}
+    """按数据源精确判断该源在当前配置下会附加哪些图片/卡片附件。"""
+    metadata = _get_merged_metadata(envelope) if envelope is not None else {}
+    return MessageBuildService.resolve_image_flags(
+        source_id=source_id,
+        active_config=runtime_config,
+        metadata=metadata,
     )
-
-    # 1. Global Quake 卡片 / 通用地图（地震系）
-    if source_id == "global_quake":
-        if _flag(message_format, "use_global_quake_card", False):
-            flags.append("Global Quake 卡片")
-        elif _flag(message_format, "include_map", False):
-            flags.append("通用地图")
-        return flags
-
-    if source_id == "snet_msil":
-        data_sources = (
-            cfg.get("data_sources") if isinstance(cfg.get("data_sources"), dict) else {}
-        )
-        snet_cfg = (
-            data_sources.get("snet")
-            if isinstance(data_sources.get("snet"), dict)
-            else {}
-        )
-        if _flag(snet_cfg, "include_station_map", True):
-            flags.append("S-Net 测站分布图")
-        return flags
-
-    if source_id == "fssn_cmt_fanstudio":
-        flags.append("震源球图")
-        return flags
-
-    if source_id in ("typhoon_fanstudio", "typhoon_eqsc"):
-        typhoon_cfg = (
-            cfg.get("typhoon_config")
-            if isinstance(cfg.get("typhoon_config"), dict)
-            else {}
-        )
-        if _flag(typhoon_cfg, "include_track_map", True):
-            flags.append("台风路径图")
-        return flags
-
-    if source_id == "cwa_fanstudio_report":
-        flags.append("地震报告图件")
-        return flags
-
-    if source_id.startswith("china_weather") or source_id == "china_weather_openquake":
-        weather_cfg = (
-            cfg.get("weather_config")
-            if isinstance(cfg.get("weather_config"), dict)
-            else {}
-        )
-        if _flag(weather_cfg, "enable_weather_icon", True):
-            flags.append("气象预警图标")
-        return flags
-
-    if "tsunami" in source_id:
-        flags.append("海啸图件")
-        return flags
-
-    # 其余地震源：通用地图（缺省关）
-    if _flag(message_format, "include_map", False):
-        flags.append("通用地图")
-    return flags
 
 
 def _is_image_render_enabled(
-    runtime_config: dict[str, Any] | None, source_id: str
+    runtime_config: dict[str, Any] | None,
+    source_id: str,
+    envelope=None,
 ) -> bool:
     """判断指定数据源在当前配置下是否附加了任何图片/卡片附件。"""
-    return len(_get_image_flags(runtime_config, source_id)) > 0
+    return len(_get_image_flags(runtime_config, source_id, envelope)) > 0
 
 
 def _extract_plain_text(chain) -> str:
@@ -188,9 +126,12 @@ async def build_config_preview(
     builder = builder or SimulationBuilder()
     envelope = builder.build_step_envelope(step)
 
+    # 仅在 runtime_config 不是 dict 时才回退持久化配置：
+    # 前端显式传入 {}（如清空全部草稿字段）时，预览必须如实反映空配置，
+    # 而非回退到持久化配置导致结果失真。
     active_config = (
         runtime_config
-        if isinstance(runtime_config, dict) and runtime_config
+        if isinstance(runtime_config, dict)
         else getattr(message_manager, "config", {}) or {}
     )
     source_id = str(getattr(envelope.identity, "source_id", "") or "")
@@ -199,11 +140,15 @@ async def build_config_preview(
     #    与发送链路（simulation_bypass_regular_filters=True 全放行）不同，
     #    预览必须让业务过滤规则（震级阈值 / 数据源开关 / 天气级别 / 关键词等）
     #    真实作用于草稿配置，才能实时反映"改过滤配置 → 推文拦截状态变化"。
+    # 评估失败的默认值语义：accepted=False + 明确错误原因，绝不默认放行。
+    # 规则链抛异常说明评估不可信，返回"评估失败"而非误导性的"规则链通过"，
+    # 前端徽章会据此展示异常状态（拦截）。
     decision_payload: dict[str, Any] = {
-        "accepted": True,
-        "reason": "规则链通过",
+        "accepted": False,
+        "reason": "规则链评估失败",
         "detail": "",
     }
+    evaluate_succeeded = False
     try:
         evaluate = getattr(message_manager, "evaluate_push_decision", None)
         if callable(evaluate):
@@ -220,8 +165,16 @@ async def build_config_preview(
                     "reason": str(getattr(final_decision, "reason", "") or ""),
                     "detail": str(getattr(final_decision, "detail", "") or ""),
                 }
+                evaluate_succeeded = True
     except Exception as exc:
-        logger.debug(f"[灾害预警] 配置预览规则链评估失败（已忽略）: {exc}")
+        logger.debug(f"[灾害预警] 配置预览规则链评估失败: {exc}")
+    if not evaluate_succeeded:
+        # 规则链不可用或未返回结果时，同样标记为"评估失败"而非默认放行
+        decision_payload = {
+            "accepted": False,
+            "reason": "规则链评估失败",
+            "detail": "",
+        }
 
     # 2. 构建消息链（纯文本优先，反映草稿展示参数）
     text_builder = getattr(message_manager, "text_message_builder", None)
@@ -248,7 +201,8 @@ async def build_config_preview(
 
     preview_text = _extract_plain_text(chain)
     has_images = _detect_image_components(chain)
-    image_flags = _get_image_flags(active_config, source_id)
+    # 传入 envelope 供 CWA/海啸等"有媒体数据才附加"的类型按 metadata 精确判断
+    image_flags = _get_image_flags(active_config, source_id, envelope)
     image_render_enabled = len(image_flags) > 0
 
     # 3. 降级提示：仅当该源在当前配置下确实附加了图片/卡片时追加

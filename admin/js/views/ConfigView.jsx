@@ -62,7 +62,12 @@ function ConfigView() {
     // 配置作用域键：mode + 会话 的组合。
     // 全局配置 / 不同会话差异配置各自独立，切换作用域时旧配置的预览必须立即作废，
     // 避免异步加载间隙用上一个作用域的配置评估（多会话/全局-会话切换混淆的根因）。
-    const scopeKey = `${mode || 'global'}|${mode === 'session' ? (selectedSession || '') : ''}`;
+    // 注意：这里基于 draftState（ConfigRenderer 已就绪后上报的草稿）派生 scopeKey，
+    // 而非 editor 的实时 mode/selectedSession——切换会话期间 ConfigRenderer 处于
+    // loading 不上报草稿，若用 editor 值则 scopeKey 先变、draftState 仍是旧作用域，
+    // 会触发"用旧配置评估新会话"的竞态。基于草稿派生则在新草稿就绪前 scopeKey 保持
+    // 旧值，配合 usePushPreview 内"scopeKey 变化即作废并跳过防抖"的双保险，彻底隔离竞态。
+    const scopeKey = `${draftState?.mode || 'global'}|${draftState?.mode === 'session' ? (draftState?.selectedSession || '') : ''}`;
 
     // ConfigRenderer 回调：上报最新 config / mode / selectedSession / ready
     const handleDraftChange = useCallback((payload) => {
@@ -119,7 +124,7 @@ function ConfigView() {
                                         label="目标会话"
                                         value={selectedSession}
                                         onChange={(e) => editor.setSelectedSession(e.target.value)}
-                                        className="config-mode-toolbar__session-field"
+                                        className="config-header-session-field"
                                     >
                                         {editor.sessions.map((item) => {
                                             const name = item.session_name;
@@ -136,7 +141,7 @@ function ConfigView() {
                                     )}
                                     {/* 单独加载特定会话时的骨架加载提示 */}
                                     {editor.sessionLoading && (
-                                        <Typography variant="caption" color="text.secondary" className="config-mode-toolbar__loading">
+                                        <Typography variant="caption" color="text.secondary" className="config-header-session-loading">
                                             会话配置加载中...
                                         </Typography>
                                     )}
