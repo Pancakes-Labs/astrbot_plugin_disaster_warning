@@ -74,13 +74,17 @@
                 // 引用稳定性优化：WS 心跳广播（默认 30s 一次）会周期性携带 statistics 载荷，
                 // 若内容与上次完全一致则直接透传原 state 引用，避免 events / stats 引用被重置，
                 // 从而引发事件列表与重大事件时间轴的无谓静默全量重拉（首次加载/页面切换变慢的根因之一）。
-                // 比较口径覆盖完整事件快照，仅比较 id/event_id 会漏掉「同 ID 事件更新描述/震级/updated_at」的情况，
-                // 且无 ID 事件会被误判为相同；events 有 100 条上限，序列化开销远小于 stats 榜单数组。
+                // 比较口径覆盖完整事件快照 + 震级分布 + stats 图表数据：
+                // - 仅比较 id/event_id 会漏掉「同 ID 事件更新描述/震级/updated_at」与无 ID 事件误判；
+                // - 仅比较 events/dist 会漏掉「统计数据变化但事件列表不变」时 StatsView 不更新的情况。
+                // events 有 100 条上限，序列化开销远小于完整 stats 榜单数组，且早退后不再重复序列化。
                 const eventsJson = JSON.stringify(nextEvents);
                 const prevEventsJson = JSON.stringify(prevEvents);
                 const distJson = JSON.stringify(normalized.magnitudeDistribution);
                 const prevDistJson = JSON.stringify(state.magnitudeDistribution);
-                if (eventsJson === prevEventsJson && distJson === prevDistJson) {
+                const statsJson = JSON.stringify(normalized.stats);
+                const prevStatsJson = JSON.stringify(state.stats);
+                if (eventsJson === prevEventsJson && distJson === prevDistJson && statsJson === prevStatsJson) {
                     return state;
                 }
                 return {
