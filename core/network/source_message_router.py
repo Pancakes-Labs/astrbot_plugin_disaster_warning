@@ -387,8 +387,6 @@ class SourceMessageRouter:
                             plugin_logger.debug(
                                 f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
                             )
-                processed_count = 0
-
                 # 遍历被分配出来的数据源及负载，分别尝试分发
                 for source, source_id, payload in messages_to_process:
                     if not self._is_source_routable(source_id, source):
@@ -400,7 +398,7 @@ class SourceMessageRouter:
                         event_stream=self._resolve_stream_by_source_id(source_id),
                         is_silent_window=True,
                     )
-                    dispatched = await self._parse_and_dispatch(
+                    await self._parse_and_dispatch(
                         source_id=source_id,
                         source_label=source,
                         parser_input=json.dumps(payload),
@@ -409,14 +407,9 @@ class SourceMessageRouter:
                         source_channel=source,
                         parser_log_label=source,
                     )
-                    if dispatched:
-                        processed_count += 1
 
-                # 没有任何子消息被路由：心跳/未知包均属常态，不再逐条打日志，
+                # 没有任何子消息被路由：心跳/未知包均属常态，无需逐条打日志，
                 # 避免高频未知消息刷屏。真正的异常由上层 error 日志承担。
-                if processed_count == 0 and not messages_to_process:
-                    pass
-
                 return None
 
             except Exception as error:
