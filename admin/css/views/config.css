@@ -481,13 +481,13 @@ body.dark-theme .config-header {
 }
 
 /* 顶栏会话选择输入控件（会话差异配置模式，原工具栏迁移至顶栏） */
-.config-mode-toolbar__session-field {
+.config-header-session-field {
     min-width: 280px;
     max-width: 100%;
 }
 
 /* 顶栏会话加载提示 */
-.config-mode-toolbar__loading {
+.config-header-session-loading {
     display: block !important;
     white-space: nowrap;
 }
@@ -686,6 +686,37 @@ body.dark-theme .config-header {
     flex-direction: column;
     overflow: hidden;
     background: color-mix(in srgb, var(--md-sys-color-primary) 3%, transparent);
+}
+
+/* 窄屏（平板/小桌面）：配置页双栏改为纵向堆叠，保证右侧预览列可读性 */
+@media (max-width: 1024px) {
+    .config-view-main {
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .config-view-main-left {
+        flex: 0 0 auto;
+        min-height: 60vh;
+        border-right: none;
+        border-bottom: 1px solid var(--glass-border, rgba(0, 0, 0, 0.08));
+    }
+
+    .config-view-main-right {
+        flex: 1 1 auto;
+        min-height: 420px;
+    }
+}
+
+/* 移动端：进一步降低左栏编辑器最小高度，右栏预览占满剩余空间 */
+@media (max-width: 768px) {
+    .config-view-main-left {
+        min-height: 50vh;
+    }
+
+    .config-view-main-right {
+        min-height: 360px;
+    }
 }
 
 /* ============================================================
@@ -980,11 +1011,11 @@ body.dark-theme .pp-decision--blocked {
 
 .pp-tweet-text {
     margin: 0;
-    font-family: "JetBrains Mono", "Consolas", "Courier New", monospace;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
     font-size: 12.5px;
     line-height: 1.6;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: break-word;
     color: var(--md-sys-color-on-surface);
     flex: 1;
     overflow-y: auto;
