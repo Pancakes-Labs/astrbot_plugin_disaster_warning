@@ -35,7 +35,7 @@
         }),
         /**
          * 导出备份压缩包 (ZIP)
-         * @param {string[]} targets 可选备份项，如 ['db', 'sessions', 'stats']
+         * @param {string[]} targets 可选备份项
          * @returns {Promise<Blob>}
          */
         exportFullBackup: (targets = null) => {
