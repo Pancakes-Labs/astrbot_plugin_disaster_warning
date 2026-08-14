@@ -2344,7 +2344,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.debug("[灾害预警] 本地监控未启用，本地坐标不可用")
             return None, None, ""
         if lat is None or lon is None:
-            logger.info("[灾害预警] 本地监控配置缺少经度或纬度，本地坐标不可用")
+            # 与"未启用"保持一致：本地监控未配置是常态，统一 DEBUG 避免每次查询刷 INFO
+            logger.debug("[灾害预警] 本地监控配置缺少经度或纬度，本地坐标不可用")
             return None, None, ""
         try:
             lat_f = float(lat)
