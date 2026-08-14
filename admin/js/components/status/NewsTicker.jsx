@@ -147,8 +147,13 @@ function NewsTicker({ style }) {
     const { events, config, dataLoaded, lastEvent } = state;
     const displayTimezone = config.displayTimezone || 'UTC+8';
 
-    // 状态：控制跑马灯是否由于鼠标悬停而暂停滚动
-    const [paused, setPaused] = useState(false);
+    // 暂停状态拆分为两个独立维度：
+    // - userPaused：键盘用户按 Space/Enter 手动暂停，仅键盘操作可切换，不受鼠标/焦点事件影响；
+    // - interactionPaused：鼠标悬停或焦点进入时的临时暂停，移出/失焦自动恢复。
+    // 实际暂停 = 两者逻辑或，保证手动暂停不会被临时暂停的清除逻辑覆盖。
+    const [userPaused, setUserPaused] = useState(false);
+    const [interactionPaused, setInteractionPaused] = useState(false);
+    const paused = userPaused || interactionPaused;
     const isDark = state.theme === 'dark';
 
     // 三栏事件队列（新事件头部插入，尾部淘汰）
@@ -477,6 +482,21 @@ function NewsTicker({ style }) {
         return () => clearInterval(timer);
     }, []);
 
+    // 键盘可达性：跑马灯自动滚动对键盘用户不可控，按 Space/Enter 可切换播放/暂停。
+    // 仅修改 userPaused，避免被鼠标/焦点事件触发的临时暂停清除。
+    // 注意：该 useCallback 必须在下方 dataLoaded 提前返回之前声明，
+    // 否则 dataLoaded 翻转时 hooks 数量变化会触发 React error #310。
+    const togglePaused = useCallback(() => {
+        setUserPaused(prev => !prev);
+    }, []);
+
+    const handleTickerKeyDown = (e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            togglePaused();
+        }
+    };
+
     // 1. 状态：网络数据未就绪，渲染跑马灯骨架屏结构
     if (!dataLoaded) {
         return (
@@ -596,18 +616,6 @@ function NewsTicker({ style }) {
         </div>
     );
 
-    // 键盘可达性：跑马灯自动滚动对键盘用户不可控，按 Space/Enter 可切换播放/暂停
-    const togglePaused = useCallback(() => {
-        setPaused(prev => !prev);
-    }, []);
-
-    const handleTickerKeyDown = (e) => {
-        if (e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            togglePaused();
-        }
-    };
-
     return (
         <div
             className={`card news-ticker-card ${isDark ? 'is-dark' : 'is-light'}`}
@@ -615,10 +623,10 @@ function NewsTicker({ style }) {
             tabIndex={0}
             role="region"
             aria-label={paused ? '最新动态（已暂停，按空格键播放）' : '最新动态（按空格键暂停）'}
-            onMouseEnter={() => setPaused(true)}
-            onMouseLeave={() => setPaused(false)}
-            onFocus={() => setPaused(true)}
-            onBlur={() => setPaused(false)}
+            onMouseEnter={() => setInteractionPaused(true)}
+            onMouseLeave={() => setInteractionPaused(false)}
+            onFocus={() => setInteractionPaused(true)}
+            onBlur={() => setInteractionPaused(false)}
             onKeyDown={handleTickerKeyDown}
         >
             {/* 左侧固定标题（与三栏同一行） */}

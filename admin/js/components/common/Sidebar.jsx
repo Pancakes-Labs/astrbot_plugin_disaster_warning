@@ -49,13 +49,14 @@ function Sidebar({ currentView, onViewChange }) {
                         className={`nav-item ${currentView === item.id ? 'active' : ''}`}
                         onClick={() => onViewChange(item.id)}
                         aria-current={currentView === item.id ? 'page' : undefined}
-                        aria-label={item.label}
+                        aria-label={item.badge > 0 ? `${item.label}，${item.badge} 条未读` : item.label}
                     >
                         <span className="nav-item__icon" aria-hidden="true">{item.icon}</span>
                         <span className="nav-item__label">{item.label}</span>
-                        {/* 如果存在大于0的徽标角标，则显示未读数（最大99+） */}
+                        {/* 如果存在大于0的徽标角标，则显示未读数（最大99+）。
+                            aria-label 已合并未读数，徽标本身仅作视觉指示，读屏不重复播报 */}
                         {item.badge > 0 && (
-                            <span className="nav-badge" aria-label={`${item.badge} 条未读`}>
+                            <span className="nav-badge" aria-hidden="true">
                                 {item.badge > 99 ? '99+' : item.badge}
                             </span>
                         )}
