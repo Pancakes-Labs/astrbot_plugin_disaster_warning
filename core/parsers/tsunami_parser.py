@@ -212,7 +212,6 @@ class TsunamiParser(BaseParser):
         try:
             msg_data = self._extract_data(data)
             if not msg_data:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 消息中没有有效数据")
                 return None
 
             if self._is_heartbeat_message(msg_data):
@@ -342,14 +341,10 @@ class JmaTsunamiP2PParser(BaseParser):
             data = json.loads(message)
             code = data.get("code")
 
-            # P2P 中 552 业务码专指日本津波予報（海啸警报），其余直接跳过
+            # P2P 中 552 业务码专指日本津波予報（海啸警报），其余直接跳过。
             if code == 552 or str(code) == "552":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到津波予報(code:552)"
-                )
                 return self._parse_tsunami_data(data)
 
-            plugin_logger.debug(f"[灾害预警] {self.source_id} 非海啸数据，code: {code}")
             return None
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")

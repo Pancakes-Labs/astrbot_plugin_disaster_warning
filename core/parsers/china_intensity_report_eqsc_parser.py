@@ -290,9 +290,7 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
             else:
                 adapted = self.adapt_eqsc_detail_to_fan_shape(raw)
             if not adapted:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 EQSC CENC 烈度速报详情，跳过"
-                )
+                # 非 EQSC CENC 烈度速报详情为混流常态，不逐一记录
                 return None
 
             envelope = self._build_envelope(adapted)

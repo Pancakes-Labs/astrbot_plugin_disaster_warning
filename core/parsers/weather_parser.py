@@ -50,7 +50,6 @@ class WeatherAlarmParser(BaseParser):
                 # 非 RealtimeEvent 结构：回退到 FAN Studio 扁平/嵌套载荷提取
                 msg_data = self._extract_data(data)
             if not msg_data:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 消息中没有有效数据")
                 return None
 
             # 过滤心跳包
@@ -262,15 +261,8 @@ class WeatherAlarmParser(BaseParser):
 
         # 仅处理气象预警新增事件；其余情况确认是 RealtimeEvent 但直接丢弃
         if msg_type and msg_type != "weather":
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 忽略非 weather 类型的 RealtimeEvent: "
-                f"{msg_type or '未知'}"
-            )
             return None, True
         if action and action not in ("new", ""):
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 忽略非 new 的气象 action: {action}"
-            )
             return None, True
 
         payload = data.get("payload")

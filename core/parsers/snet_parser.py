@@ -523,9 +523,6 @@ class SnetParser(BaseParser):
             if float(s.get("shindo", -999.0)) >= fetch_min_shindo
         ]
         if not triggered:
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 无测站达到阈值 ({fetch_min_shindo})"
-            )
             return None
 
         top = triggered[0]

@@ -197,7 +197,6 @@ class TyphoonParser(BaseParser):
         try:
             msg_data = self._extract_data(data)
             if not msg_data:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 消息中没有有效数据")
                 return None
 
             # 台风数据固定为数组格式
@@ -209,9 +208,7 @@ class TyphoonParser(BaseParser):
                 typhoon_list = [msg_data]
 
             if not typhoon_list:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 台风数据为空数组，当前无活跃台风"
-                )
+                # 空数组（当前无活跃台风）为轮询常态，不逐一记录
                 return None
 
             envelopes = []
@@ -228,7 +225,6 @@ class TyphoonParser(BaseParser):
                     envelopes.append(envelope)
 
             if not envelopes:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 台风数组中无有效数据")
                 return None
 
             return envelopes

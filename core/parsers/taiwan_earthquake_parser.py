@@ -214,9 +214,6 @@ class CwaReportParser(BaseParser):
 
             # 台湾地震报告类消息至少应具备发震时间与报告图片地址，否则通常不是来自 CWA 的地震报告
             if "shockTime" not in msg_data or "imageURI" not in msg_data:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CWA 地震报告数据，跳过"
-                )
                 return None
 
             envelope = self._build_envelope(msg_data)

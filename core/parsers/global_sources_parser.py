@@ -96,14 +96,7 @@ class GlobalQuakeParser(BaseParser):
             if ws_msg.type == MessageType.HEARTBEAT:
                 return None
             if ws_msg.type == MessageType.STATUS:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到状态消息，服务器状态为 {ws_msg.status_data.server_status}"
-                )
                 return None
-
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 收到未知类型的消息，类型值为 {ws_msg.type}"
-            )
             return None
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} Protobuf 解析失败: {exc}")
@@ -114,7 +107,7 @@ class GlobalQuakeParser(BaseParser):
         try:
             data = json.loads(message)
             if not isinstance(data, dict):
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 忽略非对象 JSON 消息")
+                # 非对象 JSON 消息为混流常态，不逐一记录
                 return None
 
             msg_type = str(data.get("type") or "").strip().lower()
@@ -123,24 +116,14 @@ class GlobalQuakeParser(BaseParser):
 
             # 仅处理 Global Quake 路径事件；source 缺失时按历史兼容继续解析。
             if source and source not in {"gq", "global_quake", "globalquake"}:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 已忽略数据源 {source} 的消息"
-                )
                 return None
 
-            # JSON 通道当前主要关心地震消息，其余类型直接忽略。
             if msg_type == "earthquake":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到 JSON 地震消息，动作为 {action}"
-                )
                 if action == "cancelled":
                     return self._parse_earthquake_removal_json(data)
                 # update / archived 均进入统一地震解析；archived 在内部标记最终报
                 return self._parse_earthquake_data(data)
 
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 已忽略类型为 {msg_type or 'unknown'} 的消息"
-            )
             return None
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")
@@ -583,11 +566,6 @@ class GlobalQuakeParser(BaseParser):
             plugin_logger.error(f"[灾害预警] {self.source_id} 解析地震数据失败: {exc}")
             return None
 
-    def _parse_text_message(self, message: str) -> EventEnvelope | None:
-        """保留文本消息兼容处理。"""
-        plugin_logger.debug(f"[灾害预警] {self.source_id} 文本消息: {message}")
-        return None
-
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """实现基类抽象方法，默认按 JSON 地震数据处理。"""
         return self._parse_earthquake_data(data)
@@ -791,9 +769,6 @@ class ShakeAlertEewParser(BaseParser):
 
             # 与 USGS 区分：ShakeAlert 预警载荷不含官方事件页 url
             if self._get_field(msg_data, "url"):
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 检测到 USGS 特征字段 url，跳过"
-                )
                 return None
 
             # 与 FSSN 区分：共享守卫（ID 前缀 + 特征字段）
@@ -801,9 +776,6 @@ class ShakeAlertEewParser(BaseParser):
                 msg_data,
                 get_value=lambda field: self._get_field(msg_data, field),
             ):
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 检测到 FSSN 特征，跳过"
-                )
                 return None
 
             # 检测关键字段完整度（复用 _get_field，兼容 camelCase / PascalCase）

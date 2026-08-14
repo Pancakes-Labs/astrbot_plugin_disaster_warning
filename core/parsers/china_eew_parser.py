@@ -113,7 +113,6 @@ class CEAEEWParser(BaseParser):
 
             # 中国地震预警数据至少应携带预计烈度字段，否则大概率不是目标消息
             if "epiIntensity" not in msg_data:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 非地震预警数据，跳过")
                 return None
 
             envelope = self._build_envelope(msg_data)
@@ -168,9 +167,6 @@ class CEAEEWWolfxParser(BaseParser):
         try:
             # Wolfx 会混发多类消息，这里只接收中国地震预警类型
             if data.get("type") != "cenc_eew":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CENC 地震预警数据，跳过"
-                )
                 return None
 
             raw_report_num = data.get("ReportNum", 1)
