@@ -41,11 +41,13 @@ function PaginationBar({
             <Box className="pagination-bar__row">
                 {/* 左侧：每页条数选择器与当前页数概览 */}
                 <Box className="pagination-bar__control-group">
-                    <Typography variant="body2" className="pagination-bar__muted">每页</Typography>
-                    <select 
-                        value={pageSize} 
-                        onChange={(e) => onPageSizeChange(Number(e.target.value))} 
+                    <Typography variant="body2" className="pagination-bar__muted" component="label" htmlFor="pagination-page-size">每页</Typography>
+                    <select
+                        id="pagination-page-size"
+                        value={pageSize}
+                        onChange={(e) => onPageSizeChange(Number(e.target.value))}
                         className="pagination-input"
+                        aria-label="每页条数"
                     >
                         {pageSizeOptions.map((size) => (
                             <option key={size} value={size}>{size} 条</option>
@@ -64,17 +66,19 @@ function PaginationBar({
                         max={Math.max(totalPages, 1)}
                         value={pageInput}
                         onChange={(e) => onPageInputChange(e.target.value)}
-                        onKeyDown={(e) => { 
+                        onKeyDown={(e) => {
                             // 监听回车键，当按下回车时直接执行跳转
-                            if (e.key === 'Enter') onPageJump(); 
+                            if (e.key === 'Enter') onPageJump();
                         }}
                         placeholder="跳转页码"
+                        aria-label="跳转到指定页"
                         className="pagination-input pagination-input--jump"
                     />
-                    <button 
-                        onClick={onPageJump} 
-                        disabled={!canJump} 
+                    <button
+                        onClick={onPageJump}
+                        disabled={!canJump}
                         className="pagination-button"
+                        aria-label="执行页码跳转"
                     >
                         跳转
                     </button>
@@ -83,12 +87,13 @@ function PaginationBar({
 
             {/* 页码选择按钮导航区域（仅在总页数大于 1 时渲染） */}
             {totalPages > 1 && (
-                <Box className="pagination-bar__pages">
+                <Box className="pagination-bar__pages" role="navigation" aria-label="分页导航">
                     {/* 上一页按钮 */}
-                    <button 
-                        onClick={() => goToPage(currentPage - 1)} 
-                        disabled={currentPage <= 1} 
+                    <button
+                        onClick={() => goToPage(currentPage - 1)}
+                        disabled={currentPage <= 1}
                         className="pagination-button"
+                        aria-label="上一页"
                     >
                         ‹
                     </button>
@@ -96,23 +101,26 @@ function PaginationBar({
                     {/* 页码列表与省略号 */}
                     {paginationItems.map((item, idx) => (
                         typeof item === 'number' ? (
-                            <button 
-                                key={`page-${item}`} 
-                                onClick={() => goToPage(item)} 
+                            <button
+                                key={`page-${item}`}
+                                onClick={() => goToPage(item)}
+                                aria-label={`第 ${item} 页`}
+                                aria-current={item === currentPage ? 'page' : undefined}
                                 className={`pagination-button pagination-button--page ${item === currentPage ? 'pagination-button--active' : ''}`}
                             >
                                 {item}
                             </button>
                         ) : (
-                            <span key={`ellipsis-${idx}`} className="pagination-ellipsis">…</span>
+                            <span key={`ellipsis-${idx}`} className="pagination-ellipsis" aria-hidden="true">…</span>
                         )
                     ))}
                     
                     {/* 下一页按钮 */}
-                    <button 
-                        onClick={() => goToPage(currentPage + 1)} 
-                        disabled={currentPage >= totalPages} 
+                    <button
+                        onClick={() => goToPage(currentPage + 1)}
+                        disabled={currentPage >= totalPages}
                         className="pagination-button"
+                        aria-label="下一页"
                     >
                         ›
                     </button>

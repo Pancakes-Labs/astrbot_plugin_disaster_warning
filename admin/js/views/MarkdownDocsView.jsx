@@ -126,7 +126,9 @@ function MarkdownDocsView() {
                                         return (
                                             <button
                                                 key={item.path}
+                                                type="button"
                                                 className={`markdown-docs-file-item ${isActive ? 'is-active' : ''}`}
+                                                aria-current={isActive ? 'true' : undefined}
                                                 onClick={() => {
                                                     // 如果是当前已选中的文档，则避免重复发起多余的异步请求
                                                     if (isActive) {

@@ -104,10 +104,10 @@ function App() {
                     {/* 公共头部栏，展示当前视图标题及实时数字时钟 */}
                     <Header currentView={currentView} />
 
-                    {/* 主滚动物理区域，绑定 Ref 锚点以便多频定位机制执行滚动恢复 */}
-                    <div className="main-content" ref={mainContentRef}>
+                    {/* 主滚动物理区域，绑定 Ref 锚点以便多频定位机制执行滚动恢复；id 供 Skip Link 无障碍跳转 */}
+                    <main className="main-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
                         {renderView()}
-                    </div>
+                    </main>
                 </div>
             </div>
         </ThemeProvider>

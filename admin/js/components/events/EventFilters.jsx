@@ -295,18 +295,19 @@ function EventFilters({
 
             {/* 下排：过滤器交互控制台 */}
             <div className="event-filters-toolbar">
-                {/* 1. 过滤流：事件大类胶囊过滤排 */}
+                {/* 1. 过滤流：事件大类胶囊过滤排（radio 语义：aria-pressed 标注选中态） */}
                 <div className="event-filters-primary-row">
                     <div className="event-filters-primary-label">事件类型</div>
-                    <div className="filter-group event-filter-group-nowrap event-filter-type-group">
+                    <div className="filter-group event-filter-group-nowrap event-filter-type-group" role="group" aria-label="事件类型">
                         {eventTypes.map((item) => (
                             <button
                                 key={item.id}
                                 type="button"
                                 className={`btn-filter event-filter-pill ${filterType === item.id ? 'active' : ''}`}
                                 onClick={() => handleTypeChange(item.id)}
+                                aria-pressed={filterType === item.id}
                             >
-                                {filterType === item.id && <span className="event-filter-checkmark">✓</span>}
+                                {filterType === item.id && <span className="event-filter-checkmark" aria-hidden="true">✓</span>}
                                 {item.label}
                             </button>
                         ))}
@@ -318,13 +319,14 @@ function EventFilters({
                     <div className={`filter-group event-filter-group-nowrap event-filter-field-group event-filter-field-card event-filter-field-card-time ${timePreset === 'custom' ? 'is-custom' : ''}`}>
                         <Typography variant="body2" className="event-filter-label">时间范围</Typography>
                         <div className="event-filter-inline-controls event-filter-inline-controls-time">
-                            <div className="event-filter-time-presets">
+                            <div className="event-filter-time-presets" role="group" aria-label="时间范围">
                                 {TIME_PRESET_OPTIONS.map((option) => (
                                     <button
                                         key={option.value}
                                         type="button"
                                         className={`event-filter-time-chip ${timePreset === option.value ? 'active' : ''}`}
                                         onClick={() => setTimePreset(option.value)}
+                                        aria-pressed={timePreset === option.value}
                                     >
                                         {option.label}
                                     </button>
@@ -361,16 +363,16 @@ function EventFilters({
                 <div className="event-filters-secondary-row">
                     {/* A. 震级限制与排序 / 颜色预警过滤选择器 */}
                     <div className="filter-group event-filter-group-nowrap event-filter-field-group event-filter-field-card event-filter-field-card-magnitude">
-                        <Typography variant="body2" className="event-filter-label">{magnitudeFilterLabel}</Typography>
+                        <Typography variant="body2" className="event-filter-label" id="event-filter-magnitude-label">{magnitudeFilterLabel}</Typography>
                         <div className="event-filter-inline-controls">
-                            <select value={magnitudeFilter} onChange={(e) => setMagnitudeFilter(e.target.value)} className="event-filter-select event-filter-select-md">
+                            <select aria-labelledby="event-filter-magnitude-label" value={magnitudeFilter} onChange={(e) => setMagnitudeFilter(e.target.value)} className="event-filter-select event-filter-select-md">
                                 {magnitudeFilterOptions.map((option) => (
                                     <option key={option.value} value={option.value}>{option.label}</option>
                                 ))}
                             </select>
                             {/* 仅在地震类型下显示震级排序选择器 */}
                             {!levelFilterConfig && (
-                                <select value={magnitudeOrder} onChange={(e) => setMagnitudeOrder(e.target.value)} className="event-filter-select event-filter-select-md">
+                                <select value={magnitudeOrder} onChange={(e) => setMagnitudeOrder(e.target.value)} className="event-filter-select event-filter-select-md" aria-label="震级排序">
                                     <option value="default">默认排序</option>
                                     <option value="desc">震级降序</option>
                                     <option value="asc">震级升序</option>
@@ -382,9 +384,9 @@ function EventFilters({
                     {/* B1. 地震深度 */}
                     {isEarthquakeLike && (
                         <div className="filter-group event-filter-group-nowrap event-filter-field-group event-filter-field-card event-filter-field-card-depth">
-                            <Typography variant="body2" className="event-filter-label">震源深度</Typography>
+                            <Typography variant="body2" className="event-filter-label" id="event-filter-depth-label">震源深度</Typography>
                             <div className="event-filter-inline-controls">
-                                <select value={depthFilter} onChange={(e) => setDepthFilter(e.target.value)} className="event-filter-select event-filter-select-md">
+                                <select aria-labelledby="event-filter-depth-label" value={depthFilter} onChange={(e) => setDepthFilter(e.target.value)} className="event-filter-select event-filter-select-md">
                                     {DEPTH_FILTER_OPTIONS.map((option) => (
                                         <option key={option.value} value={option.value}>{option.label}</option>
                                     ))}
@@ -476,15 +478,15 @@ function EventFilters({
                     {/* C. 数据源过滤 (支持单选与多选模式) */}
                     {availableSources.length > 0 && (
                         <div className="filter-group event-filter-group-nowrap event-filter-field-group event-filter-field-card event-filter-field-card-source">
-                            <Typography variant="body2" className="event-filter-label">数据源</Typography>
+                            <Typography variant="body2" className="event-filter-label" id="event-filter-source-label">数据源</Typography>
                             <div className="event-filter-inline-controls event-filter-inline-controls-source">
-                                <select value={sourceFilterMode} onChange={(e) => onSourceFilterModeChange(e.target.value)} className="event-filter-select event-filter-select-sm">
+                                <select aria-label="数据源选择模式" value={sourceFilterMode} onChange={(e) => onSourceFilterModeChange(e.target.value)} className="event-filter-select event-filter-select-sm">
                                     <option value="single">单选</option>
                                     <option value="multi">多选</option>
                                 </select>
 
                                 {sourceFilterMode === 'single' ? (
-                                    <select value={selectedSources[0] || ''} onChange={onSourceSelectChange} className="event-filter-select event-filter-source-select">
+                                    <select aria-labelledby="event-filter-source-label" value={selectedSources[0] || ''} onChange={onSourceSelectChange} className="event-filter-select event-filter-source-select">
                                         <option value="">全部数据源</option>
                                         {availableSources.map((source) => (
                                             <option key={source.normalizedKey} value={source.value} title={source.label}>
@@ -497,7 +499,7 @@ function EventFilters({
                                         <summary className="event-filter-source-summary">
                                             {selectedSourceSummary}
                                         </summary>
-                                        <div className="event-filter-source-menu">
+                                        <div className="event-filter-source-menu" role="group" aria-label="选择数据源">
                                             <label className="event-filter-checkbox-label">
                                                 <input type="checkbox" checked={selectedSources.length === 0} onChange={() => setSelectedSources([])} />
                                                 全部数据源
@@ -521,13 +523,14 @@ function EventFilters({
 
                     {/* D. 文本/地点关键字模糊检索输入框 */}
                     <div className="filter-group event-filter-group-nowrap event-filter-field-group event-filter-field-card event-filter-field-card-keyword">
-                        <Typography variant="body2" className="event-filter-label">关键词</Typography>
+                        <Typography variant="body2" className="event-filter-label" id="event-filter-keyword-label">关键词</Typography>
                         <div className="event-filter-inline-controls event-filter-inline-controls-keyword">
                             <input
                                 value={keyword}
                                 onChange={(e) => setKeyword(e.target.value)}
                                 placeholder={filterType === 'typhoon' ? '搜索台风名称、编号、来源...' : '搜索地点、标题、来源...'}
                                 className="event-filter-select event-filter-keyword-input"
+                                aria-labelledby="event-filter-keyword-label"
                             />
                         </div>
                     </div>

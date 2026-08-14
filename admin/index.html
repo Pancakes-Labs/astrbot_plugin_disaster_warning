@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <!-- 适配多端设备的视口声明，支持多指无极缩放 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <!-- 适配多端设备的视口声明，支持多指无极缩放；viewport-fit=cover 允许网页延伸至刘海屏安全区域，配合 CSS env(safe-area-inset-*) 使用 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,13 +14,40 @@
     <link rel="icon" type="image/png" href="../logo.png">
     <link rel="preload" href="../logo.png" as="image" fetchpriority="high">
 
-    <!-- 主题快速同步拦截器，防止白屏期闪烁，在首屏渲染前读取并挂载主题样式 -->
+    <!-- 主题快速同步拦截器，防止白屏期闪烁，在首屏渲染前读取并挂载主题样式。
+         优先级：用户显式保存的偏好 > 系统 prefers-color-scheme > 默认亮色。
+         同时挂载 data-theme 属性与 theme-dark 类，保证 [data-theme='dark'] 选择器
+         在登录/加载阶段（React 挂载前）同样生效。
+         注意：脚本在 <head> 中执行时 body 尚未解析，需对 document.body 做空值防护。 -->
     <script>
         (function () {
             try {
                 var savedTheme = localStorage.getItem('theme');
-                if (savedTheme === 'dark') {
+                var isDark = savedTheme === 'dark';
+                if (!savedTheme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    isDark = true;
+                }
+                if (isDark) {
                     document.documentElement.classList.add('theme-dark');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+                /* body 挂载 data-theme 与 dark-theme 类：与 useThemeSync 的映射保持一致，
+                   保证 body.dark-theme 选择器（如 .top-bar::before、.config-header 等）在
+                   首屏/登录阶段（React 挂载前）同样生效，避免暗色模式闪白 */
+                var applyBodyTheme = function () {
+                    if (isDark) {
+                        document.body.classList.add('dark-theme');
+                    } else {
+                        document.body.classList.remove('dark-theme');
+                    }
+                    document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                };
+                if (document.body) {
+                    applyBodyTheme();
+                } else {
+                    document.addEventListener('DOMContentLoaded', applyBodyTheme);
                 }
             } catch (e) {
                 /* 忽略本地存储不可用的隐私模式场景 */
@@ -63,13 +90,14 @@
     <script src="lib/emotion-react.umd.min.js" defer></script>
     <script src="lib/emotion-styled.umd.min.js" defer></script>
 
-    <!-- Markdown 增强依赖：可用时启用 GFM、安全清洗与 Mermaid 图表渲染；不可用时自动回退内置渲染器 -->
-    <script src="https://unpkg.com/marked@14.1.2/marked.min.js" defer></script>
-    <script src="https://unpkg.com/dompurify@3.1.6/dist/purify.min.js" defer></script>
-    <script src="https://unpkg.com/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+    <!-- Markdown 增强依赖（marked / DOMPurify / mermaid）已本地化到 admin/lib/，
+         并改为在“文档浏览”页使用时按需动态注入，避免任何外网 CDN 依赖或大体积库阻塞管理端首次加载与页面切换-->
 </head>
 
 <body>
+    <!-- 无障碍跳转：让键盘/读屏用户能够直接跳过侧边栏导航，直达主内容区域 -->
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
     <!-- 独立于 React 渲染根节点外的首屏加载骨架屏及密码校验面板，用以优化首屏等待感 -->
     <div id="loading-skeleton" class="boot-loader" role="status" aria-live="polite" aria-atomic="true">
 
@@ -93,7 +121,7 @@
             </div>
             <div class="boot-loader__title">灾害预警管理端</div>
             <div class="boot-loader__subtitle boot-loader__subtitle--login">请输入访问密码</div>
-            <div class="bl-error" id="bl-login-error"></div>
+            <div class="bl-error" id="bl-login-error" role="alert" aria-live="polite"></div>
             <input
                 id="bl-username"
                 type="text"
@@ -103,8 +131,9 @@
                 style="position:absolute;opacity:0;pointer-events:none;height:0;width:0;border:0;padding:0;"
             >
             <div class="bl-input-wrap">
-                <input id="bl-password" class="bl-input" type="password" placeholder="密码" autocomplete="current-password">
-                <button class="bl-toggle-pw" type="button" id="bl-toggle-pw" title="显示/隐藏密码">👁️</button>
+                <label class="visually-hidden" for="bl-password">访问密码</label>
+                <input id="bl-password" class="bl-input" type="password" placeholder="密码" autocomplete="current-password" aria-describedby="bl-login-error">
+                <button class="bl-toggle-pw" type="button" id="bl-toggle-pw" title="显示/隐藏密码" aria-label="显示密码" aria-pressed="false">👁️</button>
             </div>
             <button id="bl-submit" class="bl-submit-btn" type="submit">登录</button>
         </form>

@@ -98,8 +98,13 @@
         const passwordInput = getElement('bl-password');
         if (!toggle || !passwordInput) return;
         toggle.addEventListener('click', function () {
-            passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
-            toggle.textContent = passwordInput.type === 'password' ? '👁️' : '🙈'; // 切换 Emoji 图标
+            const isVisible = passwordInput.type !== 'password';
+            passwordInput.type = isVisible ? 'password' : 'text';
+            toggle.textContent = isVisible ? '👁️' : '🙈'; // 切换 Emoji 图标
+            // 同步无障碍状态：aria-pressed 标记点击后的当前开关状态，
+            // aria-label 描述点击后按钮的目标动作（密码可见→隐藏，密码隐藏→显示）
+            toggle.setAttribute('aria-pressed', String(!isVisible));
+            toggle.setAttribute('aria-label', isVisible ? '显示密码' : '隐藏密码');
         });
     }
 

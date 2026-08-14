@@ -596,15 +596,30 @@ function NewsTicker({ style }) {
         </div>
     );
 
+    // 键盘可达性：跑马灯自动滚动对键盘用户不可控，按 Space/Enter 可切换播放/暂停
+    const togglePaused = useCallback(() => {
+        setPaused(prev => !prev);
+    }, []);
+
+    const handleTickerKeyDown = (e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            togglePaused();
+        }
+    };
+
     return (
         <div
             className={`card news-ticker-card ${isDark ? 'is-dark' : 'is-light'}`}
             style={style}
             tabIndex={0}
+            role="region"
+            aria-label={paused ? '最新动态（已暂停，按空格键播放）' : '最新动态（按空格键暂停）'}
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
             onFocus={() => setPaused(true)}
             onBlur={() => setPaused(false)}
+            onKeyDown={handleTickerKeyDown}
         >
             {/* 左侧固定标题（与三栏同一行） */}
             <div className="news-ticker-head">
