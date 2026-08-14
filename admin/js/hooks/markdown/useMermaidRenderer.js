@@ -10,7 +10,27 @@
  * 5. 资源清理：在文档销毁、主题切换或用户重新加载时，自动打断渲染循环，并遍历执行闭包垃圾回收。
  */
 function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
+    // 按需加载本地化后的 mermaid.min.js（约 2.5MB），仅在文档页真正出现 Mermaid 图表时才注入，
+    // 避免其体积拖慢管理端冷启动与视图切换；加载失败时下方渲染逻辑自动降级展示纯文本。
+    const [mermaidReady, setMermaidReady] = React.useState(Boolean(window.mermaid));
+
     React.useEffect(() => {
+        if (window.mermaid) {
+            setMermaidReady(true);
+            return;
+        }
+        if (window.__DISASTER_MERMAID_LOADING__) return;
+        window.__DISASTER_MERMAID_LOADING__ = true;
+        const script = document.createElement('script');
+        script.src = 'lib/mermaid.min.js';
+        script.async = true;
+        script.onload = () => setMermaidReady(Boolean(window.mermaid));
+        script.onerror = () => setMermaidReady(false);
+        document.head.appendChild(script);
+    }, []);
+
+    React.useEffect(() => {
+        if (!mermaidReady) return;
         const articleEl = articleRef.current;
         const mermaid = window.mermaid;
         if (!articleEl) return;
@@ -78,5 +98,5 @@ function useMermaidRenderer(articleRef, { documentPath, renderedHtml, theme }) {
                 try { cleanup(); } catch (e) {}
             });
         };
-    }, [articleRef, documentPath, renderedHtml, theme]);
+    }, [articleRef, documentPath, renderedHtml, theme, mermaidReady]);
 }

@@ -644,6 +644,49 @@ function enhanceMarkdownFragment(sanitizedFragment) {
 }
 
 /**
+ * 按需动态加载 Markdown 增强依赖（marked / DOMPurify）。
+ *
+ * 背景：这三个库体积较大（mermaid 约 2.5MB），且此前从 unpkg.com CDN 以 defer 方式
+ * 阻塞加载在 app.jsx 入口之前，外网超时（浏览器默认约 30s）会直接卡死整个管理端
+ * 首次加载与页面切换。因此改为本地化 + 惰性加载：仅当真正进入“文档浏览”页时
+ * 才注入同源脚本，加载失败时静默降级到内置渲染器，不影响任何功能。
+ *
+ * @returns {Promise<boolean>} 是否成功加载增强依赖
+ */
+function ensureMarkdownLibs() {
+    if (window.__DISASTER_MARKDOWN_LIBS_READY__) {
+        return Promise.resolve(true);
+    }
+    if (window.__DISASTER_MARKDOWN_LIBS_LOADING__) {
+        return window.__DISASTER_MARKDOWN_LIBS_LOADING__;
+    }
+    const loadScript = (src) => new Promise((resolve) => {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+            resolve();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => resolve(); // 失败也 resolve，由调用方检查 window.marked 决定是否降级
+        document.head.appendChild(script);
+    });
+
+    window.__DISASTER_MARKDOWN_LIBS_LOADING__ = Promise.all([
+        loadScript('lib/marked.min.js'),
+        loadScript('lib/purify.min.js'),
+    ]).then(() => {
+        const ready = Boolean(window.marked && window.DOMPurify);
+        window.__DISASTER_MARKDOWN_LIBS_READY__ = ready;
+        window.__DISASTER_MARKDOWN_LIBS_LOADING__ = null;
+        return ready;
+    });
+    return window.__DISASTER_MARKDOWN_LIBS_LOADING__;
+}
+
+/**
  * 入口方法：将原始 Markdown 文本渲染并编译输出为安全的 HTML 代码段
  */
 function renderMarkdownToHtml(content) {
@@ -686,4 +729,5 @@ window.MarkdownRenderUtil = {
     normalizeMarkdownContent,
     isProbablyMarkdown,
     renderMarkdownToHtml,
+    ensureMarkdownLibs,
 };

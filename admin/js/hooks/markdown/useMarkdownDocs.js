@@ -19,6 +19,15 @@ function useMarkdownDocs() {
     /**
      * 异步拉取可读的 Markdown 说明书相对路径列表
      */
+    // 进入文档浏览页时，按需动态加载 marked / DOMPurify 增强依赖（本地化脚本，异步注入）。
+    // 加载失败时 renderMarkdownToHtml 自动降级到内置渲染器，不阻塞页面。
+    React.useEffect(() => {
+        const markdownUtil = window.MarkdownRenderUtil;
+        if (markdownUtil && typeof markdownUtil.ensureMarkdownLibs === 'function') {
+            markdownUtil.ensureMarkdownLibs().catch(() => {});
+        }
+    }, []);
+
     const loadMarkdownFiles = React.useCallback(async () => {
         setLoadingList(true);
         try {
