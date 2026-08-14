@@ -97,9 +97,6 @@ def get_sect_map() -> dict[str, str]:
 
         sect_map = _parse_js_sect_map(js_path)
         _cached_sect_map = sect_map
-        logger.debug(
-            f"[灾害预警] JmaSeisIntLoc.js 已加载，共 {len(sect_map)} 条町丁目->地域映射"
-        )
         return _cached_sect_map
     except Exception as exc:
         logger.error(f"[灾害预警] 加载 JmaSeisIntLoc.js 失败: {exc}")

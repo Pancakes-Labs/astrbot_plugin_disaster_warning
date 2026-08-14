@@ -209,14 +209,8 @@ class EventDeduplicationService:
         fingerprint = self._generate_typhoon_fingerprint(typhoon)
         cached_fingerprint = self._typhoon_cache.get(typhoon_id)
         if cached_fingerprint is not None and cached_fingerprint == fingerprint:
-            # 与 push_flow_handler 其他事件流的去重过滤日志保持一致：
-            # 单条过滤仅 DEBUG 级，避免轮询特性导致每轮 INFO 刷屏；
-            plugin_logger.debug(
-                f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
-                is_event_linked=True,
-                event_stream="typhoon",
-                is_silent_window=True,
-            )
+            # 单条过滤不再打日志：轮询侧汇总（"EQSC 台风轮询汇总：跳过 N 条未变化"）
+            # 已承担计数职责，避免轮询驱动下每轮每条台风刷屏。
             return False
         return True
 
@@ -239,14 +233,8 @@ class EventDeduplicationService:
         cached_fingerprint = self._typhoon_cache.get(typhoon_id)
 
         if cached_fingerprint is not None and cached_fingerprint == fingerprint:
-            # 单条过滤仅 DEBUG 级，与 push_flow_handler 其他事件流对齐，
-            # 避免轮询特性导致每轮 INFO 刷屏；汇总由轮询侧日志承担。
-            plugin_logger.debug(
-                f"[灾害预警] 台风 {typhoon_id} 核心参数未变化，过滤重复推送",
-                is_event_linked=True,
-                event_stream="typhoon",
-                is_silent_window=True,
-            )
+            # 单条过滤不再打日志：轮询侧汇总（"EQSC 台风轮询汇总：跳过 N 条未变化"）
+            # 已承担计数职责，避免轮询驱动下每轮每条台风刷屏。
             return False
 
         # 参数有变化（或首次出现），更新缓存并放行
@@ -850,10 +838,6 @@ class EventDeduplicationService:
         event_fingerprint = self.generate_event_fingerprint(event, domain_eq, source_id)
         current_time = self._to_utc(domain_eq.occurred_at, source_id)
 
-        plugin_logger.debug(
-            f"[灾害预警] 检查事件: {source_id}, 指纹: {event_fingerprint}"
-        )
-
         # 指纹命中说明近期已有相近事件，需要进一步区分是重复还是合法更新。
         if event_fingerprint in self.recent_events:
             source_events = self.recent_events[event_fingerprint]
@@ -952,7 +936,6 @@ class EventDeduplicationService:
                 "is_final": bool(metadata.get("is_final", False)),
             }
         }
-        plugin_logger.debug(f"[灾害预警] 事件通过基础去重检查: {source_id}")
         return True
 
     def generate_event_fingerprint(

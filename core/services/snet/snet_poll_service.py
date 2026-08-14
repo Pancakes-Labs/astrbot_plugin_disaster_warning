@@ -56,6 +56,8 @@ class SnetPollService:
         # 最近一次成功抓取的快照：{timestamp, tiles, stations|None, fetched_at}
         self._latest_snapshot: dict[str, Any] | None = None
         self._fetch_lock = asyncio.Lock()
+        # 禁用态日志：仅首次跳过本轮时打一次
+        self._disabled_logged = False
 
     @property
     def running(self) -> bool:
@@ -171,8 +173,12 @@ class SnetPollService:
                 if not getattr(self.service, "running", False):
                     break
                 if not self.is_enabled():
-                    logger.debug("[灾害预警] S-Net 已禁用，跳过本轮轮询")
+                    # 仅首次禁用时打一次，避免配置禁用后每轮刷屏
+                    if not self._disabled_logged:
+                        logger.debug("[灾害预警] S-Net 已禁用，跳过本轮轮询")
+                        self._disabled_logged = True
                     continue
+                self._disabled_logged = False
                 await self.fetch_once(emit_event=True)
             except asyncio.CancelledError:
                 break
@@ -374,7 +380,6 @@ class SnetPollService:
         async with self._fetch_lock:
             cached = self._snapshot_if_fresh()
             if cached is not None:
-                logger.debug(f"[灾害预警] S-Net 瓦片缓存命中 ts={cached['timestamp']}")
                 return {
                     "timestamp": cached["timestamp"],
                     "tiles": cached["tiles"],
@@ -389,23 +394,29 @@ class SnetPollService:
                     try_ts = now - timedelta(minutes=offset_min)
                     ts = try_ts.strftime("%Y%m%d%H%M00")
                     tiles: dict[str, str] = {}
+                    failed_tiles = 0
                     for tile_name, tile_y in self.TILE_NAMES:
                         url = f"{MSIL_TILE_BASE}/{ts}/{ts}/5/28/{tile_y}.png"
                         try:
                             async with session.get(url) as resp:
                                 if resp.status != 200:
+                                    failed_tiles += 1
                                     continue
                                 content = await resp.read()
                                 if not content:
+                                    failed_tiles += 1
                                     continue
                                 tiles[tile_name] = base64.b64encode(content).decode(
                                     "ascii"
                                 )
-                        except Exception as exc:
-                            logger.debug(f"[灾害预警] S-Net 瓦片请求失败 {url}: {exc}")
+                        except Exception:
+                            failed_tiles += 1
+                    if failed_tiles and len(tiles) < 2:
+                        logger.debug(
+                            f"[灾害预警] S-Net 瓦片获取失败，共 {failed_tiles} 张"
+                        )
                     if len(tiles) >= 2:
                         self._store_snapshot(timestamp=ts, tiles=tiles)
-                        logger.debug(f"[灾害预警] S-Net 瓦片已下载并缓存 ts={ts}")
                         return {"timestamp": ts, "tiles": tiles}
 
             logger.warning("[灾害预警] S-Net 最近 3 分钟均未拿到完整瓦片")
@@ -426,7 +437,6 @@ class SnetPollService:
             and snap.get("timestamp") == ts
             and isinstance(snap.get("stations"), list)
         ):
-            logger.debug(f"[灾害预警] S-Net 测站解码缓存命中 ts={ts}")
             return copy.deepcopy(snap["stations"])
 
         stations = self._decode_stations(tiles)
@@ -511,15 +521,10 @@ class SnetPollService:
             else []
         )
         if not triggered:
-            # 解析器也会在无触发时返回 None；这里提前短路减少噪声
-            logger.debug(
-                f"[灾害预警] S-Net 本轮无测站达到阈值 min_shindo={raw_dict.get('min_shindo')}"
-            )
             return
 
         fingerprint = self._build_push_fingerprint(triggered)
         if fingerprint == self._last_payload_fingerprint:
-            logger.debug("[灾害预警] S-Net Top-5 测站未变化，跳过推送")
             return
 
         message = json.dumps(raw_dict, ensure_ascii=False)
