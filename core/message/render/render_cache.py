@@ -58,7 +58,6 @@ class RenderImageCache:
                 _, image_path = cached_item
                 # 若文件还存在于磁盘上，则直接复用
                 if os.path.exists(image_path):
-                    logger.debug(f"[灾害预警] 命中渲染缓存: {cache_key}")
                     return image_path
 
             # 同一 cache_key 若已有渲染中的任务，后续调用直接等待该任务，

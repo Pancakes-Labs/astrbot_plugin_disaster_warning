@@ -348,14 +348,10 @@ class PushExecutionService:
                         )
                     return False, session, None, "发送前复核未通过"
 
-                logger.debug(
-                    f"[灾害预警] 事件 {event.id} 通过 {session_log} 的发送前复核，准备发送消息"
-                )
                 # 获取复用或动态渲染的图片/卡片消息链
                 message = await get_or_build_message(runtime_config)
                 # 调用底座 Session 发送器下发消息
                 await self.manager.session_sender.send(session, message)
-                logger.debug(f"[灾害预警] 事件 {event.id} 已推送到 {session_log}")
                 return True, session, runtime_config.get("message_format", {}), None
             except Exception as e:
                 error_name = type(e).__name__

@@ -366,7 +366,6 @@ class BrowserManager:
         try:
             if await self._ensure_local_browser_ready():
                 page = await self._create_local_page()
-                logger.debug("[灾害预警] 页面池暂无可用页，已直接创建应急页面")
                 return page
         except Exception as create_err:
             logger.error(f"[灾害预警] 创建应急页面失败: {create_err}")
@@ -388,9 +387,6 @@ class BrowserManager:
                     if not await self._put_page_into_pool(new_page):
                         # 池已满：停止补充
                         break
-                    logger.debug(
-                        f"[灾害预警] 已补充页面，当前池大小: {self._page_pool.qsize()}/{self.pool_size}"
-                    )
                 except Exception as recover_err:
                     logger.error(f"[灾害预警] 页面恢复失败: {recover_err}")
                     break
@@ -577,7 +573,6 @@ class BrowserManager:
                 page = await asyncio.wait_for(context.new_page(), timeout=10.0)
                 if not await self._put_page_into_pool(page):
                     break
-                logger.debug(f"[灾害预警] 页面 {i + 1}/{self.pool_size} 已创建")
             except asyncio.TimeoutError:
                 logger.error(f"[灾害预警] 创建页面 {i + 1} 超时")
                 if i == 0:
@@ -594,15 +589,12 @@ class BrowserManager:
         try:
             # browserless CDP：必须使用默认 context
             contexts = self._browser.contexts
-            logger.debug(f"[灾害预警] 发现 {len(contexts)} 个现有 context")
 
             if contexts:
                 # 使用第一个 context（browserless 的默认 context）
                 self._context = contexts[0]
-                logger.debug("[灾害预警] 使用现有 context")
             else:
                 # 没有现有 context，创建新的
-                logger.debug("[灾害预警] 创建新 context")
                 self._context = await asyncio.wait_for(
                     self._browser.new_context(
                         viewport=dict(self.DEFAULT_VIEWPORT),
@@ -619,7 +611,6 @@ class BrowserManager:
                     )
                     if not await self._put_page_into_pool(page):
                         break
-                    logger.debug(f"[灾害预警] 页面 {i + 1}/{self.pool_size} 已创建")
                 except asyncio.TimeoutError:
                     logger.error(f"[灾害预警] 创建页面 {i + 1} 超时")
                     if i == 0:
@@ -757,11 +748,9 @@ class BrowserManager:
                                     )
                                 )
                             )
-                            if is_dup_resource_log:
-                                logger.debug(
-                                    f"[灾害预警] 忽略与资源请求失败重复的控制台日志: {entry}"
-                                )
-                            else:
+                            # 与资源请求失败重复的控制台日志仅追加，不逐条打日志；
+                            # 渲染结束时由汇总逻辑统一输出，避免每条瓦片刷两条日志。
+                            if not is_dup_resource_log:
                                 logger.warning(f"[灾害预警] 页面控制台{entry}")
                         except Exception as hook_err:
                             logger.debug(f"[灾害预警] 记录控制台日志失败: {hook_err}")
@@ -803,18 +792,13 @@ class BrowserManager:
                                 failure_text=failure_text,
                                 resource_type=resource_type,
                             ):
+                                # 良性中止仅收集计数，渲染结束时统一汇总，避免逐条刷屏。
                                 benign_request_failures.append(entry)
-                                logger.debug(
-                                    f"[灾害预警] 忽略可预期的资源中止: {entry}"
-                                )
                                 return
                             # 方案A：瓦片类失败（如证书过期等真实错误）一律降级为 debug，
                             # 仅在末尾统一去重汇总一条，避免每张瓦片刷屏。
                             if is_tile:
                                 tile_request_failures.append(entry)
-                                logger.debug(
-                                    f"[灾害预警] 瓦片资源请求失败(已降级为debug): {entry}"
-                                )
                                 return
                             request_failures.append(entry)
                             logger.warning(f"[灾害预警] 页面资源请求失败: {entry}")
@@ -829,10 +813,6 @@ class BrowserManager:
                     # 大尺寸卡片（如 S-Net）临时放大视口，截图后在 finally 中恢复默认
                     if resolved_viewport:
                         await page.set_viewport_size(resolved_viewport)
-                        logger.debug(
-                            f"[灾害预警] 临时视口已设为 "
-                            f"{resolved_viewport['width']}x{resolved_viewport['height']}"
-                        )
 
                     # 本地模式：使用 file:// 协议（支持相对路径资源）
                     temp_html = None
@@ -880,7 +860,6 @@ class BrowserManager:
                             await page.wait_for_selector(
                                 ".map-ready", state="attached", timeout=10000
                             )
-                            logger.debug("[灾害预警] 地图渲染标记已就绪")
                         except Exception:
                             logger.warning(
                                 f"[灾害预警] {label}等待 .map-ready 标记超时，地图可能未完全加载"
@@ -907,10 +886,7 @@ class BrowserManager:
                             selector, state="visible", timeout=2000
                         )
                     except Exception:
-                        # 兜底：尝试找常见的类名。该分支在部分模板中属于正常兼容路径，不额外输出诊断日志。
-                        logger.debug(
-                            f"[灾害预警] 选择器 {selector} 未找到，尝试备用选择器"
-                        )
+                        # 兜底：尝试找常见的类名。该分支在部分模板中属于正常兼容路径，不输出诊断日志。
                         selector = ".quake-card"
                         await page.wait_for_selector(
                             selector, state="visible", timeout=1000
