@@ -85,6 +85,8 @@ function useEventsQuery({ wsEvents, wsConnected, preserveScrollPosition }) {
 
     // 跨渲染周期的最新状态引用，以供异步事件拉取时获取最新快照
     const abortControllerRef = React.useRef(null);
+    // 记录上次已处理的事件列表头部事件 id，用于判别是否真正出现新事件（避免心跳广播重复拉取）
+    const wsHeadEventIdRef = React.useRef(null);
     const filterTypeRef = React.useRef(filterType);
     const pageSizeRef = React.useRef(pageSize);
     const selectedSourcesRef = React.useRef(selectedSources);
@@ -389,8 +391,11 @@ function useEventsQuery({ wsEvents, wsConnected, preserveScrollPosition }) {
         selectedSources,
     ]);
 
-    // 异步加载所有可用数据源以作下拉筛选
+    // 异步加载所有可用数据源以作下拉筛选。
+    // 主查询 executeQuery 的成功回调中已经会回填 source_options，
+    // 这里仅在主查询尚未成功（sourceOptions 为空）时兜底拉取一次，避免首屏冗余并发请求。
     React.useEffect(() => {
+        if (sourceOptions.length > 0) return;
         eventsApi.getEvents({ page: 1, limit: 1 })
             .then((data) => {
                 if (Array.isArray(data.source_options) && data.source_options.length > 0) {
@@ -398,7 +403,7 @@ function useEventsQuery({ wsEvents, wsConnected, preserveScrollPosition }) {
                 }
             })
             .catch(() => {});
-    }, [eventsApi]);
+    }, [eventsApi, sourceOptions]);
 
     // 监听过滤参数变化：重置当前页码为第一页并重新加载数据
     React.useEffect(() => {
@@ -447,9 +452,15 @@ function useEventsQuery({ wsEvents, wsConnected, preserveScrollPosition }) {
         activeOnlyRef.current = activeOnly;
     });
 
-    // 响应长连接的实时事件推送
+    // 响应长连接的实时事件推送。
+    // 通过记忆「上一次处理的头部事件 id」判定是否真的出现新事件（新事件总是被 unshift 到头部）：
+    // 若头部事件未变化（如 WS 心跳广播仅刷新统计、无新警报），则跳过静默拉取，
+    // 避免每 30 秒一次的广播把整个列表反复重拉，拖慢页面切换与值守体验。
     React.useEffect(() => {
         if (!wsConnected) return;
+        const headId = wsEvents?.[0]?.id ?? wsEvents?.[0]?.event_id ?? null;
+        if (headId == null || headId === wsHeadEventIdRef.current) return;
+        wsHeadEventIdRef.current = headId;
         executeQuery(currentPageRef.current, {
             preserveScroll: true,
             useRefs: true,

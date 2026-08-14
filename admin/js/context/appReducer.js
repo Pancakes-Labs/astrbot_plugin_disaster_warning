@@ -69,10 +69,26 @@
             case ACTIONS.UPDATE_STATS: {
                 // 利用 StatsNormalizer 将后端扁平或高维的统计聚合数据归类分流，直接切分到图表渲染各自所需的特定数据集
                 const normalized = normalizeStatsPayload(action.payload || {});
+                const nextEvents = normalized.events || [];
+                const prevEvents = state.events || [];
+                // 引用稳定性优化：WS 心跳广播（默认 30s 一次）会周期性携带 statistics 载荷，
+                // 若内容与上次完全一致则直接透传原 state 引用，避免 events / stats 引用被重置，
+                // 从而引发事件列表与重大事件时间轴的无谓静默全量重拉（首次加载/页面切换变慢的根因之一）。
+                const eventsChanged = (
+                    nextEvents.length !== prevEvents.length
+                    || nextEvents.some((evt, idx) => (
+                        (evt?.id ?? evt?.event_id) !== (prevEvents[idx]?.id ?? prevEvents[idx]?.event_id)
+                    ))
+                );
+                const statsJson = JSON.stringify(normalized.stats);
+                const prevStatsJson = JSON.stringify(state.stats);
+                if (!eventsChanged && statsJson === prevStatsJson) {
+                    return state;
+                }
                 return {
                     ...state,
                     stats: normalized.stats,
-                    events: normalized.events,
+                    events: nextEvents,
                     magnitudeDistribution: normalized.magnitudeDistribution,
                 };
             }

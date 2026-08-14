@@ -44,8 +44,11 @@ function useMajorEvents(displayLimit, refreshSignal) {
         fetchMajorEvents(false);
     }, [fetchMajorEvents]);
 
-    // 当触发外部业务刷新信号时触发静默重拉，不让界面闪烁或导致 Scroll Container 被卸载
+    // 当触发外部业务刷新信号时触发静默重拉，不让界面闪烁或导致 Scroll Container 被卸载。
+    // 挂载首帧 refreshSignal 为 null（mount 时 lastEvent 尚无值）时跳过本次调用，
+    // 避免与上方「挂载/上限变化」的非静默拉取重复发出网络请求。
     React.useEffect(() => {
+        if (refreshSignal == null) return;
         fetchMajorEvents(true);
     }, [refreshSignal, fetchMajorEvents]);
 
