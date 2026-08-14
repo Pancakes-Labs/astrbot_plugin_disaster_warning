@@ -119,6 +119,7 @@ class MessageBuildService:
         source_id: str,
         active_config: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        event: EventEnvelope | None = None,
     ) -> list[str]:
         """解析指定数据源在当前配置与事件元数据下会附加的图片/卡片类型列表。
 
@@ -130,14 +131,25 @@ class MessageBuildService:
             source_id: 数据源标识。
             active_config: 生效配置快照（可为前端编辑中的草稿）。
             metadata: 事件元数据（domain + envelope 合并视图），用于判断
-                "有数据才附加"的媒体类型。
+                "有数据才附加"的媒体类型；未传时若提供 event 则自动合并。
+            event: 事件信封（可选）。提供时复用 _get_event_metadata 统一
+                合并元数据视图，并可从 domain 事件读取字段，以对齐真实链路的可渲染条件。
 
         Returns:
             图片/卡片类型中文标签列表，顺序与真实附加顺序一致。
         """
         cfg = active_config if isinstance(active_config, dict) else {}
-        meta = metadata if isinstance(metadata, dict) else {}
+        meta = (
+            metadata
+            if isinstance(metadata, dict)
+            else (
+                MessageBuildService._get_event_metadata(event)
+                if event is not None
+                else {}
+            )
+        )
         flags: list[str] = []
+        domain_event = getattr(event, "event", None) if event is not None else None
 
         def _flag(section, key, default=False) -> bool:
             if not isinstance(section, dict):
@@ -198,7 +210,14 @@ class MessageBuildService:
                 else {}
             )
             if _flag(typhoon_cfg, "include_track_map", True):
-                flags.append("台风路径图")
+                # 与真实链路对齐，无有效历史轨迹时不会附加路径图，预览也不应提示。
+                # can_render 要求至少 1 个有效历史节点，此处用 history_track 非空近似。
+                history_track = getattr(domain_event, "history_track", None)
+                has_track = bool(
+                    isinstance(history_track, (list, tuple)) and history_track
+                )
+                if has_track:
+                    flags.append("台风路径图")
             return flags
 
         # 5. CWA 台湾正式地震报告图件（无开关；有图件 URI 才附加）

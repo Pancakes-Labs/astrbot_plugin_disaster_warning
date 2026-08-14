@@ -28,30 +28,16 @@ from .flow_models import SimulationStep
 from .simulation_builder import SimulationBuilder
 
 
-def _get_merged_metadata(envelope) -> dict[str, Any]:
-    """合并事件 domain 与 envelope 层级的 metadata（envelope 覆盖 domain）。"""
-    merged: dict[str, Any] = {}
-    domain_event = getattr(envelope, "event", None)
-    domain_meta = getattr(domain_event, "metadata", None)
-    if isinstance(domain_meta, dict):
-        merged.update(domain_meta)
-    env_meta = getattr(envelope, "metadata", None)
-    if isinstance(env_meta, dict):
-        merged.update(env_meta)
-    return merged
-
-
 def _get_image_flags(
     runtime_config: dict[str, Any] | None,
     source_id: str,
     envelope=None,
 ) -> list[str]:
     """按数据源精确判断该源在当前配置下会附加哪些图片/卡片附件。"""
-    metadata = _get_merged_metadata(envelope) if envelope is not None else {}
     return MessageBuildService.resolve_image_flags(
         source_id=source_id,
         active_config=runtime_config,
-        metadata=metadata,
+        event=envelope,
     )
 
 
@@ -161,19 +147,26 @@ async def build_config_preview(
             )
             if final_decision is not None:
                 decision_payload = {
-                    "accepted": bool(getattr(final_decision, "accepted", True)),
+                    # 决策对象缺失 accepted 时同样视为拦截，绝不默认放行
+                    "accepted": bool(getattr(final_decision, "accepted", False)),
                     "reason": str(getattr(final_decision, "reason", "") or ""),
                     "detail": str(getattr(final_decision, "detail", "") or ""),
                 }
                 evaluate_succeeded = True
     except Exception as exc:
         logger.debug(f"[灾害预警] 配置预览规则链评估失败: {exc}")
+        # 将异常摘要回传前端，便于定位评估失败原因
+        decision_payload = {
+            "accepted": False,
+            "reason": "规则链评估失败",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
     if not evaluate_succeeded:
         # 规则链不可用或未返回结果时，同样标记为"评估失败"而非默认放行
         decision_payload = {
             "accepted": False,
             "reason": "规则链评估失败",
-            "detail": "",
+            "detail": decision_payload.get("detail", "") or "",
         }
 
     # 2. 构建消息链（纯文本优先，反映草稿展示参数）
