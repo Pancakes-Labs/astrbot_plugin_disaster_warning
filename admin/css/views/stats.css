@@ -1071,7 +1071,6 @@ html.theme-dark .snet-max-card {
     width: 60%;
     height: 60%;
     background: var(--md-sys-color-surface);
-    background-color: #e5e7eb;
     background-image: linear-gradient(var(--md-sys-color-surface), var(--md-sys-color-surface));
     border-radius: 50%;
     display: flex;
@@ -1495,7 +1494,6 @@ html.theme-dark .snet-max-card {
     width: 60%;
     height: 60%;
     background: var(--md-sys-color-surface);
-    background-color: #e5e7eb;
     background-image: linear-gradient(var(--md-sys-color-surface), var(--md-sys-color-surface));
     border-radius: 50%;
     display: flex;

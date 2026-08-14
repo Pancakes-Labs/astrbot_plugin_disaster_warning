@@ -468,7 +468,9 @@
     padding: 0 12px !important;
 }
 
-[data-theme='dark'] .sim-source-group-header {
+[data-theme='dark'] .sim-source-group-header,
+html.theme-dark .sim-source-group-header,
+body.dark-theme .sim-source-group-header {
     background: rgba(255, 255, 255, 0.05);
 }
 
@@ -896,7 +898,7 @@
 }
 
 .sim-run-status-tag.is-pending {
-    background: rgba(0, 0, 0, 0.08);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 10%, transparent);
 }
 
 .sim-run-status-tag.is-running {
@@ -1104,33 +1106,49 @@
    11. 明暗主题适配（预览文本/编排分组底色）
    ========================================================================== */
 [data-theme='dark'] .sim-view-preview-dialog-text,
-[data-theme='dark'] .sim-run-preview-text {
+[data-theme='dark'] .sim-run-preview-text,
+html.theme-dark .sim-view-preview-dialog-text,
+html.theme-dark .sim-run-preview-text,
+body.dark-theme .sim-view-preview-dialog-text,
+body.dark-theme .sim-run-preview-text {
     background: rgba(255, 255, 255, 0.05);
 }
 
-[data-theme='dark'] .sim-editor-orchestration {
+[data-theme='dark'] .sim-editor-orchestration,
+html.theme-dark .sim-editor-orchestration,
+body.dark-theme .sim-editor-orchestration {
     background: rgba(255, 255, 255, 0.03);
 }
 
 /* 暗色适配：时间分组 / 编排分组 / JSON 表格 / 数据源后缀 */
-[data-theme='dark'] .sim-editor-group--time {
+[data-theme='dark'] .sim-editor-group--time,
+html.theme-dark .sim-editor-group--time,
+body.dark-theme .sim-editor-group--time {
     background: rgba(33, 150, 243, 0.08);
     border-color: rgba(33, 150, 243, 0.2);
 }
 
-[data-theme='dark'] .sim-editor-group--orchestration {
+[data-theme='dark'] .sim-editor-group--orchestration,
+html.theme-dark .sim-editor-group--orchestration,
+body.dark-theme .sim-editor-group--orchestration {
     background: rgba(255, 255, 255, 0.03);
 }
 
-[data-theme='dark'] .sim-json-table-grid th {
+[data-theme='dark'] .sim-json-table-grid th,
+html.theme-dark .sim-json-table-grid th,
+body.dark-theme .sim-json-table-grid th {
     background: rgba(255, 255, 255, 0.05);
 }
 
-[data-theme='dark'] .sim-json-table-empty {
+[data-theme='dark'] .sim-json-table-empty,
+html.theme-dark .sim-json-table-empty,
+body.dark-theme .sim-json-table-empty {
     background: rgba(255, 255, 255, 0.03);
 }
 
-[data-theme='dark'] .sim-source-option-family {
+[data-theme='dark'] .sim-source-option-family,
+html.theme-dark .sim-source-option-family,
+body.dark-theme .sim-source-option-family {
     background: rgba(255, 255, 255, 0.08);
 }
 
@@ -1217,7 +1235,9 @@
     min-width: 0;
 }
 
-[data-theme='dark'] .sim-json-visual-section {
+[data-theme='dark'] .sim-json-visual-section,
+html.theme-dark .sim-json-visual-section,
+body.dark-theme .sim-json-visual-section {
     background: rgba(255, 255, 255, 0.03);
     border-color: rgba(255, 255, 255, 0.08);
 }
@@ -1404,7 +1424,9 @@
 }
 
 /* 暗色主题适配 */
-[data-theme='dark'] .sim-step-item {
+[data-theme='dark'] .sim-step-item,
+html.theme-dark .sim-step-item,
+body.dark-theme .sim-step-item {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
 }
 
@@ -1515,7 +1537,66 @@
 }
 
 /* 暗色主题：拖拽跟随卡片 */
-[data-theme='dark'] .sim-step-drag-ghost {
+[data-theme='dark'] .sim-step-drag-ghost,
+html.theme-dark .sim-step-drag-ghost,
+body.dark-theme .sim-step-drag-ghost {
     background: #1e1e1e;
     border-color: #42a5f5;
+}
+
+/* ==========================================================================
+   18. 暗色适配补强（--card-bg / --divider fallback 变量覆盖）
+   模拟视图多处使用 var(--card-bg, #ffffff) / var(--divider, rgba(0,0,0,…)) 兜底，
+   在暗色主题下若无 CSS 变量覆盖会整体发白。此处统一写入暗色变量，保证
+   工具栏、草稿栏、左右分栏、控制台与拖拽卡片的底色/分割线跟随主题。
+   ========================================================================== */
+[data-theme='dark'] .sim-view-toolbar,
+[data-theme='dark'] .sim-view-draft-bar,
+[data-theme='dark'] .sim-view-left,
+[data-theme='dark'] .sim-view-right,
+[data-theme='dark'] .sim-view-console,
+[data-theme='dark'] .sim-step-drag-ghost,
+html.theme-dark .sim-view-toolbar,
+html.theme-dark .sim-view-draft-bar,
+html.theme-dark .sim-view-left,
+html.theme-dark .sim-view-right,
+html.theme-dark .sim-view-console,
+html.theme-dark .sim-step-drag-ghost,
+body.dark-theme .sim-view-toolbar,
+body.dark-theme .sim-view-draft-bar,
+body.dark-theme .sim-view-left,
+body.dark-theme .sim-view-right,
+body.dark-theme .sim-view-console,
+body.dark-theme .sim-step-drag-ghost {
+    --card-bg: var(--md-sys-color-surface);
+    --divider: var(--md-sys-color-outline-variant);
+}
+
+/* 步骤卡片/编辑分组等使用 --divider 虚线边框的元素，暗色下同步变量 */
+[data-theme='dark'] .sim-step-item,
+[data-theme='dark'] .sim-editor-group--orchestration,
+[data-theme='dark'] .sim-editor-orchestration,
+[data-theme='dark'] .sim-json-visual-section,
+html.theme-dark .sim-step-item,
+html.theme-dark .sim-editor-group--orchestration,
+html.theme-dark .sim-editor-orchestration,
+html.theme-dark .sim-json-visual-section,
+body.dark-theme .sim-step-item,
+body.dark-theme .sim-editor-group--orchestration,
+body.dark-theme .sim-editor-orchestration,
+body.dark-theme .sim-json-visual-section {
+    --divider: var(--md-sys-color-outline-variant);
+}
+
+/* 模拟页原生输入控件（日期/时间、下拉等）暗色渲染 */
+[data-theme='dark'] .sim-view-main input,
+[data-theme='dark'] .sim-view-main select,
+[data-theme='dark'] .sim-view-main textarea,
+html.theme-dark .sim-view-main input,
+html.theme-dark .sim-view-main select,
+html.theme-dark .sim-view-main textarea,
+body.dark-theme .sim-view-main input,
+body.dark-theme .sim-view-main select,
+body.dark-theme .sim-view-main textarea {
+    color-scheme: dark;
 }

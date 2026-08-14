@@ -39,6 +39,14 @@
     --glass-border: rgba(103, 80, 164, 0.15);
     --glass-shadow: 0 4px 20px 0 rgba(103, 80, 164, 0.08);
 
+    /* --- 通用品牌色变量（simulation.css 等自研视图使用） ---
+       与 MaterialUI 主色保持一致：亮色为深紫 #6750A4，暗色为淡紫 #D0BCFF。
+       此前这些变量未定义，simulation 视图 fallback 到 #1976d2 亮蓝，
+       在暗色主题下既突兀又缺乏对比。 */
+    --primary: #6750A4;
+    --primary-light: rgba(103, 80, 164, 0.12);
+    --primary-light-solid: #EADDFF;
+
     /* --- 圆角规范 (Border Radius) --- */
     --radius-sm: 8px;     /* 小圆角：适用于小工具、输入框及小徽标 */
     --radius-md: 12px;    /* 中圆角：适用于普通按钮、下拉菜单及小卡片 */
@@ -118,6 +126,11 @@ body.dark-theme {
     --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 
     --status-tone-disabled-border: rgba(255, 255, 255, 0.08);
+
+    /* 通用品牌色变量暗色定义（与 html.theme-dark body 块保持一致） */
+    --primary: #D0BCFF;
+    --primary-light: rgba(208, 188, 255, 0.18);
+    --primary-light-solid: #4F378B;
 }
 
 html.theme-dark body {
@@ -143,6 +156,10 @@ html.theme-dark body {
     --glass-bg: rgba(28, 27, 31, 0.7);
     --glass-border: rgba(208, 188, 255, 0.1);
     --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+
+    --primary: #D0BCFF;
+    --primary-light: rgba(208, 188, 255, 0.18);
+    --primary-light-solid: #4F378B;
 }
 
 /* ==========================================================================
@@ -211,17 +228,71 @@ body {
     overflow-x: hidden; /* 防止水平溢出滚动条 */
 }
 
-/* 视觉隐藏辅助类：主要用于无障碍朗读器(Screen Reader)，在视觉上完全隐藏但保留在DOM树中 */
+/* 视觉隐藏辅助类：主要用于无障碍朗读器(Screen Reader)，在视觉上完全隐藏但保留在DOM树中。
+   额外追加 !important 保护，防止被组件库/全局样式中的 display:none 等规则误覆盖，
+   避免读屏用户丢失关键标签文本 */
 .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* 移动端导航角标：加大触控目标（padding 撑高），便于拇指点击未读徽标 */
+@media (max-width: 768px) {
+    .nav-badge {
+        min-width: 26px;
+        height: 26px;
+    }
+}
+
+/* ==========================================================================
+   无障碍支持：跳转链接与键盘焦点指示 (Skip Link & Focus Indicators)
+   ========================================================================== */
+
+/* 跳过导航链接：仅在键盘聚焦时可见，帮助键盘/读屏用户直达主内容 */
+.skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 100000;
+    padding: 10px 18px;
+    border-radius: 12px;
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    transform: translateY(-160%);
+    transition: transform 0.2s ease-out;
+}
+
+.skip-link:focus-visible {
+    transform: translateY(0);
+}
+
+/* 统一的可访问焦点指示：所有键盘可达元素获得高对比度外环，替代浏览器默认样式保证跨主题一致 */
+:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 65%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* 禁用 outline:none 的控件在聚焦时提供等价视觉反馈（用 box-shadow 环形光圈替代） */
+.event-filter-select:focus,
+.event-filter-keyword-input:focus,
+.event-filter-source-summary:focus,
+.bl-input:focus,
+.pagination-input:focus,
+.weather-query-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
 }
 
 /* ==========================================================================
@@ -516,14 +587,21 @@ body.dark-theme .bl-error {
     box-shadow: var(--glass-shadow);
 }
 
-/* 侧边栏及主导航栏导航单项 */
+/* 侧边栏及主导航栏导航单项（现为语义化 button，需重置浏览器默认样式） */
 .nav-item {
+    width: 100%;
     padding: 14px 20px;
     border-radius: 16px;
+    border: none;
+    background: transparent;
     display: flex;
     align-items: center;
     gap: 16px;
     cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.43;
+    text-align: left;
     transition:
         background-color 0.18s ease-out,
         color 0.18s ease-out,
@@ -532,6 +610,11 @@ body.dark-theme .bl-error {
     color: var(--md-sys-color-on-surface);
     opacity: 0.8;
     margin-bottom: 4px;
+}
+
+.nav-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
+    outline-offset: 2px;
 }
 
 .nav-item:hover {
@@ -778,6 +861,27 @@ body.dark-theme .card {
 .badge-success { background: #dcfce7; color: #166534; }
 .badge-error { background: #fee2e2; color: #991b1b; }
 
+/* 暗色主题下的状态徽标：采用深色底 + 高亮前景，避免浅绿/浅红块在暗色中刺眼 */
+html.theme-dark .badge-success,
+body.dark-theme .badge-success {
+    background: #16331F;
+    color: #86EFAC;
+}
+
+html.theme-dark .badge-error,
+body.dark-theme .badge-error {
+    background: #3B1215;
+    color: #FECACA;
+}
+
+/* 原生表单控件（日期选择器、复选框、下拉等）在暗色主题下采用暗色渲染，
+   否则 datetime-local 等控件的弹层/日历在暗色模式仍显示白底，极其刺眼 */
+html.theme-dark input,
+html.theme-dark select,
+html.theme-dark textarea {
+    color-scheme: dark;
+}
+
 /* 震级高亮小方块/徽标 */
 .mag-badge {
     width: 48px;
@@ -910,6 +1014,8 @@ body.dark-theme .btn-action:hover {
 
 /* 支持平滑滚动的容器 */
 .sidebar > div:nth-child(2),
+.sidebar > nav:nth-child(2),
+.sidebar-nav,
 .main-content {
     -webkit-overflow-scrolling: touch; /* 开启iOS弹性滚动效果 */
     scroll-behavior: smooth;
@@ -1089,6 +1195,7 @@ body.dark-theme .btn-action:hover {
 @media (max-width: 768px) {
     .nav-item {
         white-space: nowrap;
+        width: auto; /* 覆盖桌面竖排的 100% 宽度，恢复横向滚动导航的按内容收缩 */
         padding: 10px 16px;
         margin-bottom: 0;
         flex-shrink: 0;
@@ -1203,7 +1310,8 @@ body.dark-theme .btn-action:hover {
         font-size: 13px;
     }
 
-    .nav-item span {
+    /* 仅放大导航图标，文字标签保持与按钮一致的 13px，避免超小屏按钮被撑宽 */
+    .nav-item .nav-item__icon {
         font-size: 16px !important;
     }
 
@@ -1458,6 +1566,8 @@ html.theme-dark .skeleton {
     text-transform: none !important;
 }
 
-[data-theme='dark'] .app-error-boundary-msg {
+[data-theme='dark'] .app-error-boundary-msg,
+html.theme-dark .app-error-boundary-msg,
+body.dark-theme .app-error-boundary-msg {
     background: rgba(255, 255, 255, 0.06);
 }

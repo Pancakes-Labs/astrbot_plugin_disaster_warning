@@ -18,6 +18,10 @@ function useThemeSync(theme) {
         rootEl.classList.add('theme-switching');
         bodyEl.classList.toggle('dark-theme', isDark);
         rootEl.classList.toggle('theme-dark', isDark);
+        // 同步 data-theme 属性：供 simulation.css 等使用 [data-theme='dark'] 选择器的样式生效
+        // （此前该属性仅挂在 Sidebar 的 GitHub 链接上，导致模拟页暗色适配完全失效）
+        rootEl.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        bodyEl.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
         // 持久化同步，以便在系统重新加载时实现偏好恢复
         localStorage.setItem('theme', theme);
