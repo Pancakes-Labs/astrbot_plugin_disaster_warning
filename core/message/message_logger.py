@@ -136,12 +136,6 @@ class MessageLogger:
         self._earthquake_list_summary_service = EarthquakeListSummaryService(self)
 
         logger.debug("[灾害预警] 消息记录器初始化完成")
-        if self.filter_heartbeat:
-            logger.debug("[灾害预警] 消息过滤配置已启用:")
-            logger.debug(f"[灾害预警] - 基础类型过滤: {self.filter_types}")
-            logger.debug(f"[灾害预警] - P2P节点状态过滤: {self.filter_p2p_areas}")
-            logger.debug(f"[灾害预警] - 重复事件过滤: {self.filter_duplicate_events}")
-            logger.debug(f"[灾害预警] - 连接状态过滤: {self.filter_connection_status}")
 
     def set_silence_checker(self, checker) -> None:
         """注入启动静默判定回调（通常绑定主服务 is_silencing）。"""

@@ -320,9 +320,6 @@ class CencIntensityReportParser(BaseParser):
             info_type_name = str(msg_data.get("infoTypeName") or "").strip()
             # 正式/自动测定报文即使混入速报字段名，也不按烈度速报处理。
             if "[正式测定]" in info_type_name or "[自动测定]" in info_type_name:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 疑似 CENC 测定报文，跳过"
-                )
                 return None
 
             has_report_body = any(
@@ -335,9 +332,7 @@ class CencIntensityReportParser(BaseParser):
                 )
             )
             if not uni_event_id or not has_report_body:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CENC 烈度速报数据，跳过"
-                )
+                # 非烈度速报数据为混流常态，不逐一记录
                 return None
 
             envelope = self._build_envelope(msg_data)

@@ -82,6 +82,11 @@ class SourceMessageRouter:
         self._dispatch_service = service.event_ingress_dispatch_service
         self._side_effect_service = service.source_ingress_side_effect_service
         self._source_runtime_query = service.source_runtime_query
+        # Wolfx 未知消息节流：连续未知类型仅首次与每 N 轮各打一次，
+        # 避免极端情况下高频未知类型逐条刷屏，同时保留排查价值。
+        self._wolfx_unknown_logged = False
+        self._wolfx_unknown_rounds = 0
+        self._wolfx_unknown_log_interval = 60
 
     def register_all(self, ws_manager: WebSocketManager):
         """把各连接族处理器注册到 WebSocket 管理器。"""
@@ -190,13 +195,6 @@ class SourceMessageRouter:
                     event.metadata.setdefault("bootstrap", True)
                     if connection_name and not event.metadata.get("bootstrap_kind"):
                         event.metadata["bootstrap_kind"] = "conn_first_wave"
-            log_label = parser_log_label or source_label or source_id
-            plugin_logger.debug(
-                f"[灾害预警] {log_label} 解析成功: {event.id}",
-                is_event_linked=True,
-                event_stream=self._resolve_stream_by_source_id(source_id),
-            )
-
             # 将解析好的事件丢给分发流水线处理
             await self._dispatch_event(
                 event,
@@ -332,9 +330,6 @@ class SourceMessageRouter:
 
                 # 鉴权成功回执：不进入业务解析
                 if msg_type in {"auth_success", "auth_ok", "authenticated"}:
-                    plugin_logger.debug(
-                        f"[灾害预警] FAN Studio 鉴权成功: {connection_name or 'unknown'}"
-                    )
                     return None
 
                 # FAN Studio 会以业务错误包表达限流/策略拒绝；收到后主动关闭，尽快释放上游配额
@@ -376,12 +371,6 @@ class SourceMessageRouter:
                 if isinstance(data, dict) and self._is_fan_preauth_partial_initial_all(
                     data
                 ):
-                    plugin_logger.debug(
-                        f"[灾害预警] 忽略 FAN 鉴权前半量 initial_all"
-                        f"（连接 {connection_name or 'unknown'}，"
-                        f"源: {self._fan_initial_all_known_source_keys(data)}），"
-                        "等待完整快照"
-                    )
                     return None
 
                 # 先校验路由映射，再把一条总线消息拆成多个候选数据源消息
@@ -403,8 +392,6 @@ class SourceMessageRouter:
                             plugin_logger.debug(
                                 f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
                             )
-                processed_count = 0
-
                 # 遍历被分配出来的数据源及负载，分别尝试分发
                 for source, source_id, payload in messages_to_process:
                     if not self._is_source_routable(source_id, source):
@@ -416,7 +403,7 @@ class SourceMessageRouter:
                         event_stream=self._resolve_stream_by_source_id(source_id),
                         is_silent_window=True,
                     )
-                    dispatched = await self._parse_and_dispatch(
+                    await self._parse_and_dispatch(
                         source_id=source_id,
                         source_label=source,
                         parser_input=json.dumps(payload),
@@ -425,25 +412,9 @@ class SourceMessageRouter:
                         source_channel=source,
                         parser_log_label=source,
                     )
-                    if dispatched:
-                        processed_count += 1
 
-                # 没有任何子消息被路由时，只对真正异常或未识别数据做调试记录，避免心跳刷屏
-                if processed_count == 0 and not messages_to_process:
-                    is_heartbeat = (
-                        data.get("type") in ["heartbeat", "ping", "pong"]
-                        or "timestamp" in data
-                        and len(data) <= 3
-                    )
-                    # 过滤心跳包后，对其他未知包进行 debug 日志留存
-                    if not is_heartbeat:
-                        has_data = "Data" in data or "data" in data
-                        is_unhandled_initial = msg_type == "initial_all"
-                        if has_data or is_unhandled_initial:
-                            plugin_logger.debug(
-                                f"[灾害预警] 收到一条尚未处理的消息，连接为 {connection_name}，消息类型为 {msg_type}，来源为 {data.get('source', 'unknown')}，数据摘要：{str(data)[:100]}"
-                            )
-
+                # 没有任何子消息被路由：心跳/未知包均属常态，无需逐条打日志，
+                # 避免高频未知消息刷屏。真正的异常由上层 error 日志承担。
                 return None
 
             except Exception as error:
@@ -518,15 +489,13 @@ class SourceMessageRouter:
             )
 
             # 启动候选者解析轮询
-            dispatched = await self._parse_candidate_source_ids(
+            await self._parse_candidate_source_ids(
                 source_ids=list(candidate_source_ids),
                 parser_input=message,
                 connection_name=connection_name,
                 connection_info=connection_info,
                 source_channel=code or None,
             )
-            if not dispatched:
-                plugin_logger.debug("[灾害预警] P2P处理器返回None，无有效事件")
 
         return p2p_handler
 
@@ -583,17 +552,29 @@ class SourceMessageRouter:
                 # 获取 Wolfx 当前子报文类型对应的系统内 source_id
                 source_id = get_wolfx_source_id(msg_type)
                 if source_id is None:
-                    plugin_logger.debug(
-                        f"[灾害预警] Wolfx 消息类型 {msg_type} 暂未识别，来源连接为 {connection_name}"
-                    )
+                    # 未知类型属罕见异常态，但为防极端情况下高频未知类型刷屏，
+                    # 连续未知仅在首次与每 _wolfx_unknown_log_interval 轮各打一次。
+                    if not self._wolfx_unknown_logged:
+                        plugin_logger.debug(
+                            f"[灾害预警] Wolfx 消息类型 {msg_type} 暂未识别，"
+                            f"来源连接为 {connection_name}"
+                        )
+                        self._wolfx_unknown_logged = True
+                    else:
+                        self._wolfx_unknown_rounds += 1
+                        if (
+                            self._wolfx_unknown_rounds
+                            >= self._wolfx_unknown_log_interval
+                        ):
+                            self._wolfx_unknown_rounds = 0
+                            plugin_logger.debug(
+                                f"[灾害预警] Wolfx 连续 {self._wolfx_unknown_log_interval} 轮 "
+                                f"未识别消息类型，最近为 {msg_type}"
+                            )
                     return None
 
                 if not self._is_source_routable(source_id, msg_type):
                     return None
-
-                plugin_logger.debug(
-                    f"[灾害预警] 将使用 Wolfx 解析器 {source_id} 处理类型为 {msg_type} 的消息"
-                )
                 # 某些 Wolfx 消息在正式解析前需要先触发旁路副作用（比如缓存 eqlist）
                 await self._side_effect_service.process_message(
                     source_id=source_id,
@@ -670,10 +651,7 @@ class SourceMessageRouter:
 
                 raw_text = message if isinstance(message, str) else None
                 if raw_text is None:
-                    plugin_logger.debug(
-                        f"[灾害预警] OpenQuakeAPI 忽略非文本/非二进制消息，"
-                        f"类型为 {type(message).__name__}"
-                    )
+                    # 非文本/非二进制消息为混流常态，不逐一记录
                     return
 
                 try:
@@ -685,7 +663,7 @@ class SourceMessageRouter:
                     return
 
                 if not isinstance(data, dict):
-                    plugin_logger.debug("[灾害预警] OpenQuakeAPI 忽略非对象 JSON 消息")
+                    # 非对象 JSON 消息为混流常态，不逐一记录
                     return
 
                 source_name = str(data.get("source") or "").strip()

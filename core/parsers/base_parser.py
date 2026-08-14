@@ -83,14 +83,11 @@ class BaseParser:
         """提取实际业务数据，兼容多种外层包装格式。"""
         # 兼容首字母大写的 "Data" 键
         if "Data" in data:
-            plugin_logger.debug(f"[灾害预警] {self.source_id} 使用 Data 字段获取数据")
             return data["Data"] or {}
         # 兼容小写的 "data" 键
         if "data" in data:
-            plugin_logger.debug(f"[灾害预警] {self.source_id} 使用 data 字段获取数据")
             return data["data"] or {}
         # 无包装时，直接视整个载荷为数据体
-        plugin_logger.debug(f"[灾害预警] {self.source_id} 使用整个消息作为数据")
         return data
 
     def _is_heartbeat_message(self, msg_data: dict[str, Any]) -> bool:

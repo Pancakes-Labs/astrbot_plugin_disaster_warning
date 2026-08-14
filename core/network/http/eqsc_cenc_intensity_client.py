@@ -168,7 +168,6 @@ class EqscCencIntensityClient(EqscHttpClient):
     ) -> list[dict[str, Any]]:
         """获取 CENC 烈度速报列表（规范化后的有序条目）。"""
         if use_cache and self._list_cache and self._is_cache_valid(self._list_cache[1]):
-            logger.debug("[灾害预警] EQSC CENC 烈度速报列表命中缓存")
             return list(self._list_cache[0])
 
         if not self._base_url:
@@ -201,9 +200,6 @@ class EqscCencIntensityClient(EqscHttpClient):
 
             items = self.normalize_list_payload(data)
             self._list_cache = (items, time.time() + self._cache_ttl)
-            logger.debug(
-                f"[灾害预警] EQSC CENC 烈度速报列表查询成功，共 {len(items)} 条"
-            )
             return list(items)
         except Exception as e:
             logger.error(
@@ -227,9 +223,6 @@ class EqscCencIntensityClient(EqscHttpClient):
         if use_cache:
             cached = self._detail_cache.get(normalized_id)
             if cached and self._is_cache_valid(cached[1]):
-                logger.debug(
-                    f"[灾害预警] EQSC CENC 烈度速报详情 {normalized_id} 命中缓存"
-                )
                 return cached[0]
 
         if not self._base_url:
@@ -252,9 +245,6 @@ class EqscCencIntensityClient(EqscHttpClient):
                 return None
 
             self._store_detail_cache(normalized_id, data)
-            logger.debug(
-                f"[灾害预警] EQSC CENC 烈度速报详情 {normalized_id} 查询成功并已缓存"
-            )
             return data
         except Exception as e:
             logger.error(

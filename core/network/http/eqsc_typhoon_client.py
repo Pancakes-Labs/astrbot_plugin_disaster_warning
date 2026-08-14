@@ -80,7 +80,6 @@ class EqscTyphoonClient(EqscHttpClient):
         if use_cache:
             cached = self._cache.get(typhoon_id)
             if cached and self._is_cache_valid(cached[1]):
-                logger.debug(f"[灾害预警] EQSC 台风 {typhoon_id} 命中缓存")
                 return cached[0]
 
         # 获取 AccessToken
@@ -109,7 +108,6 @@ class EqscTyphoonClient(EqscHttpClient):
             typhoon_data = typhoon_list[0]
             # 写入缓存
             self._cache[typhoon_id] = (typhoon_data, time.time() + self._cache_ttl)
-            logger.debug(f"[灾害预警] EQSC 台风 {typhoon_id} 查询成功并已缓存")
             return typhoon_data
 
         except Exception as e:
@@ -134,7 +132,6 @@ class EqscTyphoonClient(EqscHttpClient):
         """
         # 检查缓存
         if use_cache and self._list_cache and self._is_cache_valid(self._list_cache[1]):
-            logger.debug("[灾害预警] EQSC 台风列表命中缓存")
             return self._list_cache[0]
 
         # 获取 AccessToken
@@ -155,9 +152,6 @@ class EqscTyphoonClient(EqscHttpClient):
             typhoon_list = data.get("typhoon", []) if isinstance(data, dict) else []
             # 写入缓存
             self._list_cache = (typhoon_list, time.time() + self._cache_ttl)
-            logger.debug(
-                f"[灾害预警] EQSC 台风列表查询成功，共 {len(typhoon_list)} 个台风"
-            )
             return typhoon_list
 
         except Exception as e:

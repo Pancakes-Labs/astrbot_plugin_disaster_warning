@@ -152,12 +152,6 @@ def _parse_travel_times(js_path: Path) -> dict[str, TravelTimeModel]:
     for name in ("jma2001", "jb"):
         model = _parse_model_block(text, name)
         models[name] = model
-        logger.debug(
-            f"[灾害预警] TravelTimes.js 模型 {name}: "
-            f"depths={len(model.depths)}, distances={len(model.distances)}, "
-            f"p_times={len(model.p_times)}x{len(model.p_times[0]) if model.p_times else 0}, "
-            f"s_times={len(model.s_times)}x{len(model.s_times[0]) if model.s_times else 0}"
-        )
     return models
 
 
@@ -188,7 +182,6 @@ def get_travel_times() -> dict[str, TravelTimeModel]:
 
         models = _parse_travel_times(js_path)
         _cached_travel_times = models
-        logger.debug(f"[灾害预警] TravelTimes.js 已加载，共 {len(models)} 个走时模型")
         return _cached_travel_times
     except Exception as exc:
         logger.error(f"[灾害预警] 加载 TravelTimes.js 失败: {exc}")

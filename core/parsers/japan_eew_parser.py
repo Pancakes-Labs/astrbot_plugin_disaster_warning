@@ -113,9 +113,6 @@ class JmaEewFanStudioParser(BaseParser):
 
             # 预计震度与情报类型至少应命中其一，否则通常不是正式预警消息
             if "epiIntensity" not in msg_data and "infoTypeName" not in msg_data:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 JMA 地震预警数据，跳过"
-                )
                 return None
 
             # 取消报在当前推送链中不作为正式地震事件继续向后处理
@@ -168,21 +165,13 @@ class JmaEewP2PParser(BaseParser):
             data = json.loads(message)
             code = data.get("code")
 
-            # P2P 用业务码区分不同类型，其中 556 才是正式紧急地震速报
+            # P2P 用业务码区分不同类型，其中 556 才是正式紧急地震速报。
+            # 554 发布检测与其余码为混流常态，不逐一记录
             if code == 556:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到紧急地震速报（警报）"
-                )
                 return self._parse_eew_data(data)
             if code == 554:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到紧急地震速报发布检测消息，忽略"
-                )
                 return None
 
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 非地震预警数据，code: {code}"
-            )
             return None
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")
@@ -485,9 +474,6 @@ class JmaEewWolfxParser(BaseParser):
         try:
             # Wolfx 会混发多类日本消息，这里只接收日本地震预警类型
             if data.get("type") != "jma_eew":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 JMA 地震预警数据，跳过"
-                )
                 return None
 
             report_num = (

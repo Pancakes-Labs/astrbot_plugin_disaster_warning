@@ -50,8 +50,6 @@ class ConfigValidator:
         返回值：
         - 校验并修正后的配置字典
         """
-        logger.debug("[灾害预警] 正在进行配置校验...")
-
         # 按配置分组依次处理，确保每一类配置都在进入运行态前完成基础修正。
 
         # 1. 本地监控配置校验
@@ -170,7 +168,6 @@ class ConfigValidator:
         # 19. 顶层开关校验
         if "enabled" in config and not isinstance(config["enabled"], bool):
             config["enabled"] = True
-
         logger.debug("[灾害预警] 配置校验完成")
         return config
 
@@ -1408,9 +1405,8 @@ class ConfigValidator:
             # 避免 None 原样保留导致下游轮询调度收到无效间隔。
             poll_interval = eqsc_cfg.get("poll_interval_seconds")
             if poll_interval is None:
-                if "poll_interval_seconds" not in eqsc_cfg:
-                    logger.debug("[灾害预警] EQSC 未配置轮询间隔，已填充默认值 120。")
-                else:
+                # 未配置时静默填充默认值（正常升级路径）；仅 null 显式写入属异常，保留 warning
+                if "poll_interval_seconds" in eqsc_cfg:
                     logger.warning(
                         "[灾害预警] 配置警告: EQSC 轮询间隔为 null，已重置为 120。"
                     )

@@ -102,11 +102,6 @@ class RawMessageFilter:
             )
             return ""
 
-        msg_type = data.get("type", "")
-        logger.debug(
-            f"[灾害预警] 消息记录器 - 检查消息过滤，来源: {source_id}, 类型: {msg_type}, 数据长度: {len(payload_data)}"
-        )
-
         # 字符串入口同样执行 OpenQuakeAPI 业务类型检查，
         # 与字典入口保持一致，避免 tsunami/station/status 等字符串消息绕过过滤。
         reason = self._check_openquake_api_type(data, source_id)
@@ -131,10 +126,6 @@ class RawMessageFilter:
 
     def _handle_dict_message(self, payload_data: dict[str, Any], source_id: str) -> str:
         """处理字典形态的原始消息。"""
-        msg_type = payload_data.get("type", "")
-        logger.debug(
-            f"[灾害预警] 消息记录器 - 检查字典类型消息，来源: {source_id}, 类型: {msg_type}"
-        )
         return self._handle_common_dict_checks(payload_data, source_id)
 
     def _handle_inner_dict_checks(
@@ -163,7 +154,6 @@ class RawMessageFilter:
         # 保证统计口径稳定且便于理解每条消息被过滤的首要原因。
         if msg_type and msg_type.lower() in self.filter_types:
             self.filter_stats["heartbeat_filtered"] += 1
-            logger.debug(f"[灾害预警] 消息记录器 - 消息类型过滤: {msg_type}")
             return f"消息类型过滤: {msg_type}"
 
         if self.filter_p2p_areas and self._is_p2p_areas_message(data):
@@ -175,18 +165,13 @@ class RawMessageFilter:
             is_duplicate = self._is_duplicate_event(data, source_id)
             if is_duplicate:
                 self.filter_stats["duplicate_events_filtered"] += 1
-                logger.debug(
-                    f"[灾害预警] 消息记录器 - 重复事件过滤，哈希: {event_hash}"
-                )
                 return f"重复事件 (哈希: {event_hash})"
             elif event_hash:
-                logger.debug(
-                    f"[灾害预警] 消息记录器 - 事件哈希生成: {event_hash}, 允许记录"
-                )
+                # 哈希生成/允许记录为每条消息常态，无需逐一记录
+                pass
 
         if self.filter_connection_status and self._is_connection_status_message(data):
             self.filter_stats["connection_status_filtered"] += 1
-            logger.debug("[灾害预警] 消息记录器 - 连接状态消息过滤")
             return "连接状态消息"
 
         return ""

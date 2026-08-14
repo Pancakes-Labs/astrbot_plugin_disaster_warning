@@ -561,9 +561,6 @@ class MessageBuildService:
                 or normalized_url.startswith("https://")
             )
         ):
-            logger.debug(
-                f"[灾害预警] 跳过非 HTTP 图片链接 ({media_label}): {normalized_url}"
-            )
             return False
 
         # 调用抓取服务拉取远程图片二进制数据
@@ -587,16 +584,11 @@ class MessageBuildService:
         if fetch_result:
             error_msg = str(fetch_result.get("error") or "")
             # 特征识别：气象预警图标接口返回伪图片（HTML 错误页伪装为 image/png），
-            # 这类失败稳定触发，降级为 DEBUG 避免控制台刷屏。
+            # 这类失败稳定触发、会走本地回退，不再逐条打 DEBUG 避免刷屏。
             is_pseudo_image = media_label == "气象预警图标" and any(
                 marker in error_msg for marker in self._PSEUDO_IMAGE_ERROR_MARKERS
             )
-            if is_pseudo_image:
-                logger.debug(
-                    f"[灾害预警] 气象预警图标接口返回伪图片，将走本地回退: "
-                    f"编码相关 URL：{normalized_url}, 错误信息：{error_msg}"
-                )
-            else:
+            if not is_pseudo_image:
                 logger.warning(
                     "[灾害预警] 远程图片抓取失败 "
                     f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
@@ -742,7 +734,6 @@ class MessageBuildService:
                 session_log = self.manager._get_session_log_str(session)
                 try:
                     await self.manager.session_sender.send(session, map_message)
-                    logger.debug(f"[灾害预警] 分离地图已发送到 {session_log}")
                 except Exception as e:
                     logger.error(f"[灾害预警] 分离地图发送到 {session_log} 失败: {e}")
         except Exception as e:
@@ -883,7 +874,6 @@ class MessageBuildService:
             with open(out, "rb") as f:
                 b64_data = base64.b64encode(f.read()).decode()
             chain.chain.append(Comp.Image.fromBase64(b64_data))
-            logger.debug("[灾害预警] 已附加 S-Net 测站分布图")
             # 不删除 out：交给 RenderImageCache / 临时目录清理服务回收
         except Exception as e:
             logger.error(f"[灾害预警] S-Net 测站图渲染失败: {e}")
@@ -957,7 +947,6 @@ class MessageBuildService:
             with open(out, "rb") as f:
                 b64_data = base64.b64encode(f.read()).decode()
             chain.chain.append(Comp.Image.fromBase64(b64_data))
-            logger.debug("[灾害预警] 已附加台风路径图")
         except Exception as e:
             logger.error(f"[灾害预警] 台风路径图渲染失败: {e}")
 
@@ -1005,7 +994,6 @@ class MessageBuildService:
                 with open(map_image_path, "rb") as f:
                     b64_data = base64.b64encode(f.read()).decode()
                 chain.chain.append(Comp.Image.fromBase64(b64_data))
-                logger.debug("[灾害预警] 已附加地图图片 (Base64模式)")
             except Exception as b64_err:
                 logger.error(f"[灾害预警] 地图图片转Base64失败: {b64_err}")
         except Exception as e:
@@ -1152,7 +1140,6 @@ class MessageBuildService:
                 with open(local_icon_path, "rb") as f:
                     b64_data = base64.b64encode(f.read()).decode()
                 chain.chain.append(Comp.Image.fromBase64(b64_data))
-                logger.debug(f"[灾害预警] 已附加本地气象预警图标: {local_icon_path}")
                 return
             except Exception as e:
                 logger.warning(
@@ -1186,10 +1173,7 @@ class MessageBuildService:
                 with open(fallback_path, "rb") as f:
                     b64_data = base64.b64encode(f.read()).decode()
                 chain.chain.append(Comp.Image.fromBase64(b64_data))
-                logger.debug(
-                    f"[灾害预警] 本地具体图标缺失，已回退到本地通用颜色图标: "
-                    f"预警编码为 {raw_weather_code}, 解析码为 {icon_code}"
-                )
+                # 本地颜色回退成功为常态路径，不再逐条打日志
                 return
             except Exception as e:
                 logger.warning(
@@ -1207,13 +1191,7 @@ class MessageBuildService:
                 allow_url_fallback=False,
             )
             if appended:
-                logger.debug(f"[灾害预警] 已附加气象预警图标: {icon_url}")
                 return
-
-        logger.debug(
-            f"[灾害预警] 气象预警图标下载失败且无可用回退图标，已跳过: "
-            f"原始编码={raw_weather_code}, 解析码={icon_code}"
-        )
 
     async def _append_tsunami_media_if_needed(
         self,

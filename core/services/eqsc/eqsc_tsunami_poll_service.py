@@ -47,6 +47,11 @@ class EqscTsunamiPollService:
         self._consecutive_failures = 0
         self._client: EqscTsunamiClient | None = None
         self._owns_token_manager = False
+        # 禁用态日志：仅首次跳过本轮时打一次
+        self._disabled_logged = False
+        # 无变化汇总日志节流：连续 N 轮才打一次，避免无灾害时每轮刷屏
+        self._no_change_log_rounds = 0
+        self._no_change_log_interval = 30
 
     @property
     def running(self) -> bool:
@@ -176,8 +181,16 @@ class EqscTsunamiPollService:
                 if not getattr(self.service, "running", False):
                     break
                 if not self.is_enabled():
-                    logger.debug("[灾害预警] EQSC 海啸已禁用，跳过本轮轮询")
+                    # 仅首次禁用时打一次，避免配置禁用后每轮刷屏
+                    if not self._disabled_logged:
+                        logger.debug("[灾害预警] EQSC 海啸已禁用，跳过本轮轮询")
+                        self._disabled_logged = True
                     continue
+                if self._disabled_logged:
+                    # 从禁用状态恢复：重置无变化计数器，避免禁用期的旧累计值
+                    # 导致恢复后立即打印"无变化"汇总日志
+                    self._no_change_log_rounds = 0
+                self._disabled_logged = False
                 await self.fetch_once(emit_event=True)
             except asyncio.CancelledError:
                 break
@@ -235,17 +248,24 @@ class EqscTsunamiPollService:
         if is_training and not self._resolve_include_training():
             # 主动忽略训练报时仍提交指纹，避免每轮重复解析同一训练快照。
             self._last_payload_fingerprint = fingerprint
-            logger.debug("[灾害预警] EQSC 海啸训练报已忽略")
+            # 新快照（含训练报）到达即视为"有变化"，重置无变化计数器
+            self._no_change_log_rounds = 0
             self._notify_silence_fetch_completed(success=True)
             return raw
 
         if fingerprint == self._last_payload_fingerprint:
-            logger.debug("[灾害预警] EQSC 海啸快照内容未变化，跳过推送")
+            # 无变化为常态，连续 N 轮才打一次，避免无灾害时每轮刷屏
+            self._no_change_log_rounds += 1
+            if self._no_change_log_rounds >= self._no_change_log_interval:
+                self._no_change_log_rounds = 0
+                logger.debug("[灾害预警] EQSC 海啸快照内容未变化，跳过推送")
             self._notify_silence_fetch_completed(success=True)
             return raw
 
         if not emit_event:
             self._last_payload_fingerprint = fingerprint
+            # 新快照到达即视为"有变化"，重置无变化计数器
+            self._no_change_log_rounds = 0
             self._notify_silence_fetch_completed(success=True)
             return raw
 
@@ -265,6 +285,8 @@ class EqscTsunamiPollService:
             return raw
         self._last_payload_fingerprint = fingerprint
         self._last_event_id = str(event_id) if event_id else None
+        # 新快照成功处理即视为"有变化"，重置无变化计数器
+        self._no_change_log_rounds = 0
         self._notify_silence_fetch_completed(success=True)
         return raw
 

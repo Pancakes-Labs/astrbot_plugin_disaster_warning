@@ -107,9 +107,6 @@ class CencEarthquakeParser(BaseParser):
 
             # 这类消息至少应具备情报类型与事件标识，否则通常不是正式测定数据
             if "infoTypeName" not in msg_data or "eventId" not in msg_data:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CENC 地震测定数据，跳过"
-                )
                 return None
 
             envelope = self._build_envelope(msg_data)
@@ -149,15 +146,10 @@ class CencEarthquakeWolfxParser(BaseParser):
                 for key, value in data.items()
                 if key.startswith("No") and isinstance(value, dict)
             ]
+            # 非 cenc_eqlist 类型与无法识别的列表结构均为混流常态，不逐一记录
             if raw_type and raw_type != "cenc_eqlist":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CENC 地震列表数据，跳过"
-                )
                 return None
             if not raw_type and not no_keys:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 未识别到 Wolfx CENC 列表结构，跳过"
-                )
                 return None
 
             eq_info = None
@@ -252,8 +244,11 @@ class CencEarthquakeWolfxParser(BaseParser):
                 metadata=metadata,
             )
 
-            plugin_logger.debug(
-                f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}"
+            plugin_logger.info(
+                f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
 
             return envelope

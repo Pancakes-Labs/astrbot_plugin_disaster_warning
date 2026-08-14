@@ -99,7 +99,6 @@ class EqscTsunamiClient(EqscHttpClient):
                 return None
 
             self._latest_cache = (data, time.time() + self._cache_ttl)
-            logger.debug("[灾害预警] EQSC 海啸快照查询成功并已缓存")
             return data
         except Exception as e:
             logger.error(

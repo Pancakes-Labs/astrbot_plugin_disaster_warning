@@ -34,7 +34,6 @@ class MessageLogDedupService:
         try:
             new_content_clean = self.extract_content_without_timestamp(new_log_content)
             if new_content_clean in self.logger.recent_raw_logs:
-                logger.debug("[灾害预警] 发现内容完全重复的日志（内存缓存），跳过写入")
                 return True
 
             self.logger.recent_raw_logs.append(new_content_clean)

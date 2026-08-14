@@ -10,8 +10,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from astrbot.api import logger
-
 from ....utils.converters import ScaleConverter
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
 from ...storage.snet_peak_repository import SnetPeakRepository
@@ -123,11 +121,6 @@ class SnetPeakService:
             stations,
             observed_at=observed_at,
             hit_threshold=hit_threshold,
-        )
-        logger.debug(
-            "[灾害预警] S-Net 峰值观测完成 processed=%s peak_updates=%s",
-            result.get("processed"),
-            result.get("peak_updates"),
         )
         return result
 

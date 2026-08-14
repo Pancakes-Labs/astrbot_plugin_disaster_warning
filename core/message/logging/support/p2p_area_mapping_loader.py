@@ -36,9 +36,6 @@ class P2PAreaMappingLoader:
                         except (ValueError, IndexError):
                             continue
 
-                logger.debug(
-                    f"[灾害预警] 成功加载 {len(area_mapping)} 个P2P区域代码映射"
-                )
             else:
                 logger.warning("[灾害预警] 未找到epsp-area.csv文件，请检查资源完整性")
         except Exception as e:

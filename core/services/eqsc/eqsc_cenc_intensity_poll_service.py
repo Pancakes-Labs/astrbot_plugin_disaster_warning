@@ -54,6 +54,11 @@ class EqscCencIntensityPollService:
         self._client: EqscCencIntensityClient | None = None
         self._owns_token_manager = False
         self._startup_seeded = False
+        # 禁用态日志：仅首次跳过本轮时打一次
+        self._disabled_logged = False
+        # 无变化汇总日志节流：连续 N 轮才打一次，避免无灾害时每轮刷屏
+        self._no_change_log_rounds = 0
+        self._no_change_log_interval = 30
 
     @property
     def running(self) -> bool:
@@ -194,8 +199,18 @@ class EqscCencIntensityPollService:
                 if not getattr(self.service, "running", False):
                     break
                 if not self.is_enabled():
-                    logger.debug("[灾害预警] EQSC CENC 烈度速报已禁用，跳过本轮轮询")
+                    # 仅首次禁用时打一次，避免配置禁用后每轮刷屏
+                    if not self._disabled_logged:
+                        logger.debug(
+                            "[灾害预警] EQSC CENC 烈度速报已禁用，跳过本轮轮询"
+                        )
+                        self._disabled_logged = True
                     continue
+                if self._disabled_logged:
+                    # 从禁用状态恢复：重置无变化计数器，避免禁用期的旧累计值
+                    # 导致恢复后立即打印"无变化"汇总日志
+                    self._no_change_log_rounds = 0
+                self._disabled_logged = False
                 await self.fetch_once(emit_event=True)
             except asyncio.CancelledError:
                 break
@@ -365,14 +380,23 @@ class EqscCencIntensityPollService:
                 emitted += 1
 
         if emitted:
-            plugin_logger.info(
+            self._no_change_log_rounds = 0
+            # 与台风轮询汇总一致降为 DEBUG：无灾害时每轮不刷屏，
+            # 有推送价值的事件由事件级"会话筛选/推送完成" INFO 汇总提供可观测性。
+            plugin_logger.debug(
                 f"[灾害预警] EQSC CENC 烈度速报轮询本轮推送 {emitted} 条",
                 is_event_linked=True,
                 event_stream="earthquake",
                 is_silent_window=True,
             )
         else:
-            plugin_logger.debug("[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送")
+            # 无变化为常态，连续 N 轮才打一次，避免无灾害时每轮刷屏
+            self._no_change_log_rounds += 1
+            if self._no_change_log_rounds >= self._no_change_log_interval:
+                self._no_change_log_rounds = 0
+                plugin_logger.debug(
+                    "[灾害预警] EQSC CENC 烈度速报轮询本轮无变化，跳过推送"
+                )
         return items
 
 

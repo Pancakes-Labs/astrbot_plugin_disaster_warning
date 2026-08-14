@@ -166,10 +166,6 @@ def get_district_points() -> dict[str, list[tuple[float, float]]]:
         district_points = _parse_js_district_points(js_path)
         _cached_district_points = district_points
         _cached_flat_index = _build_flat_index(district_points)
-        logger.debug(
-            f"[灾害预警] CnSeisIntLoc.js 已加载，共 {len(district_points)} 个区县，"
-            f"{len(_cached_flat_index)} 个采样点"
-        )
         return _cached_district_points
     except Exception as exc:
         logger.error(f"[灾害预警] 加载 CnSeisIntLoc.js 失败: {exc}")
