@@ -87,8 +87,14 @@ function escapeMarkdownHtml(text) {
 
 /**
  * 净化并规整代码语言标识符
+ * 复用高亮引擎 markdownHighlighter.js 导出的归一化实现，避免两处同步维护。
+ * 引擎未就绪时使用本地兜底实现。
  */
 function normalizeMarkdownLanguageName(language) {
+    const highlighter = window.MarkdownCodeHighlighter;
+    if (highlighter && typeof highlighter.normalizeLanguageName === 'function') {
+        return highlighter.normalizeLanguageName(language);
+    }
     const normalized = String(language || '').trim().toLowerCase();
     if (!normalized) return 'text';
     return normalized.replace(/[^a-z0-9_-]/g, '') || 'text';
