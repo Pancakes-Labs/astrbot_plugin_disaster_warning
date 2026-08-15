@@ -513,7 +513,9 @@ body.dark-theme .markdown-docs-file-item.is-active {
     background: linear-gradient(180deg, #f0ede8, #e9e5df);
 }
 
-/* ===== 暗色主题：代码块切换为 VSCode Dark 终端底，与 Dark Modern token 协调 ===== */
+/* ===== 暗色主题：代码块切换为 VSCode Dark 终端底，与 Dark Modern token 协调 =====
+   统一使用 html.theme-dark 选择器（首屏预挂载，见 index.html 主题拦截器）。
+   body.dark-theme 的历史规则见文末，保持值一致，避免级联顺序导致跳变。 */
 html.theme-dark .notification-md-code-block,
 html.theme-dark .notification-md-mermaid-block {
     border-color: rgba(255, 255, 255, 0.10);
@@ -537,6 +539,14 @@ html.theme-dark .notification-md-code-lang {
 html.theme-dark .notification-md pre {
     background: #1e1e1e;
     scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+html.theme-dark .notification-md-traffic-light {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html.theme-dark .notification-md pre code {
+    color: #D4D4D4; /* VSCode Dark Modern 默认前景色 */
 }
 
 /* 红绿灯圆点组（经典 macOS 风格） */
@@ -997,18 +1007,20 @@ body.dark-theme .notification-md :not(pre) > code {
     border-color: rgba(208, 188, 255, 0.18);
 }
 
+/* 兼容选择器：body.dark-theme 与 html.theme-dark 同时挂载（useThemeSync 同步 toggle），
+   此处保持与上方 html.theme-dark 规则完全一致，防止级联顺序导致首屏跳变。 */
 body.dark-theme .notification-md-code-block,
 body.dark-theme .notification-md-mermaid-block {
-    border-color: rgba(103, 80, 164, 0.30);
-    background: #1E1E1E; /* VSCode Dark Modern 编辑器底色 */
+    border-color: rgba(255, 255, 255, 0.10);
+    background: #1e1e1e;
     box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 body.dark-theme .notification-md-code-header {
-    border-bottom-color: rgba(103, 80, 164, 0.22);
-    background: linear-gradient(180deg, #2D2D30, #262629);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #2d2d30, #252526);
 }
 
 /* 暗色下红绿灯描边微调，保持立体感 */
@@ -1017,12 +1029,13 @@ body.dark-theme .notification-md-traffic-light {
 }
 
 body.dark-theme .notification-md-code-lang {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(208, 188, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--md-sys-color-primary);
 }
 
 body.dark-theme .notification-md pre {
-    background: #1E1E1E; /* 与外壳同色，形成一整块终端画布 */
+    background: #1e1e1e; /* 与外壳同色，形成一整块终端画布 */
 }
 
 body.dark-theme .notification-md pre code {
