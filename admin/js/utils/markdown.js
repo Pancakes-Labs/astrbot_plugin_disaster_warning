@@ -1,23 +1,37 @@
 /**
  * 提供管理端通用的 Markdown 渲染与安全清洗能力，供多个视图复用。
+ *
+ * 职责边界说明：
+ * - 本文件负责 Markdown 渲染管线（marked / DOMPurify 增强渲染 + 内置 fallback 编译器）、
+ *   安全清洗、代码块 HTML 结构拼装，保持职责解耦。
  */
 
 // 代码块展示标签的配置字典
 const MARKDOWN_CODE_LANGUAGE_LABELS = {
     js: 'JavaScript',
     jsx: 'JSX',
+    javascript: 'JavaScript',
     ts: 'TypeScript',
     tsx: 'TSX',
+    typescript: 'TypeScript',
     json: 'JSON',
     bash: 'Bash',
     shell: 'Shell',
     sh: 'Shell',
+    zsh: 'Zsh',
+    powershell: 'PowerShell',
+    cmd: 'CMD',
     python: 'Python',
     py: 'Python',
     yaml: 'YAML',
     yml: 'YAML',
     html: 'HTML',
+    htm: 'HTML',
+    xml: 'XML',
+    svg: 'SVG',
     css: 'CSS',
+    scss: 'SCSS',
+    less: 'Less',
     md: 'Markdown',
     markdown: 'Markdown',
     mermaid: 'Mermaid',
@@ -73,8 +87,14 @@ function escapeMarkdownHtml(text) {
 
 /**
  * 净化并规整代码语言标识符
+ * 复用高亮引擎 markdownHighlighter.js 导出的归一化实现，避免两处同步维护。
+ * 引擎未就绪时使用本地兜底实现。
  */
 function normalizeMarkdownLanguageName(language) {
+    const highlighter = window.MarkdownCodeHighlighter;
+    if (highlighter && typeof highlighter.normalizeLanguageName === 'function') {
+        return highlighter.normalizeLanguageName(language);
+    }
     const normalized = String(language || '').trim().toLowerCase();
     if (!normalized) return 'text';
     return normalized.replace(/[^a-z0-9_-]/g, '') || 'text';
@@ -111,54 +131,32 @@ function getSafeMarkdownImageSrc(src) {
 }
 
 /**
- * 对代码文本进行极轻量级的高亮着色替换
+ * 对代码文本进行语法高亮着色。
+ * 委托给独立的高亮引擎模块 markdownHighlighter.js（职责解耦）。
  */
 function highlightMarkdownCode(code, language) {
-    const escaped = escapeMarkdownHtml(code);
-    const normalizedLanguage = normalizeMarkdownLanguageName(language);
-
-    // JSON 语法高亮
-    if (normalizedLanguage === 'json') {
-        return escaped
-            .replace(/("(?:[^"\\]|\\.)*")\s*:/g, '<span class="token token-key">$1</span><span class="token token-punctuation">:</span>')
-            .replace(/:\s*("(?:[^"\\]|\\.)*")/g, ': <span class="token token-string">$1</span>')
-            .replace(/\b(true|false|null)\b/g, '<span class="token token-boolean">$1</span>')
-            .replace(/\b(-?\d+(?:\.\d+)?)\b/g, '<span class="token token-number">$1</span>');
+    const highlighter = window.MarkdownCodeHighlighter;
+    if (highlighter && typeof highlighter.highlightMarkdownCode === 'function') {
+        return highlighter.highlightMarkdownCode(code, language);
     }
+    // 高亮引擎未就绪时兜底：保证输出安全可读的纯文本。
+    return escapeMarkdownHtml(code);
+}
 
-    // JavaScript / TypeScript 语法高亮
-    if (['js', 'jsx', 'ts', 'tsx', 'javascript', 'typescript'].includes(normalizedLanguage)) {
-        return escaped
-            .replace(/\b(function|const|let|var|return|if|else|new|throw|class|async|await|import|from|export|default|try|catch)\b/g, '<span class="token token-keyword">$1</span>')
-            .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, '<span class="token token-string">$1</span>')
-            .replace(/\b(true|false|null|undefined)\b/g, '<span class="token token-boolean">$1</span>')
-            .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="token token-number">$1</span>')
-            .replace(/\b([A-Za-z_$][\w$]*)\s*(?=\()/g, '<span class="token token-function">$1</span>');
-    }
-
-    // Shell 语法高亮
-    if (['bash', 'shell', 'sh'].includes(normalizedLanguage)) {
-        const lines = escaped.split('\n');
-        return lines
-            .map((line) => {
-                const commandMatch = line.match(/^(\s*)([A-Za-z0-9_./:-]+)(.*)$/);
-                if (!commandMatch) return line;
-                const [, indent, command, rest] = commandMatch;
-                const highlightedRest = rest
-                    .replace(/\s(-{1,2}[A-Za-z0-9_-]+)/g, ' <span class="token token-flag">$1</span>')
-                    .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="token token-string">$1</span>');
-                return `${indent}<span class="token token-command">${command}</span>${highlightedRest}`;
-            })
-            .join('\n');
-    }
-
-    // Mermaid 图表源码不做语法高亮，直接保留为纯文本，避免破坏图定义。
-    if (normalizedLanguage === 'mermaid') {
-        return escaped;
-    }
-
-    // 未识别语言时保持纯转义文本，至少保证安全与可读。
-    return escaped;
+/**
+ * 拼装代码块顶部标题栏 HTML：经典 macOS 红绿灯圆点 + 语言徽章，强化代码块 / 终端风格。
+ */
+function buildMarkdownCodeHeaderHtml(languageLabel) {
+    return [
+        '<div class="notification-md-code-header">',
+        '<span class="notification-md-code-traffic-lights" aria-hidden="true">',
+        '<i class="notification-md-traffic-light is-red"></i>',
+        '<i class="notification-md-traffic-light is-yellow"></i>',
+        '<i class="notification-md-traffic-light is-green"></i>',
+        '</span>',
+        `<span class="notification-md-code-lang">${escapeMarkdownHtml(languageLabel)}</span>`,
+        '</div>',
+    ].join('');
 }
 
 /**
@@ -169,9 +167,7 @@ function buildMarkdownMermaidBlockHtml(code) {
     const escapedCode = escapeMarkdownHtml(normalizedCode);
     return [
         '<div class="notification-md-mermaid-block" data-language="mermaid">',
-        '<div class="notification-md-code-header">',
-        `<span class="notification-md-code-lang">${escapeMarkdownHtml(getMarkdownLanguageLabel('mermaid'))}</span>`,
-        '</div>',
+        buildMarkdownCodeHeaderHtml(getMarkdownLanguageLabel('mermaid')),
         `<div class="notification-md-mermaid" data-mermaid-source="${escapedCode}">${escapedCode}</div>`,
         '</div>',
     ].join('');
@@ -190,9 +186,7 @@ function buildMarkdownCodeBlockHtml(code, language) {
     const highlightedCode = highlightMarkdownCode(code, normalizedLanguage);
     return [
         `<div class="notification-md-code-block${languageClass}">`,
-        '<div class="notification-md-code-header">',
-        `<span class="notification-md-code-lang">${escapeMarkdownHtml(languageLabel)}</span>`,
-        '</div>',
+        buildMarkdownCodeHeaderHtml(languageLabel),
         `<pre><code class="${languageClass.trim()}">${highlightedCode}</code></pre>`,
         '</div>',
     ].join('');
@@ -629,9 +623,21 @@ function enhanceMarkdownFragment(sanitizedFragment) {
         const header = document.createElement('div');
         header.className = 'notification-md-code-header';
 
+        // 经典红绿灯圆点，强化代码块 / 终端风格
+        const trafficLights = document.createElement('span');
+        trafficLights.className = 'notification-md-code-traffic-lights';
+        trafficLights.setAttribute('aria-hidden', 'true');
+        ['is-red', 'is-yellow', 'is-green'].forEach((lightClass) => {
+            const light = document.createElement('i');
+            light.className = `notification-md-traffic-light ${lightClass}`;
+            trafficLights.appendChild(light);
+        });
+
         const langChip = document.createElement('span');
         langChip.className = 'notification-md-code-lang';
         langChip.textContent = getMarkdownLanguageLabel(language);
+
+        header.appendChild(trafficLights);
         header.appendChild(langChip);
 
         codeEl.className = `language-${language}`;

@@ -76,7 +76,7 @@ ATn.ATnnnnnn.ATnnnnnn.ATnnnnnn,3600
 
 示例：请求数据
 
-```json
+```bash
 curl -X GET "/jma_tsunami.json"
  -H "Authorization: Bearer your_access_token"
 ```

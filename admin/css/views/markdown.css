@@ -489,30 +489,89 @@ body.dark-theme .markdown-docs-file-item.is-active {
     line-height: 1.45;
 }
 
-/* 代码高亮块及画板 Mermaid 容器 */
+/* 代码高亮块及画板 Mermaid 容器：明暗双主题 VSCode 风格终端底 + 红绿灯标题栏 */
 .notification-md-code-block,
 .notification-md-mermaid-block {
     margin: 0 0 0.95rem;
     overflow: hidden;
-    border-radius: 18px;
+    border-radius: 14px;
     border: 1px solid rgba(103, 80, 164, 0.18);
-    background:
-        linear-gradient(180deg, rgba(103, 80, 164, 0.18), rgba(103, 80, 164, 0.05) 18%, rgba(255, 255, 255, 0.94) 100%),
-        rgba(255, 255, 255, 0.92);
+    background: #faf8f5;
     box-shadow:
-        0 10px 28px rgba(103, 80, 164, 0.12),
+        0 10px 28px rgba(0, 0, 0, 0.10),
         inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
-/* 代码头部状态栏（包含代码语言与一键复制等操作） */
+/* 代码头部状态栏（红绿灯 + 语言徽章） */
 .notification-md-code-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 12px;
     min-height: 42px;
     padding: 0 14px;
     border-bottom: 1px solid rgba(103, 80, 164, 0.10);
-    background: linear-gradient(180deg, rgba(103, 80, 164, 0.12), rgba(103, 80, 164, 0.06));
+    background: linear-gradient(180deg, #f0ede8, #e9e5df);
+}
+
+/* ===== 暗色主题：代码块切换为 VSCode Dark 终端底，与 Dark Modern token 协调 =====
+   统一使用 html.theme-dark 选择器（首屏预挂载，见 index.html 主题拦截器）。
+   body.dark-theme 的历史规则见文末，保持值一致，避免级联顺序导致跳变。 */
+html.theme-dark .notification-md-code-block,
+html.theme-dark .notification-md-mermaid-block {
+    border-color: rgba(255, 255, 255, 0.10);
+    background: #1e1e1e;
+    box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html.theme-dark .notification-md-code-header {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #2d2d30, #252526);
+}
+
+html.theme-dark .notification-md-code-lang {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--md-sys-color-primary);
+}
+
+html.theme-dark .notification-md pre {
+    background: #1e1e1e;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+html.theme-dark .notification-md-traffic-light {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html.theme-dark .notification-md pre code {
+    color: #D4D4D4; /* VSCode Dark Modern 默认前景色 */
+}
+
+/* 红绿灯圆点组（经典 macOS 风格） */
+.notification-md-code-traffic-lights {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.notification-md-traffic-light {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.10);
+    transition: filter 0.18s ease-out, transform 0.18s ease-out;
+}
+
+.notification-md-traffic-light.is-red { background: #FF5F56; }
+.notification-md-traffic-light.is-yellow { background: #FFBD2E; }
+.notification-md-traffic-light.is-green { background: #27C93F; }
+
+.notification-md-code-header:hover .notification-md-traffic-light {
+    filter: brightness(1.15);
 }
 
 /* 代码块语言提示标 (如 "JSON", "PYTHON") */
@@ -521,6 +580,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
     align-items: center;
     justify-content: center;
     min-height: 24px;
+    margin-left: auto;
     padding: 0 10px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.58);
@@ -537,10 +597,8 @@ body.dark-theme .markdown-docs-file-item.is-active {
     margin: 0;
     padding: 1rem 1.05rem 1.05rem;
     border: none;
-    border-radius: 0 0 18px 18px;
-    background:
-        radial-gradient(circle at top right, rgba(103, 80, 164, 0.08), transparent 34%),
-        linear-gradient(180deg, rgba(248, 245, 255, 0.96), rgba(241, 236, 251, 0.96));
+    border-radius: 0 0 14px 14px;
+    background: #faf8f5;
     box-shadow: none;
     scrollbar-width: thin;
     scrollbar-color: rgba(103, 80, 164, 0.28) transparent;
@@ -557,19 +615,72 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 .notification-md pre code .token {
-    font-weight: 600;
+    font-weight: 400; /* 恢复常规字重，避免 token 全局加粗干扰 Dark Modern 的细腻观感 */
 }
 
-/* Prism 代码高亮词法配色绑定 */
-.notification-md .token-key, .notification-md .token-property { color: var(--md-code-token-key, #7C3AED); }
-.notification-md .token-string { color: var(--md-code-token-string, #0F766E); }
-.notification-md .token-number { color: var(--md-code-token-number, #B45309); }
-.notification-md .token-boolean { color: var(--md-code-token-boolean, #B45309); }
-.notification-md .token-keyword { color: var(--md-code-token-keyword, #B91C1C); }
-.notification-md .token-function { color: var(--md-code-token-function, #2563EB); }
-.notification-md .token-command { color: var(--md-code-token-command, #2563EB); font-weight: 800; }
-.notification-md .token-flag { color: var(--md-code-token-flag, #9333EA); }
-.notification-md .token-punctuation { color: var(--md-code-token-punctuation, #6B7280); }
+/* ===== VSCode Dark Modern 语法高亮配色（暗色主题使用，与 VSCode Dark+ 对齐） ===== */
+.notification-md .token-comment  { color: #6A9955; font-style: italic; }
+.notification-md .token-keyword  { color: #569CD6; }
+.notification-md .token-control  { color: #569CD6; }
+.notification-md .token-string   { color: #CE9178; }
+.notification-md .token-number   { color: #B5CEA8; }
+.notification-md .token-boolean  { color: #569CD6; }
+.notification-md .token-function { color: #DCDCAA; }
+.notification-md .token-class    { color: #4EC9B0; }
+.notification-md .token-type     { color: #4EC9B0; }
+.notification-md .token-property { color: #9CDCFE; }
+.notification-md .token-key      { color: #9CDCFE; }
+.notification-md .token-variable { color: #9CDCFE; }
+.notification-md .token-parameter{ color: #9CDCFE; }
+.notification-md .token-builtin  { color: #4EC9B0; }
+.notification-md .token-constant { color: #4FC1FF; }
+.notification-md .token-regex    { color: #D16969; }
+.notification-md .token-decorator{ color: #DCDCAA; }
+.notification-md .token-atrule   { color: #C586C0; }
+.notification-md .token-selector { color: #D7BA7D; }
+.notification-md .token-tag      { color: #569CD6; }
+.notification-md .token-attribute{ color: #9CDCFE; }
+.notification-md .token-punctuation { color: #D4D4D4; }
+.notification-md .token-operator { color: #D4D4D4; }
+.notification-md .token-command  { color: #DCDCAA; }
+.notification-md .token-flag     { color: #C586C0; }
+.notification-md .token-unit     { color: #B5CEA8; }
+.notification-md .token-cdata    { color: #D4D4D4; }
+.notification-md .token-import   { color: #9CDCFE; }
+.notification-md .token-value    { color: #9CDCFE; }
+
+/* ===== VSCode Light Modern 语法高亮配色（亮色主题覆盖，与 VSCode Light+ 对齐） =====
+   亮色下代码块底色为米白 #faf8f5，token 统一切换为深色系保证对比度与可读性。
+   使用 html:not(.theme-dark) 选择器：默认即亮色，即使 data-theme 尚未挂载也生效，避免首屏闪烁。 */
+html:not(.theme-dark) .notification-md .token-comment  { color: #008000; font-style: italic; }
+html:not(.theme-dark) .notification-md .token-keyword  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-control  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-string   { color: #A31515; }
+html:not(.theme-dark) .notification-md .token-number   { color: #098658; }
+html:not(.theme-dark) .notification-md .token-boolean  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-function { color: #795E26; }
+html:not(.theme-dark) .notification-md .token-class    { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-type     { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-property { color: #001080; }
+html:not(.theme-dark) .notification-md .token-key      { color: #001080; }
+html:not(.theme-dark) .notification-md .token-variable { color: #001080; }
+html:not(.theme-dark) .notification-md .token-parameter{ color: #001080; }
+html:not(.theme-dark) .notification-md .token-builtin  { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-constant { color: #0451A5; }
+html:not(.theme-dark) .notification-md .token-regex    { color: #811F3F; }
+html:not(.theme-dark) .notification-md .token-decorator{ color: #795E26; }
+html:not(.theme-dark) .notification-md .token-atrule   { color: #AF00DB; }
+html:not(.theme-dark) .notification-md .token-selector { color: #800000; }
+html:not(.theme-dark) .notification-md .token-tag      { color: #800000; }
+html:not(.theme-dark) .notification-md .token-attribute{ color: #001080; }
+html:not(.theme-dark) .notification-md .token-punctuation { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-operator { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-command  { color: #795E26; }
+html:not(.theme-dark) .notification-md .token-flag     { color: #AF00DB; }
+html:not(.theme-dark) .notification-md .token-unit     { color: #098658; }
+html:not(.theme-dark) .notification-md .token-cdata    { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-import   { color: #001080; }
+html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 
 /* ==========================================================================
    6. Markdown 表格渲染及列宽定制 (Markdown Tables Layout)
@@ -896,35 +1007,39 @@ body.dark-theme .notification-md :not(pre) > code {
     border-color: rgba(208, 188, 255, 0.18);
 }
 
+/* 兼容选择器：body.dark-theme 与 html.theme-dark 同时挂载（useThemeSync 同步 toggle），
+   此处保持与上方 html.theme-dark 规则完全一致，防止级联顺序导致首屏跳变。 */
 body.dark-theme .notification-md-code-block,
 body.dark-theme .notification-md-mermaid-block {
-    border-color: rgba(208, 188, 255, 0.18);
-    background:
-        linear-gradient(180deg, rgba(208, 188, 255, 0.12), rgba(79, 55, 139, 0.08) 16%, rgba(23, 20, 29, 0.96) 100%),
-        rgba(23, 20, 29, 0.96);
+    border-color: rgba(255, 255, 255, 0.10);
+    background: #1e1e1e;
     box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 body.dark-theme .notification-md-code-header {
-    border-bottom-color: rgba(208, 188, 255, 0.12);
-    background: linear-gradient(180deg, rgba(208, 188, 255, 0.14), rgba(79, 55, 139, 0.20));
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #2d2d30, #252526);
+}
+
+/* 暗色下红绿灯描边微调，保持立体感 */
+body.dark-theme .notification-md-traffic-light {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 body.dark-theme .notification-md-code-lang {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(208, 188, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--md-sys-color-primary);
 }
 
 body.dark-theme .notification-md pre {
-    background:
-        radial-gradient(circle at top right, rgba(208, 188, 255, 0.08), transparent 34%),
-        linear-gradient(180deg, rgba(30, 27, 38, 0.98), rgba(20, 18, 24, 0.98));
+    background: #1e1e1e; /* 与外壳同色，形成一整块终端画布 */
 }
 
 body.dark-theme .notification-md pre code {
-    color: #ECE7F6;
+    color: #D4D4D4; /* VSCode Dark Modern 默认前景色 */
 }
 
 body.dark-theme .notification-md .notification-md-table-wrap {
