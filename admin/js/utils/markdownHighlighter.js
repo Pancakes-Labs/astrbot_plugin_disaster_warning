@@ -485,15 +485,16 @@ function scanPython(source, opts) {
                 i = j;
                 continue;
             }
-            // 函数调用 name(
-            if (nextCh === '(') {
-                em.token('token-function', word);
+            // 类实例化 Name(（首字母大写视为类）——须在通用函数调用判定之前，
+            // 否则 Foo(...) 会被误染为函数色，与注释意图不符
+            if (/^[A-Z]/.test(word) && nextCh === '(') {
+                em.token('token-class', word);
                 i = j;
                 continue;
             }
-            // 类实例化 Name(（首字母大写视为类）
-            if (/^[A-Z]/.test(word) && nextCh === '(') {
-                em.token('token-class', word);
+            // 函数调用 name(
+            if (nextCh === '(') {
+                em.token('token-function', word);
                 i = j;
                 continue;
             }
@@ -682,7 +683,10 @@ function scanPythonImportNames(names) {
             const asIdx = pieces.indexOf('as');
             const orig = pieces.slice(0, asIdx).join(' ');
             const alias = pieces[asIdx + 1];
-            const asStart = trimmed.indexOf('as');
+            // 按单词边界定位 as 分隔符，避免原名（如 dataclass）内含 as 子串时
+            // indexOf 命中错误位置，导致输出文本与源码不一致
+            const asMatch = /\bas\b/.exec(trimmed);
+            const asStart = asMatch ? asMatch.index : trimmed.indexOf('as');
             em.token(importNameClass(orig), orig);
             em.text(trimmed.slice(orig.length, asStart));       // ' as ' 中的前导空白
             em.token('token-keyword', 'as');
@@ -847,10 +851,6 @@ function scanJavaScript(source, opts) {
                 i = j;
                 continue;
             }
-            // 类声明名
-            if (word === 'class' && /^[A-Za-z_$]/.test(source.slice(j).replace(/^\s*/, '')[0] || '')) {
-                // 已作为 keyword 处理，类名后续标识符处理
-            }
             // import { x, y } 解构导入名（浅蓝变量色，非属性色）
             const prevTrimForImport = source.slice(0, i).replace(/\s+$/, '');
             const inImportBrace = /(^|[^\w])import\s*\{[^}]*$/.test(prevTrimForImport);
@@ -887,10 +887,10 @@ function scanJavaScript(source, opts) {
                 }
             }
             // 形参解构花括号内的参数名（constructor({ station, onAlert })）
+            // 仅保留解构花括号上下文判定，避免数组字面量 / 函数实参中
+            // 逗号后的标识符被误染为参数色
             const prevTrimDestr = source.slice(0, i).replace(/\s+$/, '');
-            const prevChDestr = prevTrimDestr[prevTrimDestr.length - 1];
-            const beforeOpenParen = prevTrimDestr.replace(/[({,]\s*$/, '');
-            const inDestrParam = prevChDestr === ',' || /\(\s*\{[^}]*$/.test(prevTrimDestr);
+            const inDestrParam = /\(\s*\{[^}]*$/.test(prevTrimDestr);
             if (inDestrParam) {
                 em.token('token-parameter', word);
                 i = j;
@@ -1019,7 +1019,6 @@ function scanCss(source) {
     // @media 等块级 at-rule 的 { 内部仍是选择器区域，普通规则集 { 内部是声明区域。
     const modeStack = ['selector'];
     const curMode = () => modeStack[modeStack.length - 1];
-    const braceDepth = 0;
 
     while (i < n) {
         const c = source[i];
@@ -1086,11 +1085,17 @@ function scanCss(source) {
             }
         }
 
-        // !important
+        // !important / !default / !global 等 SCSS 标记：
+        // 先匹配实际标记文本，避免硬编码 !important 吞掉 !default 等标记及相邻字符
         if (c === '!') {
-            em.token('token-keyword', '!');
-            em.text('important');
-            i += '!important'.length;
+            const bangMatch = /^!important\b|^![a-zA-Z-]+/.exec(source.slice(i));
+            if (bangMatch) {
+                em.token('token-keyword', bangMatch[0]);
+                i += bangMatch[0].length;
+                continue;
+            }
+            em.text(c);
+            i += 1;
             continue;
         }
 
@@ -1189,7 +1194,7 @@ function scanCss(source) {
                 continue;
             }
         }
-        if ((c === ':' || c === '::') && curMode() === 'selector') {
+        if (c === ':' && curMode() === 'selector') {
             const pseudoMatch = /^:{1,2}[a-zA-Z-]+/.exec(source.slice(i));
             if (pseudoMatch) {
                 em.token('token-punctuation', ':'.repeat(pseudoMatch[0].startsWith('::') ? 2 : 1));
@@ -1634,7 +1639,6 @@ function scanYaml(source) {
 
     lines.forEach((line, lineIndex) => {
         if (lineIndex > 0) em.text('\n');
-        const trimmed = line;
         let i = 0;
         const n = line.length;
         let inValue = false; // 是否已匹配过 key: 进入值区域（值区域裸字符串按字符串色）
@@ -1716,6 +1720,27 @@ function scanYaml(source) {
                     inValue = true;
                     // 剩余值
                     continue;
+                }
+                // 带引号的键 "some:key": value / 'key': value：
+                // 先扫描完整字符串，再前瞻冒号判定，作为键着色而非字符串值，
+                // 与不带引号的键保持行为一致
+                if (c === '"' || c === "'") {
+                    let quotedEnd = i + 1;
+                    while (quotedEnd < line.length) {
+                        if (line[quotedEnd] === '\\') { quotedEnd += 2; continue; }
+                        if (line[quotedEnd] === c) { quotedEnd += 1; break; }
+                        quotedEnd += 1;
+                    }
+                    const afterQuoted = line.slice(quotedEnd).replace(/^\s+/, '');
+                    if (afterQuoted[0] === ':') {
+                        const colonIdx = quotedEnd + (line.slice(quotedEnd).length - afterQuoted.length);
+                        em.token('token-property', line.slice(i, quotedEnd));
+                        em.text(line.slice(quotedEnd, colonIdx));
+                        em.token('token-punctuation', ':');
+                        i = colonIdx + 1;
+                        inValue = true;
+                        continue;
+                    }
                 }
                 // 字符串值
                 if (c === '"' || c === "'") {
@@ -1875,4 +1900,5 @@ function highlightMarkdownCode(code, language) {
 // 绑定全局暴露（供 markdown.js 渲染管线调用，保持两模块解耦）
 window.MarkdownCodeHighlighter = {
     highlightMarkdownCode,
+    normalizeLanguageName,
 };
