@@ -886,12 +886,15 @@ function scanJavaScript(source, opts) {
                     }
                 }
             }
-            // 形参解构花括号内的参数名（constructor({ station, onAlert })）
-            // 仅保留解构花括号上下文判定，避免数组字面量 / 函数实参中
-            // 逗号后的标识符被误染为参数色
-            const prevTrimDestr = source.slice(0, i).replace(/\s+$/, '');
-            const inDestrParam = /\(\s*\{[^}]*$/.test(prevTrimDestr);
-            if (inDestrParam) {
+            // 形参解构花括号内的参数名（如 function foo({ a, b }) 或 const f = ({ a, b }) => ...）
+            // 仅在已确认的函数声明 / 箭头函数参数列表中使用参数色：
+            // - 箭头函数参数：最近 ( 前存在赋值符号 =（const f = ({ ... }）
+            // - 函数声明参数：同层存在 function 关键字（function foo({ ... }）
+            // 避免 render({ a, b }) 等对象实参中的标识符被误染为参数色
+            const destrPrefix = source.slice(0, i);
+            const inArrowFnDestr = /=\s*\(\s*\{[^}]*$/.test(destrPrefix);
+            const inFnDeclDestr = /function\s+(?:[A-Za-z_$][\w$]*\s*)?\(\s*\{[^}]*$/.test(destrPrefix);
+            if (inArrowFnDestr || inFnDeclDestr) {
                 em.token('token-parameter', word);
                 i = j;
                 continue;
