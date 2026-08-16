@@ -41,6 +41,7 @@ from ...core.services.query.aqi_query_service import (
     query_aqi_rank,
 )
 from ...core.services.query.ground_motion_query_service import (
+    DEFAULT_VS30_MS,
     GroundMotionInput,
     predict_ground_motion,
 )
@@ -2163,16 +2164,27 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         depth_str: str | None = None,
         point_lat_str: str | None = None,
         point_lon_str: str | None = None,
+        vs30_str: str | None = None,
     ):
-        """处理地震动预测命令（/地震动预测 <震中纬度> <震中经度> <震级> <深度> <预测点纬度> <预测点经度>）。
+        """处理地震动预测命令。
 
-        六个参数齐全时按手动模式计算；参数不足时尝试从引用消息提取地震参数
-        （此时预测点默认为本地配置坐标，未配置则要求手动提供预测点）。
+        用法：/地震动预测 <震中纬度> <震中经度> <震级> <深度>
+              <预测点纬度> <预测点经度> [<预测点Vs30>]
+
+        前六个参数齐全时按手动模式计算（Vs30 可选，缺省 600 m/s）；
+        参数不足时尝试从引用消息提取地震参数（此时预测点默认为本地配置坐标，
+        未配置则要求手动提供预测点）。
         """
         try:
-            # 尝试手动参数：需要全部 6 个
+            # 尝试手动参数：需要全部 6 个（Vs30 可选）
             manual = _try_parse_ground_motion_args(
-                lat_str, lon_str, mag_str, depth_str, point_lat_str, point_lon_str
+                lat_str,
+                lon_str,
+                mag_str,
+                depth_str,
+                point_lat_str,
+                point_lon_str,
+                vs30_str,
             )
             if manual is not None:
                 result = predict_ground_motion(manual)
@@ -2189,7 +2201,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     event,
                     "❌ 参数不足。\n"
                     "用法：/地震动预测 <震中纬度> <震中经度> <震级> <震源深度> "
-                    "<预测点纬度> <预测点经度>\n"
+                    "<预测点纬度> <预测点经度> [<预测点Vs30>]\n"
                     "或引用一条地震消息（自动提取震中参数）。",
                 )
                 return
@@ -2202,7 +2214,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     event,
                     "❌ 未配置本地坐标，无法确定预测点。请使用：\n"
                     "/地震动预测 <震中纬度> <震中经度> <震级> <震源深度> "
-                    "<预测点纬度> <预测点经度>\n"
+                    "<预测点纬度> <预测点经度> [<预测点Vs30>]\n"
                     "或 /本地地震动预测 [<本地纬度>] [<本地经度>]，"
                     "或在配置中设置本地经纬度。",
                 )
@@ -2214,6 +2226,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 depth_km=params.depth_km if params.depth_km is not None else 10.0,
                 point_lat=point_lat,
                 point_lon=point_lon,
+                vs30=_parse_optional_vs30(vs30_str),
                 occurred_at=params.occurred_at,
             )
             result = predict_ground_motion(gm_input)
@@ -2376,11 +2389,12 @@ def _try_parse_ground_motion_args(
     depth_str: str | None,
     point_lat_str: str | None,
     point_lon_str: str | None,
+    vs30_str: str | None = None,
 ) -> GroundMotionInput | None:
     """解析手动地震动预测参数。
 
-    六个参数齐全且合法时返回 GroundMotionInput；否则返回 None（由调用方
-    回退到引用消息模式）。
+    前六个参数齐全且合法时返回 GroundMotionInput（Vs30 可选，缺省 600 m/s）；
+    否则返回 None（由调用方回退到引用消息模式）。
     """
     values = [
         lat_str,
@@ -2420,4 +2434,22 @@ def _try_parse_ground_motion_args(
         depth_km=depth,
         point_lat=p_lat,
         point_lon=p_lon,
+        vs30=_parse_optional_vs30(vs30_str),
     )
+
+
+def _parse_optional_vs30(vs30_str: str | None) -> float:
+    """解析可选的 Vs30 参数（m/s）。
+
+    非法或空输入回退到 DEFAULT_VS30_MS（600 m/s），保证 ARV/JMA 震度计算
+    始终有合理的场地基准。
+    """
+    if vs30_str is None or not str(vs30_str).strip():
+        return DEFAULT_VS30_MS
+    try:
+        vs30 = float(str(vs30_str).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_VS30_MS
+    if not math.isfinite(vs30) or vs30 <= 0:
+        return DEFAULT_VS30_MS
+    return vs30
