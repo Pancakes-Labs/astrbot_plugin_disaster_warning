@@ -1182,6 +1182,10 @@ class ConfigValidator:
         ConfigValidator._ensure_bool(cfg, "detailed_jma_intensity", False)
         ConfigValidator._ensure_bool(cfg, "jma_region_intensity", True)
         ConfigValidator._ensure_bool(cfg, "use_global_quake_card", False)
+        # 影响区县/地域预估开关：若手工配置为字符串 "false"，bool("false") 为 True
+        # 会错误启用地域估算，因此必须强制为布尔值。
+        ConfigValidator._ensure_bool(cfg, "cn_district_intensity_estimate", False)
+        ConfigValidator._ensure_bool(cfg, "jma_shindo_estimate", False)
 
         return cfg
 
