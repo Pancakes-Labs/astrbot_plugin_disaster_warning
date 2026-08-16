@@ -68,8 +68,10 @@ class BeachballRenderer:
         """计算 T 轴与 P 轴向量。"""
         n, u = self._strike_dip_slip_to_fault_plane(strike, dip, rake)
 
+        # 标准定义：T = (n + u) / |n + u|，P = (n - u) / |n - u|
+        # 注意 P 为 n - u（而非 u - n），与震源机制教科书约定一致
         t = [u[i] + n[i] for i in range(3)]
-        p = [u[i] - n[i] for i in range(3)]
+        p = [n[i] - u[i] for i in range(3)]
 
         norm_t = math.sqrt(sum(x * x for x in t))
         norm_p = math.sqrt(sum(x * x for x in p))
@@ -102,8 +104,15 @@ class BeachballRenderer:
 
     @staticmethod
     def _project_pixel_to_sphere(dx: float, dy: float, dist_sq: float) -> list[float]:
-        """将等面积投影平面坐标逆映射为单位球面向量。"""
-        z = 1.0 - dist_sq / 2.0
+        """将等面积投影平面坐标逆映射为单位球面向量。
+
+        下半球 Lambert 等面积投影，归一化圆盘半径 1（赤道处 R=1）：
+          z = 1 - R²            （z 为向下分量，R = √dist_sq）
+          x = -dy · √(2 - R²)   （北向分量）
+          y =  dx · √(2 - R²)   （东向分量）
+        与 `_sphere_to_projection` 互为逆变换。
+        """
+        z = 1.0 - dist_sq
         z = max(0.0, min(1.0, z))
 
         factor_sqrt2 = math.sqrt(2.0 * (1.0 - z)) if z < 1.0 else 1.0
@@ -131,14 +140,15 @@ class BeachballRenderer:
         """将下半球单位向量映射到等面积投影单位圆坐标 (dx, dy)。
 
         与 `_project_pixel_to_sphere` 互为逆变换：
-        dx = east * sqrt(2 / (1 + down))
-        dy = -north * sqrt(2 / (1 + down))
+        dx = east / sqrt(1 + down)
+        dy = -north / sqrt(1 + down)
+        （下半球等面积投影，赤道 down=0 处投影半径恰为 1）
         """
         vx, vy, vz = v
         if vz < -1e-9:
             return None
         vz = max(vz, 0.0)
-        scale = math.sqrt(2.0 / (1.0 + vz))
+        scale = math.sqrt(1.0 / (1.0 + vz))
         dx = vy * scale
         dy = -vx * scale
         return dx, dy
