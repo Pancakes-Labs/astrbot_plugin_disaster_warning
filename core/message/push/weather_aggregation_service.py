@@ -85,19 +85,34 @@ class WeatherAggregationService:
         self._max_flush_retries = 3
         # 各会话当前重试计数：session -> int
         self._flush_retry_counts: dict[str, int] = {}
+        # 节点未满延期条目的最大滞留轮数：低流量会话 total < max_batch 时，
+        # 延期条目会反复放回缓冲区（见 _requeue_deferred_entries）；达到上限后
+        # 强制发送（fill_nodes 判定失效），避免预警无限滞留无法送达。
+        self._max_deferred_stalls = 5
+        # 各会话当前延期滞留计数：session -> int
+        self._deferred_stall_counts: dict[str, int] = {}
+        # 各会话缓冲时保存的聚合时间窗口（秒），供延期回收重排定时器使用，
+        # 保证与 should_aggregate 读取的会话级配置一致（而非全局配置）。
+        self._session_time_windows: dict[str, float] = {}
+        # 各会话"强制发送全部"标记：延期条目滞留达到上限时置位，
+        # 本轮 flush 忽略 fill_nodes 判定，发送全部条目。
+        self._force_send_all_sessions: set[str] = set()
 
     def set_flush_callback(self, callback) -> None:
         """注入推送回调。
 
-        签名: async def callback(session, entries, config, *, mode)
-              -> int | tuple[int, list[WeatherBufferEntry]]。
-        返回 (sent_count, deferred_entries)：
-        - sent_count：实际成功发送（所在节点发送成功）的条目数。
-          规则链复核/消息构建可能过滤部分条目，回调必须返回真实发送数量，
-          避免统计口径高估；
-        - deferred_entries：fill_nodes 开启时因节点未满本轮未发送、需放回
-          缓冲区等待下次推送窗口凑满的条目（不会丢弃）。
-        为兼容旧回调仅返回 int 的情况，本服务会将返回值归一化为元组。
+        契约:
+            签名: async def callback(session, entries, config, *, mode)
+                  -> tuple[int, list[WeatherBufferEntry], list[WeatherBufferEntry]]
+            恒返回 (sent_count, deferred_entries, failed_entries)：
+            - sent_count：实际成功发送（所在节点发送成功）的条目数。
+              规则链复核/消息构建可能过滤部分条目，回调必须返回真实发送数量，
+              避免统计口径高估；
+            - deferred_entries：fill_nodes 开启时因节点未满本轮未发送、需放回
+              缓冲区等待下次推送窗口凑满的条目（不会丢弃）；
+            - failed_entries：发送失败节点内的条目，由本服务按失败重试路径
+              回收（累计重试计数，达到上限后丢弃），避免静默丢失。
+
         全部发送失败时抛异常（如 RuntimeError）由本服务捕获后回缓冲重试。
         """
         self._flush_callback = callback
@@ -263,6 +278,9 @@ class WeatherAggregationService:
 
         # 将事件加入缓冲区
         buffer[event_id] = entry
+        # 记录缓冲时的会话级聚合时间窗口（供延期回收重排定时器使用，
+        # 保证与会话级配置一致，而非回退到全局配置）。
+        self._session_time_windows[session] = time_window
 
         plugin_logger.debug(
             f"[灾害预警] 气象预警 {event_id} ({color_name}) 进入聚合缓冲区 "
@@ -372,28 +390,24 @@ class WeatherAggregationService:
         # 整批交给回调：回调内部先完成规则链复核与消息构建，
         # 再按 max_batch_size 切分合并转发节点，保证节点内条数尽量塞满上限，
         # 避免"先切批后复核"导致节点条数参差（如 4+4+12+1+10）。
-        # 回调返回 (sent_count, deferred_entries)：
+        # 回调恒返回 (sent_count, deferred_entries, failed_entries) 三元组：
         # - sent_count：实际成功发送（所在节点发送成功）的条目数；
         # - deferred_entries：fill_nodes 开启时因节点未满本轮未发送、需放回
-        #   缓冲区等待下次推送窗口凑满的条目。
-        # 为兼容旧回调仅返回 int 的情况，这里统一归一化为元组。
+        #   缓冲区等待下次推送窗口凑满的条目；
+        # - failed_entries：发送失败节点内的条目，按失败重试路径回收。
         try:
             # 先尝试合并转发，成功则不限流。
             # 注：传入的 config 为全局配置兜底，回调（EventPipeline._flush_weather_buffer）
             # 内部会通过 session_config_manager 重新解析会话级生效配置，
             # 因此会话级差异配置（如 max_batch_size）在 flush 阶段仍能生效。
-            # 回调返回实际成功发送的条数（规则链复核/消息构建会过滤部分条目，
-            # 不能用 len(entries) 统计，避免高估实际转发数量）。
-            callback_result = await self._flush_callback(
+            sent_count, deferred_entries, failed_entries = await self._flush_callback(
                 session, entries, self._config, mode="forward"
             )
-            if isinstance(callback_result, tuple):
-                sent_count, deferred_entries = callback_result
-            else:
-                sent_count = callback_result or 0
-                deferred_entries = []
 
-            if not sent_count and not deferred_entries:
+            # 节点未满回退 / 部分节点发送失败不属于"全部未发送"：
+            # 只有全部条目被过滤且无任何待回收条目时才算空轮。
+            pending_recovery = list(deferred_entries) + list(failed_entries)
+            if not sent_count and not pending_recovery:
                 # 全部条目被规则链复核过滤或消息构建失败，实际未发出任何预警：
                 # 不更新"最后转发"统计，也不进入重试（过滤属正常业务路径，
                 # 构建失败条目已在回调内记录日志后丢弃）。
@@ -401,6 +415,11 @@ class WeatherAggregationService:
 
             # 发送成功后清空该会话的重试计数
             self._flush_retry_counts.pop(session, None)
+            # 有成功发送或进入失败重试路径时，重置延期滞留计数与强制发送标记
+            if sent_count or failed_entries:
+                self._deferred_stall_counts.pop(session, None)
+                self._force_send_all_sessions.discard(session)
+
             if sent_count:
                 # 记录最后一批成功推送的条数与目标会话，供停止汇总大屏展示。
                 self.last_flushed_count = sent_count
@@ -417,6 +436,10 @@ class WeatherAggregationService:
             # 即使本轮没有任何完整节点发出（sent_count == 0）也属正常业务路径。
             if deferred_entries:
                 self._requeue_deferred_entries(session, deferred_entries)
+            # 发送失败节点内的条目按失败重试路径回收（累计重试计数，
+            # 达到上限后丢弃），避免静默丢失。
+            if failed_entries:
+                self._requeue_entries(session, failed_entries)
         except Exception as e:
             # 合并转发失败：仅当平台确实不支持合并转发时，才允许降级为逐条发送。
             # 注意：不能仅凭一次发送异常就判定"平台不支持"——插件停止/网络瞬时
@@ -443,24 +466,57 @@ class WeatherAggregationService:
         与 _requeue_entries 的区别：节点未满回退属于正常业务路径（非发送失败），
         不累计重试计数。放回后按聚合时间窗口重新排定一次定时推送，
         使剩余条目在下个窗口到期后能继续尝试凑满发送。
+
+        低流量会话防护：total < max_batch 时每轮都会把全部条目放回（sents 为 0），
+        若无上限会无限滞留。因此每次延期都累计 _deferred_stall_counts，达到
+        _max_deferred_stalls 后置位 _force_send_all_sessions 并立即触发一次
+        flush，使 fill_nodes 判定失效、本轮强制发送全部条目（不再无限滞留）。
         """
+        stall_count = self._deferred_stall_counts.get(session, 0) + 1
+        if stall_count >= self._max_deferred_stalls:
+            # 滞留达到上限：置位强制发送标记并立即触发 flush，避免无限滞留
+            self._force_send_all_sessions.add(session)
+            self._deferred_stall_counts.pop(session, None)
+            self._spawn_flush_task(session)
+            plugin_logger.info(
+                f"[灾害预警] 气象预警节点未满已连续滞留 {stall_count} 轮 "
+                f"({session})，本轮强制发送全部 {len(entries)} 条",
+                is_event_linked=True,
+                event_stream="weather_alarm",
+            )
+            return
+        self._deferred_stall_counts[session] = stall_count
+
         buffer = self._buffers.setdefault(session, {})
         for entry in entries:
             event_id = str(entry.event.id or "")
             if event_id:
                 buffer[event_id] = entry
 
-        # 重新排定一次定时推送：等待下个聚合窗口到期后再尝试凑满
+        # 重新排定一次定时推送：等待下个聚合窗口到期后再尝试凑满。
+        # 优先使用缓冲时保存的会话级时间窗口（与 should_aggregate 一致），
+        # 会话未缓冲过时回退到全局配置。
         if session not in self._flush_timers:
-            agg_config = self._get_aggregation_config()
-            time_window = float(agg_config.get("time_window_seconds", 900))
-            self._schedule_flush(session, time_window)
+            time_window = self._session_time_windows.get(session)
+            if time_window is None:
+                agg_config = self._get_aggregation_config()
+                time_window = float(agg_config.get("time_window_seconds", 900))
+            self._schedule_flush(session, float(time_window))
         plugin_logger.info(
             f"[灾害预警] 气象预警节点未满，{len(entries)} 条已放回缓冲区 "
-            f"({session})，等待下次推送窗口凑满后再发",
+            f"({session})，等待下次推送窗口凑满后再发（第 {stall_count} 轮）",
             is_event_linked=True,
             event_stream="weather_alarm",
         )
+
+    def should_force_send_all(self, session: str) -> bool:
+        """当前会话是否处于"强制发送全部"状态。
+
+        由 _requeue_deferred_entries 在延期条目滞留达到上限时置位，
+        回调（EventPipeline._flush_weather_buffer）据此忽略 fill_nodes 判定，
+        避免低流量会话的延期条目无限滞留无法送达。
+        """
+        return session in self._force_send_all_sessions
 
     def _requeue_entries(self, session: str, entries: list[WeatherBufferEntry]) -> None:
         """发送失败后把条目放回缓冲区并重新排定定时刷新。"""
