@@ -205,7 +205,7 @@ class ConfigValidator:
                 # 限制经度在 -180.0 至 180.0 度区间内
                 cfg["longitude"] = max(-180.0, min(180.0, float(lon)))
 
-        # 阈值校验：本地预计烈度报警下限阈值
+        # 阈值校验：本地预计烈度报警下限阈值（中国烈度体系）
         threshold = cfg.get("intensity_threshold")
         if isinstance(threshold, (int, float)):
             if threshold < 0 or threshold > 12:
@@ -215,6 +215,16 @@ class ConfigValidator:
                 # 烈度通常在 0 至 12 级范围内
                 cfg["intensity_threshold"] = max(0.0, min(12.0, float(threshold)))
 
+        # 阈值校验：本地预计震度报警下限阈值（日本震度体系，計測震度 0~7）
+        shindo_threshold = cfg.get("shindo_threshold")
+        if isinstance(shindo_threshold, (int, float)):
+            if shindo_threshold < 0 or shindo_threshold > 7:
+                logger.warning(
+                    f"[灾害预警] 配置警告: 震度阈值 {shindo_threshold} 超出范围 (0~7)，已自动修正。"
+                )
+                # 計測震度通常在 0 至 7 档范围内（震度 7 为最高档）
+                cfg["shindo_threshold"] = max(0.0, min(7.0, float(shindo_threshold)))
+
         # 地名校验：确保本地监控参考地名为字符串
         if "place_name" in cfg and not isinstance(cfg["place_name"], str):
             cfg["place_name"] = str(cfg["place_name"])
@@ -222,6 +232,27 @@ class ConfigValidator:
         # 布尔值校验：校验本地预计烈度监控开关及严格模式开关
         ConfigValidator._ensure_bool(cfg, "enabled", False)
         ConfigValidator._ensure_bool(cfg, "strict_mode", False)
+
+        # 强度体系校验：兼容中英文别名，统一规范化为英文内部值
+        # 中文别名用于配置页下拉展示（自动判定/中国烈度/日本震度）
+        system_map = {
+            "auto": "auto",
+            "cenc": "cenc",
+            "jma": "jma",
+            "自动判定": "auto",
+            "中国烈度": "cenc",
+            "日本震度": "jma",
+        }
+        raw_system = cfg.get("intensity_system")
+        if raw_system is not None:
+            normalized = system_map.get(str(raw_system).strip())
+            if normalized is None:
+                logger.warning(
+                    f"[灾害预警] 配置警告: 本地强度体系 {raw_system!r} 非法，已重置为自动判定。"
+                )
+                cfg["intensity_system"] = "auto"
+            else:
+                cfg["intensity_system"] = normalized
 
         return cfg
 
@@ -1208,6 +1239,9 @@ class ConfigValidator:
                     field_name="气象预警聚合单批最大条数",
                 )
             )
+            # 节点未满时等待凑满再推送：剩余条数无法装满节点时本轮不发送，放回缓冲区等下次窗口
+            ConfigValidator._ensure_bool(agg, "fill_nodes", True)
+
             agg["rate_limit_max_messages"] = int(
                 ConfigValidator._clamp_number(
                     agg.get("rate_limit_max_messages", 3),
