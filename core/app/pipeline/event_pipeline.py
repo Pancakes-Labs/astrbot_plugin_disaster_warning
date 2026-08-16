@@ -275,7 +275,7 @@ class EventPipeline:
         config: dict,
         *,
         mode: str = "forward",
-    ) -> None:
+    ) -> tuple[int, list, list]:
         """聚合缓冲区推送回调。
 
         与 WeatherAggregationService.set_flush_callback 约定一致：
@@ -301,7 +301,7 @@ class EventPipeline:
         mode="single" 时逐条发送（降级路径）。
         """
         if not entries:
-            return
+            return 0, [], []
 
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
@@ -408,9 +408,9 @@ class EventPipeline:
             node_count = full_batch_count
             sent_nodes = 0
             failed_nodes = 0
-            # 第一个失败节点的下标（node_count 表示本轮无失败节点）：
-            # 用于收集失败节点内的条目，单独走失败重试路径。
-            failed_start = node_count
+            # 发送失败节点内的条目：在 except 块内立即收集当前 batch，
+            # 避免用"首个失败节点下标"推断失败范围而误收后续成功节点的条目。
+            failed_entries: list[WeatherBufferEntry] = []
             # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
             # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
             sent_entry_count = 0
@@ -448,9 +448,9 @@ class EventPipeline:
                     # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
                     # 记录错误后继续发送剩余节点，避免触发无意义的降级限流。
-                    if failed_start == node_count:
-                        failed_start = batch_idx
                     failed_nodes += 1
+                    # 立即收集本失败节点内的条目，走失败重试路径（累计重试计数）
+                    failed_entries.extend(entry for entry, _ in batch)
                     logger.error(
                         f"[灾害预警] 气象预警合并转发节点 {batch_idx + 1}/{node_count} "
                         f"发送失败 ({session_log}): {e}"
@@ -469,14 +469,6 @@ class EventPipeline:
             deferred_entries = [
                 entry for entry, _ in built_messages[full_batch_count * max_batch :]
             ]
-            # 部分节点发送失败：单独返回失败节点内的条目，由聚合服务按失败
-            # 重试路径回收（累计重试计数，达到上限后丢弃），避免静默丢失。
-            failed_entries: list[WeatherBufferEntry] = []
-            for batch_idx in range(failed_start, node_count):
-                batch = built_messages[
-                    batch_idx * max_batch : (batch_idx + 1) * max_batch
-                ]
-                failed_entries.extend(entry for entry, _ in batch)
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
