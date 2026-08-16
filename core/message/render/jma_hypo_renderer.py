@@ -428,7 +428,9 @@ def _time_axis_setup(
         (lo, hi, ticks)：轴范围与刻度列表。
     """
     if not values:
-        return _nice_ticks(0.0, 7 * 86400.0, target_count=target_count)
+        # 空数据时返回空刻度：绘图区已覆盖"该时段无地震记录"提示，
+        # 避免出现 1970-01-01 起算的无意义 epoch 日期刻度。
+        return 0.0, 0.0, []
 
     data_lo = float(min(values))
     data_hi = float(max(values))

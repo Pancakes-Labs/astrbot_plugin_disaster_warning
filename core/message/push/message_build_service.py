@@ -606,11 +606,14 @@ class MessageBuildService:
             )
             if not is_pseudo_image:
                 # 命中防盗链域名时在日志中附加提示，便于快速定位 403 根因。
+                # 原始 URL 与重定向后的最终 URL 都检查：若原始地址重定向到 CDN，
+                # 仅查 final_url 会漏掉原始防盗链域名的提示。
                 referer_hint = (
                     "，疑似目标站防盗链(Referer)拦截"
                     if self._is_anti_hotlink_url(
-                        str(fetch_result.get("final_url") or normalized_url)
+                        str(fetch_result.get("final_url") or "")
                     )
+                    or self._is_anti_hotlink_url(normalized_url)
                     else ""
                 )
                 logger.warning(
