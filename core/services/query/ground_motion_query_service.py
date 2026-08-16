@@ -4,13 +4,28 @@
 根据震中参数（纬度/经度/震级/震源深度）与预测点坐标，估算：
 - 预测点与震中距离（Haversine 球面距离）
 - 预测点 CSIS（中国仪器烈度，GB/T 17742-2020 同源衰减）
-- 预测点 ARV（估计峰值加速度 PGA，gal），由 CSIS 反推保证与烈度自洽
+- 预测点 PGA（估计峰值加速度，gal），由 CSIS 反推保证与烈度自洽
+- 预测点 ARV（速度放大比/系数，无量纲），由 Vs30 场地剪切波速计算
+- 预测点 JMA 计测震度（距离衰减式，参考《緊急地震速報で使われる距離減衰式による震度計算》）
 - P/S 波走时与到达时间（复用 TravelTimeService，jma2001/jb 双模型）
 - PKP / PKIKP 深部震相（震中距 ≥ 105°/110° 才可达，否则显示不会到达）
 
 算法说明：
 - CSIS 复用 core/services/geo/intensity_service.py 的衰减模型（105° 经度东西分界）；
-- ARV 定义为与 CSIS 同源反推的 PGA：PGA = 10^((CSIS - 1.82) / 3.77)；
+- PGA 定义为与 CSIS 同源反推的峰值加速度：PGA = 10^((CSIS - 1.82) / 3.77)；
+- ARV 定义为「工程基岩（Vs=400m/s）到地表的最大速度放大率」的近似：
+    ARV = 10^(2.367 - 0.852 * log10(Vs30))
+  该式由 Vs30 经验关系（速度放大比）推导，Vs30=600m/s 时 ARV≈1.0，
+  Vs30 越小（场地越软）放大越大，物理上自洽。
+- JMA 计测震度按紧急地震速报距离衰减式链路计算：
+    Mw = MJMA - 0.171（宇津 1982）
+    L = 10^(0.5*Mw - 1.85)（宇津 1977，断层长，半径取 L/2）
+    X = max(√(D²+d²) - L/2, 3)
+    PGV600 = 10^(0.58*Mw + 0.0038*D - 1.29
+                - log10(X + 0.0028*10^(0.5*Mw)) - 0.002*X)（司・翠川 1999）
+    PGV400 = PGV600 * 1.31（松岡・翠川 1994，Vs600→Vs400 换算）
+    PGVs   = PGV400 * ARV
+    I      = 2.68 + 1.72 * log10(PGVs)（计测震度）
 - P/S 波走时复用 core/services/geo/travel_time_service.py 的双线性插值表；
 - PKP 族按地震学事实加可达性约束，避免近震中距误报深部震相。
 """
@@ -21,8 +36,14 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from ....utils.converters import ScaleConverter
 from ....utils.time_converter import TimeConverter
 from ...services.geo.intensity_service import IntensityService
+from ...services.geo.jma_shindo_service import (
+    DEFAULT_VS30_MS,
+    calculate_jma_shindo,
+    calculate_vs30_arv,
+)
 from ...services.geo.travel_time_service import TravelTimeService
 
 # ---------------------------------------------------------------------------
@@ -59,9 +80,13 @@ CSIS_GRADE_NAMES = (
     "极度毁灭",
 )
 
-# ARV（PGA）反推系数：基于 GB/T 17742-2020 仪器烈度换算关系
-_ARV_A = 1.82
-_ARV_B = 3.77
+# PGA反推系数：基于 GB/T 17742-2020 仪器烈度换算关系
+_PGA_A = 1.82
+_PGA_B = 3.77
+
+# Vs30 默认值（m/s）：工程基岩平均 S 波速度，日本 J-SHIS 表层面板常用 400/600；
+# 用户可自行通过 GroundMotionInput.vs30 覆盖。
+# 实际常量与 JMA 距离衰减式计算统一由 core.services.geo.jma_shindo_service 维护。
 
 # PKP / PKIKP 深部震相可达的最小震中距（度）
 PKP_MIN_DISTANCE_DEG = 105.0
@@ -88,10 +113,11 @@ class GroundMotionInput:
 
     lat: float  # 震中纬度
     lon: float  # 震中经度
-    magnitude: float  # 震级
+    magnitude: float  # 震级（通用 MJMA 近似）
     depth_km: float  # 震源深度 (km)
     point_lat: float  # 预测点纬度
     point_lon: float  # 预测点经度
+    vs30: float = DEFAULT_VS30_MS  # 预测点 Vs30（m/s），默认 600（工程基岩等效）
     occurred_at: datetime | None = None  # 发震时间；None 表示假定即刻发震（用当前时间）
 
 
@@ -102,7 +128,10 @@ class GroundMotionResult:
     distance_km: float  # 预测点与震中距离
     csis: float  # 中国仪器烈度（连续值）
     csis_grade: int  # 烈度等级（1~12）
-    arv_gal: float  # 估计峰值加速度 PGA（gal）
+    pga_gal: float  # 估计峰值加速度 PGA（gal），与 CSIS 同源反推
+    arv: float  # 速度放大比/系数（无量纲），由 Vs30 计算
+    vs30: float  # 使用的 Vs30（m/s）
+    jma_shindo: float | None  # JMA 计测震度（连续值），物理不可算时为 None
     p_travel_sec: float | None  # P 波走时（秒）
     s_travel_sec: float | None  # S 波走时（秒）
     pkp_travel_sec: float | None  # PKP 波走时（秒），不可达为 None
@@ -129,7 +158,12 @@ class GroundMotionResult:
         )
         lines.append(f"预测点与震中距离：{self.distance_km:.2f} km")
         lines.append(f"预测点CSIS：{self.csis_display()}")
-        lines.append(f"预测点ARV：{self.arv_gal:.4g} gal")
+        if self.jma_shindo is not None:
+            lines.append(f"预测点JMA震度：{self.jma_shindo_display()}")
+        else:
+            lines.append("预测点JMA震度：（数据不足）")
+        lines.append(f"预测点PGA：{self.pga_gal:.4g} gal")
+        lines.append(f"预测点ARV：{self.arv:.3f}（Vs30={self.vs30:g} m/s）")
 
         lines.append("预测到达时间：")
         lines.append(
@@ -166,6 +200,22 @@ class GroundMotionResult:
         if self.csis_grade <= 0:
             return "0（无感）"
         return f"{self.csis_roman()}（{self.csis_grade}）"
+
+    def jma_shindo_display(self) -> str:
+        """JMA 计测震度 -> 展示文本"""
+        if self.jma_shindo is None:
+            return "（数据不足）"
+        # 计测震度低于 -0.5（0以下）：统一显示 0 [0以下]，
+        # 避免远距离小震把模型外推的深负值直接暴露给用户。
+        if self.jma_shindo < ScaleConverter.MEASURED_INTENSITY_BELOW_ZERO:
+            return "0 [0以下]"
+        classified = ScaleConverter.classify_measured_intensity(self.jma_shindo)
+        label = (
+            ScaleConverter.format_jma_cwa_scale_display(classified)
+            if classified is not None
+            else "0以下"
+        )
+        return f"{self.jma_shindo:.2f} [{label}]"
 
     def _arrival_datetime(self, travel_sec: float | None) -> datetime | None:
         """根据发震时间 + 走时计算到达时间。"""
@@ -236,9 +286,9 @@ def csis_to_grade(csis: float) -> int:
     return max(1, min(12, grade))
 
 
-def csis_to_arv_gal(csis: float) -> float:
-    """CSIS -> ARV（PGA，gal）：PGA = 10^((CSIS - 1.82) / 3.77)。"""
-    return 10.0 ** ((max(0.0, csis) - _ARV_A) / _ARV_B)
+def csis_to_pga_gal(csis: float) -> float:
+    """CSIS -> PGA（峰值加速度，gal）：PGA = 10^((CSIS - 1.82) / 3.77)。"""
+    return 10.0 ** ((max(0.0, csis) - _PGA_A) / _PGA_B)
 
 
 def estimate_pkp_travel_sec(distance_deg: float) -> float | None:
@@ -288,18 +338,29 @@ def predict_ground_motion(params: GroundMotionInput) -> GroundMotionResult:
         event_longitude=params.lon,
     )
 
-    # 3. ARV（PGA 反推）
-    arv_gal = csis_to_arv_gal(csis)
+    # 3. PGA（与 CSIS 同源反推，gal）
+    pga_gal = csis_to_pga_gal(csis)
 
-    # 4. P/S 波走时
+    # 4. ARV（由 Vs30 求速度放大比，无量纲）
+    arv = calculate_vs30_arv(params.vs30)
+
+    # 5. JMA 计测震度（距离衰减式）
+    jma_shindo = calculate_jma_shindo(
+        magnitude=params.magnitude,
+        depth_km=params.depth_km,
+        distance_km=distance_km,
+        vs30=params.vs30,
+    )
+
+    # 6. P/S 波走时
     travel_result = TravelTimeService.lookup(params.depth_km, distance_km)
 
-    # 5. PKP / PKIKP 深部震相
+    # 7. PKP / PKIKP 深部震相
     distance_deg = distance_km_to_degree(distance_km)
     pkp_sec = estimate_pkp_travel_sec(distance_deg)
     pkikp_sec = estimate_pkikp_travel_sec(distance_deg)
 
-    # 6. 发震时间基准
+    # 8. 发震时间基准
     occurred_at = params.occurred_at
     is_instant = occurred_at is None
     if occurred_at is None:
@@ -311,7 +372,10 @@ def predict_ground_motion(params: GroundMotionInput) -> GroundMotionResult:
         distance_km=distance_km,
         csis=csis,
         csis_grade=csis_to_grade(csis),
-        arv_gal=arv_gal,
+        pga_gal=pga_gal,
+        arv=arv,
+        vs30=params.vs30,
+        jma_shindo=jma_shindo,
         p_travel_sec=travel_result.p_travel_sec,
         s_travel_sec=travel_result.s_travel_sec,
         pkp_travel_sec=pkp_sec,
@@ -331,8 +395,11 @@ def predict_ground_motion(params: GroundMotionInput) -> GroundMotionResult:
 __all__ = [
     "GroundMotionInput",
     "GroundMotionResult",
+    "DEFAULT_VS30_MS",
     "csis_to_grade",
-    "csis_to_arv_gal",
+    "csis_to_pga_gal",
+    "calculate_vs30_arv",
+    "calculate_jma_shindo",
     "estimate_pkp_travel_sec",
     "estimate_pkikp_travel_sec",
     "distance_km_to_degree",
