@@ -474,7 +474,15 @@ class WeatherAggregationService:
         """
         stall_count = self._deferred_stall_counts.get(session, 0) + 1
         if stall_count >= self._max_deferred_stalls:
-            # 滞留达到上限：置位强制发送标记并立即触发 flush，避免无限滞留
+            # 滞留达到上限：必须先把本轮条目放回缓冲区，再置位强制发送标记并
+            # 立即触发 flush。_flush_session 从缓冲区取条目（pop），若此处不
+            # 放回，新触发的 flush 将读到空缓冲区直接返回，导致积压预警被
+            # 永久丢弃（表现为低流量期"1 个多小时无推送/列表不更新"）。
+            buffer = self._buffers.setdefault(session, {})
+            for entry in entries:
+                event_id = str(entry.event.id or "")
+                if event_id:
+                    buffer[event_id] = entry
             self._force_send_all_sessions.add(session)
             self._deferred_stall_counts.pop(session, None)
             self._spawn_flush_task(session)
@@ -537,6 +545,17 @@ class WeatherAggregationService:
             event_id = str(entry.event.id or "")
             if event_id:
                 buffer[event_id] = entry
+        # 停机 flush_all 批次中：事件循环即将关闭，重新排定定时器不会执行，
+        # 只会让条目残留在缓冲区（插件卸载后消失，造成"已入库但从未推送"）。
+        # 停机场景不再重试，条目已放回缓冲区供停机汇总准确统计（计为未发出）。
+        if self._in_flush_batch:
+            plugin_logger.warning(
+                f"[灾害预警] 停机批次中气象预警推送失败，{len(entries)} 条 "
+                f"({session}) 已放弃重试（共 {retry_count} 次）",
+                is_event_linked=True,
+                event_stream="weather_alarm",
+            )
+            return
         # 重新排定一次定时刷新（默认 60 秒后重试）
         if session not in self._flush_timers:
             self._schedule_flush(session, 60.0)
