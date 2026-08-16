@@ -135,9 +135,12 @@ def _resolve_by_samples(lat: float, lng: float) -> str | None:
     global _cached_jp_min_dist, _cached_cn_min_dist
     global _cached_probe_lat, _cached_probe_lng
 
-    # 坐标变化时清除缓存
+    # 坐标变化时清除缓存。
+    # 注意：不能用「±0.01° 视为同一坐标」的容差缓存——约 1km 的坐标变化
+    # 可能跨越 50km/150km 的分类阈值，导致 SYSTEM_JMA/SYSTEM_CENC/None 误判，
+    # 因此使用精确坐标作为缓存键。
     if _cached_probe_lat is not None and (
-        abs(lat - _cached_probe_lat) > 0.01 or abs(lng - _cached_probe_lng) > 0.01
+        lat != _cached_probe_lat or lng != _cached_probe_lng
     ):
         _clear_probe_cache()
 
