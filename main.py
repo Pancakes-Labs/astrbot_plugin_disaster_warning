@@ -1,8 +1,9 @@
 import asyncio
 from typing import Any
 
+import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
 from .core.app.disaster_service import get_disaster_service
@@ -239,13 +240,23 @@ class DisasterWarningPlugin(Star):
                 "📚 更多信息请查阅插件 README 文档"
             ),
         ]
-        await send_forward_blocks(
-            self,
-            event,
-            blocks,
-            header=header,
-            name="灾害预警",
-        )
+        try:
+            await send_forward_blocks(
+                self,
+                event,
+                blocks,
+                header=header,
+                name="灾害预警",
+            )
+        except Exception as exc:
+            # 平台拒绝合并转发或发送暂时失败时，回退为普通文本回复，
+            # 保证帮助内容仍能送达用户。
+            logger.warning(f"[灾害预警] 帮助命令合并转发失败，回退为普通文本: {exc}")
+            fallback_text = header + "\n" + "\n\n".join(blocks)
+            await self.context.send_message(
+                event.unified_msg_origin,
+                MessageChain([Comp.Plain(fallback_text)]),
+            )
 
     # ======================================================================
     # 2. 地震类指令
