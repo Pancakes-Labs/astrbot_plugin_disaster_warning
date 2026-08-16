@@ -214,4 +214,6 @@ class MessageManagerBootstrapService:
             image_type_checker=self.manager._remote_media_service.is_image_content_type,
             content_type_guesser=self.manager._remote_media_service.guess_image_content_type,
             image_bytes_checker=self.manager._remote_media_service.looks_like_image_bytes,
+            # 按目标 URL 生成请求级 Referer，规避 CWA 等图片站的防盗链拦截。
+            referer_builder=self.manager._remote_media_service.guess_referer,
         )

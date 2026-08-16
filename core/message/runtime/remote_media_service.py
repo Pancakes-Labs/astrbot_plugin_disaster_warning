@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import mimetypes
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import ClientSession
@@ -132,3 +133,24 @@ class MessageRemoteMediaService:
         if isinstance(guessed_type, str) and guessed_type.startswith("image/"):
             return guessed_type
         return None
+
+    @staticmethod
+    def guess_referer(url: str) -> str | None:
+        """按目标 URL 推导防盗链 Referer。
+
+        部分图片服务（如台湾中央气象署 scweb.cwa.gov.tw）对无 Referer 或
+        非浏览器 Referer 的请求会返回 403，这里按域名推导同源站点根路径
+        作为 Referer，模拟浏览器行为以提升抓取成功率；非 http(s) 返回 None。
+        """
+        try:
+            parsed = urlparse(str(url or "").strip())
+            host = (parsed.hostname or "").lower()
+        except Exception:
+            return None
+        if parsed.scheme not in ("http", "https") or not host:
+            return None
+        # 已知存在防盗链检查的域名：显式使用站点根路径（与浏览器行为一致）。
+        if host.endswith("cwa.gov.tw"):
+            return "https://scweb.cwa.gov.tw/"
+        # 通用兜底：其余站点使用同源根路径，通常无害且贴近浏览器请求。
+        return f"{parsed.scheme}://{host}/"
