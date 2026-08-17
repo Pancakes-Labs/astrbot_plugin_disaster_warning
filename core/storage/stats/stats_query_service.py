@@ -275,10 +275,11 @@ class StatsQueryService:
             else []
         )
         if top_sessions:
-            text.extend(["", "👥 会话推送统计 Top10:"])
+            text.extend(["", "👥 会话推送统计 Top10："])
             for item in top_sessions[:10]:
                 text.append(
-                    f"{item.get('session')}: pushed={item.get('pushed', 0)}, received={item.get('received', 0)}"
+                    f"{item.get('session')}：推送 {item.get('pushed', 0)} 条，"
+                    f"接收 {item.get('received', 0)} 条"
                 )
 
         return "\n".join(text)

@@ -235,7 +235,10 @@ class NmcRealRankClient:
         msg = payload.get("msg")
         code = payload.get("code")
         if msg != "success" or code != 0:
-            return {"success": False, "error": f"接口返回异常: msg={msg}, code={code}"}
+            return {
+                "success": False,
+                "error": f"接口返回异常：消息为 {msg}，状态码 {code}",
+            }
 
         data = payload.get("data")
         # 无数据/非法时次时 data 可能是空字符串 ""，需防御。

@@ -124,7 +124,7 @@ class EqscHttpClient:
             return "<empty>"
         if len(value) <= 10:
             return value[:2] + "***"
-        return f"{value[:6]}...{value[-4:]}(len={len(value)})"
+        return f"{value[:6]}...{value[-4:]}(长度 {len(value)})"
 
     def _build_request_url(
         self,
@@ -251,9 +251,9 @@ class EqscHttpClient:
 
                 if response.status in (401, 403):
                     logger.warning(
-                        f"[灾害预警] {log_label} 鉴权失败: HTTP {response.status}；"
-                        f"token={self._mask_token(current_token)}"
-                        + (f"；响应: {last_text[:160]}" if last_text else "")
+                        f"[灾害预警] {log_label} 鉴权失败：HTTP 状态码 {response.status}；"
+                        f"令牌为 {self._mask_token(current_token)}"
+                        + (f"；响应内容：{last_text[:160]}" if last_text else "")
                     )
                     if allow_retry_on_auth_error and attempt == 0:
                         # 不在锁外主动失效：交给 token_manager 在锁内按 stale_token

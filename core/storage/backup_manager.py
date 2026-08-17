@@ -449,7 +449,9 @@ class BackupService:
         :param imported_data: 导入的 JSON 配置
         :param merge: 是否以增量合并方式导入（若为 False，则会全量覆盖）
         """
-        logger.info(f"[灾害预警] 准备导入会话差异配置 (merge={merge})...")
+        logger.info(
+            f"[灾害预警] 准备导入会话差异配置（合并模式：{'开启' if merge else '关闭'}）..."
+        )
         if not isinstance(imported_data, dict):
             logger.error("[灾害预警] 导入会话差异配置失败: 格式非 JSON 对象")
             return False, "会话差异配置数据格式错误，必须为 JSON 对象"

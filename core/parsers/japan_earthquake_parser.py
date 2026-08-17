@@ -77,7 +77,7 @@ class JmaEarthquakeP2PParser(BaseParser):
 
             if (lat is None or lon is None) and issue_type != "ScalePrompt":
                 plugin_logger.error(
-                    f"[灾害预警] {self.source_id} 经纬度解析失败: lat={latitude}, lon={longitude}"
+                    f"[灾害预警] {self.source_id} 经纬度解析失败：纬度 {latitude}，经度 {longitude}"
                 )
                 return None
 

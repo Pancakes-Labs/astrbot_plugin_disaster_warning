@@ -254,8 +254,8 @@ class EqscTokenManager:
                 expires_seconds = int(expires_raw)
             except ValueError:
                 logger.warning(
-                    f"[灾害预警] EQSC AccessToken 有效期解析失败（{url}）: "
-                    f"token={self._mask_token(access_token)}, expires={expires_raw!r}"
+                    f"[灾害预警] EQSC AccessToken 有效期解析失败（{url}）："
+                    f"令牌为 {self._mask_token(access_token)}，有效期 {expires_raw!r}"
                 )
                 return False
 
@@ -326,7 +326,7 @@ class EqscTokenManager:
             return "<empty>"
         if len(value) <= 10:
             return value[:2] + "***"
-        return f"{value[:6]}...{value[-4:]}(len={len(value)})"
+        return f"{value[:6]}...{value[-4:]}(长度 {len(value)})"
 
 
 __all__ = ["EqscTokenManager"]

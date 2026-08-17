@@ -592,9 +592,9 @@ class MessageBuildService:
                 return True
             except Exception as e:
                 logger.warning(
-                    "[灾害预警] 远程图片转Base64失败 "
-                    f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
-                    f"content_type={fetch_result.get('content_type')}, bytes={fetch_result.get('bytes')}, error={type(e).__name__}: {e}"
+                    "[灾害预警] 远程图片转 Base64 失败 "
+                    f"（{media_label}）：原始地址为 {fetch_result.get('source_url')}，最终地址为 {fetch_result.get('final_url')}，"
+                    f"内容类型为 {fetch_result.get('content_type')}，数据大小 {fetch_result.get('bytes')} 字节，错误为 {type(e).__name__}: {e}"
                 )
 
         if fetch_result:
@@ -618,10 +618,10 @@ class MessageBuildService:
                 )
                 logger.warning(
                     "[灾害预警] 远程图片抓取失败 "
-                    f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
-                    f"status={fetch_result.get('status')}, content_type={fetch_result.get('content_type')}, "
-                    f"content_length={fetch_result.get('content_length')}, bytes={fetch_result.get('bytes')}, "
-                    f"error={fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
+                    f"（{media_label}）：原始地址为 {fetch_result.get('source_url')}，最终地址为 {fetch_result.get('final_url')}，"
+                    f"状态码 {fetch_result.get('status')}，内容类型为 {fetch_result.get('content_type')}，"
+                    f"内容长度 {fetch_result.get('content_length')}，数据大小 {fetch_result.get('bytes')} 字节，"
+                    f"错误为 {fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
                     f"{referer_hint}"
                 )
 
@@ -633,8 +633,8 @@ class MessageBuildService:
             except Exception as e:
                 parsed = urlparse(normalized_url)
                 logger.warning(
-                    "[灾害预警] 远程图片URL回退发送失败 "
-                    f"({media_label}): scheme={parsed.scheme}, host={parsed.netloc}, url={normalized_url}, error={type(e).__name__}: {e}"
+                    "[灾害预警] 远程图片 URL 回退发送失败 "
+                    f"（{media_label}）：协议为 {parsed.scheme}，主机为 {parsed.netloc}，地址为 {normalized_url}，错误为 {type(e).__name__}: {e}"
                 )
         return False
 

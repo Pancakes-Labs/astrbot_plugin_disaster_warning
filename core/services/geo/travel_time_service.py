@@ -237,8 +237,8 @@ class TravelTimeService:
 
         if p_sec is None and s_sec is None:
             logger.debug(
-                f"[灾害预警] 走时查询失败: depth={depth_km}km, "
-                f"dist={distance_km}km, model={model_name}"
+                f"[灾害预警] 走时查询失败：震源深度 {depth_km} 公里，"
+                f"震中距 {distance_km} 公里，模型为 {model_name}"
             )
 
         return TravelTimeResult(

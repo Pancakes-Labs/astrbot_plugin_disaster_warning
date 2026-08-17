@@ -73,7 +73,7 @@ class SourceEnabledRule(BaseRule):
         if source_entry is None:
             return RuleDecision.reject(
                 reason="会话数据源开关关闭",
-                detail=f"未注册数据源 {source_id or 'unknown'}，拒绝推送",
+                detail=f"未注册数据源{source_id or '（未知数据源）'}，拒绝推送",
                 context={"source_id": source_id},
             )
 

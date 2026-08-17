@@ -163,7 +163,7 @@ class GroundMotionResult:
         else:
             lines.append("预测点JMA震度：（数据不足）")
         lines.append(f"预测点PGA：{self.pga_gal:.4g} gal")
-        lines.append(f"预测点ARV：{self.arv:.3f}（Vs30={self.vs30:g} m/s）")
+        lines.append(f"预测点ARV：{self.arv:.3f}（Vs30= {self.vs30:g}m/s）")
 
         lines.append("预测到达时间：")
         lines.append(

@@ -186,7 +186,7 @@ class RemoteMediaFetcher:
                 if expected_kind == "image" and not self._image_type_checker(
                     content_type
                 ):
-                    result["error"] = f"响应类型不是图片: {content_type or 'unknown'}"
+                    result["error"] = f"响应类型不是图片：{content_type or '未知类型'}"
                     return result
 
                 # 进一步校验文件头，拦截 Content-Type 伪装成 image/* 的 HTML/JSON 错误页。
@@ -202,7 +202,7 @@ class RemoteMediaFetcher:
                         preview_text = repr(preview)
                     result["error"] = (
                         "响应体不是有效图片"
-                        f"（content_type={content_type or 'unknown'}, preview={preview_text!r}）"
+                        f"（内容类型为 {content_type or '未知'}，预览：{preview_text!r}）"
                     )
                     return result
 

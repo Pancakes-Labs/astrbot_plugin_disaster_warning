@@ -61,7 +61,7 @@ class FssnCmtParser(BaseParser):
             if not is_event_linked:
                 plugin_logger.debug(
                     f"[灾害预警] {self.source_id} 该 CMT 解未携带关联事件 ID "
-                    f"(cmt_id={cmt_id})，使用 CMT ID 兜底，未关联事件"
+                    f"（CMT 编号 {cmt_id}），使用 CMT 编号兜底，未关联事件"
                 )
 
             # 规范化 metadata 携带的 CMT 附加信息

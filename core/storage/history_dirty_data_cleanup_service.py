@@ -535,9 +535,9 @@ class HistoryDirtyDataCleanupService:
         )
 
         logger.info(
-            "[灾害预警] CWA 报告污染清理: "
-            f"删除事件 {len(poison_ids)} 条, 删除更新快照 {updates_count} 条 "
-            f"(毒 id 集合={sorted(_CWA_REPORT_POISON_IDS)})"
+            "[灾害预警] CWA 报告污染清理："
+            f"删除事件 {len(poison_ids)} 条，删除更新快照 {updates_count} 条 "
+            f"（污染编号集合 {sorted(_CWA_REPORT_POISON_IDS)}）"
         )
         return {
             "cwa_deleted_events": len(poison_ids),
