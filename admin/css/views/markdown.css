@@ -10,6 +10,7 @@
     flex-direction: column;
     gap: 10px;
     height: calc(100vh - var(--top-bar-height) - 24px);
+    height: calc(100dvh - var(--top-bar-height) - 24px); /* 移动端动态视口：与 .app 的 100dvh 保持一致 */
     min-height: 0;
     overflow: hidden;
 }
@@ -83,16 +84,19 @@ body.dark-theme .markdown-docs-toc-inner {
     max-height: 260px;
     overflow: hidden;
     opacity: 1;
+    visibility: visible;
     transform: translateY(0);
     transition:
         max-height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
         opacity 0.24s ease-out,
+        visibility 0.32s linear,
         transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .markdown-docs-toc.is-collapsed .markdown-docs-toc-body {
     max-height: 0;
     opacity: 0;
+    visibility: hidden; /* 移出无障碍树与 Tab 序列，避免键盘聚焦到不可见目录项 */
     transform: translateY(-6px);
 }
 
@@ -155,11 +159,7 @@ body.dark-theme .markdown-docs-toc-inner {
     justify-content: center;
     font-size: 12px;
     line-height: 1;
-    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.markdown-docs-toc.is-collapsed .markdown-docs-toc-toggle-icon {
-    transform: rotate(-90deg); /* 收起状态下箭头指向右侧 */
+    /* 箭头方向由 JSX 中的字符（▸/▾）直接表达，不再叠加 CSS 旋转，避免状态不一致 */
 }
 
 /* 横向文档列表容器：溢出时横向滚动 */
@@ -290,10 +290,11 @@ body.dark-theme .markdown-docs-toc-item.is-active {
    滚动发生在内部 .markdown-docs-content-scroll 容器中，
    从而避免 .card::before 绝对定位背景只覆盖可视区域、
    滚动出的内容暴露在透明背景上的问题 */
+/* 卡片仅含单一滚动容器子元素，flex gap 无实际间距效果（gap 已由内部滚动容器
+   的 flex:1 撑满承担），保留 display:flex 以维持列方向布局 */
 .markdown-docs-content-card {
     display: flex;
     flex-direction: column;
-    gap: 18px;
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
@@ -1227,19 +1228,11 @@ body.dark-theme .notification-md-mermaid svg .edgeLabels .edgeLabel {
         width: 100%;
     }
 
+    /* 触屏小屏：关闭目录项的悬停位移，仅保留静态反馈。
+       变量关闭与 hover 禁用已在 base.css 768px 触屏规则中统一声明，
+       此处仅保留尺寸收窄，避免重复维护同值变量 */
     .markdown-docs-toc-item {
         min-width: 140px;
         max-width: 260px;
-    }
-
-    /* 触屏小屏：关闭目录项的悬停位移，仅保留静态反馈（与 base.css 触屏规则一致） */
-    .markdown-docs-toc-item {
-        --hover-lift: 0px;
-        --hover-shift-x: 0px;
-    }
-
-    .markdown-docs-toc-item:hover,
-    .markdown-docs-toc-item:hover > * {
-        transform: none;
     }
 }

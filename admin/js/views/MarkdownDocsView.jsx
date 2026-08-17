@@ -5,12 +5,12 @@
  * 功能描述：在管理端界面中提供一个内置的 Markdown 文件浏览器。
  *           支持读取插件根目录及子目录下的说明文档、更新日志等，
  *           配合 Mermaid 渲染器实现架构图与时序图的可视化展示。
- * 布局说明：文档目录固定于页面顶部并横向展示，支持展开/收起；
- *           向下滚动时目录条保持吸附在顶部导航栏之下；
- *           下方文档阅读区独占全宽。
+ * 布局说明：外层视图固定高度，目录条固定于顶部并横向展示，支持展开/收起；
+ *           下方文档阅读区独占剩余空间并在内部独立滚动，
+ *           目录条始终保持可见、不随阅读区内容滚动。
  * 结构说明：主工作区使用 .markdown-docs-layout 包裹「目录条 + 阅读区」，
- *           目录条采用 sticky 定位并配以不透明毛玻璃背景，
- *           滚动时阅读区内容从目录条下方干净通过，互不干扰。
+ *           目录条占固定行并配以不透明毛玻璃背景，
+ *           阅读区在 .markdown-docs-content-scroll 内独立滚动，互不干扰。
  */
 
 const { Box, Typography, Button, Chip, CircularProgress } = MaterialUI;
@@ -22,8 +22,10 @@ const { Box, Typography, Button, Chip, CircularProgress } = MaterialUI;
 function MarkdownDocsView() {
     // 渲染文章 DOM 的引用，用于给 Mermaid 渲染 Hook 提供挂载的容器
     const articleRef = React.useRef(null);
-    // 顶部目录横向列表的引用，用于绑定鼠标滚轮横滚
+    // 顶部目录条（始终渲染）的引用，用于绑定鼠标滚轮横滚
     const tocListRef = React.useRef(null);
+    // 缓存当前实际横向列表元素，避免滚轮高频路径中重复 DOM 查询
+    const tocScrollListRef = React.useRef(null);
     // 顶部目录条的展开/收起状态（默认展开）
     const [tocCollapsed, setTocCollapsed] = React.useState(false);
 
@@ -57,23 +59,28 @@ function MarkdownDocsView() {
     // 目录横向列表的鼠标滚轮横滚支持：
     // 滚轮垂直滚动时转为横向滚动，触控板/滚轮步进不一致时归一化 delta 平滑连续滚动。
     // 监听器绑定在始终渲染的 .markdown-docs-toc-body 上（列表为条件渲染，
-    // 直接挂列表会在加载完成前丢失绑定），事件内再查找实际列表元素滚动。
+    // 直接挂列表会在加载完成前丢失绑定），实际列表元素在此 effect 内缓存到 ref，
+    // 仅在 markdownFiles 变化时重新查询，避免滚轮高频路径中的重复 DOM 查询。
     React.useEffect(() => {
         const host = tocListRef.current;
         if (!host) return;
+        tocScrollListRef.current = host.querySelector('.markdown-docs-toc-list');
         const handleWheel = (e) => {
-            // 仅当垂直滚动占主导且确实存在横向列表时接管
+            // 仅当垂直滚动占主导时接管，触控板横向滚动手势放行
             if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-            const list = host.querySelector('.markdown-docs-toc-list');
-            if (!list) return; // 加载中 / 空状态 / 收起状态：放行默认滚动
-            e.preventDefault();
-            // 归一化 delta：触控板/鼠标滚轮步进不一致时仍可平滑连续滚动
+            const list = tocScrollListRef.current;
+            if (!list) return; // 加载中 / 空状态：放行默认滚动
+            const maxScroll = list.scrollWidth - list.clientWidth;
+            if (maxScroll <= 0) return; // 列表未横向溢出：不接管，放行纵向滚动
+            // 已到边界且继续向该方向滚动时不再接管，避免吞掉纵向滚动
             const step = Math.abs(e.deltaY) < 1 ? e.deltaY * 16 : e.deltaY;
+            if ((step > 0 && list.scrollLeft >= maxScroll - 0.5) || (step < 0 && list.scrollLeft <= 0.5)) return;
+            e.preventDefault();
             list.scrollLeft += step;
         };
         host.addEventListener('wheel', handleWheel, { passive: false });
         return () => host.removeEventListener('wheel', handleWheel);
-    }, [tocCollapsed]);
+    }, [markdownFiles]);
 
     return (
         // 外部容器，复用了通知中心的部分样式并加入文档特定主题类
@@ -127,7 +134,7 @@ function MarkdownDocsView() {
 
             {/* 主工作区：顶部固定横向目录条 + 下方全宽阅读区 */}
             <div className="markdown-docs-layout">
-                {/* 顶部固定横向目录条：随页面滚动吸附在顶栏下方，支持展开/收起 */}
+                {/* 顶部固定横向目录条：占固定行不随阅读区滚动，支持展开/收起 */}
                 <div className={`markdown-docs-toc ${tocCollapsed ? 'is-collapsed' : ''}`}>
                     <div className="markdown-docs-toc-inner">
                         {/* 目录头部：标题 + 展开/收起切换按钮 */}
@@ -145,6 +152,7 @@ function MarkdownDocsView() {
                                 className="markdown-docs-toc-toggle"
                                 onClick={toggleToc}
                                 aria-expanded={!tocCollapsed}
+                                aria-controls="markdown-docs-toc-body"
                                 title={tocCollapsed ? '展开文档目录' : '收起文档目录'}
                             >
                                 <span className="markdown-docs-toc-toggle-icon">{tocCollapsed ? '▸' : '▾'}</span>
@@ -153,7 +161,7 @@ function MarkdownDocsView() {
                         </div>
 
                         {/* 文档列表区域：始终渲染以支持收起/展开的高度过渡动画 */}
-                        <div ref={tocListRef} className="markdown-docs-toc-body">
+                        <div ref={tocListRef} id="markdown-docs-toc-body" className="markdown-docs-toc-body">
                             {loadingList ? (
                                 <div className="markdown-docs-toc-loading">
                                     <CircularProgress size={22} />

@@ -838,8 +838,7 @@ body.dark-theme .card {
 .card.notifications-hero-card,
 .card.trend-chart-card,
 .card.config-card,
-.card.news-ticker-card,
-.markdown-docs-toc-inner {
+.card.news-ticker-card {
     --hover-lift: 0px;
 }
 
