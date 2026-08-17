@@ -4,6 +4,21 @@
    1. Markdown 视图大纲与骨架布局 (Markdown View Layout Framework)
    ========================================================================== */
 
+/* 外层视图：固定高度、内部纵向 flex，阅读区独立滚动（根治覆盖 bug） */
+.markdown-docs-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: calc(100vh - var(--top-bar-height) - 24px);
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Hero 卡与目录条固定不压缩，剩余空间全部交给阅读区滚动 */
+.markdown-docs-view .notifications-hero-card {
+    flex-shrink: 0;
+}
+
 /* 视图大标题布局栈 */
 .markdown-docs-view .notifications-title-stack {
     display: flex;
@@ -21,183 +36,275 @@
     margin-bottom: 4px !important;
 }
 
-/* 文档双栏左右分栏外壳 */
-.markdown-docs-shell {
-    display: grid;
-    /* 左侧为固定的文档树侧栏，右侧自适应承载文章渲染区域 */
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
-}
+/* ==========================================================================
+   2. 顶部固定横向文档目录条 (Top Fixed Horizontal TOC Bar)
+   ========================================================================== */
 
-.markdown-docs-aside-column {
+/* 主工作区：包裹「目录条 + 阅读区」的纵向 flex 容器。
+   目录条固定（不滚动），阅读区占满剩余高度并独立滚动，
+   彻底避免目录条覆盖阅读区的问题 */
+.markdown-docs-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px; /* 目录条与阅读区间距（减半） */
     min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
 }
 
-/* 侧栏定位：向下滑动时贴紧在顶部栏之下 */
-.markdown-docs-aside-sticky {
-    position: sticky;
-    top: calc(var(--top-bar-height) + 16px);
-}
-
-.markdown-docs-sidebar-card,
-.markdown-docs-content-card {
-    min-height: 520px;
-}
-
-/* 侧栏高度跟随视窗高度，自适应控制列表滚动 */
-.markdown-docs-sidebar-card {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    height: calc(100vh - var(--top-bar-height) - 32px);
-    max-height: 880px;
-    overflow: hidden; /* 高度约束 + 内部列表滚动 */
-}
-
-.markdown-docs-sidebar-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+/* 目录条外壳：固定在布局顶部，不参与滚动 */
+.markdown-docs-toc {
     flex-shrink: 0;
+    z-index: 5;
 }
 
-/* 文档文件列表容器 (列表过长时纵向滚动) */
-.markdown-docs-file-list {
+/* 目录条内层卡片：毛玻璃视觉，内容完全渲染在阅读区之上方 */
+.markdown-docs-toc-inner {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    min-height: 0;
-    flex: 1;
-    overflow-y: auto;
-    padding-right: 4px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
-.markdown-docs-content-column {
+body.dark-theme .markdown-docs-toc-inner {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 文档列表区域：始终渲染，通过 max-height + opacity 过渡实现平滑收起/展开。
+   收起时高度归零并淡出，展开时恢复完整高度 */
+.markdown-docs-toc-body {
+    max-height: 260px;
+    overflow: hidden;
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+        max-height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.24s ease-out,
+        transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.markdown-docs-toc.is-collapsed .markdown-docs-toc-body {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-6px);
+}
+
+/* 收起时内层卡片的内边距同步收敛，目录条仅保留一行标题的高度 */
+.markdown-docs-toc.is-collapsed .markdown-docs-toc-inner {
+    gap: 0;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+/* 目录头部：标题与展开/收起按钮一行排布 */
+.markdown-docs-toc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.markdown-docs-toc-head-text {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
     min-width: 0;
 }
 
-/* ==========================================================================
-   2. 文档侧边栏文件单项样式 (Sidebar Markdown Document Item)
-   ========================================================================== */
-/* 文档文件项 —— 命中壳 / 视觉面分离 */
-.markdown-docs-file-item {
-    --hover-lift: 2px;
-    --card-bg: rgba(255, 255, 255, 0.56);
-    --card-border-color: rgba(103, 80, 164, 0.12);
-    --card-shadow: none;
-    --card-hover-bg: rgba(103, 80, 164, 0.08);
-    --card-hover-border-color: rgba(103, 80, 164, 0.18);
-    --card-hover-shadow: 0 8px 22px rgba(103, 80, 164, 0.08);
-    position: relative;
-    isolation: isolate;
-    width: 100%;
-    text-align: left;
-    padding: 14px 16px;
-    border-radius: 16px;
-    border: 1px solid transparent;
-    background: transparent;
-    box-shadow: none;
-    color: var(--md-sys-color-on-surface);
+.markdown-docs-toc-subtitle {
+    opacity: 0.72;
+    font-size: 12px !important;
+}
+
+/* 展开/收起切换按钮 */
+.markdown-docs-toc-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(103, 80, 164, 0.18);
+    background: rgba(103, 80, 164, 0.08);
+    color: var(--md-sys-color-primary);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
     cursor: pointer;
-    transition: color 0.18s ease-out;
+    transition: background-color 0.18s ease-out, border-color 0.18s ease-out, transform 0.18s ease-out;
 }
 
-.markdown-docs-file-item::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    border-radius: inherit;
-    background: var(--card-bg);
-    border: 1px solid var(--card-border-color);
-    box-shadow: var(--card-shadow);
-    pointer-events: none;
-    transition:
-        transform 0.18s ease-out,
-        background 0.18s ease-out,
-        border-color 0.18s ease-out,
-        box-shadow 0.18s ease-out;
+.markdown-docs-toc-toggle:hover {
+    background: rgba(103, 80, 164, 0.16);
+    border-color: rgba(103, 80, 164, 0.3);
+    transform: translateY(-1px);
 }
 
-.markdown-docs-file-item > * {
-    transition: transform 0.18s ease-out;
+.markdown-docs-toc-toggle-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-body.dark-theme .markdown-docs-file-item {
-    --card-bg: rgba(32, 29, 39, 0.86);
-    --card-border-color: rgba(208, 188, 255, 0.12);
-    --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-    --card-hover-bg: rgba(208, 188, 255, 0.13);
-    --card-hover-border-color: rgba(208, 188, 255, 0.26);
-    --card-hover-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
-    color: var(--md-sys-color-on-surface);
+.markdown-docs-toc.is-collapsed .markdown-docs-toc-toggle-icon {
+    transform: rotate(-90deg); /* 收起状态下箭头指向右侧 */
 }
 
-.markdown-docs-file-item:hover::before,
-.markdown-docs-file-item:hover > * {
-    transform: translateY(calc(-1 * var(--hover-lift)));
+/* 横向文档列表容器：溢出时横向滚动 */
+.markdown-docs-toc-list {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 2px 6px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
 }
 
-.markdown-docs-file-item:hover::before {
-    background: var(--card-hover-bg);
-    border-color: var(--card-hover-border-color);
-    box-shadow: var(--card-hover-shadow);
+.markdown-docs-toc-list::-webkit-scrollbar {
+    height: 6px;
 }
 
-/* 激活的文档文件菜单项 */
-.markdown-docs-file-item.is-active {
-    --card-bg: var(--md-sys-color-primary-container);
-    --card-border-color: rgba(103, 80, 164, 0.22);
-    color: var(--md-sys-color-on-primary-container);
-}
-
-body.dark-theme .markdown-docs-file-item.is-active {
-    --card-bg: linear-gradient(135deg, rgba(103, 80, 164, 0.94), rgba(79, 55, 139, 0.94));
-    --card-border-color: rgba(208, 188, 255, 0.32);
-    --card-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
-    color: #F4EEFF;
-}
-
-.markdown-docs-file-item.is-active .markdown-docs-file-path {
-    color: var(--md-sys-color-on-primary-container);
-    opacity: 0.82;
-}
-
-.markdown-docs-file-item-top {
+/* 单个横向文档项 */
+.markdown-docs-toc-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 6px;
+    flex: 0 0 auto;
+    max-width: 300px;
+    min-width: 180px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(103, 80, 164, 0.12);
+    background: rgba(255, 255, 255, 0.56);
+    color: var(--md-sys-color-on-surface);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.18s ease-out, border-color 0.18s ease-out, transform 0.18s ease-out, box-shadow 0.18s ease-out;
 }
 
-.markdown-docs-file-icon {
+body.dark-theme .markdown-docs-toc-item {
+    background: rgba(32, 29, 39, 0.86);
+    border-color: rgba(208, 188, 255, 0.12);
+}
+
+.markdown-docs-toc-item:hover {
+    background: rgba(103, 80, 164, 0.08);
+    border-color: rgba(103, 80, 164, 0.24);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(103, 80, 164, 0.08);
+}
+
+/* 激活的文档项 */
+.markdown-docs-toc-item.is-active {
+    background: var(--md-sys-color-primary-container);
+    border-color: rgba(103, 80, 164, 0.28);
+    color: var(--md-sys-color-on-primary-container);
+}
+
+body.dark-theme .markdown-docs-toc-item.is-active {
+    background: linear-gradient(135deg, rgba(103, 80, 164, 0.94), rgba(79, 55, 139, 0.94));
+    border-color: rgba(208, 188, 255, 0.32);
+    color: #F4EEFF;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+.markdown-docs-toc-item-icon {
     flex-shrink: 0;
 }
 
-.markdown-docs-file-title {
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1.35;
-    word-break: break-word;
-    letter-spacing: -0.01em;
+.markdown-docs-toc-item-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
 }
 
-/* 文件的磁盘路径展示文案 */
-.markdown-docs-file-path {
+.markdown-docs-toc-item-title {
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.markdown-docs-toc-item-path {
     opacity: 0.72;
-    font-size: 12px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.35;
 }
 
-/* 右侧文档主要内容卡片 */
+.markdown-docs-toc-item.is-active .markdown-docs-toc-item-path {
+    opacity: 0.82;
+}
+
+/* 目录条加载 / 空状态 */
+.markdown-docs-toc-loading,
+.markdown-docs-toc-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 18px 0 6px;
+}
+
+.markdown-docs-toc-empty-icon {
+    font-size: 18px;
+}
+
+/* ==========================================================================
+   3. 全宽文档阅读区 (Full-Width Document Reader)
+   ========================================================================== */
+/* 阅读区列容器：占据布局剩余高度，内部独立滚动（根治覆盖 bug） */
+.markdown-docs-content-column {
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.markdown-docs-content-column--full {
+    width: 100%;
+}
+
+/* 阅读卡片：占满列容器高度。
+   卡片自身不滚动（视觉面 ::before 背景完整覆盖整个卡片区域），
+   滚动发生在内部 .markdown-docs-content-scroll 容器中，
+   从而避免 .card::before 绝对定位背景只覆盖可视区域、
+   滚动出的内容暴露在透明背景上的问题 */
 .markdown-docs-content-card {
     display: flex;
     flex-direction: column;
     gap: 18px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* 卡片内部独立滚动容器：承载全部阅读内容并滚动 */
+.markdown-docs-content-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 /* 文章头部区域 */
@@ -223,7 +330,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   3. Markdown 正文排版与渲染规范 (Markdown Typography Core Styles)
+   5. Markdown 正文排版与渲染规范 (Markdown Typography Core Styles)
    ========================================================================== */
 .markdown-docs-article {
     min-height: 380px;
@@ -383,7 +490,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   4. Markdown 警示呼叫盒组件 (Markdown Callouts/Admonitions)
+   6. Markdown 警示呼叫盒组件 (Markdown Callouts/Admonitions)
    ========================================================================== */
 .notification-md .notification-md-callout {
     position: relative;
@@ -471,7 +578,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   5. 行内代码与多行代码高亮渲染 (Code Block & Code Highlights)
+   7. 行内代码与多行代码高亮渲染 (Code Block & Code Highlights)
    ========================================================================== */
 
 /* 行内小代码标签 `code` */
@@ -683,7 +790,7 @@ html:not(.theme-dark) .notification-md .token-import   { color: #001080; }
 html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 
 /* ==========================================================================
-   6. Markdown 表格渲染及列宽定制 (Markdown Tables Layout)
+   8. Markdown 表格渲染及列宽定制 (Markdown Tables Layout)
    ========================================================================== */
 .notification-md .notification-md-table-wrap {
     overflow-x: auto;
@@ -754,8 +861,7 @@ html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 }
 
 /* 空白占位卡片 */
-.markdown-docs-empty-card,
-.markdown-docs-empty-side-card {
+.markdown-docs-empty-card {
     min-height: 240px;
     display: flex;
     flex-direction: column;
@@ -770,7 +876,7 @@ html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 }
 
 /* ==========================================================================
-   7. HTML 折叠折叠盒组件 (Markdown Details Expanders)
+   9. HTML 折叠折叠盒组件 (Markdown Details Expanders)
    ========================================================================== */
 .notification-md .notification-md-details {
     overflow: hidden;
@@ -828,7 +934,7 @@ html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 }
 
 /* ==========================================================================
-   8. Mermaid 流程图/拓扑图平移缩放渲染器 (Mermaid SVG Pan/Zoom Viewport)
+   10. Mermaid 流程图/拓扑图平移缩放渲染器 (Mermaid SVG Pan/Zoom Viewport)
    ========================================================================== */
 .notification-md-mermaid {
     overflow: hidden;
@@ -924,7 +1030,7 @@ html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 }
 
 /* ==========================================================================
-   9. 深色模式适配 (Dark Theme Adaptive Override)
+   11. 深色模式适配 (Dark Theme Adaptive Override)
    ========================================================================== */
 body.dark-theme .notification-md h1 {
     border-bottom-color: rgba(208, 188, 255, 0.18);
@@ -1084,21 +1190,56 @@ body.dark-theme .notification-md-mermaid svg .edgeLabels .edgeLabel {
 }
 
 /* ==========================================================================
-   10. 响应式分栏断点媒体查询适配
+   12. 响应式断点适配 (Responsive Adaptive)
    ========================================================================== */
 
-/* 平板及移动端视窗（最大宽 920px）：由横向双栏重置为单栏瀑布流 */
+/* 平板及移动端视窗（最大宽 920px）：条目宽度自适应收窄 */
 @media (max-width: 920px) {
-    .markdown-docs-shell {
-        grid-template-columns: 1fr;
+    .markdown-docs-toc-item {
+        min-width: 150px;
+    }
+}
+
+/* 移动端（最大宽 768px）：顶部栏转为静态占位，视图回归正常文档流 */
+@media (max-width: 768px) {
+    /* 移动端不锁定视图高度，内容自然流动，由页面整体滚动承载 */
+    .markdown-docs-view {
+        height: auto;
+        overflow: visible;
     }
 
-    .markdown-docs-aside-sticky {
-        position: static; /* 移除悬浮粘性定位，列表变为自然流动排布在上方 */
+    .markdown-docs-layout {
+        gap: 7px;
     }
 
-    .markdown-docs-sidebar-card,
-    .markdown-docs-content-card {
-        min-height: auto;
+    /* 移动端阅读卡片与内部滚动容器恢复自然高度，由页面整体滚动承载 */
+    .markdown-docs-content-card,
+    .markdown-docs-content-scroll {
+        overflow: visible;
+        flex: none;
+    }
+
+    .markdown-docs-toc-head {
+        flex-wrap: wrap;
+    }
+
+    .markdown-docs-toc-subtitle {
+        width: 100%;
+    }
+
+    .markdown-docs-toc-item {
+        min-width: 140px;
+        max-width: 260px;
+    }
+
+    /* 触屏小屏：关闭目录项的悬停位移，仅保留静态反馈（与 base.css 触屏规则一致） */
+    .markdown-docs-toc-item {
+        --hover-lift: 0px;
+        --hover-shift-x: 0px;
+    }
+
+    .markdown-docs-toc-item:hover,
+    .markdown-docs-toc-item:hover > * {
+        transform: none;
     }
 }

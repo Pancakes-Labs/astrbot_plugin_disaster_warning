@@ -733,11 +733,10 @@ body.dark-theme .bl-error {
 .notifications-hero-card,
 .notifications-empty-card,
 .notification-feed-card,
-.markdown-docs-sidebar-card,
+.markdown-docs-toc-inner,
 .markdown-docs-content-card,
 .markdown-docs-empty-card,
-.markdown-docs-empty-side-card,
-.markdown-docs-file-item,
+.markdown-docs-toc-item,
 .config-card,
 .config-header,
 .config-renderer-shell,
@@ -760,7 +759,7 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(1),
 .weather-query-result-card,
 .notifications-hero-card,
-.markdown-docs-sidebar-card,
+.markdown-docs-toc-inner,
 .config-header,
 .config-renderer-aside {
     animation-delay: 0.02s;
@@ -790,12 +789,11 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(3),
 .weather-query-list-item:nth-child(2),
 .notification-feed-card:nth-child(2),
-.markdown-docs-file-item:nth-child(1),
+.markdown-docs-toc-item:nth-child(1),
 .config-renderer-shell,
 .config-renderer-preview-card,
 .notifications-empty-card,
-.markdown-docs-empty-card,
-.markdown-docs-empty-side-card {
+.markdown-docs-empty-card {
     animation-delay: 0.10s;
 }
 
@@ -808,7 +806,7 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(n+4),
 .weather-query-list-item:nth-child(n+3),
 .notification-feed-card:nth-child(n+3),
-.markdown-docs-file-item:nth-child(n+2),
+.markdown-docs-toc-item:nth-child(n+2),
 .config-card .MuiAccordion-root:nth-child(n+1),
 .config-card .MuiPaper-root:nth-child(n+1),
 .notifications-inline-meta-item:nth-child(n+1) {
@@ -840,8 +838,8 @@ body.dark-theme .card {
 .card.notifications-hero-card,
 .card.trend-chart-card,
 .card.config-card,
-.card.markdown-docs-sidebar-card,
-.card.news-ticker-card {
+.card.news-ticker-card,
+.markdown-docs-toc-inner {
     --hover-lift: 0px;
 }
 
@@ -1235,7 +1233,7 @@ body.dark-theme .btn-action:hover {
     /* 触屏小屏：关闭所有卡片视觉位移，仅保留命中壳静态反馈 */
     .card,
     .connection-item,
-    .markdown-docs-file-item,
+    .markdown-docs-toc-item,
     .event-filters-toolbar,
     .event-filter-field-card,
     .event-filter-pill,
@@ -1249,8 +1247,8 @@ body.dark-theme .btn-action:hover {
     .card:hover > *,
     .connection-item:hover::before,
     .connection-item:hover > *,
-    .markdown-docs-file-item:hover::before,
-    .markdown-docs-file-item:hover > *,
+    .markdown-docs-toc-item:hover,
+    .markdown-docs-toc-item:hover > *,
     .event-filters-toolbar:hover::before,
     .event-filters-toolbar:hover > *,
     .event-filter-field-card:hover::before,
@@ -1480,11 +1478,10 @@ html.theme-dark .skeleton {
     .notifications-hero-card,
     .notifications-empty-card,
     .notification-feed-card,
-    .markdown-docs-sidebar-card,
+    .markdown-docs-toc-inner,
     .markdown-docs-content-card,
     .markdown-docs-empty-card,
-    .markdown-docs-empty-side-card,
-    .markdown-docs-file-item,
+    .markdown-docs-toc-item,
     .config-card,
     .config-header,
     .config-renderer-shell,
