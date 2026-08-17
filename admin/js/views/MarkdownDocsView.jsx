@@ -5,18 +5,30 @@
  * 功能描述：在管理端界面中提供一个内置的 Markdown 文件浏览器。
  *           支持读取插件根目录及子目录下的说明文档、更新日志等，
  *           配合 Mermaid 渲染器实现架构图与时序图的可视化展示。
+ * 布局说明：外层视图固定高度，目录条固定于顶部并横向展示，支持展开/收起；
+ *           下方文档阅读区独占剩余空间并在内部独立滚动，
+ *           目录条始终保持可见、不随阅读区内容滚动。
+ * 结构说明：主工作区使用 .markdown-docs-layout 包裹「目录条 + 阅读区」，
+ *           目录条占固定行并配以不透明毛玻璃背景，
+ *           阅读区在 .markdown-docs-content-scroll 内独立滚动，互不干扰。
  */
 
 const { Box, Typography, Button, Chip, CircularProgress } = MaterialUI;
 
 /**
  * 文档浏览视图主组件
- * 构建包含侧边栏文件树与右侧主渲染区的双栏自适应阅读器
+ * 采用「顶部固定横向目录条 + 下方全宽阅读区」的单列自适应阅读器
  */
 function MarkdownDocsView() {
     // 渲染文章 DOM 的引用，用于给 Mermaid 渲染 Hook 提供挂载的容器
     const articleRef = React.useRef(null);
-    
+    // 顶部目录条（始终渲染）的引用，用于绑定鼠标滚轮横滚
+    const tocListRef = React.useRef(null);
+    // 缓存当前实际横向列表元素，避免滚轮高频路径中重复 DOM 查询
+    const tocScrollListRef = React.useRef(null);
+    // 顶部目录条的展开/收起状态（默认展开）
+    const [tocCollapsed, setTocCollapsed] = React.useState(false);
+
     // 获取 Markdown 相关的底层状态和异步操作函数
     const docs = useMarkdownDocs();
     const {
@@ -40,6 +52,41 @@ function MarkdownDocsView() {
         renderedHtml,
         theme,
     });
+
+    // 切换顶部目录条的展开/收起状态
+    const toggleToc = () => setTocCollapsed((prev) => !prev);
+
+    // 目录横向列表的鼠标滚轮横滚支持：
+    // 滚轮垂直滚动时转为横向滚动，触控板/滚轮步进不一致时归一化 delta 平滑连续滚动。
+    // 监听器绑定在始终渲染的 .markdown-docs-toc-body 上（列表为条件渲染，
+    // 直接挂列表会在加载完成前丢失绑定），实际列表元素在此 effect 内缓存到 ref，
+    // 仅在 markdownFiles / loadingList 变化时重新查询，避免滚轮高频路径中的重复 DOM 查询。
+    React.useEffect(() => {
+        const host = tocListRef.current;
+        if (!host) return;
+        tocScrollListRef.current = host.querySelector('.markdown-docs-toc-list');
+        const handleWheel = (e) => {
+            // 仅当垂直滚动占主导时接管，触控板横向滚动手势放行
+            if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+            let list = tocScrollListRef.current;
+            // 缓存列表已脱离 DOM（如刷新目录期间被替换为加载态）：
+            // 重新查询，仍不存在则放行，避免对失效元素 preventDefault 吞掉纵向滚动
+            if (!list || !host.contains(list)) {
+                list = host.querySelector('.markdown-docs-toc-list');
+                tocScrollListRef.current = list;
+            }
+            if (!list) return; // 加载中 / 空状态：放行默认滚动
+            const maxScroll = list.scrollWidth - list.clientWidth;
+            if (maxScroll <= 0) return; // 列表未横向溢出：不接管，放行纵向滚动
+            // 已到边界且继续向该方向滚动时不再接管，避免吞掉纵向滚动
+            const step = Math.abs(e.deltaY) < 1 ? e.deltaY * 16 : e.deltaY;
+            if ((step > 0 && list.scrollLeft >= maxScroll - 0.5) || (step < 0 && list.scrollLeft <= 0.5)) return;
+            e.preventDefault();
+            list.scrollLeft += step;
+        };
+        host.addEventListener('wheel', handleWheel, { passive: false });
+        return () => host.removeEventListener('wheel', handleWheel);
+    }, [markdownFiles, loadingList]);
 
     return (
         // 外部容器，复用了通知中心的部分样式并加入文档特定主题类
@@ -65,7 +112,7 @@ function MarkdownDocsView() {
                             </Box>
                         </Box>
                         <Typography variant="body2" className="tasks-header-subtitle notifications-hero-subtitle">
-                            在插件前端中直接阅读原生 Markdown 文件，例如 README、CHANGELOG 与 docs 目录文档。
+                            在插件前端中直接阅读原生 Markdown 文件，例如 README、CHANGELOG 与 docs 目录文档
                         </Typography>
                     </div>
                     {/* 右侧动作控制区，可刷新目录或重载当前文本内容 */}
@@ -91,43 +138,55 @@ function MarkdownDocsView() {
                 </Box>
             </div>
 
-            {/* 双栏主工作区 */}
-            <div className="markdown-docs-shell">
-                {/* 左侧侧边栏：文档目录树 */}
-                <aside className="markdown-docs-aside-column">
-                    <div className="markdown-docs-aside-sticky">
-                        <div className="card markdown-docs-sidebar-card">
-                            <div className="markdown-docs-sidebar-head">
+            {/* 主工作区：顶部固定横向目录条 + 下方全宽阅读区 */}
+            <div className="markdown-docs-layout">
+                {/* 顶部固定横向目录条：占固定行不随阅读区滚动，支持展开/收起 */}
+                <div className={`markdown-docs-toc ${tocCollapsed ? 'is-collapsed' : ''}`}>
+                    <div className="markdown-docs-toc-inner">
+                        {/* 目录头部：标题 + 展开/收起切换按钮 */}
+                        <div className="markdown-docs-toc-head">
+                            <div className="markdown-docs-toc-head-text">
                                 <Typography variant="subtitle1" className="markdown-docs-sidebar-title">
                                     文档目录
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" className="markdown-docs-sidebar-subtitle">
-                                    仅展示插件目录内允许浏览的 Markdown 文件。
+                                <Typography variant="body2" color="text.secondary" className="markdown-docs-toc-subtitle">
+                                    仅展示插件目录内允许浏览的 Markdown 文件
                                 </Typography>
                             </div>
+                            <button
+                                type="button"
+                                className="markdown-docs-toc-toggle"
+                                onClick={toggleToc}
+                                aria-expanded={!tocCollapsed}
+                                aria-controls="markdown-docs-toc-body"
+                                title={tocCollapsed ? '展开文档目录' : '收起文档目录'}
+                            >
+                                <span className="markdown-docs-toc-toggle-icon">{tocCollapsed ? '▸' : '▾'}</span>
+                                <span className="markdown-docs-toc-toggle-text">{tocCollapsed ? '展开目录' : '收起目录'}</span>
+                            </button>
+                        </div>
 
-                            {/* 条件渲染列表内容 */}
+                        {/* 文档列表区域：始终渲染以支持收起/展开的高度过渡动画 */}
+                        <div ref={tocListRef} id="markdown-docs-toc-body" className="markdown-docs-toc-body">
                             {loadingList ? (
-                                <div className="tasks-empty-card markdown-docs-empty-side-card" style={{ padding: '24px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                    <CircularProgress size={24} style={{ marginBottom: '12px' }} />
+                                <div className="markdown-docs-toc-loading">
+                                    <CircularProgress size={22} />
                                     <Typography variant="body2" color="text.secondary">正在加载文档列表…</Typography>
                                 </div>
                             ) : markdownFiles.length === 0 ? (
-                                <div className="tasks-empty-card markdown-docs-empty-side-card">
-                                    <div className="tasks-empty-icon">📚</div>
-                                    <Typography variant="body1" className="markdown-docs-empty-title">
-                                        暂无可浏览文档
-                                    </Typography>
+                                <div className="markdown-docs-toc-empty">
+                                    <span className="markdown-docs-toc-empty-icon">📚</span>
+                                    <Typography variant="body2" color="text.secondary">暂无可浏览文档</Typography>
                                 </div>
                             ) : (
-                                <div className="markdown-docs-file-list">
+                                <div className="markdown-docs-toc-list">
                                     {markdownFiles.map((item) => {
                                         const isActive = item.path === currentDocumentPath;
                                         return (
                                             <button
                                                 key={item.path}
                                                 type="button"
-                                                className={`markdown-docs-file-item ${isActive ? 'is-active' : ''}`}
+                                                className={`markdown-docs-toc-item ${isActive ? 'is-active' : ''}`}
                                                 aria-current={isActive ? 'true' : undefined}
                                                 onClick={() => {
                                                     // 如果是当前已选中的文档，则避免重复发起多余的异步请求
@@ -137,12 +196,12 @@ function MarkdownDocsView() {
                                                     loadMarkdownDocument(item.path);
                                                 }}
                                             >
-                                                <div className="markdown-docs-file-item-top">
-                                                    <span className="markdown-docs-file-icon">📝</span>
-                                                    <span className="markdown-docs-file-title">{item.title || item.filename || item.path}</span>
-                                                </div>
-                                                {/* 显示文件在服务器磁盘上的等宽相对路径 */}
-                                                <div className="markdown-docs-file-path mono">{item.path}</div>
+                                                <span className="markdown-docs-toc-item-icon">📝</span>
+                                                <span className="markdown-docs-toc-item-body">
+                                                    <span className="markdown-docs-toc-item-title">{item.title || item.filename || item.path}</span>
+                                                    {/* 显示文件在服务器磁盘上的等宽相对路径 */}
+                                                    <span className="markdown-docs-toc-item-path mono">{item.path}</span>
+                                                </span>
                                             </button>
                                         );
                                     })}
@@ -150,18 +209,21 @@ function MarkdownDocsView() {
                             )}
                         </div>
                     </div>
-                </aside>
+                </div>
 
-                {/* 右侧内容主展板 */}
-                <div className="markdown-docs-content-column">
+                {/* 下方全宽文档阅读区 */}
+                <div className="markdown-docs-content-column markdown-docs-content-column--full">
                     <div className="card markdown-docs-content-card">
+                        {/* 卡片内部独立滚动容器：卡片自身不滚动（视觉面 ::before 背景完整覆盖），
+                            内容在此容器内滚动，避免背景随滚动破裂 */}
+                        <div className="markdown-docs-content-scroll">
                         {/* 分状态渲染不同的提示信息与文本视图 */}
                         {!currentDocumentPath ? (
                             // 状态 1：未选择任何文件时的缺省空白页提示
                             <div className="tasks-empty-card markdown-docs-empty-card">
                                 <div className="tasks-empty-icon">📄</div>
                                 <Typography variant="h6" className="markdown-docs-empty-title">
-                                    请选择左侧文档
+                                    请选择上方文档
                                 </Typography>
                                 <Typography variant="body1" color="text.secondary" className="markdown-docs-empty-subtitle">
                                     选择后即可在当前管理端中直接阅读 Markdown 文档内容。
@@ -219,6 +281,7 @@ function MarkdownDocsView() {
                                 </Typography>
                             </div>
                         )}
+                        </div>
                     </div>
                 </div>
             </div>

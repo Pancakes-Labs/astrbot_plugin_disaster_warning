@@ -58,7 +58,7 @@
     grid-column: span 4;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
 }
 
 .stats-fill-column {
