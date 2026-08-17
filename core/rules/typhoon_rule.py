@@ -89,6 +89,17 @@ class TyphoonRule(BaseRule):
                 age_hours = (
                     datetime.now(timezone.utc) - updated_at
                 ).total_seconds() / 3600
+                if age_hours < 0:
+                    # 未来时间戳（观测时间晚于当前时间）：不属于 6 小时之内，
+                    # 拒绝放行并附负数老化小时数便于排查时钟偏差。
+                    return RuleDecision.reject(
+                        reason="台风停编通知时效过滤",
+                        detail="该台风最后一次观测时间晚于当前时间，无法确认在 6 小时内停编",
+                        context={
+                            **decision_context,
+                            "deactivate_age_hours": round(age_hours, 2),
+                        },
+                    )
                 if age_hours > self.DEACTIVATE_NOTIFY_MAX_AGE_HOURS:
                     return RuleDecision.reject(
                         reason="台风停编通知时效过滤",
