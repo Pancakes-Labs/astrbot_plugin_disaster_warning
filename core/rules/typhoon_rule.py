@@ -22,6 +22,12 @@ class TyphoonRule(BaseRule):
 
     rule_name = "typhoon_rule"
 
+    # 停编通知的最大允许时效（小时）。
+    # 停编事件的时间字段（updated_at）缺失或距今超过该阈值时拒绝放行，
+    # 作为前置 time_rule 的兜底（time_rule 目前对台风事件不设时效限制），
+    # 避免早已停编的历史台风在开关开启时被无条件放行刷屏。
+    DEACTIVATE_NOTIFY_MAX_AGE_HOURS = 6.0
+
     def evaluate(self, context: RuleContext) -> RuleDecision:
         """按台风过滤配置评估是否放行。"""
         domain_event = context.domain_event
@@ -62,13 +68,54 @@ class TyphoonRule(BaseRule):
 
         # 1) 活跃状态
         if not bool(domain_event.is_active):
-            # 停编通知：typhoon_filter.typhoon_deactivate_notify 开启时直接放行，
-            # 不受名称/强度/距离等过滤约束（停编即视为值得通知）。
-            # 早已停编的历史台风由前置 time_rule 按事件时效过滤，避免刷屏。
+            # 停编通知：typhoon_filter.typhoon_deactivate_notify 开启时，
+            # 不受名称/强度/距离等过滤约束（停编即视为值得通知），
+            # 但仍受时效兜底约束：以最新观测时间（updated_at）为准，
+            # 距今超过 DEACTIVATE_NOTIFY_MAX_AGE_HOURS 或时间缺失时拒绝放行，
+            # 避免早已停编的历史台风在开关开启时被无条件放行刷屏
+            # （time_rule 目前对台风事件不设时效限制，需在此处兜底）。
             deactivate_notify = bool(
                 typhoon_filter.get("typhoon_deactivate_notify", True)
             )
             if deactivate_notify:
+                # 时效兜底：停编事件必须发生在 6 小时之内。
+                updated_at = self._coerce_datetime(domain_event.updated_at)
+                if updated_at is None:
+                    return RuleDecision.reject(
+                        reason="台风停编通知时效过滤",
+                        detail="该台风缺少观测时间，无法确认在 6 小时内停编",
+                        context=decision_context,
+                    )
+                age_hours = (
+                    datetime.now(timezone.utc) - updated_at
+                ).total_seconds() / 3600
+                if age_hours < 0:
+                    # 未来时间戳（观测时间晚于当前时间）：不属于 6 小时之内，
+                    # 拒绝放行并附负数老化小时数便于排查时钟偏差。
+                    return RuleDecision.reject(
+                        reason="台风停编通知时效过滤",
+                        detail="该台风最后一次观测时间晚于当前时间，无法确认在 6 小时内停编",
+                        context={
+                            **decision_context,
+                            "deactivate_age_hours": round(age_hours, 2),
+                        },
+                    )
+                if age_hours > self.DEACTIVATE_NOTIFY_MAX_AGE_HOURS:
+                    return RuleDecision.reject(
+                        reason="台风停编通知时效过滤",
+                        detail=(
+                            f"该台风最后一次观测于 {age_hours:.1f} 小时前，"
+                            f"超过停编通知最大时效 "
+                            f"{self.DEACTIVATE_NOTIFY_MAX_AGE_HOURS:.0f} 小时"
+                        ),
+                        context={
+                            **decision_context,
+                            "deactivate_age_hours": round(age_hours, 2),
+                            "deactivate_max_age_hours": (
+                                self.DEACTIVATE_NOTIFY_MAX_AGE_HOURS
+                            ),
+                        },
+                    )
                 # 仍尽量补充本地距离信息供展示复用。
                 estimation = self._build_location_estimation(
                     domain_event,
@@ -79,8 +126,11 @@ class TyphoonRule(BaseRule):
                     context.extras["typhoon_local_estimation"] = estimation
                 return RuleDecision.accept(
                     reason="台风停编通知",
-                    detail="该台风已停止编报",
-                    context=decision_context,
+                    detail=f"该台风已停止编报（{age_hours:.1f} 小时内停编）",
+                    context={
+                        **decision_context,
+                        "deactivate_age_hours": round(age_hours, 2),
+                    },
                 )
             if typhoon_filter.get("only_active", True):
                 return RuleDecision.reject(

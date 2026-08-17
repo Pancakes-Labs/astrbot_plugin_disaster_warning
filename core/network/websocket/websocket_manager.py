@@ -46,8 +46,19 @@ class WebSocketManager:
         self.connections: dict[str, ClientWebSocketResponse] = {}
         self.message_handlers: dict[str, Callable] = {}
         self.reconnect_tasks: dict[str, asyncio.Task] = {}
+        # 手动重连追踪表：记录管理员主动触发重连后尚未获得结果的连接。
+        # 键为连接名，值为唯一尝试标识 attempt_id（"{request_id}:{seq}"）：
+        # - 在首次 await 前登记，消除并发请求的 TOCTOU 覆盖竞态；
+        # - 成功/失败/取消路径均按 attempt_id 精确匹配后清理，避免旧 connect
+        #   任务误清新请求的标识；同时携带 request_id 供上层路由回执。
+        self._manual_reconnect_pending: dict[str, str] = {}
+        # 手动重连尝试序号生成器：同一连接每次物理重连尝试递增，保证标识唯一。
+        self._manual_reconnect_seq: dict[str, int] = {}
         # FAN 次要通道静默等待主通道的任务表（无感排队，不走错误重连日志）
         self._fan_secondary_wait_tasks: dict[str, asyncio.Task] = {}
+        # FAN 次要通道手动重连被暂缓后的超时清理任务表：
+        # 与 wait task 解耦（独立槽位），避免暂缓等待任务被误判复用。
+        self._fan_secondary_cleanup_tasks: dict[str, asyncio.Task] = {}
         self.connection_retry_counts: dict[str, int] = {}
         self.fallback_retry_counts: dict[str, int] = {}  # 兜底重试计数
         self.connection_info: dict[str, dict] = {}  # 存放连接 URI, header 等元数据
@@ -60,6 +71,13 @@ class WebSocketManager:
         self._offline_notify_callback: (
             Callable[[dict[str, Any]], Awaitable[None]] | None
         ) = None
+
+        # 手动重连结果回调（由上层业务注册，接收连接名、是否成功及详情载荷）。
+        # 与离线通知回调解耦：离线通知描述"被动掉线后的重试过程"，
+        # 而此回调专门汇报"管理员主动触发重连后的真实结果"。
+        self._reconnect_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = (
+            None
+        )
 
         # 实例化委托服务，保持高内聚低耦合
         self._reconnect_service = WebSocketReconnectService(self)
@@ -134,6 +152,22 @@ class WebSocketManager:
                 headers=headers,
                 connection_info=connection_info,
             )
+            # 手动重连被暂缓：若该连接正处于待确认状态，安排绑定 attempt_id 的
+            # 超时清理。否则主通道长期不可用时，待确认标记会永久残留，
+            # 导致后续 force_reconnect 被"已有进行中的手动重连"永久拒绝。
+            attempt_id = (connection_info or {}).get("manual_reconnect_attempt")
+            if attempt_id is not None:
+                cleanup = asyncio.create_task(
+                    self._schedule_deferred_attempt_cleanup(name, attempt_id),
+                    name=f"dw_fan_secondary_cleanup_{name}",
+                )
+                # 存入独立槽位，与静默等待任务解耦（避免 wait task 复用判断误判），
+                # 主通道恢复建连成功后由唤醒路径一并取消，避免误发"被暂缓"回执。
+                self._fan_secondary_cleanup_tasks[name] = cleanup
+                # 任务完成（超时清理已执行或已被取消）后自动移除槽位，避免残留。
+                cleanup.add_done_callback(
+                    lambda _t: self._fan_secondary_cleanup_tasks.pop(name, None)
+                )
             return
 
         websocket: ClientWebSocketResponse | None = None
@@ -229,6 +263,30 @@ class WebSocketManager:
                         self._handle_connection_error(name, uri, headers, error)
                         return
 
+                # 若该连接处于"手动重连待确认"状态，说明是管理员主动触发的重连：
+                # 建连成功且（FAN 连接）应用层鉴权通过后，才清除追踪标记并回调上层
+                # 汇报真实成功结果。若鉴权失败，上方错误路径会负责清除标记并汇报失败。
+                # 按 attempt_id 精确匹配清理：仅当本次任务携带的尝试标识与当前待确认
+                # 标识一致时才 pop 并回报，避免旧 connect 任务误清新请求的标识。
+                attempt_id = (self.connection_info.get(name) or {}).get(
+                    "manual_reconnect_attempt"
+                )
+                if attempt_id is not None:
+                    current = self._manual_reconnect_pending.get(name)
+                    if current == attempt_id:
+                        self._manual_reconnect_pending.pop(name, None)
+                        self._manual_reconnect_seq.pop(name, None)
+                        self.emit_reconnect_result(
+                            connection_name=name,
+                            success=True,
+                            message="重连成功，连接已建立",
+                            stage="success",
+                            # 回执显式携带原始 request_id 用于上层路由，
+                            # attempt_id 仅内部使用，双字段互不覆盖。
+                            request_id=attempt_id.rsplit(":", 1)[0],
+                            attempt_id=attempt_id,
+                        )
+
                 # 重置重连相关的状态变量
                 self.connection_retry_counts[name] = 0
                 self.fallback_retry_counts[name] = 0
@@ -259,7 +317,25 @@ class WebSocketManager:
             self._handle_connection_error(name, uri, headers, e)
 
         except asyncio.CancelledError:
-            # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出
+            # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出。
+            # 若该连接正处于"手动重连待确认"状态，按 attempt_id 精确匹配清理
+            # 待确认标记，并汇报取消回执，避免取消后残留标记导致后续重连被误拒。
+            attempt_id = (self.connection_info.get(name) or {}).get(
+                "manual_reconnect_attempt"
+            )
+            if attempt_id is not None:
+                current = self._manual_reconnect_pending.get(name)
+                if current == attempt_id:
+                    self._manual_reconnect_pending.pop(name, None)
+                    self._manual_reconnect_seq.pop(name, None)
+                    self.emit_reconnect_result(
+                        connection_name=name,
+                        success=False,
+                        message="重连被取消（任务终止）",
+                        stage="failed",
+                        request_id=attempt_id.rsplit(":", 1)[0],
+                        attempt_id=attempt_id,
+                    )
             logger.debug(f"[灾害预警] WebSocket 连接任务被取消: {name}")
             await self._release_existing_connection(
                 name,
@@ -508,6 +584,11 @@ class WebSocketManager:
             wait_task = self._fan_secondary_wait_tasks.pop(name, None)
             if wait_task is not None and not wait_task.done():
                 wait_task.cancel()
+            # 同步取消被暂缓的手动重连清理任务：主通道恢复后即将重新建连，
+            # 成功/失败回执由新的 connect 路径负责，清理任务不应再误发"被暂缓"回执。
+            cleanup_task = self._fan_secondary_cleanup_tasks.pop(name, None)
+            if cleanup_task is not None and not cleanup_task.done():
+                cleanup_task.cancel()
             task = self.reconnect_tasks.pop(name, None)
             if task is not None and not task.done():
                 task.cancel()
@@ -528,6 +609,26 @@ class WebSocketManager:
         self, name: str, uri: str, headers: dict | None, error: Exception
     ):
         """统一分发连接错误处理。"""
+        # 若该连接正处于"手动重连待确认"状态，说明管理员主动触发的重连已失败：
+        # 按 attempt_id 精确匹配清理（本次任务的尝试标识须与当前待确认标识一致），
+        # 再回调上层汇报失败结果（request_id 用于路由、attempt_id 用于匹配），
+        # 随后交给重连服务安排重试。
+        attempt_id = (self.connection_info.get(name) or {}).get(
+            "manual_reconnect_attempt"
+        )
+        if attempt_id is not None:
+            current = self._manual_reconnect_pending.get(name)
+            if current == attempt_id:
+                self._manual_reconnect_pending.pop(name, None)
+                self._manual_reconnect_seq.pop(name, None)
+                self.emit_reconnect_result(
+                    connection_name=name,
+                    success=False,
+                    message=f"重连失败: {error}",
+                    stage="failed",
+                    request_id=attempt_id.rsplit(":", 1)[0],
+                    attempt_id=attempt_id,
+                )
         self._reconnect_service.handle_connection_error(name, uri, headers, error)
 
     def _is_critical_error(self, error: Exception) -> bool:
@@ -555,16 +656,89 @@ class WebSocketManager:
             force_fallback=force_fallback,
         )
 
+    async def _schedule_deferred_attempt_cleanup(
+        self, name: str, attempt_id: str
+    ) -> None:
+        """为被 FAN 主通道暂缓的手动重连安排绑定 attempt_id 的超时清理。
+
+        当 FAN 次要通道因主通道 /all 未在线而被暂缓建连时，connect() 直接返回，
+        不触发成功/失败/取消回执，待确认标记会残留。若主通道长期不可用，
+        该连接的后续手动重连会被"已有进行中的手动重连"永久拒绝。
+
+        本方法在超时后若待确认标记仍匹配该 attempt_id，则清除标记并发送
+        "重连被暂缓"回执，保证终态最终可达。
+        """
+        # 超时窗口与重连服务的结果等待超时保持一致（默认 30 秒），
+        # 避免暂缓期间上层批次超时兜底后，底层仍残留待确认标记。
+        timeout_seconds = getattr(
+            self._reconnect_service, "MANUAL_RECONNECT_TIMEOUT", 30.0
+        )
+        try:
+            await asyncio.sleep(timeout_seconds)
+        except asyncio.CancelledError:
+            return
+        current = self._manual_reconnect_pending.get(name)
+        if current != attempt_id:
+            # 暂缓期间已产生终态（如主通道恢复后建连成功/失败），无需处理。
+            return
+        self._manual_reconnect_pending.pop(name, None)
+        self._manual_reconnect_seq.pop(name, None)
+        self.emit_reconnect_result(
+            connection_name=name,
+            success=False,
+            message="重连被暂缓（FAN 主通道未就绪）",
+            stage="failed",
+            request_id=attempt_id.rsplit(":", 1)[0],
+            attempt_id=attempt_id,
+        )
+
     async def _heartbeat_loop(self, name: str, websocket: ClientWebSocketResponse):
         """运行应用层心跳循环。"""
         await self._runtime_service.heartbeat_loop(name, websocket)
 
-    async def force_reconnect(self, name: str) -> bool:
-        """强制立即重连指定连接，跳过原有等待队列。"""
+    async def force_reconnect(self, name: str, *, request_id: str = "") -> bool:
+        """强制立即重连指定连接，跳过原有等待队列。
+
+        Args:
+            name: 连接标识
+            request_id: 请求批次标识，用于把重连结果路由回对应订阅者。
+        """
         # 若已有健康连接，没必要强行断开
         existing = self.connections.get(name)
         if existing is not None and not existing.closed:
             return False
+
+        # 拒绝同一连接的重复手动重连请求：若该连接仍处于"手动重连待确认"状态，
+        # 说明上一次强制重连尚未产生终态结果。此时若覆盖 attempt_id，旧批次将
+        # 永远收不到终态回执，且结果可能被路由到错误批次。
+        # 采用串行化策略：拒绝新请求，保留旧请求的完整回执链路。
+        if name in self._manual_reconnect_pending:
+            logger.debug(
+                f"[灾害预警] {name} 已有进行中的手动重连，拒绝重复触发 "
+                f"(尝试标识为{self._manual_reconnect_pending.get(name)})"
+            )
+            return False
+
+        # 检查是否保留了该连接的配置元信息
+        info = self.connection_info.get(name)
+        if not info:
+            logger.warning(f"[灾害预警] 无法重连 {name}: 找不到连接信息")
+            # 手动重连失败也应反馈到上层，避免命令侧只看到"已触发"却没有下文。
+            self.emit_reconnect_result(
+                connection_name=name,
+                success=False,
+                message="找不到连接信息，无法重连",
+                stage="failed",
+                request_id=request_id,
+            )
+            return False
+
+        # 生成唯一尝试标识并"在首次 await 前"登记：
+        # 消除两个并发调用都通过重复检查、后写覆盖先写标识的 TOCTOU 竞态。
+        seq = self._manual_reconnect_seq.get(name, 0) + 1
+        self._manual_reconnect_seq[name] = seq
+        attempt_id = f"{request_id}:{seq}"
+        self._manual_reconnect_pending[name] = attempt_id
 
         # 取消已处于等待计时队列中的待执行重试任务，避免竞争
         if name in self.reconnect_tasks:
@@ -572,12 +746,6 @@ class WebSocketManager:
             if task is not None and not task.done():
                 task.cancel()
                 logger.debug(f"[灾害预警] 取消了 {name} 正在等待的重连任务 (强制重连)")
-
-        # 检查是否保留了该连接的配置元信息
-        info = self.connection_info.get(name)
-        if not info:
-            logger.warning(f"[灾害预警] 无法重连 {name}: 找不到连接信息")
-            return False
 
         # 强制重连前先释放可能残留的半开/已关闭句柄，避免上游连接配额被占
         await self._release_existing_connection(
@@ -596,6 +764,11 @@ class WebSocketManager:
         info.pop("short_retry_notified", None)
 
         logger.info(f"[灾害预警] 正在手动重连 {name}...")
+
+        # 把尝试标识写入连接附加信息，供 connect 任务的成功/失败/取消路径
+        # 按 attempt_id 精确匹配清理并回报，避免旧任务误清新请求的标识。
+        info["manual_reconnect_attempt"] = attempt_id
+        self.connection_info[name] = info
 
         # 异步启动物理连接，不卡死调用线程
         asyncio.create_task(
@@ -673,6 +846,65 @@ class WebSocketManager:
     ) -> None:
         """设置离线通知回调。"""
         self._offline_notify_callback = callback
+
+    def set_reconnect_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
+        """设置手动重连结果回调。
+
+        与离线通知回调解耦：该回调只在管理员通过强制重连主动触发
+        重连后汇报真实结果（成功 / 失败 / 进入重连流程）。
+        """
+        self._reconnect_callback = callback
+
+    def emit_reconnect_result(
+        self,
+        connection_name: str,
+        success: bool,
+        message: str,
+        *,
+        stage: str = "result",
+        request_id: str = "",
+        attempt_id: str = "",
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """以异步安全方式触发手动重连结果回调。
+
+        Args:
+            request_id: 原始请求批次标识，供上层路由回执到对应订阅者。
+            attempt_id: 内部唯一尝试标识（"{request_id}:{seq}"），
+                用于底层待确认状态匹配，仅内部使用，不参与上层路由。
+        """
+        callback = self._reconnect_callback
+        if not callback:
+            return
+        info = self.connection_info.get(connection_name, {})
+        payload: dict[str, Any] = {
+            "connection_name": connection_name,
+            "data_source": info.get("data_source")
+            or info.get("connection_name")
+            or connection_name,
+            "request_id": request_id,
+            "attempt_id": attempt_id,
+            "success": success,
+            "message": message,
+            "stage": stage,
+            "detail": detail or {},
+        }
+
+        async def _invoke_callback() -> None:
+            # 捕获并记录回调异常，避免下游发送失败变成未处理的异步任务异常，
+            # 导致回执静默丢失且事件循环持续告警。
+            try:
+                await callback(payload)
+            except Exception as exc:
+                logger.error(
+                    f"[灾害预警] 手动重连结果回调处理失败 "
+                    f"({connection_name}, 请求 ID 为{request_id}): {exc}"
+                )
+
+        # 以非阻塞异步任务方式抛出给外层订阅者，避免阻塞建连/重连主流程。
+        asyncio.create_task(_invoke_callback())
 
     def _emit_offline_notification(
         self,

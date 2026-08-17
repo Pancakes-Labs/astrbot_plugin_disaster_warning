@@ -43,7 +43,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         return session_umo
 
     async def handle_disaster_reconnect(self, event):
-        """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。"""
+        """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
+
+        触发后立即返回"已触发"概览，并注册底层手动重连结果回执回调，
+        待各连接的真实建连结果（成功/失败/超时）到达后，异步推送到当前会话，
+        避免指令只反馈"已触发"却没有后续真实结果。
+        """
         # 管理类命令统一在入口先做管理员校验，避免内部逻辑重复散落权限判断。
         if not await self.plugin.is_plugin_admin(event):
             yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
@@ -56,13 +61,27 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         yield event.plain_result("🔄 正在尝试重连所有离线数据源...")
 
         try:
-            results = await self.plugin.disaster_service.reconnect_all_sources()
+            reconnect_service = self.plugin.disaster_service.reconnect_service
+            # 记录触发指令的会话，作为异步回执的推送目标。
+            target_session = getattr(event, "unified_msg_origin", None)
+
+            # 注册本批次回执回调，并拿到请求批次标识；
+            # 重连服务会在本轮结果全部消费完后自动清理该批次。
+            request_id, _unregister = reconnect_service.register_reconnect_callback(
+                self._build_reconnect_receipt_sender(target_session)
+            )
+            results = await reconnect_service.reconnect_all_sources(
+                request_id=request_id
+            )
+
             lines = ["🔄 重连操作结果："]
             success_count = 0
             fail_count = 0
             skip_count = 0
 
             for name, status in results.items():
+                # 展示名统一由重连服务按连接配置解析，避免向用户暴露内部字段名。
+                display_name = reconnect_service.resolve_display_name(name)
                 if "已触发" in status:
                     success_count += 1
                     icon = "✅"
@@ -72,12 +91,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 else:
                     skip_count += 1
                     icon = "⏩"
-                lines.append(f"  {icon} {name}: {status}")
+                lines.append(f"  {icon} {display_name}: {status}")
 
             lines.append("")
             lines.append(
                 f"📊 统计: 触发 {success_count}, 跳过 {skip_count}, 失败 {fail_count}"
             )
+            if success_count > 0:
+                lines.append("⏳ 重连结果将稍后推送，请留意后续消息。")
             # 匿名上报功能执行遥测
             await self._track_command_feature(
                 "command_force_reconnect",
@@ -96,6 +117,54 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             logger.error(f"[灾害预警] 重连操作失败: {e}")
             yield event.plain_result(f"❌ 重连操作失败: {str(e)}")
+
+    def _build_reconnect_receipt_sender(self, target_session: str | None):
+        """构造重连结果回执的异步发送器。
+
+        回执载荷包含展示名与结果描述，由重连服务在真实建连结果到达后调用。
+        订阅者的清理由重连服务在"本轮所有等待结果消费完毕"时统一完成。
+        """
+        if not target_session:
+            # 无有效目标会话时直接返回异步空操作，避免回调链断裂。
+            # _noop_reconnect_receipt 已具备正确异步签名，无需额外 lambda 包裹。
+            return self._noop_reconnect_receipt
+
+        async def _send(payload: dict) -> None:
+            display_name = str(payload.get("display_name") or "未知连接")
+            success = bool(payload.get("success"))
+            stage = str(payload.get("stage") or "result")
+            message = str(payload.get("message") or "")
+
+            if stage == "timeout":
+                line = f"⏳ {display_name}：{message}"
+            elif success:
+                line = f"✅ {display_name}：重连成功"
+            else:
+                line = f"❌ {display_name}：{message}"
+            await self._send_plain_to_session(target_session, line)
+
+        return _send
+
+    async def _noop_reconnect_receipt(self, payload: dict) -> None:
+        """无目标会话时的空回执处理（仅保留接口一致性）。"""
+        pass
+
+    async def _send_plain_to_session(self, session: str, text: str) -> None:
+        """向指定会话发送纯文本消息（复用消息管理器的会话发送能力）。"""
+        try:
+            message_manager = getattr(
+                self.plugin.disaster_service, "message_manager", None
+            )
+            if message_manager is None:
+                logger.warning("[灾害预警] 消息管理器不可用，无法发送重连回执")
+                return
+            session_sender = getattr(message_manager, "session_sender", None)
+            if session_sender is None:
+                logger.warning("[灾害预警] 会话发送器不可用，无法发送重连回执")
+                return
+            await session_sender.send(session, Comp.Plain(text))
+        except Exception as e:
+            logger.error(f"[灾害预警] 重连回执发送到 {session} 失败: {e}")
 
     async def handle_disaster_status(self, event):
         """处理运行状态查询命令，以合并转发多节点消息形式展示各个连接状态与子数据源情况。"""
