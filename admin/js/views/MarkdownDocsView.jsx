@@ -60,7 +60,7 @@ function MarkdownDocsView() {
     // 滚轮垂直滚动时转为横向滚动，触控板/滚轮步进不一致时归一化 delta 平滑连续滚动。
     // 监听器绑定在始终渲染的 .markdown-docs-toc-body 上（列表为条件渲染，
     // 直接挂列表会在加载完成前丢失绑定），实际列表元素在此 effect 内缓存到 ref，
-    // 仅在 markdownFiles 变化时重新查询，避免滚轮高频路径中的重复 DOM 查询。
+    // 仅在 markdownFiles / loadingList 变化时重新查询，避免滚轮高频路径中的重复 DOM 查询。
     React.useEffect(() => {
         const host = tocListRef.current;
         if (!host) return;
@@ -68,7 +68,13 @@ function MarkdownDocsView() {
         const handleWheel = (e) => {
             // 仅当垂直滚动占主导时接管，触控板横向滚动手势放行
             if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-            const list = tocScrollListRef.current;
+            let list = tocScrollListRef.current;
+            // 缓存列表已脱离 DOM（如刷新目录期间被替换为加载态）：
+            // 重新查询，仍不存在则放行，避免对失效元素 preventDefault 吞掉纵向滚动
+            if (!list || !host.contains(list)) {
+                list = host.querySelector('.markdown-docs-toc-list');
+                tocScrollListRef.current = list;
+            }
             if (!list) return; // 加载中 / 空状态：放行默认滚动
             const maxScroll = list.scrollWidth - list.clientWidth;
             if (maxScroll <= 0) return; // 列表未横向溢出：不接管，放行纵向滚动
@@ -80,7 +86,7 @@ function MarkdownDocsView() {
         };
         host.addEventListener('wheel', handleWheel, { passive: false });
         return () => host.removeEventListener('wheel', handleWheel);
-    }, [markdownFiles]);
+    }, [markdownFiles, loadingList]);
 
     return (
         // 外部容器，复用了通知中心的部分样式并加入文档特定主题类
