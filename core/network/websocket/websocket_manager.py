@@ -606,6 +606,17 @@ class WebSocketManager:
         if existing is not None and not existing.closed:
             return False
 
+        # 拒绝同一连接的重复手动重连请求：若该连接仍处于"手动重连待确认"状态，
+        # 说明上一次强制重连尚未产生终态结果。此时若覆盖 request_id，旧批次将
+        # 永远收不到终态回执，且结果可能被路由到错误批次。
+        # 采用串行化策略：拒绝新请求，保留旧请求的完整回执链路。
+        if name in self._manual_reconnect_pending:
+            logger.debug(
+                f"[灾害预警] {name} 已有进行中的手动重连，拒绝重复触发 "
+                f"(请求 ID 为{self._manual_reconnect_pending.get(name)})"
+            )
+            return False
+
         # 取消已处于等待计时队列中的待执行重试任务，避免竞争
         if name in self.reconnect_tasks:
             task = self.reconnect_tasks.pop(name, None)
@@ -762,8 +773,20 @@ class WebSocketManager:
             "stage": stage,
             "detail": detail or {},
         }
+
+        async def _invoke_callback() -> None:
+            # 捕获并记录回调异常，避免下游发送失败变成未处理的异步任务异常，
+            # 导致回执静默丢失且事件循环持续告警。
+            try:
+                await callback(payload)
+            except Exception as exc:
+                logger.error(
+                    f"[灾害预警] 手动重连结果回调处理失败 "
+                    f"({connection_name}, 请求 ID 为{request_id}): {exc}"
+                )
+
         # 以非阻塞异步任务方式抛出给外层订阅者，避免阻塞建连/重连主流程。
-        asyncio.create_task(callback(payload))
+        asyncio.create_task(_invoke_callback())
 
     def _emit_offline_notification(
         self,
