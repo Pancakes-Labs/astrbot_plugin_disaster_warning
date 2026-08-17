@@ -65,11 +65,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # 记录触发指令的会话，作为异步回执的推送目标。
             target_session = getattr(event, "unified_msg_origin", None)
 
-            # 注册本批次回执回调；重连服务会在本轮结果全部消费完后自动清空订阅者。
-            reconnect_service.register_reconnect_callback(
+            # 注册本批次回执回调，并拿到请求批次标识；
+            # 重连服务会在本轮结果全部消费完后自动清理该批次。
+            request_id, _unregister = reconnect_service.register_reconnect_callback(
                 self._build_reconnect_receipt_sender(target_session)
             )
-            results = await reconnect_service.reconnect_all_sources()
+            results = await reconnect_service.reconnect_all_sources(
+                request_id=request_id
+            )
 
             lines = ["🔄 重连操作结果："]
             success_count = 0
@@ -122,8 +125,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         订阅者的清理由重连服务在"本轮所有等待结果消费完毕"时统一完成。
         """
         if not target_session:
-            # 无有效目标会话时返回空操作，避免回调链断裂。
-            return lambda payload: self._noop_reconnect_receipt(payload)
+            # 无有效目标会话时直接返回异步空操作，避免回调链断裂。
+            # _noop_reconnect_receipt 已具备正确异步签名，无需额外 lambda 包裹。
+            return self._noop_reconnect_receipt
 
         async def _send(payload: dict) -> None:
             display_name = str(payload.get("display_name") or "未知连接")

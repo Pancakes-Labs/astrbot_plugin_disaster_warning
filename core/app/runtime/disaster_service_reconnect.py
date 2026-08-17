@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -15,6 +16,24 @@ from astrbot.api import logger
 
 from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
 from ...sources.display_registry import CONNECTION_DISPLAY_NAMES
+
+
+class _ReconnectBatch:
+    """单个手动重连请求批次的状态容器。
+
+    每次管理员触发一次重连命令都会创建一个独立批次，用于隔离不同请求：
+    - callbacks:  该批次订阅的回执回调（通常为触发指令的会话发送器）
+    - awaiting:   该批次正在等待底层结果的连接名集合
+    - registered: 该批次是否已完成全部连接登记（防止回调在登记完成前触发清理）
+    """
+
+    __slots__ = ("request_id", "callbacks", "awaiting", "registered")
+
+    def __init__(self, request_id: str):
+        self.request_id = request_id
+        self.callbacks: list[Callable[[dict[str, Any]], Awaitable[None]]] = []
+        self.awaiting: set[str] = set()
+        self.registered = False
 
 
 class DisasterServiceReconnectService:
@@ -26,8 +45,11 @@ class DisasterServiceReconnectService:
 
     职责划分：
     - 底层 WebSocketManager 只负责物理建连与成功/失败回调的原始广播；
-    - 本服务负责把结果按连接映射为友好展示名，并转交给命令侧注册的回执回调，
+    - 本服务负责把结果按连接映射为友好展示名，并按"请求批次"路由回执，
       最终由命令侧把回执异步推送到触发指令的会话。
+
+    批次隔离：每次命令触发都会生成唯一 request_id，回执只路由到同一请求的订阅者，
+    避免并发触发指令时结果串扰；无等待连接或全部消费完毕时立即清理批次，防止陈旧回调残留。
     """
 
     # 手动重连结果等待超时（秒）：超过该时长仍未收到底层成功/失败回调时，
@@ -37,22 +59,23 @@ class DisasterServiceReconnectService:
     def __init__(self, service):
         # 主服务中维护了连接计划与连接管理器，本服务只负责在其之上做重连编排。
         self.service = service  # 主服务 DisasterWarningService 实例
-        # 命令侧注册的回执回调列表：每个回调接收统一结果载荷
-        # （含展示名、成功标志、消息等）。支持多订阅者，避免多次触发指令时互相覆盖。
-        self._reconnect_callbacks: list[
-            Callable[[dict[str, Any]], Awaitable[None]]
-        ] = []
-        # 登记"正在等待底层结果"的连接名集合，用于超时兜底与并发保护。
-        self._awaiting: set[str] = set()
+        # 请求批次表：request_id -> _ReconnectBatch。
+        # 引入批次是为了隔离不同命令请求，避免并发触发时回执串扰或陈旧回调残留。
+        self._batches: dict[str, _ReconnectBatch] = {}
+        self._request_seq = itertools.count(1)
 
     # ------------------------------------------------------------------
-    # 回调注册与底层桥接
+    # 批次注册与底层桥接
     # ------------------------------------------------------------------
+
+    def _create_request_id(self) -> str:
+        """生成唯一请求批次标识。"""
+        return f"reconnect-{next(self._request_seq)}"
 
     def register_reconnect_callback(
         self, callback: Callable[[dict[str, Any]], Awaitable[None]]
-    ) -> None:
-        """注册手动重连结果回执回调（由命令侧注入）。
+    ) -> tuple[str, Callable[[], None]]:
+        """注册一次手动重连请求的回执回调。
 
         回调接收统一载荷字典，至少包含:
         - connection_name: 底层连接标识
@@ -61,42 +84,58 @@ class DisasterServiceReconnectService:
         - message: 人类可读的结果描述
         - stage: success / failed / timeout
 
-        支持多次调用以注册多个订阅者；返回注销函数，命令侧在回执完成后调用。
+        返回 (request_id, 注销函数)：
+        - request_id 用于把本次触发的重连结果关联回该批次；
+        - 注销函数供调用方在异常或提前结束时移除订阅。
         """
-        if callback not in self._reconnect_callbacks:
-            self._reconnect_callbacks.append(callback)
-        # 同时把底层管理器的手动重连结果回调桥接到本服务的统一回执处理入口。
+        request_id = self._create_request_id()
+        batch = self._batches.setdefault(request_id, _ReconnectBatch(request_id))
+        if callback not in batch.callbacks:
+            batch.callbacks.append(callback)
+        # 把底层管理器的手动重连结果回调桥接到本服务的统一回执处理入口。
+        # 桥接是单例的（WebSocketManager 只保存一个回调），
+        # 具体路由交由 _handle_ws_reconnect_result 按 request_id 分发到对应批次。
         ws_manager = getattr(self.service, "ws_manager", None)
         if ws_manager is not None and hasattr(ws_manager, "set_reconnect_callback"):
             ws_manager.set_reconnect_callback(self._handle_ws_reconnect_result)
 
         def _unregister() -> None:
-            if callback in self._reconnect_callbacks:
-                self._reconnect_callbacks.remove(callback)
+            if callback in batch.callbacks:
+                batch.callbacks.remove(callback)
+            if not batch.callbacks:
+                self._remove_batch(request_id)
 
-        return _unregister
+        return request_id, _unregister
 
-    def _broadcast_reconnect_result(self, payload: dict[str, Any]) -> None:
-        """把统一结果载荷广播给所有已注册的回执回调。"""
-        for callback in list(self._reconnect_callbacks):
-            try:
-                asyncio.create_task(callback(payload))
-            except Exception as exc:
-                logger.error(f"[灾害预警] 手动重连回执回调调度失败: {exc}")
+    def _remove_batch(self, request_id: str) -> None:
+        """移除批次并清理其等待状态，避免陈旧状态残留。"""
+        batch = self._batches.pop(request_id, None)
+        if batch is None:
+            return
+        # 兜底：把底层待确认表中仍属于本批次的连接标记清除，
+        # 防止本批次被清理后，底层后续结果因 request_id 无法路由而悬空。
+        ws_manager = getattr(self.service, "ws_manager", None)
+        pending = getattr(ws_manager, "_manual_reconnect_pending", None)
+        if pending is not None:
+            for conn_name in list(batch.awaiting):
+                if pending.get(conn_name) == request_id:
+                    pending.pop(conn_name, None)
 
-    def _handle_ws_reconnect_result(self, payload: dict[str, Any]) -> None:
-        """接收底层 WebSocketManager 手动重连结果并做上层转接。
+    async def _handle_ws_reconnect_result(self, payload: dict[str, Any]) -> None:
+        """接收底层 WebSocketManager 手动重连结果并做上层转接（异步）。
 
-        幂等保护：同一连接只会消费一次结果（成功/失败/超时任一先到者生效）。
-        本轮所有等待结果消费完毕后，自动清空订阅者，避免残留回调占用列表。
+        幂等保护：同一批次中同一连接只会消费一次结果（成功/失败/超时任一先到者生效）。
+        批次登记完成（registered）后，若所有等待连接均已出结果，自动清理批次订阅者。
         """
         conn_name = str(payload.get("connection_name") or "")
-        if not conn_name:
+        request_id = str(payload.get("request_id") or "")
+        if not conn_name or not request_id:
             return
-        # 若该连接不在"等待结果"集合中，说明是历史残留回调或非本批次触发，忽略。
-        if conn_name not in self._awaiting:
+        batch = self._batches.get(request_id)
+        # 若非本批次等待的连接或批次已清理，说明是历史残留/跨批次回调，忽略。
+        if batch is None or conn_name not in batch.awaiting:
             return
-        self._awaiting.discard(conn_name)
+        batch.awaiting.discard(conn_name)
 
         display_name = self.resolve_display_name(conn_name)
         result_payload = {
@@ -106,15 +145,20 @@ class DisasterServiceReconnectService:
             "message": str(payload.get("message") or ""),
             "stage": str(payload.get("stage") or "result"),
         }
-        self._broadcast_reconnect_result(result_payload)
-        # 全部连接已出结果，清空订阅者列表，避免长期占用。
-        if not self._awaiting:
-            self._clear_reconnect_callbacks()
+        self._broadcast_reconnect_result(batch, result_payload)
+        # 登记完成后若已全部出结果，清理批次，避免订阅者长期残留。
+        if batch.registered and not batch.awaiting:
+            self._remove_batch(request_id)
 
-    def _clear_reconnect_callbacks(self) -> None:
-        """清空所有已注册的回执回调订阅者。"""
-        if self._reconnect_callbacks:
-            self._reconnect_callbacks.clear()
+    def _broadcast_reconnect_result(
+        self, batch: _ReconnectBatch, payload: dict[str, Any]
+    ) -> None:
+        """把统一结果载荷广播给指定批次内的回执回调。"""
+        for callback in list(batch.callbacks):
+            try:
+                asyncio.create_task(callback(payload))
+            except Exception as exc:
+                logger.error(f"[灾害预警] 手动重连回执回调调度失败: {exc}")
 
     # ------------------------------------------------------------------
     # 展示名解析
@@ -158,13 +202,19 @@ class DisasterServiceReconnectService:
     # 重连编排主流程
     # ------------------------------------------------------------------
 
-    async def reconnect_all_sources(self) -> dict[str, str]:
-        """强制重连所有已启用但离线的数据源。"""
+    async def reconnect_all_sources(self, request_id: str = "") -> dict[str, str]:
+        """强制重连所有已启用但离线的数据源。
+
+        Args:
+            request_id: 由 register_reconnect_callback 生成的请求批次标识，
+                用于把本次触发的结果关联回对应批次的订阅者。
+        """
         results: dict[str, str] = {}
         # 校验 WebSocket 管理器是否正常就绪
         if not self.service.ws_manager:
             return {"error": "WebSocket管理器未初始化"}
 
+        batch = self._batches.get(request_id) if request_id else None
         reconnect_count = 0
         # 遍历已配置的所有数据源连接计划
         for conn_name, conn_config in self.service.connections.items():
@@ -177,11 +227,14 @@ class DisasterServiceReconnectService:
                 # 某些连接可能尚未完成首次建连，因此连接管理器内部还没有对应附加信息；
                 # 在强制重连前先补齐这些字段，方便底层重连逻辑与状态展示复用。
                 self._ensure_connection_info(conn_name, conn_config)
-                # 触发底层数据源物理连接重连操作
-                triggered = await self._force_reconnect(conn_name)
+                # 触发底层数据源物理连接重连操作，携带请求批次标识以路由回执。
+                triggered = await self._force_reconnect(
+                    conn_name, request_id=request_id
+                )
                 if triggered:
                     # 登记等待结果，供底层回调做幂等消费与超时兜底。
-                    self._awaiting.add(conn_name)
+                    if batch is not None:
+                        batch.awaiting.add(conn_name)
                     results[conn_name] = "✅ 已触发重连"
                     reconnect_count += 1
                 else:
@@ -192,17 +245,24 @@ class DisasterServiceReconnectService:
                 logger.error(f"[灾害预警] 手动重连 {conn_name} 失败: {e}")
 
         logger.info(f"[灾害预警] 手动重连操作完成，触发了 {reconnect_count} 个重连任务")
-        # 为每个已触发重连的连接安排超时兜底检查，防止命令侧长时间无回执。
-        if reconnect_count > 0 and self._reconnect_callbacks:
-            await self._schedule_timeout_guard(list(self._awaiting))
+        if batch is not None:
+            # 关键时序：全部连接登记完成后再允许批次清理，
+            # 避免循环中较早出结果的连接触发过早清理而丢失后续连接的回执。
+            batch.registered = True
+            if reconnect_count > 0 and batch.callbacks:
+                self._schedule_timeout_guard(batch)
+            elif not batch.awaiting:
+                # 无任何等待中的连接（全部未触发/跳过），立即清理批次避免陈旧回调残留。
+                self._remove_batch(request_id)
         return results
 
-    async def _schedule_timeout_guard(self, conn_names: list[str]) -> None:
-        """为等待结果的连接安排超时兜底回执。
+    def _schedule_timeout_guard(self, batch: _ReconnectBatch) -> None:
+        """为批次内等待结果的连接安排超时兜底回执（即发即弃，不阻塞调用方）。
 
-        若连接仍未从 _awaiting 中消费掉，说明底层既未成功也未失败（可能处于长重试等待），主动推送"仍在尝试中"回执。
+        若连接在超时后仍未从批次 awaiting 中消费掉，说明底层既未成功也未失败
+        （可能处于长重试等待），主动推送"仍在尝试中"回执。
         """
-        for conn_name in conn_names:
+        for conn_name in list(batch.awaiting):
             display_name = self.resolve_display_name(conn_name)
 
             async def _guard(conn_name: str = conn_name, display: str = display_name):
@@ -211,9 +271,9 @@ class DisasterServiceReconnectService:
                 except asyncio.CancelledError:
                     return
                 # 超时后仍未被消费，说明重连仍在进行中，发送超时回执。
-                if conn_name not in self._awaiting:
+                if conn_name not in batch.awaiting:
                     return
-                self._awaiting.discard(conn_name)
+                batch.awaiting.discard(conn_name)
                 payload = {
                     "connection_name": conn_name,
                     "display_name": display,
@@ -221,17 +281,17 @@ class DisasterServiceReconnectService:
                     "message": "重连仍在尝试中，可稍后使用状态指令确认",
                     "stage": "timeout",
                 }
-                # 超时回执同样广播给所有订阅者。
-                for callback in list(self._reconnect_callbacks):
+                # 超时回执同样广播给本批次订阅者。
+                for callback in list(batch.callbacks):
                     try:
                         await callback(payload)
                     except Exception as exc:
                         logger.error(
                             f"[灾害预警] 手动重连超时回执发送失败 {conn_name}: {exc}"
                         )
-                # 全部连接已出结果，清空订阅者列表，避免长期占用。
-                if not self._awaiting:
-                    self._clear_reconnect_callbacks()
+                # 全部连接已出结果，清理批次订阅者。
+                if batch.registered and not batch.awaiting:
+                    self._remove_batch(batch.request_id)
 
             # 挂载为后台任务，并登记到主服务统一回收，避免停机泄漏。
             task = asyncio.create_task(_guard())
@@ -277,10 +337,17 @@ class DisasterServiceReconnectService:
             **connection_info,
         }
 
-    async def _force_reconnect(self, conn_name: str) -> bool:
-        """调用 WebSocketManager 执行底层强制物理重连。"""
+    async def _force_reconnect(self, conn_name: str, *, request_id: str = "") -> bool:
+        """调用 WebSocketManager 执行底层强制物理重连。
+
+        Args:
+            conn_name: 连接标识
+            request_id: 请求批次标识，透传给底层用于结果归因路由。
+        """
         # 并非所有连接管理器实现都强制要求提供该接口，
         # 因此这里先做能力检查，再决定是否触发主动重连。
         if not hasattr(self.service.ws_manager, "force_reconnect"):
             return False
-        return await self.service.ws_manager.force_reconnect(conn_name)
+        return await self.service.ws_manager.force_reconnect(
+            conn_name, request_id=request_id
+        )
