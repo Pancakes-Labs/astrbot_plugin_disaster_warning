@@ -298,8 +298,8 @@ class StatsRuleService:
     ) -> None:
         """记录气象统计被跳过的日志，附带地区解析失败上下文以便排障。"""
         detail_parts = [
-            f"事件 ID 为 {event_id or '未知'}",
-            f"来源：{source_id or 'unknown'}",
+            f"事件编号为 {event_id or '未知'}",
+            f"来源：{source_id or '未知来源'}",
         ]
         if place_name:
             detail_parts.append(f"提取地名为 {place_name}")
@@ -308,7 +308,7 @@ class StatsRuleService:
         if title_text:
             detail_parts.append(f"标题为{title_text[:60]}")
         if headline_text:
-            detail_parts.append(f"headline={headline_text[:80]}")
+            detail_parts.append(f"副标题为 {headline_text[:80]}")
         logger.warning(
             "[灾害预警] 气象预警地区信息无效或缺失，已跳过该次气象详细统计"
             f"（{'; '.join(detail_parts)}）"

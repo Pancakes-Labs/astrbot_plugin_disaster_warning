@@ -275,13 +275,18 @@ class EventPipeline:
         config: dict,
         *,
         mode: str = "forward",
-    ) -> None:
+    ) -> tuple[int, list, list]:
         """聚合缓冲区推送回调。
 
         与 WeatherAggregationService.set_flush_callback 约定一致：
-        返回实际成功发送的条目数（规则链复核/消息构建可能过滤部分条目，
-        统计口径以实际发送为准）；全部节点发送失败时抛出 RuntimeError，
-        由聚合服务捕获后放回缓冲区重试。
+        恒返回 (sent_count, deferred_entries, failed_entries) 三元组：
+        - sent_count：实际成功发送（所在节点发送成功）的条目数
+          （规则链复核/消息构建可能过滤部分条目，统计口径以实际发送为准）；
+        - deferred_entries：fill_nodes 开启时因节点未满本轮未发送、需放回
+          缓冲区等待下次推送窗口凑满的条目（不会丢弃）；
+        - failed_entries：发送失败节点内的条目，需由聚合服务按失败重试路径
+          回收（累计重试计数，达到上限后丢弃），避免静默丢失。
+        全部节点发送失败时抛出 RuntimeError，由聚合服务捕获后放回缓冲区重试。
 
         为每条气象预警构建含图标的完整消息链后发送。
         每条预警在构建消息前先通过规则链复核，未通过的不发送。
@@ -296,7 +301,7 @@ class EventPipeline:
         mode="single" 时逐条发送（降级路径）。
         """
         if not entries:
-            return
+            return 0, [], []
 
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
@@ -359,7 +364,7 @@ class EventPipeline:
 
         if not built_messages:
             # 全部条目被规则链复核过滤或构建失败，实际未发送任何预警
-            return 0
+            return 0, [], []
 
         if mode == "forward":
             # 构建合并转发节点
@@ -378,9 +383,34 @@ class EventPipeline:
             # 避免"一个多一个少"（如 4+4+12+1+10）。
             # 每个节点独立构建一个合并转发消息链（含头部节点）。
             total = len(built_messages)
-            node_count = (total + max_batch - 1) // max_batch
+
+            # 填满节点开关 fill_nodes（默认开启）：
+            # 开启后仅发送能装满 max_batch 的完整节点；切分后剩余条数无法
+            # 装满一个节点时，该部分本轮不发送，放回缓冲区等待下次推送窗口
+            # 凑满后再发（不会丢弃）。关闭后按原有逻辑发送全部条目（最后一
+            # 个节点可不装满）。停机 flush_all 强制发送全部，避免积压预警
+            # 在停机时因节点未满而滞留。
+            # 低流量会话下 total < max_batch 时本应无完整节点可发；但若延期
+            # 条目反复滞留聚合服务会以 force_send_all 标记本轮强制发送，此时 fill_nodes 判定失效。
+            fill_nodes = bool(agg_config.get("fill_nodes", True))
+            is_flush_all = bool(
+                self._weather_aggregation is not None
+                and self._weather_aggregation.is_flushing_all()
+            )
+            force_send_all = bool(
+                self._weather_aggregation is not None
+                and self._weather_aggregation.should_force_send_all(session)
+            )
+            if fill_nodes and not is_flush_all and not force_send_all:
+                full_batch_count = total // max_batch
+            else:
+                full_batch_count = (total + max_batch - 1) // max_batch
+            node_count = full_batch_count
             sent_nodes = 0
             failed_nodes = 0
+            # 发送失败节点内的条目：在 except 块内立即收集当前 batch，
+            # 避免用"首个失败节点下标"推断失败范围而误收后续成功节点的条目。
+            failed_entries: list[WeatherBufferEntry] = []
             # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
             # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
             sent_entry_count = 0
@@ -419,6 +449,8 @@ class EventPipeline:
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
                     # 记录错误后继续发送剩余节点，避免触发无意义的降级限流。
                     failed_nodes += 1
+                    # 立即收集本失败节点内的条目，走失败重试路径（累计重试计数）
+                    failed_entries.extend(entry for entry, _ in batch)
                     logger.error(
                         f"[灾害预警] 气象预警合并转发节点 {batch_idx + 1}/{node_count} "
                         f"发送失败 ({session_log}): {e}"
@@ -432,17 +464,29 @@ class EventPipeline:
                     f"{failed_nodes}/{node_count} 个节点失败"
                 )
 
+            # 节点未满回退：完整节点之后剩余的条目
+            # 本轮未发送，放回缓冲区等待下次推送窗口凑满后再发。
+            deferred_entries = [
+                entry for entry, _ in built_messages[full_batch_count * max_batch :]
+            ]
+
             plugin_logger.info(
                 f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
                 f"共 {sent_entry_count} 条预警，切为 {sent_nodes} 个节点"
                 f"（单批上限 {max_batch}）"
+                + (
+                    f"，{len(deferred_entries)} 条节点未满已放回缓冲区等待凑满"
+                    if deferred_entries
+                    else ""
+                )
                 + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
                 event_stream="weather_alarm",
                 is_silent_window=True,
             )
-            # 返回实际成功发送（所在节点发送成功）的条目数，
-            # 供聚合服务统计真实转发量，避免高报成功数量。
-            return sent_entry_count
+            # 返回实际成功发送（所在节点发送成功）的条目数、需放回缓冲区的
+            # 节点未满条目、以及发送失败节点内的条目（走失败重试路径），
+            # 供聚合服务统计真实转发量，避免高报成功数量与静默丢失。
+            return sent_entry_count, deferred_entries, failed_entries
         else:
             # 逐条发送（降级路径）
             for entry, message in built_messages:
@@ -454,4 +498,4 @@ class EventPipeline:
                     )
                     raise
             # 返回实际成功发送的条目数（供聚合服务统计真实转发量）
-            return len(built_messages)
+            return len(built_messages), [], []

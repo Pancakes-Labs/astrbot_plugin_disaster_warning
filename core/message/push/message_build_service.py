@@ -543,6 +543,22 @@ class MessageBuildService:
         "响应类型不是图片",
     )
 
+    # 已知存在防盗链（Referer 校验）的图片服务域名后缀；
+    # 命中时若抓取返回 403，大概率是缺失 Referer 导致。
+    _ANTI_HOTLINK_HOST_SUFFIXES: tuple[str, ...] = (".cwa.gov.tw",)
+
+    @staticmethod
+    def _is_anti_hotlink_url(url: str) -> bool:
+        """判断 URL 是否命中已知防盗链图片服务域名。"""
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except Exception:
+            return False
+        return any(
+            host.endswith(suffix)
+            for suffix in MessageBuildService._ANTI_HOTLINK_HOST_SUFFIXES
+        )
+
     async def _append_remote_image_component(
         self,
         chain: MessageChain,
@@ -576,9 +592,9 @@ class MessageBuildService:
                 return True
             except Exception as e:
                 logger.warning(
-                    "[灾害预警] 远程图片转Base64失败 "
-                    f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
-                    f"content_type={fetch_result.get('content_type')}, bytes={fetch_result.get('bytes')}, error={type(e).__name__}: {e}"
+                    "[灾害预警] 远程图片转 Base64 失败 "
+                    f"（{media_label}）：原始地址为 {fetch_result.get('source_url')}，最终地址为 {fetch_result.get('final_url')}，"
+                    f"内容类型为 {fetch_result.get('content_type')}，数据大小 {fetch_result.get('bytes')} 字节，错误为 {type(e).__name__}: {e}"
                 )
 
         if fetch_result:
@@ -589,12 +605,24 @@ class MessageBuildService:
                 marker in error_msg for marker in self._PSEUDO_IMAGE_ERROR_MARKERS
             )
             if not is_pseudo_image:
+                # 命中防盗链域名时在日志中附加提示，便于快速定位 403 根因。
+                # 原始 URL 与重定向后的最终 URL 都检查：若原始地址重定向到 CDN，
+                # 仅查 final_url 会漏掉原始防盗链域名的提示。
+                referer_hint = (
+                    "，疑似目标站防盗链(Referer)拦截"
+                    if self._is_anti_hotlink_url(
+                        str(fetch_result.get("final_url") or "")
+                    )
+                    or self._is_anti_hotlink_url(normalized_url)
+                    else ""
+                )
                 logger.warning(
                     "[灾害预警] 远程图片抓取失败 "
-                    f"({media_label}): source={fetch_result.get('source_url')}, final={fetch_result.get('final_url')}, "
-                    f"status={fetch_result.get('status')}, content_type={fetch_result.get('content_type')}, "
-                    f"content_length={fetch_result.get('content_length')}, bytes={fetch_result.get('bytes')}, "
-                    f"error={fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
+                    f"（{media_label}）：原始地址为 {fetch_result.get('source_url')}，最终地址为 {fetch_result.get('final_url')}，"
+                    f"状态码 {fetch_result.get('status')}，内容类型为 {fetch_result.get('content_type')}，"
+                    f"内容长度 {fetch_result.get('content_length')}，数据大小 {fetch_result.get('bytes')} 字节，"
+                    f"错误为 {fetch_result.get('exception_type') or 'FetchError'}: {fetch_result.get('error')}"
+                    f"{referer_hint}"
                 )
 
         # 抓取或 Base64 转换失败后，若开启 URL 回退，则尝试利用 URL 方式插入图片组件
@@ -605,8 +633,8 @@ class MessageBuildService:
             except Exception as e:
                 parsed = urlparse(normalized_url)
                 logger.warning(
-                    "[灾害预警] 远程图片URL回退发送失败 "
-                    f"({media_label}): scheme={parsed.scheme}, host={parsed.netloc}, url={normalized_url}, error={type(e).__name__}: {e}"
+                    "[灾害预警] 远程图片 URL 回退发送失败 "
+                    f"（{media_label}）：协议为 {parsed.scheme}，主机为 {parsed.netloc}，地址为 {normalized_url}，错误为 {type(e).__name__}: {e}"
                 )
         return False
 

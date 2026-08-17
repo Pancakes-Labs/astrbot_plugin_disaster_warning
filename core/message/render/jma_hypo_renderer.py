@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from datetime import date, datetime
 from typing import Any
 
@@ -342,7 +343,8 @@ def _nice_range(
     if abs(hi - lo) < 1e-9:
         pad = 1.0 if abs(lo) < 1e-9 else abs(lo) * 0.05
         return lo - pad, hi + pad
-    pad = (hi - lo) * 0.08
+    # 默认留白缩小，避免数据两端出现大段空白
+    pad = (hi - lo) * 0.06
     return lo - pad, hi + pad
 
 
@@ -388,6 +390,76 @@ def _geo_axis_setup(
     while v <= hi + step * 1e-9 and guard < 100:
         if v >= lo - 1e-9:
             # 抑制浮点毛刺（如 129.999999）
+            ticks.append(round(v, 10))
+        v += step
+        guard += 1
+
+    if not ticks:
+        ticks = [lo, hi]
+    return lo, hi, ticks
+
+
+def _time_axis_setup(
+    values: list[float],
+    *,
+    pad_ratio: float = 0.0267,
+    min_pad: float = 3 * 3600.0,
+    target_count: int = 6,
+    max_ticks: int = 10,
+) -> tuple[float, float, list[float]]:
+    """时间轴：数据极值 + 小留白，不向外扩到整天边界。
+
+    与 `_nice_ticks` 的区别：
+    - 轴范围不向外扩张到整数日边界（避免时间轴两端出现大段空白日期）。
+    - 仅在数据极值附近保留少量留白，并生成整天步长刻度，避免非整日刻度导致 "%m-%d" 日期标签重复。
+
+    刻度策略（动态）：
+    - 短跨度（逐天可画且不超过 max_ticks）→ 逐天画轴；
+    - 逐天会超过 max_ticks → 按 max_ticks 等距取整天步长（不再逐个画）。
+
+    Args:
+        values: 时间戳列表（Unix 秒）。
+        pad_ratio: 两端留白占数据跨度的比例（默认 0.0267，约为原 0.08 的 1/3）。
+        min_pad: 最小留白（秒），默认 3 小时。
+        target_count: 目标刻度数量（仅作为步长估算的基准）。
+        max_ticks: 时间轴刻度数量上限，超过后改为等距整天步长。
+
+    Returns:
+        (lo, hi, ticks)：轴范围与刻度列表。
+    """
+    if not values:
+        # 空数据时返回空刻度：绘图区已覆盖"该时段无地震记录"提示，
+        # 避免出现 1970-01-01 起算的无意义 epoch 日期刻度。
+        return 0.0, 0.0, []
+
+    data_lo = float(min(values))
+    data_hi = float(max(values))
+    span = data_hi - data_lo
+    if span < 1e-9:
+        pad = min_pad
+    else:
+        pad = max(span * pad_ratio, min_pad)
+
+    lo = data_lo - pad
+    hi = data_hi + pad
+
+    # 时间轴步长取整天倍数，避免非整日刻度导致日期标签重复。
+    # 逐天可行且不超上限 → 逐天；否则按上限等距取整天步长。
+    day = 86400.0
+    span_days = max((hi - lo) / day, 1e-9)
+    if span_days <= max(1, max_ticks):
+        step = day
+    else:
+        raw_step = span_days / max(max_ticks, 1)
+        step = max(day, math.ceil(raw_step - 1e-12) * day)
+
+    # 起始刻度取数据下限所在整天（floor），保证覆盖完整日期序列
+    first = math.floor((lo / step) - 1e-12) * step
+    ticks: list[float] = []
+    v = first
+    guard = 0
+    while v <= hi + step * 1e-9 and guard < 500:
+        if v >= lo - 1e-9:
             ticks.append(round(v, 10))
         v += step
         guard += 1
@@ -506,6 +578,37 @@ def _map_value(v: float, lo: float, hi: float, a: float, b: float) -> float:
     if abs(hi - lo) < 1e-12:
         return (a + b) / 2.0
     return a + (v - lo) / (hi - lo) * (b - a)
+
+
+def _map_depth_axis_x(
+    dep: float,
+    dep_max: float,
+    plot_left: float,
+    plot_right: float,
+) -> float:
+    """深度 → 像素 X（水平方向，左浅右深）。
+
+    与 `_map_depth_axis`（垂直方向，上浅下深）共用相同的分段比例：
+    - 左端留白（-25~0）→ DEPTH_FRAC_PAD
+    - 浅源放大（0~100）→ DEPTH_FRAC_SHALLOW
+    - 深源压缩（100~max）→ 剩余宽度
+
+    用于深度时间投影（PLOT_DEP_TIME）的 X 轴，与 Y 轴深度投影保持
+    一致的"浅源放大、深源压缩"视觉语义。
+    """
+    w = plot_right - plot_left
+    x0 = plot_left  # dep = -25
+    x1 = plot_left + w * DEPTH_FRAC_PAD  # dep = 0
+    x2 = x1 + w * DEPTH_FRAC_SHALLOW  # dep = 100
+    x3 = plot_right  # dep = max
+
+    d = float(dep)
+    if d <= 0:
+        return _map_value(d, DEPTH_PAD_TOP, 0.0, x0, x1)
+    if d <= DEPTH_SHALLOW_BREAK:
+        return _map_value(d, 0.0, DEPTH_SHALLOW_BREAK, x1, x2)
+    hi = max(dep_max, DEPTH_SHALLOW_BREAK + 1.0)
+    return _map_value(d, DEPTH_SHALLOW_BREAK, hi, x2, x3)
 
 
 def _format_axis_value(v: float, is_time: bool, *, prefer_int: bool = False) -> str:
@@ -628,12 +731,17 @@ class JmaHypoRenderer:
         """渲染并保存 PNG，成功返回路径。"""
         mode = mode or PLOT_LON_LAT
         stats = stats or {}
+        render_started = time.perf_counter()
         try:
             if mode == PLOT_LON_LAT:
                 img = self._render_map(events, start_date, end_date, stats)
             else:
                 img = self._render_scatter(events, mode, start_date, end_date, stats)
             img.save(output_path, "PNG")
+            elapsed = time.perf_counter() - render_started
+            logger.info(
+                f"[灾害预警] JMA 震央分布图渲染成功（{mode}），耗时 {elapsed:.3f}秒"
+            )
             return output_path
         except Exception as exc:
             logger.error(f"[灾害预警] JMA 震央分布图渲染失败: {exc}", exc_info=True)
@@ -746,6 +854,12 @@ class JmaHypoRenderer:
         x_is_depth = _is_depth_axis(x_label)
         y_is_depth = _is_depth_axis(y_label)
 
+        # 时间轴判定（用于 Y 轴的时间分支与刻度格式化，需在轴计算前定义）
+        # 注意：6 种投影中时间均在 Y 轴（经度时间/纬度时间/深度时间）；
+        # X 轴恒为经度/纬度/深度，不存在时间在 X 轴的情况。
+        is_y_time = mode in (PLOT_LON_TIME, PLOT_LAT_TIME, PLOT_DEP_TIME)
+        is_x_time = False
+
         # X 轴
         # 经度/纬度：用数据极值自适应，禁止 nice_ticks 把范围外扩成 110~160
         x_is_geo = mode in (
@@ -770,6 +884,10 @@ class JmaHypoRenderer:
         # Y 轴
         if y_is_depth:
             y_lo, y_hi, y_ticks = _depth_axis_setup(ys)
+        elif is_y_time:
+            # 时间轴：数据极值 + 小留白，避免两端出现大段空白日期。
+            # Y 轴方向最多 10 个刻度，超过后等距画。
+            y_lo, y_hi, y_ticks = _time_axis_setup(ys, target_count=6, max_ticks=10)
         else:
             y_raw_lo, y_raw_hi = _nice_range(ys, y_fallback)
             y_lo, y_hi, y_ticks = _nice_ticks(
@@ -784,14 +902,12 @@ class JmaHypoRenderer:
         )
 
         # 网格与刻度
-        is_y_time = mode in (PLOT_LON_TIME, PLOT_LAT_TIME, PLOT_DEP_TIME)
-        is_x_time = False
         tick_font = _get_font(14 * s)
 
         def _x_to_px(xv: float) -> float:
             if x_is_depth:
-                # 深度作 X 时暂用线性（少见）；Y 深度才用分段
-                return _map_value(xv, x_lo, x_hi, plot_left, plot_right)
+                # 深度作 X（深度时间投影）：与 Y 深度一致的分段压缩，左浅右深
+                return _map_depth_axis_x(xv, x_hi, plot_left, plot_right)
             return _map_value(xv, x_lo, x_hi, plot_left, plot_right)
 
         def _y_to_px(yv: float) -> float:

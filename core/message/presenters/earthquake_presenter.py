@@ -25,6 +25,7 @@ from ...services.geo.cn_district_intensity_service import (
 )
 from ...services.geo.intensity_service import IntensityCalculator
 from ...services.geo.jma_seis_int_loc_loader import get_sect_map
+from ...services.geo.jp_sect_intensity_service import JpSectIntensityService
 from ...services.geo.travel_time_service import compute_s_wave_countdown
 from ...services.identity.event_identity import ensure_aware_datetime
 from .base_presenter import BasePresenter
@@ -199,11 +200,21 @@ def _append_local_estimation(
     dist = local_est.get("distance", 0.0)
     inte = local_est.get("intensity", 0.0)
     place = local_est.get("place_name", "本地")
-    desc = IntensityCalculator.get_intensity_description(inte)
+    # 本地监控按坐标自动选择体系：jma（日本震度）用震度文案，
+    # cenc（中国烈度）保持烈度文案；缺失时默认按中国烈度处理。
+    system = str(local_est.get("system") or "cenc").strip().lower()
 
     lines.append("")
     lines.append(f"📍{place}预估：")
-    lines.append(f"距离震中 {dist:.1f} km，预估最大烈度 {inte:.1f} ({desc})")
+    if system == "jma":
+        scale_display = ScaleConverter.format_measured_intensity_display(inte)
+        if not scale_display:
+            scale_display = f"{inte:.1f}"
+        desc = IntensityCalculator.get_shindo_description(inte)
+        lines.append(f"距离震中 {dist:.1f} km，预估最大震度 {scale_display} ({desc})")
+    else:
+        desc = IntensityCalculator.get_intensity_description(inte)
+        lines.append(f"距离震中 {dist:.1f} km，预估最大烈度 {inte:.1f} ({desc})")
 
     # P/S 波预计到达时间仅对预警类消息有意义（震后情报已无预警价值）
     if not include_travel_time:
@@ -247,13 +258,18 @@ def _append_local_estimation(
 def _append_cn_district_estimation(
     lines: list[str],
     display_context: EarthquakeDisplayContext,
+    *,
+    enabled: bool = True,
 ) -> None:
     """把中国影响区县预估列表附加到文本尾部。
 
     仅用于中国地震预警展示；正式测定不附加。
-    仅在震中位于中国大陆附近、且能解析出受影响区县时输出。
+    仅在开关开启、震中位于中国大陆附近、且能解析出受影响区县时输出。
     资源加载失败或无命中区县时静默跳过，不影响主推送链路。
     """
+    if not enabled:
+        return
+
     lat = display_context.latitude
     lon = display_context.longitude
     mag = display_context.magnitude
@@ -289,6 +305,63 @@ def _append_cn_district_estimation(
         else:
             loc_str = "、".join(names)
         lines.append(f"  {emoji}[烈度{level}] {loc_str}")
+
+
+def _append_jp_sect_estimation(
+    lines: list[str],
+    display_context: EarthquakeDisplayContext,
+) -> None:
+    """把日本影响地域震度预估列表附加到文本尾部。
+
+    仅用于日本紧急地震速报展示；正式测定不附加。
+    仅在开关开启、且能解析出受影响地域时输出。
+    资源加载失败或无命中地域时静默跳过，不影响主推送链路。
+    """
+    lat = display_context.latitude
+    lon = display_context.longitude
+    mag = display_context.magnitude
+    depth = display_context.depth
+    # 缺少位置或震级时无法估算；深度缺失时按 10 km 兜底
+    if lat is None or lon is None or mag is None:
+        return
+    depth_km = float(depth) if depth is not None else 10.0
+
+    # PLUM/假定震源下 M1.0 为占位震级：JMA 距离衰减式对 <3 无意义，直接跳过
+    try:
+        mag_f = float(mag)
+    except (TypeError, ValueError):
+        return
+    if mag_f < 3.0:
+        return
+
+    try:
+        estimates = JpSectIntensityService.estimate_affected_sects(
+            float(lat), float(lon), mag_f, depth_km
+        )
+    except Exception:
+        return
+
+    if not estimates:
+        return
+
+    # 按震度阶级分组
+    groups = JpSectIntensityService.group_by_shindo(estimates)
+    if not groups:
+        return
+
+    lines.append("")
+    lines.append("📡预估影响地域（仅供参考）：")
+    for level, sects in groups.items():
+        # 阶级值转展示文本（4.5→5弱, 5.0→5强, ...）
+        scale_display = ScaleConverter.format_jma_cwa_scale_display(level)
+        emoji = _get_intensity_emoji(level, is_eew=True, is_shindo=True)
+        # 每行最多展示 5 个地域名，超出部分用「等N处」省略
+        max_show = 5
+        if len(sects) > max_show:
+            loc_str = "、".join(sects[:max_show]) + f" 等{len(sects)}处"
+        else:
+            loc_str = "、".join(sects)
+        lines.append(f"  {emoji}[震度{scale_display}] {loc_str}")
 
 
 class CeaEewPresenter(BasePresenter):
@@ -364,9 +437,14 @@ class CeaEewPresenter(BasePresenter):
         lines = rendered.split("\n") if rendered else []
         # 本地预估仅在上下文携带 local_estimation 时输出（跟随会话级配置）
         _append_local_estimation(lines, display_context)
-        # 追加中国影响区县预估列表（独立于本地监控配置）
+        # 追加中国影响区县预估列表（受会话级开关控制，独立于本地监控配置）
+        cn_enabled = bool(
+            _resolve_options(display_context, options).get(
+                "cn_district_intensity_estimate", False
+            )
+        )
         if not any("预估影响区县" in line for line in lines):
-            _append_cn_district_estimation(lines, display_context)
+            _append_cn_district_estimation(lines, display_context, enabled=cn_enabled)
         return "\n".join(lines)
 
 
@@ -617,6 +695,12 @@ class JmaEewPresenter(BasePresenter):
                 lines.append(f"⚠️警报区域：{jma_warn_area.strip()}")
 
         _append_local_estimation(lines, display_context)
+        # 追加日本影响地域震度预估列表（受会话级开关控制）
+        jp_enabled = bool(
+            _resolve_options(display_context, options).get("jma_shindo_estimate", False)
+        )
+        if jp_enabled and not any("预估影响地域" in line for line in lines):
+            _append_jp_sect_estimation(lines, display_context)
         return "\n".join(lines)
 
 

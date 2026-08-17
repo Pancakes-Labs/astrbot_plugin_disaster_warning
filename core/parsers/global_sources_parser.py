@@ -208,7 +208,7 @@ class GlobalQuakeParser(BaseParser):
             )
 
             plugin_logger.info(
-                f"[灾害预警] Global Quake 收到地震取消广播: ID={event_id}",
+                f"[灾害预警] Global Quake 收到地震取消广播：事件编号 {event_id}",
                 is_event_linked=True,
                 event_stream="global_quake",
                 is_silent_window=True,
@@ -236,7 +236,7 @@ class GlobalQuakeParser(BaseParser):
             )
 
             plugin_logger.info(
-                f"[灾害预警] Global Quake 收到地震取消广播 (JSON): ID={event_id}",
+                f"[灾害预警] Global Quake 收到地震取消广播（JSON 格式）：事件编号 {event_id}",
                 is_event_linked=True,
                 event_stream="global_quake",
                 is_silent_window=True,
@@ -257,7 +257,7 @@ class GlobalQuakeParser(BaseParser):
             if self._is_invalid_zero_coordinate(eq_data.latitude, eq_data.longitude):
                 plugin_logger.debug(
                     f"[灾害预警] {self.source_id} 忽略经纬度为 0 的脏数据 "
-                    f"(id={getattr(eq_data, 'id', '')})"
+                    f"（事件编号 {getattr(eq_data, 'id', '')}）"
                 )
                 return None
 
@@ -437,7 +437,7 @@ class GlobalQuakeParser(BaseParser):
             if self._is_invalid_zero_coordinate(latitude, longitude):
                 plugin_logger.debug(
                     f"[灾害预警] {self.source_id} 忽略经纬度为 0 的 JSON 脏数据 "
-                    f"(id={eq_data.get('id', '')})"
+                    f"（事件编号 {eq_data.get('id', '')}）"
                 )
                 return None
 

@@ -48,6 +48,11 @@ class TextMessageBuilder:
             "timezone": display_timezone,
             "detailed_jma_intensity": detailed_jma,
             "jma_region_intensity": jma_region,
+            # 是否附加中国影响区县烈度预估 / 日本影响地域震度预估。
+            "cn_district_intensity_estimate": config.get(
+                "cn_district_intensity_estimate", False
+            ),
+            "jma_shindo_estimate": config.get("jma_shindo_estimate", False),
             "local_monitoring": active_config.get("local_monitoring", {}),
             # 台风展示是否暴露本地距离/逼近信息，对齐地震 local_monitoring.enabled。
             "typhoon_config": active_config.get("typhoon_config", {}),

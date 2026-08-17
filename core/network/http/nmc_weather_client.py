@@ -269,7 +269,10 @@ class NmcWeatherClient:
         if payload.get("msg") != "success" or payload.get("code") != 0:
             return {
                 "success": False,
-                "error": f"接口返回异常: msg={payload.get('msg')}, code={payload.get('code')}",
+                "error": (
+                    f"接口返回异常：消息为 {payload.get('msg')}，"
+                    f"状态码 {payload.get('code')}"
+                ),
             }
         data = payload.get("data")
         # 站点不存在/无数据时 data 可能为空字符串 ""；非 dict 一律视为无站点数据

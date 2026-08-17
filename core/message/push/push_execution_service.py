@@ -257,6 +257,12 @@ class PushExecutionService:
                         "jma_region_intensity": message_format_config.get(
                             "jma_region_intensity", True
                         ),
+                        "cn_district_intensity_estimate": message_format_config.get(
+                            "cn_district_intensity_estimate", False
+                        ),
+                        "jma_shindo_estimate": message_format_config.get(
+                            "jma_shindo_estimate", False
+                        ),
                         "emoji_filter_mode": message_format_config.get(
                             "emoji_filter_mode", EMOJI_FILTER_MODE_DEFAULT
                         ),
@@ -300,6 +306,14 @@ class PushExecutionService:
                         ),
                         "intensity_threshold": local_monitoring_cfg.get(
                             "intensity_threshold", 2.0
+                        ),
+                        # 震度阈值同样纳入缓存键：日本体系下阈值差异会影响拦截判定
+                        # 与展示文案，缺失时会导致不同会话误复用同一渲染结果。
+                        "shindo_threshold": local_monitoring_cfg.get(
+                            "shindo_threshold", 2.0
+                        ),
+                        "intensity_system": str(
+                            local_monitoring_cfg.get("intensity_system", "auto")
                         ),
                     },
                 },

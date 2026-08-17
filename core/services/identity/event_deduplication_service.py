@@ -373,20 +373,20 @@ class EventDeduplicationService:
         if priority < existing_priority:
             _log_filter(
                 f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
-                f"过滤 {source_id} 推送 (event={event_id})"
+                f"过滤 {source_id} 推送（事件编号 {event_id}）"
             )
             return False
         if priority == existing_priority and existing_source == source_id:
             if not filter_same_source:
                 # 粗软指纹：同源更新交给下游 _should_allow_update 判定
                 plugin_logger.debug(
-                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定: "
-                    f"{source_id} (事件 ID {event_id})"
+                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定："
+                    f"{source_id}（事件编号 {event_id}）"
                 )
                 return True
             _log_filter(
-                f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
-                f"(事件 ID {event_id})"
+                f"[灾害预警] {kind}内容未变化，过滤重复推送：{source_id} "
+                f"（事件编号 {event_id}）"
             )
             return False
         if priority == existing_priority and existing_source != source_id:
@@ -454,20 +454,20 @@ class EventDeduplicationService:
         if priority < existing_priority:
             _log_filter(
                 f"[灾害预警] {kind}内容与 {existing_source} 重复且优先级更低，"
-                f"过滤 {source_id} 推送 (event={event_id})"
+                f"过滤 {source_id} 推送（事件编号 {event_id}）"
             )
             return False
         if priority == existing_priority and existing_source == source_id:
             if not filter_same_source:
                 # 粗软指纹：同源更新交给 recent_events / _should_allow_update
                 plugin_logger.debug(
-                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定: "
-                    f"{source_id} (事件 ID {event_id})"
+                    f"[灾害预警] {kind}同源软指纹命中，放行供下游更新判定："
+                    f"{source_id}（事件编号 {event_id}）"
                 )
                 return True
             _log_filter(
-                f"[灾害预警] {kind}内容未变化，过滤重复推送: {source_id} "
-                f"(事件 ID {event_id})"
+                f"[灾害预警] {kind}内容未变化，过滤重复推送：{source_id} "
+                f"（事件编号 {event_id}）"
             )
             return False
         if priority == existing_priority and existing_source != source_id:
@@ -518,8 +518,8 @@ class EventDeduplicationService:
         existing = self._tsunami_cache.get(cache_key)
         if existing is not None:
             plugin_logger.info(
-                f"[灾害预警] 海啸内容未变化，过滤重复推送: {source_id} "
-                f"(event={event_id})",
+                f"[灾害预警] 海啸内容未变化，过滤重复推送：{source_id} "
+                f"（事件编号 {event_id}）",
                 is_event_linked=True,
                 event_stream="tsunami",
                 is_silent_window=True,

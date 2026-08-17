@@ -372,8 +372,8 @@ class EqscCencIntensityPollService:
             except Exception as exc:
                 event_id = str(item.get("event_id") or "").strip()
                 logger.error(
-                    f"[灾害预警] EQSC CENC 烈度速报事件推送失败，已跳过并继续本轮: "
-                    f"ID={event_id}, 错误={exc}"
+                    f"[灾害预警] EQSC CENC 烈度速报事件推送失败，已跳过并继续本轮："
+                    f"事件编号 {event_id}，错误为 {exc}"
                 )
                 continue
             if pushed:

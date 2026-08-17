@@ -338,7 +338,7 @@ class SourceMessageRouter:
                         data.get("message") or data.get("msg") or ""
                     ).strip()
                     plugin_logger.warning(
-                        f"[灾害预警] FAN Studio 返回错误包，连接为 {connection_name or 'unknown'}："
+                        f"[灾害预警] FAN Studio 返回错误包，连接为 {connection_name or '未知'}："
                         f"{error_message or data}"
                     )
                     ws_manager = getattr(self.service, "ws_manager", None)
