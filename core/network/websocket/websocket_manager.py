@@ -46,9 +46,14 @@ class WebSocketManager:
         self.connections: dict[str, ClientWebSocketResponse] = {}
         self.message_handlers: dict[str, Callable] = {}
         self.reconnect_tasks: dict[str, asyncio.Task] = {}
-        # 手动重连追踪表：记录管理员主动触发重连后尚未获得结果的连接，
-        # 键为连接名，值为请求批次标识 request_id（用于把结果路由回对应订阅者）。
+        # 手动重连追踪表：记录管理员主动触发重连后尚未获得结果的连接。
+        # 键为连接名，值为唯一尝试标识 attempt_id（"{request_id}:{seq}"）：
+        # - 在首次 await 前登记，消除并发请求的 TOCTOU 覆盖竞态；
+        # - 成功/失败/取消路径均按 attempt_id 精确匹配后清理，避免旧 connect
+        #   任务误清新请求的标识；同时携带 request_id 供上层路由回执。
         self._manual_reconnect_pending: dict[str, str] = {}
+        # 手动重连尝试序号生成器：同一连接每次物理重连尝试递增，保证标识唯一。
+        self._manual_reconnect_seq: dict[str, int] = {}
         # FAN 次要通道静默等待主通道的任务表（无感排队，不走错误重连日志）
         self._fan_secondary_wait_tasks: dict[str, asyncio.Task] = {}
         self.connection_retry_counts: dict[str, int] = {}
@@ -242,15 +247,23 @@ class WebSocketManager:
                 # 若该连接处于"手动重连待确认"状态，说明是管理员主动触发的重连：
                 # 建连成功且（FAN 连接）应用层鉴权通过后，才清除追踪标记并回调上层
                 # 汇报真实成功结果。若鉴权失败，上方错误路径会负责清除标记并汇报失败。
-                pending_request = self._manual_reconnect_pending.pop(name, None)
-                if pending_request is not None:
-                    self.emit_reconnect_result(
-                        connection_name=name,
-                        success=True,
-                        message="重连成功，连接已建立",
-                        stage="success",
-                        request_id=pending_request,
-                    )
+                # 按 attempt_id 精确匹配清理：仅当本次任务携带的尝试标识与当前待确认
+                # 标识一致时才 pop 并回报，避免旧 connect 任务误清新请求的标识。
+                attempt_id = (self.connection_info.get(name) or {}).get(
+                    "manual_reconnect_attempt"
+                )
+                if attempt_id is not None:
+                    current = self._manual_reconnect_pending.get(name)
+                    if current == attempt_id:
+                        self._manual_reconnect_pending.pop(name, None)
+                        self._manual_reconnect_seq.pop(name, None)
+                        self.emit_reconnect_result(
+                            connection_name=name,
+                            success=True,
+                            message="重连成功，连接已建立",
+                            stage="success",
+                            request_id=attempt_id,
+                        )
 
                 # 重置重连相关的状态变量
                 self.connection_retry_counts[name] = 0
@@ -282,7 +295,24 @@ class WebSocketManager:
             self._handle_connection_error(name, uri, headers, e)
 
         except asyncio.CancelledError:
-            # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出
+            # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出。
+            # 若该连接正处于"手动重连待确认"状态，按 attempt_id 精确匹配清理
+            # 待确认标记，并汇报取消回执，避免取消后残留标记导致后续重连被误拒。
+            attempt_id = (self.connection_info.get(name) or {}).get(
+                "manual_reconnect_attempt"
+            )
+            if attempt_id is not None:
+                current = self._manual_reconnect_pending.get(name)
+                if current == attempt_id:
+                    self._manual_reconnect_pending.pop(name, None)
+                    self._manual_reconnect_seq.pop(name, None)
+                    self.emit_reconnect_result(
+                        connection_name=name,
+                        success=False,
+                        message="重连被取消（任务终止）",
+                        stage="failed",
+                        request_id=attempt_id,
+                    )
             logger.debug(f"[灾害预警] WebSocket 连接任务被取消: {name}")
             await self._release_existing_connection(
                 name,
@@ -552,17 +582,23 @@ class WebSocketManager:
     ):
         """统一分发连接错误处理。"""
         # 若该连接正处于"手动重连待确认"状态，说明管理员主动触发的重连已失败：
-        # 先清除追踪标记，并回调上层汇报失败结果（携带请求批次标识以路由回执），
-        # 随后再交给重连服务安排重试。
-        pending_request = self._manual_reconnect_pending.pop(name, None)
-        if pending_request is not None:
-            self.emit_reconnect_result(
-                connection_name=name,
-                success=False,
-                message=f"重连失败: {error}",
-                stage="failed",
-                request_id=pending_request,
-            )
+        # 按 attempt_id 精确匹配清理（本次任务的尝试标识须与当前待确认标识一致），
+        # 再回调上层汇报失败结果（携带尝试标识以路由回执），随后交给重连服务安排重试。
+        attempt_id = (self.connection_info.get(name) or {}).get(
+            "manual_reconnect_attempt"
+        )
+        if attempt_id is not None:
+            current = self._manual_reconnect_pending.get(name)
+            if current == attempt_id:
+                self._manual_reconnect_pending.pop(name, None)
+                self._manual_reconnect_seq.pop(name, None)
+                self.emit_reconnect_result(
+                    connection_name=name,
+                    success=False,
+                    message=f"重连失败: {error}",
+                    stage="failed",
+                    request_id=attempt_id,
+                )
         self._reconnect_service.handle_connection_error(name, uri, headers, error)
 
     def _is_critical_error(self, error: Exception) -> bool:
@@ -607,22 +643,15 @@ class WebSocketManager:
             return False
 
         # 拒绝同一连接的重复手动重连请求：若该连接仍处于"手动重连待确认"状态，
-        # 说明上一次强制重连尚未产生终态结果。此时若覆盖 request_id，旧批次将
+        # 说明上一次强制重连尚未产生终态结果。此时若覆盖 attempt_id，旧批次将
         # 永远收不到终态回执，且结果可能被路由到错误批次。
         # 采用串行化策略：拒绝新请求，保留旧请求的完整回执链路。
         if name in self._manual_reconnect_pending:
             logger.debug(
                 f"[灾害预警] {name} 已有进行中的手动重连，拒绝重复触发 "
-                f"(请求 ID 为{self._manual_reconnect_pending.get(name)})"
+                f"(尝试标识为{self._manual_reconnect_pending.get(name)})"
             )
             return False
-
-        # 取消已处于等待计时队列中的待执行重试任务，避免竞争
-        if name in self.reconnect_tasks:
-            task = self.reconnect_tasks.pop(name, None)
-            if task is not None and not task.done():
-                task.cancel()
-                logger.debug(f"[灾害预警] 取消了 {name} 正在等待的重连任务 (强制重连)")
 
         # 检查是否保留了该连接的配置元信息
         info = self.connection_info.get(name)
@@ -637,6 +666,20 @@ class WebSocketManager:
                 request_id=request_id,
             )
             return False
+
+        # 生成唯一尝试标识并"在首次 await 前"登记：
+        # 消除两个并发调用都通过重复检查、后写覆盖先写标识的 TOCTOU 竞态。
+        seq = self._manual_reconnect_seq.get(name, 0) + 1
+        self._manual_reconnect_seq[name] = seq
+        attempt_id = f"{request_id}:{seq}"
+        self._manual_reconnect_pending[name] = attempt_id
+
+        # 取消已处于等待计时队列中的待执行重试任务，避免竞争
+        if name in self.reconnect_tasks:
+            task = self.reconnect_tasks.pop(name, None)
+            if task is not None and not task.done():
+                task.cancel()
+                logger.debug(f"[灾害预警] 取消了 {name} 正在等待的重连任务 (强制重连)")
 
         # 强制重连前先释放可能残留的半开/已关闭句柄，避免上游连接配额被占
         await self._release_existing_connection(
@@ -654,11 +697,12 @@ class WebSocketManager:
         info.pop("offline_since", None)
         info.pop("short_retry_notified", None)
 
-        # 登记手动重连追踪标记，供建连成功/失败回调做结果归因；
-        # 值记录请求批次标识，供上层把结果路由回对应订阅者。
-        self._manual_reconnect_pending[name] = request_id
-
         logger.info(f"[灾害预警] 正在手动重连 {name}...")
+
+        # 把尝试标识写入连接附加信息，供 connect 任务的成功/失败/取消路径
+        # 按 attempt_id 精确匹配清理并回报，避免旧任务误清新请求的标识。
+        info["manual_reconnect_attempt"] = attempt_id
+        self.connection_info[name] = info
 
         # 异步启动物理连接，不卡死调用线程
         asyncio.create_task(

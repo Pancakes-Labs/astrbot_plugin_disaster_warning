@@ -32,7 +32,14 @@ def register_runtime_admin_routes(
 
     @app.post("/api/reconnect")
     async def force_reconnect():
-        """触发所有数据源立即重连。"""
+        """触发所有数据源立即重连。
+
+        回执策略说明：本接口为纯同步触发路径——调用 reconnect_all_sources()
+        时不传 request_id（默认空串）且不注册异步回执回调，因此：
+        - 底层手动重连结果回调因空 request_id 会被下游直接忽略，不会产生异步回执；
+        - 本接口只返回同步的触发结果（哪些连接已触发/跳过/失败），
+          前端需真实重连结果可由下方连接矩阵状态实时展示。
+        """
         try:
             guard_result = ApiResponse.guard_service_ready(disaster_service)
             if guard_result is not None:

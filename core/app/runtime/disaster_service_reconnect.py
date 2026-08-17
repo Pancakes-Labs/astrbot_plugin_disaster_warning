@@ -63,6 +63,9 @@ class DisasterServiceReconnectService:
         # 引入批次是为了隔离不同命令请求，避免并发触发时回执串扰或陈旧回调残留。
         self._batches: dict[str, _ReconnectBatch] = {}
         self._request_seq = itertools.count(1)
+        # 回执发送任务集合：持有 asyncio.create_task 返回任务的强引用，
+        # 避免回调在等待 session_sender.send() 挂起时被垃圾回收导致回执中断。
+        self._receipt_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # 批次注册与底层桥接
@@ -114,23 +117,35 @@ class DisasterServiceReconnectService:
             return
         # 兜底：把底层待确认表中仍属于本批次的连接标记清除，
         # 防止本批次被清理后，底层后续结果因 request_id 无法路由而悬空。
+        # 底层待确认值现在是 attempt_id（"{request_id}:{seq}"），按前缀匹配。
         ws_manager = getattr(self.service, "ws_manager", None)
         pending = getattr(ws_manager, "_manual_reconnect_pending", None)
         if pending is not None:
+            prefix = f"{request_id}:"
             for conn_name in list(batch.awaiting):
-                if pending.get(conn_name) == request_id:
+                attempt = pending.get(conn_name)
+                if attempt is not None and attempt.startswith(prefix):
                     pending.pop(conn_name, None)
+                # 顺带清理同连接的尝试序号计数，避免无限增长。
+                seq_map = getattr(ws_manager, "_manual_reconnect_seq", None)
+                if seq_map is not None:
+                    seq_map.pop(conn_name, None)
 
     async def _handle_ws_reconnect_result(self, payload: dict[str, Any]) -> None:
         """接收底层 WebSocketManager 手动重连结果并做上层转接（异步）。
 
         幂等保护：同一批次中同一连接只会消费一次结果（成功/失败/超时任一先到者生效）。
         批次登记完成（registered）后，若所有等待连接均已出结果，自动清理批次订阅者。
+
+        说明：底层回调的 request_id 字段实际承载"尝试标识 attempt_id"
+        （格式 "{request_id}:{seq}"），此处先解析回纯请求批次标识再路由。
         """
         conn_name = str(payload.get("connection_name") or "")
-        request_id = str(payload.get("request_id") or "")
-        if not conn_name or not request_id:
+        attempt_id = str(payload.get("request_id") or "")
+        if not conn_name or not attempt_id:
             return
+        # attempt_id 形如 "reconnect-1:2"；分离出纯 request_id 以命中批次表。
+        request_id = attempt_id.rsplit(":", 1)[0] if ":" in attempt_id else attempt_id
         batch = self._batches.get(request_id)
         # 若非本批次等待的连接或批次已清理，说明是历史残留/跨批次回调，忽略。
         if batch is None or conn_name not in batch.awaiting:
@@ -156,9 +171,14 @@ class DisasterServiceReconnectService:
         """把统一结果载荷广播给指定批次内的回执回调。"""
         for callback in list(batch.callbacks):
             try:
-                asyncio.create_task(callback(payload))
+                task = asyncio.create_task(callback(payload))
             except Exception as exc:
                 logger.error(f"[灾害预警] 手动重连回执回调调度失败: {exc}")
+                continue
+            # 持有任务强引用，避免回调挂起（如等待会话发送）时被 GC 回收，
+            # 导致回执发送中断；任务完成后自动从集合移除。
+            self._receipt_tasks.add(task)
+            task.add_done_callback(self._receipt_tasks.discard)
 
     # ------------------------------------------------------------------
     # 展示名解析
