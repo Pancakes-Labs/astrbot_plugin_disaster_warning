@@ -130,6 +130,13 @@ class DisasterServiceReconnectService:
                 seq_map = getattr(ws_manager, "_manual_reconnect_seq", None)
                 if seq_map is not None:
                     seq_map.pop(conn_name, None)
+                # 若该连接正被 FAN 主通道暂缓（cleanup 任务在等超时），
+                # 批次清理后 cleanup 不应再发回执，一并取消。
+                cleanup_map = getattr(ws_manager, "_fan_secondary_cleanup_tasks", None)
+                if cleanup_map is not None:
+                    cleanup_task = cleanup_map.pop(conn_name, None)
+                    if cleanup_task is not None and not cleanup_task.done():
+                        cleanup_task.cancel()
 
     async def _handle_ws_reconnect_result(self, payload: dict[str, Any]) -> None:
         """接收底层 WebSocketManager 手动重连结果并做上层转接（异步）。
@@ -137,15 +144,13 @@ class DisasterServiceReconnectService:
         幂等保护：同一批次中同一连接只会消费一次结果（成功/失败/超时任一先到者生效）。
         批次登记完成（registered）后，若所有等待连接均已出结果，自动清理批次订阅者。
 
-        说明：底层回调的 request_id 字段实际承载"尝试标识 attempt_id"
-        （格式 "{request_id}:{seq}"），此处先解析回纯请求批次标识再路由。
+        说明：底层回调显式携带原始 request_id（用于路由）与 attempt_id（内部匹配），
+        这里直接使用 request_id 精确命中批次表，不再依赖字符串解析约定。
         """
         conn_name = str(payload.get("connection_name") or "")
-        attempt_id = str(payload.get("request_id") or "")
-        if not conn_name or not attempt_id:
+        request_id = str(payload.get("request_id") or "")
+        if not conn_name or not request_id:
             return
-        # attempt_id 形如 "reconnect-1:2"；分离出纯 request_id 以命中批次表。
-        request_id = attempt_id.rsplit(":", 1)[0] if ":" in attempt_id else attempt_id
         batch = self._batches.get(request_id)
         # 若非本批次等待的连接或批次已清理，说明是历史残留/跨批次回调，忽略。
         if batch is None or conn_name not in batch.awaiting:

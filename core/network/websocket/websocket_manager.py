@@ -56,6 +56,9 @@ class WebSocketManager:
         self._manual_reconnect_seq: dict[str, int] = {}
         # FAN 次要通道静默等待主通道的任务表（无感排队，不走错误重连日志）
         self._fan_secondary_wait_tasks: dict[str, asyncio.Task] = {}
+        # FAN 次要通道手动重连被暂缓后的超时清理任务表：
+        # 与 wait task 解耦（独立槽位），避免暂缓等待任务被误判复用。
+        self._fan_secondary_cleanup_tasks: dict[str, asyncio.Task] = {}
         self.connection_retry_counts: dict[str, int] = {}
         self.fallback_retry_counts: dict[str, int] = {}  # 兜底重试计数
         self.connection_info: dict[str, dict] = {}  # 存放连接 URI, header 等元数据
@@ -149,6 +152,22 @@ class WebSocketManager:
                 headers=headers,
                 connection_info=connection_info,
             )
+            # 手动重连被暂缓：若该连接正处于待确认状态，安排绑定 attempt_id 的
+            # 超时清理。否则主通道长期不可用时，待确认标记会永久残留，
+            # 导致后续 force_reconnect 被"已有进行中的手动重连"永久拒绝。
+            attempt_id = (connection_info or {}).get("manual_reconnect_attempt")
+            if attempt_id is not None:
+                cleanup = asyncio.create_task(
+                    self._schedule_deferred_attempt_cleanup(name, attempt_id),
+                    name=f"dw_fan_secondary_cleanup_{name}",
+                )
+                # 存入独立槽位，与静默等待任务解耦（避免 wait task 复用判断误判），
+                # 主通道恢复建连成功后由唤醒路径一并取消，避免误发"被暂缓"回执。
+                self._fan_secondary_cleanup_tasks[name] = cleanup
+                # 任务完成（超时清理已执行或已被取消）后自动移除槽位，避免残留。
+                cleanup.add_done_callback(
+                    lambda _t: self._fan_secondary_cleanup_tasks.pop(name, None)
+                )
             return
 
         websocket: ClientWebSocketResponse | None = None
@@ -262,7 +281,10 @@ class WebSocketManager:
                             success=True,
                             message="重连成功，连接已建立",
                             stage="success",
-                            request_id=attempt_id,
+                            # 回执显式携带原始 request_id 用于上层路由，
+                            # attempt_id 仅内部使用，双字段互不覆盖。
+                            request_id=attempt_id.rsplit(":", 1)[0],
+                            attempt_id=attempt_id,
                         )
 
                 # 重置重连相关的状态变量
@@ -311,7 +333,8 @@ class WebSocketManager:
                         success=False,
                         message="重连被取消（任务终止）",
                         stage="failed",
-                        request_id=attempt_id,
+                        request_id=attempt_id.rsplit(":", 1)[0],
+                        attempt_id=attempt_id,
                     )
             logger.debug(f"[灾害预警] WebSocket 连接任务被取消: {name}")
             await self._release_existing_connection(
@@ -561,6 +584,11 @@ class WebSocketManager:
             wait_task = self._fan_secondary_wait_tasks.pop(name, None)
             if wait_task is not None and not wait_task.done():
                 wait_task.cancel()
+            # 同步取消被暂缓的手动重连清理任务：主通道恢复后即将重新建连，
+            # 成功/失败回执由新的 connect 路径负责，清理任务不应再误发"被暂缓"回执。
+            cleanup_task = self._fan_secondary_cleanup_tasks.pop(name, None)
+            if cleanup_task is not None and not cleanup_task.done():
+                cleanup_task.cancel()
             task = self.reconnect_tasks.pop(name, None)
             if task is not None and not task.done():
                 task.cancel()
@@ -583,7 +611,8 @@ class WebSocketManager:
         """统一分发连接错误处理。"""
         # 若该连接正处于"手动重连待确认"状态，说明管理员主动触发的重连已失败：
         # 按 attempt_id 精确匹配清理（本次任务的尝试标识须与当前待确认标识一致），
-        # 再回调上层汇报失败结果（携带尝试标识以路由回执），随后交给重连服务安排重试。
+        # 再回调上层汇报失败结果（request_id 用于路由、attempt_id 用于匹配），
+        # 随后交给重连服务安排重试。
         attempt_id = (self.connection_info.get(name) or {}).get(
             "manual_reconnect_attempt"
         )
@@ -597,7 +626,8 @@ class WebSocketManager:
                     success=False,
                     message=f"重连失败: {error}",
                     stage="failed",
-                    request_id=attempt_id,
+                    request_id=attempt_id.rsplit(":", 1)[0],
+                    attempt_id=attempt_id,
                 )
         self._reconnect_service.handle_connection_error(name, uri, headers, error)
 
@@ -624,6 +654,42 @@ class WebSocketManager:
             headers,
             connection_info,
             force_fallback=force_fallback,
+        )
+
+    async def _schedule_deferred_attempt_cleanup(
+        self, name: str, attempt_id: str
+    ) -> None:
+        """为被 FAN 主通道暂缓的手动重连安排绑定 attempt_id 的超时清理。
+
+        当 FAN 次要通道因主通道 /all 未在线而被暂缓建连时，connect() 直接返回，
+        不触发成功/失败/取消回执，待确认标记会残留。若主通道长期不可用，
+        该连接的后续手动重连会被"已有进行中的手动重连"永久拒绝。
+
+        本方法在超时后若待确认标记仍匹配该 attempt_id，则清除标记并发送
+        "重连被暂缓"回执，保证终态最终可达。
+        """
+        # 超时窗口与重连服务的结果等待超时保持一致（默认 30 秒），
+        # 避免暂缓期间上层批次超时兜底后，底层仍残留待确认标记。
+        timeout_seconds = getattr(
+            self._reconnect_service, "MANUAL_RECONNECT_TIMEOUT", 30.0
+        )
+        try:
+            await asyncio.sleep(timeout_seconds)
+        except asyncio.CancelledError:
+            return
+        current = self._manual_reconnect_pending.get(name)
+        if current != attempt_id:
+            # 暂缓期间已产生终态（如主通道恢复后建连成功/失败），无需处理。
+            return
+        self._manual_reconnect_pending.pop(name, None)
+        self._manual_reconnect_seq.pop(name, None)
+        self.emit_reconnect_result(
+            connection_name=name,
+            success=False,
+            message="重连被暂缓（FAN 主通道未就绪）",
+            stage="failed",
+            request_id=attempt_id.rsplit(":", 1)[0],
+            attempt_id=attempt_id,
         )
 
     async def _heartbeat_loop(self, name: str, websocket: ClientWebSocketResponse):
@@ -799,9 +865,16 @@ class WebSocketManager:
         *,
         stage: str = "result",
         request_id: str = "",
+        attempt_id: str = "",
         detail: dict[str, Any] | None = None,
     ) -> None:
-        """以异步安全方式触发手动重连结果回调。"""
+        """以异步安全方式触发手动重连结果回调。
+
+        Args:
+            request_id: 原始请求批次标识，供上层路由回执到对应订阅者。
+            attempt_id: 内部唯一尝试标识（"{request_id}:{seq}"），
+                用于底层待确认状态匹配，仅内部使用，不参与上层路由。
+        """
         callback = self._reconnect_callback
         if not callback:
             return
@@ -812,6 +885,7 @@ class WebSocketManager:
             or info.get("connection_name")
             or connection_name,
             "request_id": request_id,
+            "attempt_id": attempt_id,
             "success": success,
             "message": message,
             "stage": stage,
