@@ -46,6 +46,9 @@ class WebSocketManager:
         self.connections: dict[str, ClientWebSocketResponse] = {}
         self.message_handlers: dict[str, Callable] = {}
         self.reconnect_tasks: dict[str, asyncio.Task] = {}
+        # 手动重连追踪表：记录管理员主动触发重连后尚未获得结果的连接，
+        # 键为连接名，值为时间戳（用于超时兜底判定）。
+        self._manual_reconnect_pending: dict[str, float] = {}
         # FAN 次要通道静默等待主通道的任务表（无感排队，不走错误重连日志）
         self._fan_secondary_wait_tasks: dict[str, asyncio.Task] = {}
         self.connection_retry_counts: dict[str, int] = {}
@@ -60,6 +63,13 @@ class WebSocketManager:
         self._offline_notify_callback: (
             Callable[[dict[str, Any]], Awaitable[None]] | None
         ) = None
+
+        # 手动重连结果回调（由上层业务注册，接收连接名、是否成功及详情载荷）。
+        # 与离线通知回调解耦：离线通知描述"被动掉线后的重试过程"，
+        # 而此回调专门汇报"管理员主动触发重连后的真实结果"。
+        self._reconnect_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = (
+            None
+        )
 
         # 实例化委托服务，保持高内聚低耦合
         self._reconnect_service = WebSocketReconnectService(self)
@@ -205,6 +215,17 @@ class WebSocketManager:
                         logger.debug(
                             f"[灾害预警] WebSocket 建连回调通知静默协调器失败: {exc}"
                         )
+
+                # 若该连接处于"手动重连待确认"状态，说明是管理员主动触发的重连：
+                # 建连成功后清除追踪标记并回调上层汇报真实结果。
+                if name in self._manual_reconnect_pending:
+                    self._manual_reconnect_pending.pop(name, None)
+                    self.emit_reconnect_result(
+                        connection_name=name,
+                        success=True,
+                        message="重连成功，连接已建立",
+                        stage="success",
+                    )
 
                 # FAN Studio：握手成功后立即发送应用层鉴权包。
                 # 仅“缺少凭证”返回 False；网络异常会向上抛出并由下方 except 重试。
@@ -528,6 +549,16 @@ class WebSocketManager:
         self, name: str, uri: str, headers: dict | None, error: Exception
     ):
         """统一分发连接错误处理。"""
+        # 若该连接正处于"手动重连待确认"状态，说明管理员主动触发的重连已失败：
+        # 先清除追踪标记，并回调上层汇报失败结果，随后再交给重连服务安排重试。
+        if name in self._manual_reconnect_pending:
+            self._manual_reconnect_pending.pop(name, None)
+            self.emit_reconnect_result(
+                connection_name=name,
+                success=False,
+                message=f"重连失败: {error}",
+                stage="failed",
+            )
         self._reconnect_service.handle_connection_error(name, uri, headers, error)
 
     def _is_critical_error(self, error: Exception) -> bool:
@@ -577,6 +608,13 @@ class WebSocketManager:
         info = self.connection_info.get(name)
         if not info:
             logger.warning(f"[灾害预警] 无法重连 {name}: 找不到连接信息")
+            # 手动重连失败也应反馈到上层，避免命令侧只看到"已触发"却没有下文。
+            self.emit_reconnect_result(
+                connection_name=name,
+                success=False,
+                message="找不到连接信息，无法重连",
+                stage="failed",
+            )
             return False
 
         # 强制重连前先释放可能残留的半开/已关闭句柄，避免上游连接配额被占
@@ -594,6 +632,10 @@ class WebSocketManager:
         self.fallback_retry_counts[name] = 0
         info.pop("offline_since", None)
         info.pop("short_retry_notified", None)
+
+        # 登记手动重连追踪标记，供建连成功回调做结果归因；
+        # 记录触发时间戳，便于上层超时兜底。
+        self._manual_reconnect_pending[name] = asyncio.get_running_loop().time()
 
         logger.info(f"[灾害预警] 正在手动重连 {name}...")
 
@@ -673,6 +715,43 @@ class WebSocketManager:
     ) -> None:
         """设置离线通知回调。"""
         self._offline_notify_callback = callback
+
+    def set_reconnect_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
+        """设置手动重连结果回调。
+
+        与离线通知回调解耦：该回调只在管理员通过强制重连主动触发
+        重连后汇报真实结果（成功 / 失败 / 进入重连流程）。
+        """
+        self._reconnect_callback = callback
+
+    def emit_reconnect_result(
+        self,
+        connection_name: str,
+        success: bool,
+        message: str,
+        *,
+        stage: str = "result",
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """以异步安全方式触发手动重连结果回调。"""
+        callback = self._reconnect_callback
+        if not callback:
+            return
+        info = self.connection_info.get(connection_name, {})
+        payload: dict[str, Any] = {
+            "connection_name": connection_name,
+            "data_source": info.get("data_source")
+            or info.get("connection_name")
+            or connection_name,
+            "success": success,
+            "message": message,
+            "stage": stage,
+            "detail": detail or {},
+        }
+        # 以非阻塞异步任务方式抛出给外层订阅者，避免阻塞建连/重连主流程。
+        asyncio.create_task(callback(payload))
 
     def _emit_offline_notification(
         self,
