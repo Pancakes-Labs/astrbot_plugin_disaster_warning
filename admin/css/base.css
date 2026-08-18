@@ -458,7 +458,8 @@ body.dark-theme .boot-loader__logo {
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
-html.theme-dark .boot-loader__logo-pulse {
+html.theme-dark .boot-loader__logo-pulse,
+body.dark-theme .boot-loader__logo-pulse {
     border-color: rgba(208, 188, 255, 0.2);
 }
 
@@ -558,16 +559,19 @@ body.dark-theme .boot-loader__progress-bar {
     box-shadow: 0 0 0 2px rgba(67, 160, 71, 0.12);
 }
 
-html.theme-dark .bl-stage-dot {
+html.theme-dark .bl-stage-dot,
+body.dark-theme .bl-stage-dot {
     background: rgba(208, 188, 255, 0.15);
 }
 
-html.theme-dark .bl-stage-dot.active {
+html.theme-dark .bl-stage-dot.active,
+body.dark-theme .bl-stage-dot.active {
     background: #EF5350;
     box-shadow: 0 0 0 4px rgba(239, 83, 80, 0.15), 0 0 12px rgba(239, 83, 80, 0.2);
 }
 
-html.theme-dark .bl-stage-dot.done {
+html.theme-dark .bl-stage-dot.done,
+body.dark-theme .bl-stage-dot.done {
     background: #66BB6A;
     box-shadow: 0 0 0 2px rgba(102, 187, 106, 0.12);
 }

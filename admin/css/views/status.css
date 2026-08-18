@@ -272,13 +272,13 @@
 
 .server-badge--primary {
     background: rgba(76, 175, 80, 0.15);
-    color: #4CAF50;
+    color: #2E7D32;
     border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
 .server-badge--backup {
     background: rgba(255, 193, 7, 0.15);
-    color: #FFC107;
+    color: #B26A00;
     border: 1px solid rgba(255, 193, 7, 0.3);
 }
 
