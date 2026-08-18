@@ -292,6 +292,20 @@ class WebSocketManager:
                 self.fallback_retry_counts[name] = 0
                 self.last_heartbeat_time[name] = asyncio.get_running_loop().time()
 
+                # 记录当前活跃服务器类型（基于实际连接的 URI 与原始地址判定）
+                if is_fan_studio_connection(name):
+                    info = self.connection_info.get(name, {})
+                    uri = str(info.get("uri") or "").strip()
+                    conn_config = info.get("connection_config", {})
+                    # 使用原始地址（未受偏好交换影响）来判断当前连接的是主还是备
+                    original_backup = str(
+                        conn_config.get("original_backup") or ""
+                    ).strip()
+                    if uri and original_backup and uri == original_backup:
+                        self.connection_info[name]["active_server"] = "backup"
+                    else:
+                        self.connection_info[name]["active_server"] = "primary"
+
                 # 主通道恢复后，尽快唤醒此前因等待 /all 而暂缓的次要通道。
                 if is_fan_primary_connection(name):
                     self._kick_deferred_fan_secondary_reconnects()
@@ -813,6 +827,7 @@ class WebSocketManager:
                     "uri": info.get("uri"),
                     "established_time": info.get("established_time"),
                     "connection_type": info.get("connection_type"),
+                    "active_server": info.get("active_server"),
                 }
             )
 
