@@ -63,6 +63,21 @@ class ServerPreference(Enum):
         """规范化配置值，确保配置持久化时使用标准值。"""
         return cls.from_config(value).value
 
+    @classmethod
+    def parse_strict(cls, value: str | None) -> ServerPreference | None:
+        """严格解析偏好枚举；无效值返回 None（不静默回退）。
+
+        供运行期命令（如 /服务器切换）调用，在切换前拒绝无效参数，
+        避免无效值被静默当作"主服务器优先"而误切换。
+        """
+        if not value:
+            return None
+        text = str(value).strip()
+        for member in cls:
+            if member.value == text:
+                return member
+        return None
+
 
 def resolve_server_urls(
     connection_url: str,
@@ -111,11 +126,23 @@ def resolve_active_server_label(
 def resolve_active_server_domain(
     connection_info: dict[str, Any] | None,
 ) -> str:
-    """从连接信息解析当前活跃的服务器域名（用于调试/日志）。"""
+    """从连接信息解析当前活跃的服务器域名（用于调试/日志）。
+
+    返回 URI 解析后的 hostname（如 ws.fanstudio.tech），
+    不包含协议、路径或查询参数；URI 不可解析时回退原始值。
+    """
     if not isinstance(connection_info, dict):
         return ""
     uri = str(connection_info.get("uri") or "").strip()
-    return uri
+    if not uri:
+        return ""
+    from urllib.parse import urlsplit
+
+    try:
+        hostname = urlsplit(uri).hostname
+        return hostname or uri
+    except Exception:
+        return uri
 
 
 # 次要通道命中配额后的短时重连间隔（秒）

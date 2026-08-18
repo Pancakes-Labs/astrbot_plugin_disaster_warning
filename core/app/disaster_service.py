@@ -692,9 +692,10 @@ class DisasterWarningService:
         - 切换后的临时偏好随 connection_config 一并写入连接信息，
           断线重连仍按临时偏好交替主备地址。
         """
-        pref = ServerPreference.normalize(preference)
-        if not pref:
+        pref_obj = ServerPreference.parse_strict(preference)
+        if pref_obj is None:
             return {"error": f"无效的服务器偏好: {preference}"}
+        pref = pref_obj.value
 
         # 重新生成连接计划（传入临时偏好覆盖值，仅影响本次运行期 URL 顺序）
         new_connections = ConnectionPlanBuilder.build(
@@ -729,6 +730,11 @@ class DisasterWarningService:
                 self.ws_manager.connection_info.pop(conn_name, None)
                 self.ws_manager.connection_retry_counts.pop(conn_name, None)
                 self.ws_manager.fallback_retry_counts.pop(conn_name, None)
+                # 取消同连接名的旧切换建连任务，避免两次切换交叉修改共享状态
+                task_name = f"dw_switch_{conn_name}"
+                for old_task in list(self.connection_tasks):
+                    if old_task.get_name() == task_name and not old_task.done():
+                        old_task.cancel()
                 # 异步建连
                 task = asyncio.create_task(
                     self.ws_manager.connect(
@@ -736,7 +742,7 @@ class DisasterWarningService:
                         uri=conn_config["url"],
                         connection_info=connection_info,
                     ),
-                    name=f"dw_switch_{conn_name}",
+                    name=task_name,
                 )
                 self.connection_tasks.append(task)
                 results[conn_name] = f"✅ 已切换至 {pref}"
