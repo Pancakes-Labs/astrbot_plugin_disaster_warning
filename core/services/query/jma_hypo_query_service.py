@@ -79,7 +79,16 @@ def _build_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     mags = [float(e.get("mag") or 0.0) for e in events]
-    deps = [float(e.get("dep") or 0.0) for e in events]
+    # 仅收集有效数值深度：缺失/空深度不参与统计，避免被当作 0 km 浅源
+    valid_deps: list[float] = []
+    for e in events:
+        raw_dep = e.get("dep")
+        if raw_dep is None or str(raw_dep).strip() == "":
+            continue
+        try:
+            valid_deps.append(float(raw_dep))
+        except (TypeError, ValueError):
+            continue
     mag_bins = {label: 0 for _, _, label in MAG_BINS}
     for mag in mags:
         mag_bins[_mag_bin_label(mag)] += 1
@@ -107,8 +116,8 @@ def _build_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
         "total": total,
         "min_mag": min(mags),
         "max_mag": max(mags),
-        "avg_dep": (sum(deps) / total) if total else None,
-        "max_dep": max(deps) if deps else None,
+        "avg_dep": (sum(valid_deps) / len(valid_deps)) if valid_deps else None,
+        "max_dep": max(valid_deps) if valid_deps else None,
         "mag_bins": mag_bins,
         "place_counts": place_counts,
         "large_events": large_events,

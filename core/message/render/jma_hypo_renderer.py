@@ -113,8 +113,22 @@ DOT_RADIUS_REF_MAG = 8.0
 MAP_DOT_SCALE = 0.58
 
 
+# 缺失深度时的中性色（区别于 0 ~ 10km 浅源红色，避免误判为极浅源）
+COLOR_DEPTH_MISSING = (140, 140, 150)
+
+
 def _get_depth_color(depth: float) -> tuple[int, int, int]:
-    dep = max(0.0, float(depth or 0.0))
+    """根据震源深度返回色阶颜色。
+
+    仅对有效数值深度着色；缺失/空深度返回中性灰 COLOR_DEPTH_MISSING，
+    避免被当作 0 km 浅源渲染成红色。
+    """
+    try:
+        dep = float(depth)
+    except (TypeError, ValueError):
+        return COLOR_DEPTH_MISSING
+    if dep < 0:
+        dep = 0.0
     for threshold, color, _ in reversed(DEPTH_COLORS):
         if dep >= threshold:
             return color
@@ -303,13 +317,19 @@ def _axis_values(
         return xs, ys, "经度 (°E)", "纬度 (°N)", False
     if mode == PLOT_LON_DEP:
         for e in events:
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
             xs.append(float(e["lon"]))
-            ys.append(float(e["dep"]))
+            ys.append(float(dep))
         return xs, ys, "经度 (°E)", "深度 (km)", True
     if mode == PLOT_LAT_DEP:
         for e in events:
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
             xs.append(float(e["lat"]))
-            ys.append(float(e["dep"]))
+            ys.append(float(dep))
         return xs, ys, "纬度 (°N)", "深度 (km)", True
     if mode == PLOT_LON_TIME:
         for e in events:
@@ -332,7 +352,10 @@ def _axis_values(
             t = _event_time_value(e)
             if t is None:
                 continue
-            xs.append(float(e["dep"]))
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
+            xs.append(float(dep))
             ys.append(t)
         return xs, ys, "深度 (km)", "时间", False
     # 默认经度纬度
@@ -784,7 +807,8 @@ class JmaHypoRenderer:
         for ev in _sort_events_by_mag_asc(events):
             x, y = _lonlat_to_xy(float(ev["lon"]), float(ev["lat"]))
             mag = float(ev.get("mag") or 0.0)
-            dep = float(ev.get("dep") or 0.0)
+            # 保留原始深度值（可为 None/""），由 _get_depth_color 识别缺失并着中性色
+            dep = ev.get("dep")
             color = _get_depth_color(dep)
             r = max(MIN_DOT_RADIUS * 0.85, _dot_radius(mag) * MAP_DOT_SCALE)
             _draw_dot(draw, x * s, y * s, r, color, outline=True, scale=s)
@@ -959,9 +983,15 @@ class JmaHypoRenderer:
         # 圆圈大小表示震级，圆圈颜色表示深度色阶
         for e in _sort_events_by_mag_asc(aligned_events):
             if mode == PLOT_LON_DEP:
-                xv, yv = float(e["lon"]), float(e["dep"])
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(e["lon"]), float(dep)
             elif mode == PLOT_LAT_DEP:
-                xv, yv = float(e["lat"]), float(e["dep"])
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(e["lat"]), float(dep)
             elif mode == PLOT_LON_TIME:
                 t = _event_time_value(e)
                 if t is None:
@@ -976,13 +1006,17 @@ class JmaHypoRenderer:
                 t = _event_time_value(e)
                 if t is None:
                     continue
-                xv, yv = float(e["dep"]), t
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(dep), t
             else:
                 xv, yv = float(e["lon"]), float(e["lat"])
             x = _x_to_px(xv)
             y = _y_to_px(yv)
             mag = float(e.get("mag") or 0.0)
-            dep = float(e.get("dep") or 0.0)
+            # 保留原始深度值（可为 None/""），由 _get_depth_color 识别缺失并着中性色
+            dep = e.get("dep")
             color = _get_depth_color(dep)
             r = _dot_radius(mag)
             _draw_dot(draw, x, y, r, color, outline=True, scale=s)
