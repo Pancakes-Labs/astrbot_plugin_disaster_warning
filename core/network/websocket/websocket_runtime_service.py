@@ -72,6 +72,19 @@ class WebSocketRuntimeService:
             if task is not None and not task.done():
                 task.cancel()
 
+        # 取消 FAN 次要通道的静默等待/超时清理任务：
+        # 否则旧 wait task 会在服务器切换后仍用捕获的旧 URI 建连，覆盖切换效果
+        wait_task = getattr(self.manager, "_fan_secondary_wait_tasks", {}).pop(
+            name, None
+        )
+        if wait_task is not None and not wait_task.done():
+            wait_task.cancel()
+        cleanup_task = getattr(self.manager, "_fan_secondary_cleanup_tasks", {}).pop(
+            name, None
+        )
+        if cleanup_task is not None and not cleanup_task.done():
+            cleanup_task.cancel()
+
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""
         # 遍历取消全部异步任务，并聚合等待回收

@@ -59,17 +59,16 @@ class WebSocketReconnectService:
             return
 
         # 若属于 SSL 或 证书配置错误这类不可自行恢复的问题，直接终止重试，并发送系统离线通知
-        # 注意：精确匹配真正的 SSL 证书错误，避免误判"ssl:default"格式的网络错误
+        # 注意：仅把「证书配置错误」视为永久性停止重连信号；
+        # "tls handshake failed"/"tls error"/"ssl: default" 属于网络层 TLS 阻断，
+        # 应交给下方 is_tls_blocked_signal 触发主备切换，而不是提前停止重连。
         error_msg = str(error).lower()
         ssl_keywords = (
             "ssl certificate",
-            "ssl error",
             "certificate verify failed",
             "certificate_verify_failed",
             "unable to get local issuer certificate",
             "self signed certificate",
-            "tls handshake failed",
-            "tls error",
         )
         if any(kw in error_msg for kw in ssl_keywords) or "certificate" in error_msg:
             logger.warning(f"[灾害预警] {name} 遇到 SSL 配置错误，停止重连: {error}")
