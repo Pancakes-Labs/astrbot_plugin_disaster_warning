@@ -7,11 +7,17 @@ FAN Studio 连接配额与优先级策略。
 2. 运行中优先保活 /all；主通道遇配额/策略拒绝时，才释放次要通道让路
 3. 次要通道在主通道离线或命中配额时拉长退避，避免与 /all 抢连接
 4. 建连成功后发送应用层鉴权包：{"type":"auth","appId":"...","key":"sk-..."}
+
+新增服务器偏好功能：
+- 支持配置"主服务器优先"、"备用服务器优先"、"自动"三种策略
+- 连接时按偏好决定主备 URL 顺序
+- 追踪当前活跃的服务器类型
 """
 
 from __future__ import annotations
 
 import json
+from enum import Enum
 from typing import Any
 
 from astrbot.api import logger
@@ -27,7 +33,90 @@ FAN_SECONDARY_CONNECTIONS: frozenset[str] = frozenset(
 )
 
 # 上游常见 IP 并发上限（文档/经验值）；用于日志与策略说明，不作为硬编码断连阈值。
-FAN_IP_CONNECTION_LIMIT = 5
+FAN_IP_CONNECTION_LIMIT = 3
+
+# 服务器类型标签
+SERVER_TYPE_PRIMARY = "primary"  # 主服务器
+SERVER_TYPE_BACKUP = "backup"  # 备用服务器
+
+
+class ServerPreference(Enum):
+    """FAN Studio 服务器偏好枚举。"""
+
+    PRIMARY_FIRST = "主服务器优先"
+    BACKUP_FIRST = "备用服务器优先"
+    AUTO = "自动"
+
+    @classmethod
+    def from_config(cls, value: str) -> ServerPreference:
+        """从配置值解析偏好枚举，无效值回退到主服务器优先。"""
+        if not value:
+            return cls.PRIMARY_FIRST
+        text = str(value).strip()
+        for member in cls:
+            if member.value == text:
+                return member
+        return cls.PRIMARY_FIRST
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        """规范化配置值，确保配置持久化时使用标准值。"""
+        return cls.from_config(value).value
+
+
+def resolve_server_urls(
+    connection_url: str,
+    backup_url: str,
+    preference: str | ServerPreference,
+) -> tuple[str, str]:
+    """按偏好解析主备 URL 顺序。
+
+    返回 (first_try_url, second_try_url)：
+    - 主服务器优先：first=主, second=备
+    - 备用服务器优先：first=备, second=主
+    - 自动：first=主, second=备（与主服务器优先相同）
+    """
+    pref = (
+        preference
+        if isinstance(preference, ServerPreference)
+        else ServerPreference.from_config(preference)
+    )
+    primary = str(connection_url or "").strip()
+    backup = str(backup_url or "").strip()
+
+    if not primary:
+        return (backup, backup)
+    if not backup:
+        return (primary, primary)
+
+    if pref == ServerPreference.BACKUP_FIRST:
+        return (backup, primary)
+    return (primary, backup)
+
+
+def resolve_active_server_label(
+    connection_info: dict[str, Any] | None,
+) -> str:
+    """从连接信息解析当前活跃的服务器标签。"""
+    if not isinstance(connection_info, dict):
+        return "未知"
+    server_type = str(connection_info.get("active_server") or "").strip()
+    if server_type == SERVER_TYPE_PRIMARY:
+        return "主服务器"
+    if server_type == SERVER_TYPE_BACKUP:
+        return "备用服务器"
+    return "未知"
+
+
+def resolve_active_server_domain(
+    connection_info: dict[str, Any] | None,
+) -> str:
+    """从连接信息解析当前活跃的服务器域名（用于调试/日志）。"""
+    if not isinstance(connection_info, dict):
+        return ""
+    uri = str(connection_info.get("uri") or "").strip()
+    return uri
+
 
 # 次要通道命中配额后的短时重连间隔（秒）
 SECONDARY_QUOTA_RECONNECT_INTERVAL = 120
@@ -83,6 +172,40 @@ def is_connection_limit_signal(text: str | Exception | None) -> bool:
         "policy violation",
         "policy error",
         "1008",
+    )
+    return any(token in raw for token in keywords)
+
+
+def is_tls_blocked_signal(text: str | Exception | None) -> bool:
+    """识别 TLS/连接被中间设备 RST 阻断的信号。
+
+    典型场景：目标主机 TCP 端口可达（ping / 裸 TCP 探测均通），但一旦发起
+    TLS ClientHello（携带 SNI）就被连接路径上的设备（如 GFW/运营商）RST，
+    表现为 "ConnectionResetError"（Windows errno=10054）或 aiohttp 包装后的
+    "指定的网络名不再可用"（errno=10022/10054）。
+
+    命中此类信号时说明当前目标地址在该网络环境下不可用，继续在同一地址上
+    反复短时重试没有意义，应尽快切换到另一台服务器（主/备）。
+    """
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return False
+
+    keywords = (
+        "10054",  # WSAECONNRESET：远程主机强迫关闭连接（常见于 TLS 被 RST）
+        "10022",  # WSAEINVAL：无效参数（aiohttp 包装 SNI 阻断的典型 errno）
+        "connectionreseterror",
+        "远程主机强迫关闭了一个现有的连接",
+        "指定的网络名不再可用",
+        "connection reset by peer",
+        "tls handshake failed",
+        "ssl: default",
+        "ssl:default",
+        "ssl handshake",
+        "certificate verify failed",
+        "certificate_verify_failed",
+        "ssl证书",
+        "ssl 证书",
     )
     return any(token in raw for token in keywords)
 
