@@ -3,6 +3,13 @@
     const start = (window.performance && typeof performance.now === 'function') ? performance.now() : Date.now();
     const MIN_VISIBLE_MS = 280;
 
+    // 安全时间函数：在旧 WebView / 受限环境下回退到 Date.now()
+    function nowSafe() {
+        return (window.performance && typeof window.performance.now === 'function')
+            ? window.performance.now()
+            : Date.now();
+    }
+
     // ===== 阶段时序播放器 =====
     // 无论加载实际多快，阶段指示器按固定时间轴依次播放
     const STAGE_DEFS = [
@@ -16,9 +23,13 @@
     let stageTimer = null;
     let stageIndex = -1;
     let stageSequenceComplete = false;
+    // 独立"已启动"标记：在当前 bootloader 生命周期内一旦启动就不再重置，
+    // 避免完成后 stageTimer 被置回 null 而被误判为"未启动"导致阶段序列重启。
+    let stageStarted = false;
 
     function startStageSequence() {
-        if (stageTimer !== null) return;
+        if (stageStarted) return;
+        stageStarted = true;
         stageIndex = -1;
         stageSequenceComplete = false;
         advanceStage();
@@ -60,12 +71,12 @@
 
     function startProgressBar() {
         if (barRafId !== null) return;
-        barStartTime = performance.now();
+        barStartTime = nowSafe();
         barRafId = requestAnimationFrame(progressLoop);
     }
 
     function progressLoop() {
-        var elapsed = performance.now() - barStartTime;
+        var elapsed = nowSafe() - barStartTime;
         var pct = (elapsed / STAGE_TOTAL_MS) * 100;
 
         if (pct >= 100) {
@@ -85,14 +96,19 @@
 
     // ===== 拨云见雾退出动画 =====
 
-    function doCloudClearExit() {
-        if (hidden) return;
+    var exitInProgress = false;
 
-        // 如果阶段序列还没播完，等待播完再执行退出
+    function doCloudClearExit() {
+        if (hidden || exitInProgress) return;
+
+        // 如果阶段序列还没播完，等待播完再执行退出；
+        // 用 exitInProgress 防重入，避免每次调用都新建一个轮询 setInterval 造成定时器泄漏
         if (!stageSequenceComplete) {
+            exitInProgress = true;
             var checkInterval = setInterval(function () {
                 if (stageSequenceComplete) {
                     clearInterval(checkInterval);
+                    exitInProgress = false;
                     doCloudClearExit();
                 }
             }, 100);
@@ -134,7 +150,7 @@
      * 首次调用时启动阶段时序播放和进度条引擎
      */
     window.__ASTRBOT_UPDATE_PROGRESS = function () {
-        if (stageTimer === null) {
+        if (!stageStarted) {
             startStageSequence();
             startProgressBar();
         }

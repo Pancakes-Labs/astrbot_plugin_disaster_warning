@@ -165,8 +165,9 @@ function ConfigListField({ fieldKey, schema, value, onChange, depth }) {
  * 会因「值不在选项中」导致框内空白、默认值无法回显。
  *
  * 此处建立字段级别名表，实现双向转换：
- * - 存储值 → 中文标签：回显时反查，保证 Select 有可匹配的选项；
- * - 中文标签 → 存储值：兼容历史遗留的中文配置值。
+ * - 中文标签 → 内部值：MenuItem value 与 Select 当前值统一使用内部值；
+ * - 内部值 → 中文标签：仅用于下拉项的展示文本；
+ * - 兼容历史遗留的中文配置值：回显时若存储值为中文标签，先映射为内部值。
  */
 const SELECT_OPTION_VALUE_ALIASES = {
     intensity_system: {
@@ -188,36 +189,33 @@ function ConfigSelectField({ fieldKey, schema, value, onChange, depth }) {
     const aliases = SELECT_OPTION_VALUE_ALIASES[fieldKey] || null;
 
     /**
-     * 将任意输入值归一化为 Select 可匹配的展示标签（中文）：
-     * - 空值回退 schema.default（schema 默认本就是中文标签）
-     * - 已是中文标签（如 自动判定）直接返回
-     * - 兼容后端规范化后的英文内部值（如 auto），反查为中文标签
-     * - 未知值回退默认，避免 Select 无匹配项而空白
+     * 将任意输入值归一化为 Select 可匹配的「内部值」（英文）：
+     * - 命中别名表的字段：
+     *   - 空值/未知值回退 schema.default 映射后的内部值（如 auto）
+     *   - 已是内部值（auto/cenc/jma）直接返回
+     *   - 兼容历史遗留的中文标签（如 自动判定），反查为内部值
+     * - 普通字段直接返回原始值
+     *
+     * 保证 TextField.value 总能匹配某个 MenuItem.value，避免空白选中状态。
      */
     const normalizeValue = (raw) => {
-        const fallback = schema.default !== undefined ? schema.default : (schema.options && schema.options[0] || '');
+        const fallbackRaw = schema.default !== undefined ? schema.default : (schema.options && schema.options[0] || '');
+        const fallback = (aliases && aliases[fallbackRaw] !== undefined) ? aliases[fallbackRaw] : fallbackRaw;
         if (raw === undefined || raw === null || raw === '') return fallback;
         if (aliases) {
-            if (Object.values(aliases).includes(raw)) {
-                // 英文内部值（auto/cenc/jma）→ 反查中文标签
-                return Object.keys(aliases).find((key) => aliases[key] === raw) || fallback;
-            }
-            if (aliases[raw] !== undefined) return raw; // 已是中文标签
-            return fallback;
+            if (aliases[raw] !== undefined) return aliases[raw]; // 中文标签 → 内部值
+            if (Object.values(aliases).includes(raw)) return raw; // 已是内部值
+            return fallback; // 未知值回退默认内部值
         }
         return raw;
     };
 
     /**
      * 将用户选择的选项值提交给父级草稿：
-     * 选项的 value 使用英文内部值，回写时反转回中文标签，
-     * 保证配置存储/提交给后端的一直是中文（与 schema 默认值一致）。
+     * 选项的 value 已是英文内部值（auto/cenc/jma），直接透传，
+     * 与后端校验器持久化的英文内部值保持一致。
      */
     const commitValue = (raw) => {
-        if (aliases && aliases[raw] !== undefined) {
-            onChange(aliases[raw]);
-            return;
-        }
         onChange(raw);
     };
 
