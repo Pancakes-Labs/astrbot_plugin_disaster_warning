@@ -51,6 +51,13 @@
             "default": "",
             "hint": "到 https://api.fanstudio.tech/dev-platform/ 选择本应用申请。格式通常为 sk- 开头。每个部署实例使用自己的 Key，请勿把 Key 提交到公开仓库或发给他人"
           },
+          "fan_server_preference": {
+            "description": "FAN Studio 服务器偏好",
+            "type": "string",
+            "options": ["主服务器优先", "备用服务器优先", "自动"],
+            "default": "主服务器优先",
+            "hint": "主服务器优先：始终优先连接主服务器；备用服务器优先：始终优先连接备用服务器；自动：主断后自动切备，重连时优先回主"
+          },
           "china_earthquake_warning": {
             "description": "中国地震网地震预警",
             "type": "bool",
