@@ -823,6 +823,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         self, event, data_source: str = None, preference: str = None
     ):
         """处理 /服务器切换 指令。"""
+        # 管理类命令统一在入口先做管理员校验（与同文件其余管理命令保持一致）
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
         if not self.plugin.disaster_service:
             yield event.plain_result("❌ 灾害预警服务未启动")
             return
