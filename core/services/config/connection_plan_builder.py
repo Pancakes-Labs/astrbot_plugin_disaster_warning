@@ -10,6 +10,10 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...network.websocket.fan_studio_connection_policy import (
+    ServerPreference,
+    resolve_server_urls,
+)
 from ...sources.source_catalog import SOURCE_CATALOG
 from ...sources.source_entry import SourceEntry
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
@@ -59,12 +63,41 @@ class ConnectionPlanBuilder:
         return app_id, api_key
 
     @classmethod
-    def build(cls, config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """根据统一数据源目录与启用状态构建连接计划。"""
+    def _resolve_fan_server_preference(cls, config: dict[str, Any]) -> str:
+        """从全局配置解析 FAN Studio 服务器偏好。"""
+        data_sources = config.get("data_sources")
+        if not isinstance(data_sources, dict):
+            return ServerPreference.PRIMARY_FIRST.value
+        fan_cfg = data_sources.get("fan_studio", {})
+        if not isinstance(fan_cfg, dict):
+            return ServerPreference.PRIMARY_FIRST.value
+        raw = str(fan_cfg.get("fan_server_preference") or "").strip()
+        return ServerPreference.normalize(raw)
+
+    @classmethod
+    def build(
+        cls,
+        config: dict[str, Any],
+        fan_server_pref_override: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """根据统一数据源目录与启用状态构建连接计划。
+
+        Args:
+            config: 全局配置字典。
+            fan_server_pref_override: 可选的 FAN Studio 服务器偏好临时覆盖值。
+                传入时仅影响本次连接计划的 URL 顺序，不写入配置，
+                用于运行期临时切换（如 /服务器切换 指令）；
+                缺省时从配置读取持久化偏好。
+        """
         # 使用运行时查询服务拉取当前的物理数据源启用列表
         runtime_query = SourceRuntimeQueryService(config)
         connections: dict[str, dict[str, Any]] = {}
         fan_app_id, fan_api_key = cls._resolve_fan_studio_auth(config)
+        fan_server_pref = (
+            ServerPreference.normalize(fan_server_pref_override)
+            if fan_server_pref_override
+            else cls._resolve_fan_server_preference(config)
+        )
         fan_auth_warned = False
 
         # 只为当前已启用的数据源生成连接计划，避免创建无效连接占位。
@@ -96,6 +129,21 @@ class ConnectionPlanBuilder:
                     continue
                 plan["fan_app_id"] = fan_app_id
                 plan["fan_api_key"] = fan_api_key
+                # 按服务器偏好调整 URL 顺序（沿用 build 入口解析出的偏好，
+                # 支持临时覆盖值，避免此处重复读取配置导致覆盖失效）
+                plan["server_preference"] = fan_server_pref
+                original_url = str(plan.get("url") or "").strip()
+                original_backup = str(plan.get("backup_url") or "").strip()
+                first_url, second_url = resolve_server_urls(
+                    original_url,
+                    original_backup,
+                    fan_server_pref,
+                )
+                plan["url"] = first_url
+                plan["backup_url"] = second_url
+                # 记录原始 URL（供切换时恢复）
+                plan["original_url"] = original_url
+                plan["original_backup"] = original_backup
 
             connections[group_key] = plan
 
