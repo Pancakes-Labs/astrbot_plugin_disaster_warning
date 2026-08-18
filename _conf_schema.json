@@ -42,7 +42,7 @@
           "enabled": {
             "description": "启用 FAN Studio 数据源",
             "type": "bool",
-            "default": false,
+            "default": true,
             "hint": "启用后将连接 FAN Studio WebSocket。需配置下方 API Key，否则会跳过建连"
           },
           "api_key": {
@@ -187,7 +187,7 @@
           "china_cenc_eew": {
             "description": "中国地震台网（CENC）：地震预警",
             "type": "bool",
-            "default": true,
+            "default": false,
             "hint": "通过 Wolfx API 接收中国地震台网地震预警"
           },
           "taiwan_cwa_eew": {
@@ -393,7 +393,7 @@
         "type": "string",
         "options": ["自动判定", "中国烈度", "日本震度"],
         "default": "自动判定",
-        "hint": "自动判定: 按本地坐标自动选择（中国→烈度，日本→震度）；中国烈度: 强制使用中国烈度公式（按坐标经度自动切换东西部参数）；日本震度: 强制使用日本震度公式"
+        "hint": "自动判定: 按本地坐标自动选择（中国→烈度，日本→震度）；中国烈度: 强制使用中国烈度公式；日本震度: 强制使用日本震度公式"
       }
     }
   },
