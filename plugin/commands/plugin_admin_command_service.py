@@ -370,6 +370,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             else:
                 snet_state_text = "🔴 未启动"
 
+            # 解析 FAN Studio 服务器信息
+            fan_server_info = status.get("fan_server_info", {})
+
             # 1. 总体概览行（active/total 已由 status 服务计入 EQSC + S-Net）
             overview_lines = [
                 "📊 灾害预警服务状态",
@@ -403,6 +406,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     state_text = "🟢 正常"
                 else:
                     state_text = "🔴 异常"
+                # FAN Studio 连接附加主备服务器信息
+                server_label = fan_server_info.get(conn_name)
+                if server_label:
+                    state_text += f"（{server_label}）"
                 connection_lines.append(f"• {display_name}：{state_text}")
 
             connection_lines.append(f"• EQSC API：{eqsc_state_text}")
@@ -811,3 +818,93 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] 获取配置详情失败: {e}")
             yield event.plain_result(f"❌ 获取配置详情失败: {str(e)}")
+
+    async def handle_server_switch(
+        self, event, data_source: str = None, preference: str = None
+    ):
+        """处理 /服务器切换 指令。"""
+        if not self.plugin.disaster_service:
+            yield event.plain_result("❌ 灾害预警服务未启动")
+            return
+
+        # 无参数时展示当前服务器状态
+        if not data_source:
+            status = self.plugin.disaster_service.get_service_status()
+            fan_info = status.get("fan_server_info", {})
+            lines = [
+                "🖥️ 数据源服务器状态",
+                "",
+            ]
+            for conn_name, display_name in [
+                ("fan_studio_all", "FAN Studio"),
+                ("fan_studio_cenc_ir", "FAN Studio（烈度速报）"),
+            ]:
+                label = fan_info.get(conn_name, "未知")
+                lines.append(f"  • {display_name}：{label}")
+            lines.append("")
+            lines.append("📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>")
+            lines.append("💡 示例：/服务器切换 FAN 主服务器")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        # 如果 data_source 实际上是 preference（兼容单参数用法）
+        data_source_lower = str(data_source or "").strip().lower()
+        pref_candidates = ("主服务器", "备用服务器", "主", "备")
+        if data_source_lower in {c.lower() for c in pref_candidates}:
+            source = "FAN"
+            raw_pref = str(data_source).strip()
+        else:
+            source = str(data_source).strip()
+            raw_pref = str(preference or "").strip()
+
+        # 规范化偏好值
+        raw_pref_lower = raw_pref.lower()
+        if raw_pref_lower in ("主服务器", "主"):
+            preference_full = "主服务器优先"
+            preference_short = "主服务器"
+        elif raw_pref_lower in ("备用服务器", "备"):
+            preference_full = "备用服务器优先"
+            preference_short = "备用服务器"
+        else:
+            yield event.plain_result(
+                "❌ 无效参数。\n\n"
+                "📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>\n"
+                "💡 示例：/服务器切换 FAN 主服务器\n"
+                "  或：/服务器切换 FAN 备用服务器"
+            )
+            return
+
+        # 判断数据源
+        source_lower = source.lower()
+        if source_lower not in ("fan", "fan studio", "fan_studio", "fanstudio"):
+            yield event.plain_result(f"❌ 暂不支持数据源「{source}」的服务器切换。")
+            return
+
+        yield event.plain_result(f"🔄 正在切换 FAN Studio 至 {preference_short}...")
+
+        try:
+            results = await self.plugin.disaster_service.switch_fan_server_preference(
+                preference_full
+            )
+            lines = ["🖥️ FAN Studio 服务器切换结果："]
+            for conn_name, status in results.items():
+                display_name = self._resolve_fan_conn_display(conn_name)
+                if "失败" in status:
+                    lines.append(f"  ❌ {display_name}：{status}")
+                else:
+                    # 只保留首个 ✅，去掉结果中的重复 emoji
+                    clean_status = status.replace("✅ ", "")
+                    lines.append(f"  ✅ {display_name}：{clean_status}")
+            yield event.plain_result("\n".join(lines))
+        except Exception as e:
+            logger.error(f"[灾害预警] 切换 FAN Studio 服务器失败: {e}")
+            yield event.plain_result(f"❌ 切换失败: {str(e)}")
+
+    @staticmethod
+    def _resolve_fan_conn_display(conn_name: str) -> str:
+        """解析 FAN 连接展示名。"""
+        names = {
+            "fan_studio_all": "FAN Studio",
+            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        }
+        return names.get(conn_name, conn_name)
