@@ -157,12 +157,72 @@ function ConfigListField({ fieldKey, schema, value, onChange, depth }) {
 }
 
 /**
+ * 下拉框「展示标签 ↔ 内部存储值」别名映射表。
+ *
+ * 部分配置项（如本地强度体系 intensity_system）在前端 Schema 中声明中文标签
+ * （options: 自动判定/中国烈度/日本震度），但后端配置校验器会将其规范化为
+ * 英文内部值（auto/cenc/jma）持久化。若 Select 直接用存储值匹配 options，
+ * 会因「值不在选项中」导致框内空白、默认值无法回显。
+ *
+ * 此处建立字段级别名表，实现双向转换：
+ * - 存储值 → 中文标签：回显时反查，保证 Select 有可匹配的选项；
+ * - 中文标签 → 存储值：兼容历史遗留的中文配置值。
+ */
+const SELECT_OPTION_VALUE_ALIASES = {
+    intensity_system: {
+        '自动判定': 'auto',
+        '中国烈度': 'cenc',
+        '日本震度': 'jma',
+    },
+};
+
+/**
  * 4. 下拉单选枚举域 (ConfigSelectField)
  * 渲染为带有 Material-UI 下拉弹窗菜单的 Select 输入框，自动绑定 schema.options 的全部选项。
  */
 function ConfigSelectField({ fieldKey, schema, value, onChange, depth }) {
     const { TextField, MenuItem } = MaterialUI;
     const { DescriptionSection, FieldRow, FieldControl, getConfigFieldInputSx } = window.ConfigFieldLayout;
+
+    // 命中别名表的字段启用「内部值」模式：下拉选项 value 用内部值，展示文本用中文标签
+    const aliases = SELECT_OPTION_VALUE_ALIASES[fieldKey] || null;
+
+    /**
+     * 将任意输入值归一化为 Select 可匹配的展示标签（中文）：
+     * - 空值回退 schema.default（schema 默认本就是中文标签）
+     * - 已是中文标签（如 自动判定）直接返回
+     * - 兼容后端规范化后的英文内部值（如 auto），反查为中文标签
+     * - 未知值回退默认，避免 Select 无匹配项而空白
+     */
+    const normalizeValue = (raw) => {
+        const fallback = schema.default !== undefined ? schema.default : (schema.options && schema.options[0] || '');
+        if (raw === undefined || raw === null || raw === '') return fallback;
+        if (aliases) {
+            if (Object.values(aliases).includes(raw)) {
+                // 英文内部值（auto/cenc/jma）→ 反查中文标签
+                return Object.keys(aliases).find((key) => aliases[key] === raw) || fallback;
+            }
+            if (aliases[raw] !== undefined) return raw; // 已是中文标签
+            return fallback;
+        }
+        return raw;
+    };
+
+    /**
+     * 将用户选择的选项值提交给父级草稿：
+     * 选项的 value 使用英文内部值，回写时反转回中文标签，
+     * 保证配置存储/提交给后端的一直是中文（与 schema 默认值一致）。
+     */
+    const commitValue = (raw) => {
+        if (aliases && aliases[raw] !== undefined) {
+            onChange(aliases[raw]);
+            return;
+        }
+        onChange(raw);
+    };
+
+    const currentValue = normalizeValue(value);
+
     return (
         <FieldRow depth={depth}>
             <DescriptionSection schema={schema} fieldKey={fieldKey} />
@@ -171,16 +231,20 @@ function ConfigSelectField({ fieldKey, schema, value, onChange, depth }) {
                     select
                     fullWidth
                     size="small"
-                    value={value !== undefined ? value : (schema.default || '')}
-                    onChange={(e) => onChange(e.target.value)}
+                    value={currentValue}
+                    onChange={(e) => commitValue(e.target.value)}
                     variant="outlined"
                     sx={getConfigFieldInputSx({ '& .MuiSelect-select': { textAlign: 'center', pr: '32px !important' } })}
                 >
-                    {schema.options.map((option) => (
-                        <MenuItem key={option} value={option} className="config-field-menu-item">
-                            {option}
-                        </MenuItem>
-                    ))}
+                    {schema.options.map((option) => {
+                        // 选项的 value 用英文内部值以便稳定匹配，展示文本保持中文标签
+                        const optionValue = aliases && aliases[option] !== undefined ? aliases[option] : option;
+                        return (
+                            <MenuItem key={optionValue} value={optionValue} className="config-field-menu-item">
+                                {option}
+                            </MenuItem>
+                        );
+                    })}
                 </TextField>
             </FieldControl>
         </FieldRow>
