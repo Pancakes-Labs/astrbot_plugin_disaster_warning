@@ -19,6 +19,8 @@
         ['data_sources', 'eqsc', 'poll_interval_seconds'],
         // FAN Studio 鉴权影响全局 WebSocket 建连，会话模式隐藏且保存时剥离
         ['data_sources', 'fan_studio', 'api_key'],
+        // FAN Studio 主备服务器偏好影响全局连接策略，会话模式隐藏且保存时剥离
+        ['data_sources', 'fan_studio', 'fan_server_preference'],
         // 浏览器页面池大小影响全局运行态，会话模式隐藏且保存时剥离
         ['message_format', 'browser_pool_size'],
         // 是否忽略 HTTPS 证书错误是浏览器启动级配置，会话模式隐藏且保存时剥离
