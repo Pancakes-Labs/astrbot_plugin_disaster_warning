@@ -9,6 +9,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from ...network.websocket.fan_studio_connection_policy import (
+    resolve_active_server_label,
+)
 from ...services.config.config_service import ConfigAccessor
 from ...services.config.config_validation_service import ConfigValidator
 from ...sources.display_registry import CONNECTION_DISPLAY_NAMES
@@ -141,6 +144,21 @@ class DisasterServiceNoticeService:
             key_name="target_sessions",
         )
 
+    def _resolve_server_label_for_connection(self, connection_name: str) -> str:
+        """解析连接当前的活跃服务器标签。"""
+        if not connection_name:
+            return ""
+        ws_manager = getattr(self.service, "ws_manager", None)
+        if ws_manager is None:
+            return ""
+        info = ws_manager.connection_info.get(connection_name)
+        if not isinstance(info, dict):
+            return ""
+        label = resolve_active_server_label(info)
+        if label and label != "未知":
+            return f"（{label}）"
+        return ""
+
     def build_offline_notification_message(
         self,
         *,
@@ -154,9 +172,13 @@ class DisasterServiceNoticeService:
     ) -> str:
         """构建具体展示的离线通知富文本消息。"""
         # 阶段文案、重试次数和下一次重试时间会一起展示，
-        # 目的是让使用者能在一条通知里快速判断当前处于“短时抖动”还是“长期离线”。
+        # 目的是让使用者能在一条通知里快速判断当前处于"短时抖动"还是"长期离线"。
         # 数据源代号先映射为展示名，避免把内部标识暴露给用户。
         source_display = self._resolve_source_display(data_source)
+        # 附加服务器标签，让离线通知也能反映当前连接的是主还是备
+        server_label = self._resolve_server_label_for_connection(connection_name)
+        if server_label:
+            source_display = f"{source_display} {server_label}"
         stage_text = self._OFFLINE_STAGE_MAP.get(stage, stage)
         retry_part = (
             f"短时重试: {retry_count}" if retry_count is not None else "短时重试: 未知"
@@ -178,7 +200,7 @@ class DisasterServiceNoticeService:
             f"🔁 {retry_part}",
             f"🛟 {fallback_part}",
         ]
-        # “离线时间过长”和“进入兜底重试”都适合展示下一次重试时间，帮助运维判断恢复窗口。
+        # "离线时间过长"和"进入兜底重试"都适合展示下一次重试时间，帮助运维判断恢复窗口。
         if stage in {"short_retry", "fallback"}:
             message_lines.append(f"⏳ {next_retry_part}")
         return "\n".join(message_lines)
