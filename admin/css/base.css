@@ -298,6 +298,17 @@ body {
 /* ==========================================================================
    4. 首屏加载及登录器 (Boot Loader & Login Panel)
    ========================================================================== */
+
+/* --- 背景渐变呼吸动画 --- */
+@keyframes boot-bg-breathe {
+    0%, 100% {
+        background-size: 100% 100%;
+    }
+    50% {
+        background-size: 110% 110%;
+    }
+}
+
 .boot-loader {
     position: fixed;
     inset: 0;
@@ -315,6 +326,7 @@ body {
     opacity: 1;
     transform: translateZ(0);
     will-change: opacity, transform;
+    animation: boot-bg-breathe 6s ease-in-out infinite;
 }
 
 html.theme-dark .boot-loader,
@@ -326,15 +338,69 @@ body.dark-theme .boot-loader {
         #141218;
 }
 
-/* 骨架屏或加载器退出动画 */
+/* --- "拨云见雾" 退出动画 ---
+   加载完成时，骨架屏中心产生径向光晕向外扩散，
+   并伴随缩放淡出，营造云雾散开的效果 */
+/* 拨云见雾：骨架屏缩放淡出（更长，营造缓缓消散的云雾感） */
 #loading-skeleton.is-exiting {
     opacity: 0;
-    transform: scale(0.985);
-    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+    transform: scale(0.88);
+    transition: opacity 0.7s ease-out, transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 加载器中的品牌Logo容器 */
+/* 拨云见雾：径向光晕从中心向外扩散（更长，光晕缓缓散开） */
+#loading-skeleton.is-exiting::after {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    z-index: -1;
+    background: radial-gradient(circle at center, rgba(255,255,255,0.6) 0%, transparent 60%);
+    opacity: 0;
+    animation: cloud-clear-glow 0.9s ease-out forwards;
+    pointer-events: none;
+}
+
+html.theme-dark #loading-skeleton.is-exiting::after,
+body.dark-theme #loading-skeleton.is-exiting::after {
+    background: radial-gradient(circle at center, rgba(208,188,255,0.25) 0%, transparent 60%);
+}
+
+@keyframes cloud-clear-glow {
+    0% {
+        opacity: 0;
+        transform: scale(0.5);
+    }
+    40% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: scale(2.2);
+    }
+}
+
+/* --- 拨云见雾后主界面从模糊到清晰渐入（更长，缓缓浮现） --- */
+#root.root-reveal {
+    animation: root-blur-in 0.8s ease-out forwards;
+}
+
+@keyframes root-blur-in {
+    0% {
+        filter: blur(16px);
+        opacity: 0.2;
+    }
+    50% {
+        opacity: 0.7;
+    }
+    100% {
+        filter: blur(0);
+        opacity: 1;
+    }
+}
+
+/* --- Logo 脉冲波纹动画 --- */
 .boot-loader__logo {
+    position: relative;
     width: 80px;
     height: 80px;
     border-radius: 20px;
@@ -345,8 +411,8 @@ body.dark-theme .boot-loader {
     background: rgba(103, 80, 164, 0.08);
     border: 1px solid rgba(103, 80, 164, 0.18);
     box-shadow: 0 4px 24px rgba(103, 80, 164, 0.12);
-    overflow: hidden;
-    animation: boot-loader-float 2.4s ease-in-out infinite; /* 浮动跳跃动效 */
+    overflow: visible;
+    animation: boot-loader-float 2.4s ease-in-out infinite;
     will-change: transform;
 }
 
@@ -355,6 +421,34 @@ body.dark-theme .boot-loader {
     height: 56px;
     object-fit: contain;
     border-radius: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Logo 脉冲波纹扩散环 */
+.boot-loader__logo-pulse {
+    position: absolute;
+    inset: -8px;
+    border-radius: 24px;
+    border: 2px solid rgba(103, 80, 164, 0.2);
+    opacity: 0;
+    animation: logo-pulse-wave 2.4s ease-out infinite;
+    pointer-events: none;
+}
+
+@keyframes logo-pulse-wave {
+    0% {
+        transform: scale(0.92);
+        opacity: 0.6;
+    }
+    50% {
+        transform: scale(1.08);
+        opacity: 0.15;
+    }
+    100% {
+        transform: scale(1.15);
+        opacity: 0;
+    }
 }
 
 html.theme-dark .boot-loader__logo,
@@ -362,6 +456,10 @@ body.dark-theme .boot-loader__logo {
     background: rgba(208, 188, 255, 0.08);
     border-color: rgba(208, 188, 255, 0.15);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+html.theme-dark .boot-loader__logo-pulse {
+    border-color: rgba(208, 188, 255, 0.2);
 }
 
 /* 加载页面主标题 */
@@ -380,9 +478,13 @@ body.dark-theme .boot-loader__title {
 
 /* 加载页面副标题 */
 .boot-loader__subtitle {
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     color: #49454F;
     margin-bottom: 28px;
+    letter-spacing: 0.02em;
+    transition: opacity 0.25s ease;
+    min-height: 1.4em;
 }
 
 html.theme-dark .boot-loader__subtitle,
@@ -392,39 +494,82 @@ body.dark-theme .boot-loader__subtitle {
 
 /* 进度条轨道容器 */
 .boot-loader__progress {
-    width: min(260px, 68vw);
-    height: 3px;
+    width: min(280px, 72vw);
+    height: 4px;
     border-radius: 999px;
     overflow: hidden;
-    background: rgba(103, 80, 164, 0.12);
-    contain: paint; /* 性能优化，限制子元素重绘区域 */
+    background: rgba(103, 80, 164, 0.1);
+    contain: paint;
+    margin-bottom: 20px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 html.theme-dark .boot-loader__progress,
 body.dark-theme .boot-loader__progress {
-    background: rgba(208, 188, 255, 0.12);
+    background: rgba(208, 188, 255, 0.1);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-/* 滚动进度条指示器 */
+/* 真实进度条指示器 - 纯绿色渐变，由 JS requestAnimationFrame 驱动平滑插值 */
 .boot-loader__progress-bar {
     height: 100%;
-    width: 42%;
+    width: 0%;
     border-radius: 999px;
-    background: linear-gradient(90deg,
-        rgba(103, 80, 164, 0.25) 0%,
-        rgba(103, 80, 164, 0.85) 50%,
-        rgba(103, 80, 164, 0.25) 100%);
-    animation: boot-loader-progress 1.45s ease-in-out infinite;
-    will-change: transform;
-    transform: translate3d(-110%, 0, 0) scaleX(0.35);
+    background: linear-gradient(90deg, #43A047, #66BB6A);
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.3);
+    will-change: width;
 }
 
 html.theme-dark .boot-loader__progress-bar,
 body.dark-theme .boot-loader__progress-bar {
-    background: linear-gradient(90deg,
-        rgba(208, 188, 255, 0.2) 0%,
-        rgba(208, 188, 255, 0.9) 50%,
-        rgba(208, 188, 255, 0.2) 100%);
+    background: linear-gradient(90deg, #66BB6A, #81C784);
+    box-shadow: 0 0 8px rgba(129, 199, 132, 0.25);
+}
+
+/* --- 阶段指示器（5段圆点） ---
+   红绿状态：active=红色脉冲，done=绿色实心，pending=灰色 */
+.bl-stage-dots {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.bl-stage-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(103, 80, 164, 0.15);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* 当前阶段：红色脉冲发光 */
+.bl-stage-dot.active {
+    background: #E53935;
+    box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.15), 0 0 12px rgba(229, 57, 53, 0.2);
+    width: 11px;
+    height: 11px;
+}
+
+/* 已完成阶段：绿色实心 */
+.bl-stage-dot.done {
+    background: #43A047;
+    box-shadow: 0 0 0 2px rgba(67, 160, 71, 0.12);
+}
+
+html.theme-dark .bl-stage-dot {
+    background: rgba(208, 188, 255, 0.15);
+}
+
+html.theme-dark .bl-stage-dot.active {
+    background: #EF5350;
+    box-shadow: 0 0 0 4px rgba(239, 83, 80, 0.15), 0 0 12px rgba(239, 83, 80, 0.2);
+}
+
+html.theme-dark .bl-stage-dot.done {
+    background: #66BB6A;
+    box-shadow: 0 0 0 2px rgba(102, 187, 106, 0.12);
 }
 
 /* 核心加载状态包裹框 */
@@ -1460,7 +1605,9 @@ html.theme-dark .skeleton {
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
     .boot-loader__logo,
+    .boot-loader__logo-pulse,
     .boot-loader__progress-bar,
+    .boot-loader,
     .skeleton,
     .card-animated,
     .card,
@@ -1491,12 +1638,32 @@ html.theme-dark .skeleton {
     .config-renderer-session-card,
     .tasks-empty-card,
     .notifications-inline-meta-item {
-        animation: none !important; /* 强制移除所有旋转/淡入/平移动画 */
+        animation: none !important;
+    }
+
+    .boot-loader {
+        animation: none !important;
+        background-size: 100% 100% !important;
+    }
+
+    .boot-loader__logo-pulse {
+        display: none !important;
     }
 
     #loading-skeleton.is-exiting {
         transition: opacity 0.15s linear !important;
         transform: none !important;
+    }
+
+    #loading-skeleton.is-exiting::after {
+        animation: none !important;
+        display: none !important;
+    }
+
+    #root.root-reveal {
+        animation: none !important;
+        filter: none !important;
+        opacity: 1 !important;
     }
 
     .event-card,
@@ -1516,7 +1683,11 @@ html.theme-dark .skeleton {
     }
 
     .boot-loader__progress-bar {
-        transform: translate3d(0, 0, 0) scaleX(1);
+        width: 100% !important;
+    }
+
+    .bl-stage-dot {
+        transition: none !important;
     }
 
     html.theme-switching::before {
