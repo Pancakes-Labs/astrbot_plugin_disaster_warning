@@ -363,11 +363,17 @@ class WebSocketManager:
             logger.error(f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {e}")
             logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
             if self._telemetry and self._telemetry.enabled:
-                asyncio.create_task(
-                    self._telemetry.track_error(
+                # 当前处于 async 上下文，直接 await 上报，避免裸 create_task 无引用、
+                # 无异常保护导致遥测任务被 GC 或产生未处理异常。
+                try:
+                    await self._telemetry.track_error(
                         e, module=f"core.websocket_manager.connect.{name}"
                     )
-                )
+                except Exception as telemetry_exc:
+                    # 遥测上报失败不得中断后续配额策略与重连调度。
+                    logger.debug(
+                        f"[灾害预警] 连接错误遥测上报失败（已忽略）: {telemetry_exc}"
+                    )
             await self._apply_fan_quota_policy_on_error(name, e)
             self._handle_connection_error(name, uri, headers, e)
         finally:

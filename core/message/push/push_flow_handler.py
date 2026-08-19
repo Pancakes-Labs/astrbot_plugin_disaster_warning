@@ -122,7 +122,7 @@ class PushFlowHandler:
                 if self.manager._telemetry and self.manager._telemetry.enabled:
                     await self.manager._telemetry.track_error(
                         e,
-                        module="core.message_manager._execute_push",
+                        module="core.push_flow_handler.execute_push",
                     )
                 return False
 

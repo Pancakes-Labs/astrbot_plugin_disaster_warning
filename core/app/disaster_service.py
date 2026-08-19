@@ -312,6 +312,12 @@ class DisasterWarningService:
             self.ws_manager._telemetry = telemetry
         if self.message_manager:
             self.message_manager.set_telemetry(telemetry)
+        # 解析器也会在同步上下文内部捕获异常（如 JSON 解码失败），
+        # 需要注入遥测引用以便解析层也能轻量上报。
+        if self.parsers:
+            for parser in self.parsers.values():
+                if parser is not None:
+                    parser._telemetry = telemetry
 
     async def initialize(self):
         """初始化服务。"""
@@ -656,12 +662,18 @@ class DisasterWarningService:
             )
             logger.error(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
             if self._telemetry and self._telemetry.enabled:
-                asyncio.create_task(
-                    self._telemetry.track_error(
+                # 当前处于 async 上下文，直接 await 上报，避免裸 create_task 无引用、
+                # 无异常保护导致遥测任务被 GC 或产生未处理异常。
+                try:
+                    await self._telemetry.track_error(
                         exception=e,
-                        module="disaster_service._handle_disaster_event",
+                        module="core.disaster_service._handle_disaster_event",
                     )
-                )
+                except Exception as telemetry_exc:
+                    # 遥测上报失败不影响原始异常处理路径（日志已打印，事件返回失败）。
+                    logger.debug(
+                        f"[灾害预警] 事件遥测上报失败（已忽略）: {telemetry_exc}"
+                    )
             return False
 
     async def _handle_offline_notification(self, payload: dict[str, Any]) -> None:
