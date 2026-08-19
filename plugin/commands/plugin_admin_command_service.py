@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections import OrderedDict
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
+from astrbot.core import DEMO_MODE
+from astrbot.core.desktop_runtime import is_desktop_managed_backend
+from astrbot.core.updator import AstrBotUpdator
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
@@ -42,6 +46,120 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         if mgr:
             return mgr.get_session_log_str(session_umo)
         return session_umo
+
+    async def handle_disaster_restart(self, event):
+        """处理插件重载命令，等价于 AstrBot WebUI 中的重载插件操作。
+
+        重载时会依次触发：
+        1. 终止旧插件实例（调用 terminate()，回收服务/WebServer/浏览器资源）
+        2. 解绑旧插件注册表
+        3. 重新导入模块并创建新实例（调用 initialize()）
+        4. 新实例自动完成数据源装配与 WebAdmin 启动
+
+        重载成功后旧实例被销毁，因此最终结果通过 context.send_message 直接发送，
+        不再通过 yield 返回。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 向用户发送"正在重载"提示（此时旧实例尚未销毁，yield 安全可用）
+        yield event.plain_result("🔄 正在重载灾害预警插件，请稍候…")
+
+        try:
+            # 通过 Context._star_manager 获取 PluginManager 实例
+            plugin_manager = getattr(self.plugin.context, "_star_manager", None)
+            if plugin_manager is None:
+                yield event.plain_result("❌ 无法获取 AstrBot 插件管理器")
+                return
+
+            # 插件名取自 metadata.yaml 的 name 字段
+            plugin_name = "astrbot_plugin_disaster_warning"
+            success, message = await plugin_manager.reload(plugin_name)
+
+            # 重载后旧实例已销毁，改用 context.send_message 直接发送结果
+            if success:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain("✅ 灾害预警插件重载完成，正在重新启动")]),
+                )
+            else:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {message}")]),
+                )
+        except Exception as e:
+            logger.error(f"[灾害预警] 插件重载失败: {e}")
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {e}")]),
+                )
+            except Exception:
+                pass
+
+    async def handle_restart_astrbot(self, event):
+        """处理重启 AstrBot 命令，等价于 AstrBot WebUI 中「设置 → 维护 → 重启 AstrBot」。
+
+        重启是进程级的 os.exec* 替换，不依赖插件实例存活，因此：
+        1. 先通过 yield 发送「即将重启」提示（此时管道仍可用）
+        2. 检查桌面版托管 / DEMO 模式守卫，拒绝时直接提示
+        3. 通过 context.send_message 发送最终提示（进程即将替换，yield 管道已不可靠）
+        4. 起 daemon 线程调用 AstrBotUpdator()._reboot()，内部 sleep 3 秒后
+           终止全部子进程并 os.exec* 替换当前进程完成重启
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 桌面版 Launcher 托管后端时不允许核心直接重启，_reboot() 内部也会抛错，
+        # 这里提前拦截并给出更友好的提示。
+        if is_desktop_managed_backend():
+            yield event.plain_result(
+                "❌ 当前由 AstrBot Desktop 托管运行，无法通过核心命令重启。\n"
+                "请从桌面客户端执行重启或更新。"
+            )
+            return
+
+        if DEMO_MODE:
+            yield event.plain_result("❌ 演示模式（DEMO_MODE）下不允许执行此操作。")
+            return
+
+        # 告知用户即将重启（此时事件管道仍可用，yield 安全）
+        yield event.plain_result("🔄 即将重启 AstrBot，约 3 秒后进程将重新启动…")
+
+        try:
+            # 重启前先通过 context.send_message 发送最终提示：
+            # 进程级替换不销毁任何插件对象，但事件总线管道可能在进程退出瞬间被中断，
+            # 因此最终提示不依赖 yield，直接用 send_message 发送，_reboot 内部会
+            # sleep 3 秒，足以让消息送达平台。
+            await self.plugin.context.send_message(
+                event.unified_msg_origin,
+                MessageChain(
+                    [
+                        Comp.Plain(
+                            "✅ 已触发 AstrBot 重启，进程将在数秒内重新启动，请稍候…"
+                        )
+                    ]
+                ),
+            )
+
+            # _reboot 是同步阻塞函数（内部 sleep 3s + 杀子进程 + os.exec*），
+            # 必须放入 daemon 线程执行，避免阻塞事件循环。
+            threading.Thread(
+                target=AstrBotUpdator()._reboot,
+                name="astrbot-core-restart",
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 触发 AstrBot 重启失败: {e}")]),
+                )
+            except Exception:
+                pass
 
     async def handle_disaster_reconnect(self, event):
         """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。

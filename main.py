@@ -231,12 +231,14 @@ class DisasterWarningPlugin(Star):
             (
                 "🛠️ 运维管理\n"
                 "• /灾害预警状态 - 服务运行状态\n"
-                "• /服务器切换 - 查看/切换数据源主备服务器\n"
+                "• /灾害预警重启 - 重载插件\n"
                 "• /灾害预警重连 - 强制重连离线数据源\n"
                 "• /灾害预警统计 / 灾害预警统计清除\n"
                 "• /灾害预警推送开关 - 会话推送开关\n"
                 "• /灾害预警配置 查看 [全局|当前|<会话UMO>]\n"
                 "• /灾害预警日志 / 日志开关 / 日志清除\n"
+                "• /服务器切换 - 查看/切换数据源主备服务器\n"
+                "• /重启AstrBot - 重启整个 AstrBot 进程\n"
                 "──────────────\n"
                 "📚 更多信息请查阅插件 README 文档"
             ),
@@ -670,14 +672,27 @@ class DisasterWarningPlugin(Star):
         async for result in self._admin_command_service.handle_disaster_status(event):
             yield result
 
-    @filter.command("服务器切换")
-    async def server_switch(
-        self, event: AstrMessageEvent, data_source: str = None, preference: str = None
-    ):
-        """切换数据源主备服务器。"""
-        async for result in self._admin_command_service.handle_server_switch(
-            event, data_source, preference
-        ):
+    @filter.command("灾害预警重启", alias={"灾害预警重载"})
+    async def disaster_restart(self, event: AstrMessageEvent):
+        """重载插件（等价于 AstrBot WebUI 中的重载插件操作）"""
+        async for result in self._admin_command_service.handle_disaster_restart(event):
+            yield result
+
+    @filter.command(
+        "重启AstrBot",
+        alias={
+            "重启 AstrBot",
+            "重启astrbot",
+            "重启 astrbot",
+            "重载 AstrBot",
+            "重载AstrBot",
+            "重载 astrbot",
+            "重载astrbot",
+        },
+    )
+    async def restart_astrbot(self, event: AstrMessageEvent):
+        """重启整个 AstrBot 进程（等价于 AstrBot WebUI 中的「设置 → 维护 → 重启 AstrBot」）"""
+        async for result in self._admin_command_service.handle_restart_astrbot(event):
             yield result
 
     @filter.command("灾害预警重连")
@@ -738,6 +753,16 @@ class DisasterWarningPlugin(Star):
         """清除所有原始消息日志"""
         async for result in self._admin_command_service.handle_clear_message_logs(
             event
+        ):
+            yield result
+
+    @filter.command("服务器切换")
+    async def server_switch(
+        self, event: AstrMessageEvent, data_source: str = None, preference: str = None
+    ):
+        """切换数据源主备服务器。"""
+        async for result in self._admin_command_service.handle_server_switch(
+            event, data_source, preference
         ):
             yield result
 
