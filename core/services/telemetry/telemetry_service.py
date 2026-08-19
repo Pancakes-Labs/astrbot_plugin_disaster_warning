@@ -102,6 +102,10 @@ class TelemetryManager:
         self._last_send_time: float = 0.0
         self._send_semaphore = asyncio.Semaphore(1)
 
+        # 关闭标志：close() 置位后拒绝任何新事件入队/发送，
+        # 防止插件重载后残留的 track_* 调用重建 aiohttp 会话或后台批处理任务。
+        self._closed = False
+
         if self._enabled:
             logger.debug(
                 f"[灾害预警] 已启用匿名遥测，实例标识为 {self._instance_id}，AstrBot 版本为 {self._astrbot_version}"
@@ -167,7 +171,7 @@ class TelemetryManager:
         - bypass_rate_limit: 是否绕过物理发送最小间隔。仅用于关机/退出等关键路径
             （如 track_shutdown），避免被 _MIN_REQUEST_INTERVAL 限速等待阻塞资源清理。
         """
-        if not self._enabled:
+        if not self._enabled or self._closed:
             return False
 
         # 对高频冗余事件进行内存节流过滤
@@ -640,7 +644,18 @@ class TelemetryManager:
         return message
 
     async def close(self):
-        """关闭遥测会话。"""
+        """关闭遥测会话（幂等：重复调用直接返回）。
+
+        关闭开始后：
+        - _closed 置位，track() 会拒绝任何新事件，避免重建 aiohttp 会话与后台任务；
+        - 后台批处理任务被取消；
+        - 缓冲中剩余数据仍做最后一次兜底 flush（绕过物理限速，避免阻塞会话关闭）。
+        """
+        # 幂等保护：重复关闭直接返回，防止插件重载期间并发调用重复清理。
+        if self._closed:
+            return
+        self._closed = True
+
         # 1. 取消后台批处理任务并安全等待其结束
         if self._send_task and not self._send_task.done():
             self._send_task.cancel()
@@ -651,12 +666,19 @@ class TelemetryManager:
             self._send_task = None
 
         # 2. 强行上报缓冲中剩余的数据（关机路径绕过物理限速，避免阻塞会话关闭）
-        await self.flush(bypass_rate_limit=True)
+        try:
+            await self.flush(bypass_rate_limit=True)
+        except Exception as flush_err:
+            logger.debug(f"[灾害预警] 关闭时兜底发送遥测失败（已忽略）: {flush_err}")
 
         # 3. 关闭底层会话
         if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+            try:
+                await self._session.close()
+            except Exception as session_err:
+                logger.debug(f"[灾害预警] 关闭遥测会话失败（已忽略）: {session_err}")
+            finally:
+                self._session = None
             logger.debug("[灾害预警] 遥测会话已关闭")
 
 
