@@ -19,7 +19,7 @@ from astrbot.core.updator import AstrBotUpdator
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
-from ...utils.version import get_plugin_version
+from ...utils.version import get_plugin_name, get_plugin_version
 from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 
@@ -73,8 +73,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 yield event.plain_result("❌ 无法获取 AstrBot 插件管理器")
                 return
 
-            # 插件名取自 metadata.yaml 的 name 字段
-            plugin_name = "astrbot_plugin_disaster_warning"
+            # 插件名取自 metadata.yaml 的 name 字段，避免硬编码与元数据配置漂移；
+            # 读取失败时回退到插件目录名，保证兼容旧逻辑。
+            plugin_name = get_plugin_name()
             success, message = await plugin_manager.reload(plugin_name)
 
             # 重载后旧实例已销毁，改用 context.send_message 直接发送结果
