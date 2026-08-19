@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from collections import OrderedDict
@@ -70,12 +71,31 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # 通过 Context._star_manager 获取 PluginManager 实例
             plugin_manager = getattr(self.plugin.context, "_star_manager", None)
             if plugin_manager is None:
+                # 上报失败（管理器不可用，命令未真正执行）
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "no_plugin_manager",
+                    },
+                )
                 yield event.plain_result("❌ 无法获取 AstrBot 插件管理器")
                 return
 
             # 插件名取自 metadata.yaml 的 name 字段，避免硬编码与元数据配置漂移；
             # 读取失败时回退到插件目录名，保证兼容旧逻辑。
             plugin_name = get_plugin_name()
+            # 触发前上报请求状态（重载成功会销毁当前实例，无法在完成后上报，故先记录 requested）
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin",
+                    "success": True,
+                    "state": "requested",
+                    "plugin": plugin_name,
+                },
+            )
             success, message = await plugin_manager.reload(plugin_name)
 
             # 重载后旧实例已销毁，改用 context.send_message 直接发送结果
@@ -85,12 +105,30 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     MessageChain([Comp.Plain("✅ 灾害预警插件重载完成，正在重新启动")]),
                 )
             else:
+                # 上报失败（reload 返回失败结果）
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": str(message or "reload_failed"),
+                    },
+                )
                 await self.plugin.context.send_message(
                     event.unified_msg_origin,
                     MessageChain([Comp.Plain(f"❌ 插件重载失败: {message}")]),
                 )
         except Exception as e:
             logger.error(f"[灾害预警] 插件重载失败: {e}")
+            # 上报失败（异常路径）
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin",
+                    "success": False,
+                    "reason": str(e),
+                },
+            )
             try:
                 await self.plugin.context.send_message(
                     event.unified_msg_origin,
@@ -130,6 +168,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         yield event.plain_result("🔄 即将重启 AstrBot，约 3 秒后进程将重新启动…")
 
         try:
+            # 触发前上报请求状态（成功路径进程将被替换，无法在完成后上报，故先记录 requested）
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": True,
+                    "state": "requested",
+                },
+            )
             # 重启前先通过 context.send_message 发送最终提示：
             # 进程级替换不销毁任何插件对象，但事件总线管道可能在进程退出瞬间被中断，
             # 因此最终提示不依赖 yield，直接用 send_message 发送，_reboot 内部会
@@ -147,13 +194,43 @@ class PluginAdminCommandService(CommandTelemetryMixin):
 
             # _reboot 是同步阻塞函数（内部 sleep 3s + 杀子进程 + os.exec*），
             # 必须放入 daemon 线程执行，避免阻塞事件循环。
+            # 线程内用包装函数捕获异常，防止 _reboot 抛错时用户收到成功提示却无失败反馈。
+            loop = asyncio.get_running_loop()
+            unified_msg_origin = event.unified_msg_origin
+
+            def _reboot_wrapper() -> None:
+                try:
+                    AstrBotUpdator()._reboot()
+                except Exception as reboot_err:
+                    logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {reboot_err}")
+                    # 线程内无法直接 await，用 run_coroutine_threadsafe 将失败通知
+                    # 与失败遥测调度回事件循环执行（线程安全）。
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            self._notify_restart_astrbot_failure(
+                                unified_msg_origin, reboot_err
+                            ),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+
             threading.Thread(
-                target=AstrBotUpdator()._reboot,
+                target=_reboot_wrapper,
                 name="astrbot-core-restart",
                 daemon=True,
             ).start()
         except Exception as e:
             logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
+            # 上报失败（启动线程前的异常路径）
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": str(e),
+                },
+            )
             try:
                 await self.plugin.context.send_message(
                     event.unified_msg_origin,
@@ -161,6 +238,29 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 )
             except Exception:
                 pass
+
+    async def _notify_restart_astrbot_failure(
+        self, unified_msg_origin: str, error: Exception
+    ) -> None:
+        """AstrBot 重启线程失败时，向原会话推送失败通知并上报失败遥测。"""
+        try:
+            await self.plugin.context.send_message(
+                unified_msg_origin,
+                MessageChain([Comp.Plain(f"❌ AstrBot 重启失败: {error}")]),
+            )
+        except Exception:
+            pass
+        try:
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": str(error),
+                },
+            )
+        except Exception:
+            pass
 
     async def handle_disaster_reconnect(self, event):
         """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
