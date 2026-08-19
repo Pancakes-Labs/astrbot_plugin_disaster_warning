@@ -95,6 +95,14 @@ class TelemetryManager:
         self._send_task: asyncio.Task | None = None
         self._last_429_time: datetime | None = None
 
+        # 后台批处理循环唤醒事件：close() 置位 _closed 后 set 该事件，
+        # 使循环从可中断等待中立即唤醒退出，而不是取消在途发送批次。
+        self._wake_event = asyncio.Event()
+
+        # 在途发送标志：flush() 取出 batch_data 到 _send_batch_raw 完成期间置位，
+        # 供关闭复查放行"close 前已取出、正在排队发送"的批次，避免数据丢失。
+        self._sending = False
+
         # 事件节流时间记录：键为 event_name 或 feature:feature_name，值为上次上报的时间戳
         self._last_throttled_times: dict[str, float] = {}
 
@@ -246,10 +254,18 @@ class TelemetryManager:
 
     async def _batch_sender_loop(self) -> None:
         """后台批处理发送循环"""
-        # close() 置位 _closed 后循环立即退出，避免残留后台任务继续轮询。
+        # close() 置位 _closed 并通过 _wake_event 唤醒后，循环立即退出，
+        # 避免残留后台任务继续轮询。等待可中断：close() 会 set _wake_event
+        # 立即唤醒，无需等到 15 秒超时。
         while self._enabled and not self._closed:
             try:
-                await asyncio.sleep(15.0)  # 延长至每 15 秒自动轮询上报一次，平滑低峰段
+                try:
+                    await asyncio.wait_for(
+                        self._wake_event.wait(), timeout=15.0
+                    )  # 每 15 秒自动轮询上报一次，平滑低峰段
+                    self._wake_event.clear()
+                except asyncio.TimeoutError:
+                    pass
                 await self.flush()
             except asyncio.CancelledError:
                 break
@@ -282,11 +298,18 @@ class TelemetryManager:
             batch_data = list(self._queue)
             self._queue.clear()
 
-        return await self._send_batch_raw(
-            batch_data,
-            bypass_rate_limit=bypass_rate_limit,
-            _allow_after_close=_allow_after_close,
-        )
+        # 标记在途发送：close() 等待 _send_task 自然退出期间，
+        # 此标志让 _send_batch_raw 的关闭复查放行"close 前已取出"的批次，
+        # 避免取消在途发送导致 batch_data 丢失。
+        self._sending = True
+        try:
+            return await self._send_batch_raw(
+                batch_data,
+                bypass_rate_limit=bypass_rate_limit,
+                _allow_after_close=_allow_after_close,
+            )
+        finally:
+            self._sending = False
 
     async def _send_batch_raw(
         self,
@@ -328,9 +351,12 @@ class TelemetryManager:
             # 获取信号量并完成限速等待后复查关闭状态：
             # 等待期间 close() 可能已完成，此时禁止继续发送，
             # 避免 _get_session() 重新创建已关闭的 aiohttp 会话。
-            # 仅 close() 的兜底发送（_allow_after_close=True 由 close 传入）允许通过；
-            # track_shutdown 等其它路径不传该标记，关闭后一律拒绝。
-            if self._closed and not _allow_after_close:
+            # 放行条件（满足其一）：
+            # - close() 的兜底发送（_allow_after_close=True 由 close 传入）；
+            # - 本批次在 close 前置位了 _sending（flush 已取出、在途发送中），
+            #   close() 正等待其完成，不允许丢弃。
+            # track_shutdown 等其它路径不传该标记且非在途，关闭后一律拒绝。
+            if self._closed and not (_allow_after_close or self._sending):
                 return False
 
             # 更新发送时间戳，确保后续请求准确排队
@@ -706,7 +732,9 @@ class TelemetryManager:
 
         关闭开始后：
         - _closed 置位，track() 会拒绝任何新事件，避免重建 aiohttp 会话与后台任务；
-        - 后台批处理任务被取消；
+        - 通过 _wake_event 唤醒后台批处理循环并等待其**自然退出**，
+          不取消在途发送批次——若取消恰逢 flush() 已取出 batch_data，
+          会中断 _send_batch_raw() 导致该批次事件丢失；
         - 缓冲中剩余数据仍做最后一次兜底 flush（绕过物理限速，避免阻塞会话关闭）。
         """
         # 幂等保护：重复关闭直接返回，防止插件重载期间并发调用重复清理。
@@ -714,12 +742,12 @@ class TelemetryManager:
             return
         self._closed = True
 
-        # 1. 取消后台批处理任务并安全等待其结束
-        # 注：_batch_sender_loop 循环条件为 self._enabled，close 置位 _closed 后
-        # 该循环可能仍在 sleep 中；flush 内部复查 _closed 会拒绝继续发送，
-        # 因此取消任务以确保其尽快退出。
+        # 1. 唤醒后台批处理循环并等待其自然退出。
+        #    循环在 _closed 置位后通过 _wake_event 立即唤醒并退出；
+        #    若循环正在发送在途批次（_sending=True），则等待该批次发送完成，
+        #    而不是 cancel 中断（避免已取出未确认的 batch_data 丢失）。
+        self._wake_event.set()
         if self._send_task and not self._send_task.done():
-            self._send_task.cancel()
             try:
                 await self._send_task
             except asyncio.CancelledError:
