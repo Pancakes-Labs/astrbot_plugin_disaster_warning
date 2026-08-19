@@ -256,19 +256,26 @@ class TelemetryManager:
             except Exception as e:
                 logger.debug(f"[灾害预警] 遥测后台批处理循环异常: {e}")
 
-    async def flush(self, bypass_rate_limit: bool = False) -> bool:
+    async def flush(
+        self,
+        bypass_rate_limit: bool = False,
+        *,
+        _allow_after_close: bool = False,
+    ) -> bool:
         """立即清空缓冲区并批量发送所有缓存的事件。
 
-        close() 的兜底 flush 传入 bypass_rate_limit=True，可在 _closed 置位后
-        仍完成最后一次发送；其余调用一律在关闭后拒绝，避免缓冲数据落空。
+        Args:
+            bypass_rate_limit: 是否绕过物理发送最小间隔（只控制 _MIN_REQUEST_INTERVAL）。
+            _allow_after_close: 私有标记，仅 close() 的兜底 flush 传入 True，
+                允许在 _closed 置位后仍完成最后一次发送；其余调用一律拒绝。
         """
-        if not self._enabled or (self._closed and not bypass_rate_limit):
+        if not self._enabled or (self._closed and not _allow_after_close):
             return False
 
         async with self._queue_lock:
             # 持锁后复查关闭状态：等待锁期间 close() 可能已完成。
-            # 仅允许 close() 的兜底发送（bypass_rate_limit=True）绕过该检查。
-            if self._closed and not bypass_rate_limit:
+            # 仅允许 close() 的兜底发送（_allow_after_close=True）绕过该检查。
+            if self._closed and not _allow_after_close:
                 return False
             if not self._queue:
                 return False
@@ -276,7 +283,9 @@ class TelemetryManager:
             self._queue.clear()
 
         return await self._send_batch_raw(
-            batch_data, bypass_rate_limit=bypass_rate_limit
+            batch_data,
+            bypass_rate_limit=bypass_rate_limit,
+            _allow_after_close=_allow_after_close,
         )
 
     async def _send_batch_raw(
@@ -284,14 +293,18 @@ class TelemetryManager:
         batch_data: list[dict[str, Any]],
         *,
         bypass_rate_limit: bool = False,
+        _allow_after_close: bool = False,
     ) -> bool:
         """底层实际网络上报接口，包含强制发送速率限制。
 
         Args:
             batch_data: 待上报的事件批。
-            bypass_rate_limit: 是否绕过物理发送最小间隔。仅用于关机/退出等
-                关键路径（如 track_shutdown 与 close 兜底 flush），避免限速等待
-                阻塞资源清理流程；其余日常发送一律保持限速，防范 429。
+            bypass_rate_limit: 是否绕过物理发送最小间隔（只控制 _MIN_REQUEST_INTERVAL）。
+                用于关机/退出等关键路径（如 track_shutdown 与 close 兜底 flush），
+                避免限速等待阻塞资源清理流程；其余日常发送一律保持限速，防范 429。
+            _allow_after_close: 私有标记，仅 close() 的兜底发送传入 True，
+                允许在 _closed 置位后仍执行发送（会话尚未关闭）；
+                track_shutdown 等其它路径不传，关闭后一律拒绝。
         """
         payload = {
             "instance_id": self._instance_id,
@@ -315,8 +328,9 @@ class TelemetryManager:
             # 获取信号量并完成限速等待后复查关闭状态：
             # 等待期间 close() 可能已完成，此时禁止继续发送，
             # 避免 _get_session() 重新创建已关闭的 aiohttp 会话。
-            # 仅 close() 的兜底发送（bypass_rate_limit=True 由 close 传入）允许通过。
-            if self._closed and not bypass_rate_limit:
+            # 仅 close() 的兜底发送（_allow_after_close=True 由 close 传入）允许通过；
+            # track_shutdown 等其它路径不传该标记，关闭后一律拒绝。
+            if self._closed and not _allow_after_close:
                 return False
 
             # 更新发送时间戳，确保后续请求准确排队
@@ -500,21 +514,45 @@ class TelemetryManager:
         （例如后续仍会复用同一配置字典），请先自行 copy.deepcopy 再传入，
         以免原始凭据在内存中被覆盖为脱敏占位符。
 
-        对 dict 的键做"去分隔符 + 大小写不敏感"匹配（覆盖 snake_case /
-        camelCase / kebab-case）；命中 _SENSITIVE_CREDENTIAL_KEYS 的值统一
-        替换为脱敏占位符。list 内元素继续递归，确保嵌套配置结构
-        （如数据源列表）中的凭据同样被覆盖。
+        脱敏规则：
+        1. dict 的键做"去分隔符 + 大小写不敏感"匹配（覆盖 snake_case /
+           camelCase / kebab-case）；命中 _SENSITIVE_CREDENTIAL_KEYS 的值统一
+           替换为脱敏占位符；
+        2. dict 中的字符串值（即使键本身不敏感）应用 URL 查询凭据脱敏正则并
+           回写，覆盖形如 {"endpoint": "https://api.example/?refreshToken=secret"}
+           这类在普通键下携带带鉴权 URL 的场景；
+        3. list 内元素继续递归，确保嵌套配置结构（如数据源列表）同样被覆盖。
         """
         if isinstance(node, dict):
             for key in list(node.keys()):
                 normalized = self._normalize_credential_key(key)
                 if normalized in self._SENSITIVE_CREDENTIAL_KEYS:
                     node[key] = "***"
+                elif isinstance(node[key], str):
+                    # 字符串值应用 URL 查询凭据脱敏（与 _sanitize_message 同一规则），
+                    # 并回写到原位置，确保就地修改生效。
+                    if "=" in node[key] and ("?" in node[key] or "&" in node[key]):
+                        node[key] = re.sub(
+                            rf"(?i)([?&](?:{self._CREDENTIAL_URL_KEY_PATTERN})=)[^&\s\"']+",
+                            r"\1***",
+                            node[key],
+                        )
+                    else:
+                        self._sanitize_credentials(node[key])
                 else:
                     self._sanitize_credentials(node[key])
         elif isinstance(node, list):
-            for item in node:
-                self._sanitize_credentials(item)
+            # 用索引遍历，使 list 中的字符串元素也能就地脱敏回写。
+            for idx, item in enumerate(node):
+                if isinstance(item, str):
+                    if "=" in item and ("?" in item or "&" in item):
+                        node[idx] = re.sub(
+                            rf"(?i)([?&](?:{self._CREDENTIAL_URL_KEY_PATTERN})=)[^&\s\"']+",
+                            r"\1***",
+                            item,
+                        )
+                else:
+                    self._sanitize_credentials(item)
 
     async def track_feature(self, feature_name: str, extra: dict | None = None) -> bool:
         """上报功能使用事件。"""
@@ -688,9 +726,10 @@ class TelemetryManager:
                 pass
             self._send_task = None
 
-        # 2. 强行上报缓冲中剩余的数据（关机路径绕过物理限速，避免阻塞会话关闭）
+        # 2. 强行上报缓冲中剩余的数据（关机路径绕过物理限速并允许关闭后发送，
+        #    避免阻塞会话关闭；仅在 close() 内部使用 _allow_after_close 标记）。
         try:
-            await self.flush(bypass_rate_limit=True)
+            await self.flush(bypass_rate_limit=True, _allow_after_close=True)
         except Exception as flush_err:
             logger.debug(f"[灾害预警] 关闭时兜底发送遥测失败（已忽略）: {flush_err}")
 
