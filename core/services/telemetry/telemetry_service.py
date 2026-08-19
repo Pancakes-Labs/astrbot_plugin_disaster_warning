@@ -44,10 +44,12 @@ class TelemetryManager:
     # 特定高频事件的最小加入队列间隔（秒），用于在内存中提前丢弃同质化冗余遥测
     _THROTTLE_CONFIG = {
         "feature:push_result": 30.0,  # 地震等高频新报的推送结果，30秒内仅保留第一笔
-        "feature:command_status_query": 10.0,  # 指令状态查询
-        "feature:command_stats_query": 10.0,  # 统计查询
-        "heartbeat": 60.0,  # 心跳事件强制限制
+        "feature:command_admin_action": 10.0,  # 管理类命令（状态/统计等）统一节流
     }
+
+    # 错误事件按"模块 + 异常类型"维度聚合节流的最小间隔（秒），
+    # 防止同一错误点在消息风暴或瞬时故障场景下高频刷屏遥测服务器。
+    _ERROR_THROTTLE_SECONDS = 60.0
 
     # 物理网络请求的最小时间间隔，防范任何极端情况下的 429
     _MIN_REQUEST_INTERVAL = 10.0
@@ -165,11 +167,22 @@ class TelemetryManager:
         throttle_key = event_name
         if event_name == "feature" and data and "feature" in data:
             throttle_key = f"feature:{data['feature']}"
+        elif event_name == "error" and data:
+            # 错误事件按"模块 + 异常类型"维度聚合，避免同一错误点刷屏
+            throttle_key = (
+                f"error:{data.get('module') or 'unknown'}:"
+                f"{data.get('type') or 'unknown'}"
+            )
 
-        if throttle_key in self._THROTTLE_CONFIG:
+        throttle_seconds = self._THROTTLE_CONFIG.get(throttle_key)
+        if throttle_seconds is None and throttle_key.startswith("error:"):
+            # 错误事件统一按 _ERROR_THROTTLE_SECONDS 间隔节流（默认 60 秒）
+            throttle_seconds = self._ERROR_THROTTLE_SECONDS
+
+        if throttle_seconds is not None:
             now_ts = time.time()
             last_ts = self._last_throttled_times.get(throttle_key, 0.0)
-            if now_ts - last_ts < self._THROTTLE_CONFIG[throttle_key]:
+            if now_ts - last_ts < throttle_seconds:
                 # 冷却时间未到，静默丢弃当前高频事件
                 return True
             self._last_throttled_times[throttle_key] = now_ts
@@ -337,11 +350,31 @@ class TelemetryManager:
             },
         )
 
+    # 配置快照中可能携带真实凭据的敏感键集合。
+    # 命中即整体替换为脱敏占位符，避免 API Key、刷新令牌等凭据随匿名遥测外泄。
+    _SENSITIVE_CREDENTIAL_KEYS = {
+        "api_key",
+        "apikey",
+        "refresh_token",
+        "access_token",
+        "token",
+        "secret",
+        "password",
+        "pwd",
+        "cookie",
+        "cookie_str",
+        "app_key",
+        "app_secret",
+        "client_secret",
+        "authorization",
+    }
+
     async def track_config(self, config: dict) -> bool:
         """
         上报配置快照。
 
-        会过滤管理员、目标会话、地理位置与管理端密码等敏感字段。
+        会过滤管理员、目标会话、地理位置与管理端密码等敏感字段，
+        并对数据源凭据类键做递归脱敏替换，防止真实凭据随匿名遥测外泄。
         """
         if not self._enabled:
             return False
@@ -370,11 +403,32 @@ class TelemetryManager:
                 if isinstance(wa, dict) and "password" in wa:
                     del wa["password"]
 
+            # 递归脱敏数据源凭据类键，兜底未来新增的敏感字段
+            self._sanitize_credentials(config_copy)
+
             return await self.track("config", config_copy, immediate=True)
 
         except Exception as e:
             logger.debug(f"[灾害预警] 配置快照提取失败: {e}")
             return False
+
+    def _sanitize_credentials(self, node: Any) -> None:
+        """就地递归脱敏配置树中的凭据类键值。
+
+        对 dict 的键做大小写不敏感匹配；命中 _SENSITIVE_CREDENTIAL_KEYS
+        的值统一替换为脱敏占位符。list 内元素继续递归，确保嵌套配置结构
+        （如数据源列表）中的凭据同样被覆盖。
+        """
+        if isinstance(node, dict):
+            for key in list(node.keys()):
+                normalized = str(key).strip().lower()
+                if normalized in self._SENSITIVE_CREDENTIAL_KEYS:
+                    node[key] = "***"
+                else:
+                    self._sanitize_credentials(node[key])
+        elif isinstance(node, list):
+            for item in node:
+                self._sanitize_credentials(item)
 
     async def track_feature(self, feature_name: str, extra: dict | None = None) -> bool:
         """上报功能使用事件。"""
@@ -394,6 +448,9 @@ class TelemetryManager:
         - exception: 捕获到的异常对象
         - module: 发生错误的模块名
         """
+        # 未指定模块时使用默认占位，避免服务器端出现 null 分组
+        module = module or "unknown"
+
         raw_message = str(exception)
         # 通过预设规则判定，忽略常规网络抖动或主动取消等高频无价值错误，减少服务器遥测数据噪声
         if self._should_skip_error_telemetry(exception, raw_message, module):
@@ -505,6 +562,13 @@ class TelemetryManager:
         message = re.sub(r"/(?:home|Users|root)/[^/\s]+/", r"<USER_HOME>/", message)
         message = re.sub(r"/root/", r"<USER_HOME>/", message)
         message = re.sub(r"[A-Za-z]:\\Users\\[^\\\s]+\\", r"<USER_HOME>\\", message)
+        # 脱敏 URL query 中的凭据类参数（token/key/secret/password 等），
+        # 避免异常消息里拼接的带鉴权参数的 URL 把真实凭据带进遥测。
+        message = re.sub(
+            r"(?i)([?&](?:token|key|secret|password|pwd|api_key|apikey|refresh_token|access_token|authorization|cookie)=)[^&\s\"']+",
+            r"\1***",
+            message,
+        )
         return message
 
     async def close(self):
