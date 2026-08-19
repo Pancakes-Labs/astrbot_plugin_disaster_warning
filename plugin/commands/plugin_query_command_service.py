@@ -14,6 +14,7 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -264,14 +265,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
             await self._track_command_feature(
                 "command_generate_beachball",
-                {
-                    "success": True,
-                    "strike": strike_val,
-                    "dip": dip_val,
-                    "rake": rake_val,
-                    "size": size,
-                    "line_width": line_width,
-                },
+                {"success": True},
             )
 
             yield event.chain_result(
@@ -283,6 +277,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
         except Exception as e:
             logger.error(f"[灾害预警] 生成沙滩球失败: {e}", exc_info=True)
+            await self._track_command_error(e, "generate_beachball")
             yield _quoted_plain_result(f"❌ 生成沙滩球失败: {e}")
 
     async def handle_parse_nodal_plane(
@@ -343,17 +338,13 @@ class PluginQueryCommandService(CommandTelemetryMixin):
 
             await self._track_command_feature(
                 "command_parse_nodal_plane",
-                {
-                    "success": True,
-                    "strike": strike_val,
-                    "dip": dip_val,
-                    "rake": rake_val,
-                },
+                {"success": True},
             )
 
             yield _quoted_plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"[灾害预警] 节面解析失败: {e}", exc_info=True)
+            await self._track_command_error(e, "parse_nodal_plane")
             yield _quoted_plain_result(f"❌ 节面解析失败: {e}")
 
     async def handle_query_weather_alarm(
@@ -408,6 +399,32 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     chain = MessageChain([Comp.Plain(block)])
                 await self.plugin.context.send_message(event.unified_msg_origin, chain)
 
+        async def _report_weather_query(
+            *,
+            success: bool,
+            query_mode: str = "unknown",
+            result_count: int = 0,
+            is_nationwide: bool = False,
+            has_icon: bool = False,
+            delivery_mode: str | None = None,
+            has_optional_type: bool = False,
+            has_optional_level: bool = False,
+        ) -> None:
+            """收敛上报气象预警查询遥测，避免各分支重复拼装字段。"""
+            extra: dict[str, Any] = {
+                "success": bool(success),
+                "query_mode": str(query_mode or "unknown"),
+                "is_nationwide": bool(is_nationwide),
+                "result_count": int(result_count or 0),
+                "has_optional_type": bool(has_optional_type),
+                "has_optional_level": bool(has_optional_level),
+            }
+            if has_icon:
+                extra["has_icon"] = True
+            if delivery_mode:
+                extra["delivery_mode"] = delivery_mode
+            await self._track_command_feature("command_weather_query", extra)
+
         if not self.plugin.disaster_service:
             yield _quoted_plain_result("❌ 灾害预警服务未启动")
             return
@@ -461,14 +478,11 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     usage_lines = "\n".join(f"• {line}" for line in result["usage"])
                     error_text = f"{error_text}\n用法：\n{usage_lines}"
 
-                await self._track_command_feature(
-                    "command_weather_query",
-                    {
-                        "success": False,
-                        "query_mode": str(result.get("query_mode") or "unknown"),
-                        "has_optional_type": bool(optional_a),
-                        "has_optional_level": bool(optional_b),
-                    },
+                await _report_weather_query(
+                    success=False,
+                    query_mode=str(result.get("query_mode") or "unknown"),
+                    has_optional_type=bool(optional_a),
+                    has_optional_level=bool(optional_b),
                 )
                 yield _quoted_plain_result(error_text)
                 return
@@ -501,13 +515,10 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 detail_text = "\n".join(lines)
                 icon_url = detail.get("icon_url")
                 weather_type_code = str(detail.get("weather_type_code") or "").strip()
-                await self._track_command_feature(
-                    "command_weather_query",
-                    {
-                        "success": True,
-                        "query_mode": "id",
-                        "has_icon": bool(icon_url),
-                    },
+                await _report_weather_query(
+                    success=True,
+                    query_mode="id",
+                    has_icon=bool(icon_url),
                 )
                 if icon_url:
                     try:
@@ -541,17 +552,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     # 全国级查询优先走分段合并转发通道发送
                     ok = await _send_forward_batches(text_blocks)
                     if ok:
-                        await self._track_command_feature(
-                            "command_weather_query",
-                            {
-                                "success": True,
-                                "query_mode": str(result.get("query_mode") or "search"),
-                                "is_nationwide": True,
-                                "result_count": int(total or 0),
-                                "has_optional_type": bool(optional_a),
-                                "has_optional_level": bool(optional_b),
-                                "delivery_mode": "forward_batches",
-                            },
+                        await _report_weather_query(
+                            success=True,
+                            query_mode=str(result.get("query_mode") or "search"),
+                            is_nationwide=True,
+                            result_count=int(total or 0),
+                            delivery_mode="forward_batches",
+                            has_optional_type=bool(optional_a),
+                            has_optional_level=bool(optional_b),
                         )
                         return
                 except Exception as forward_error:
@@ -560,17 +568,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     )
                     try:
                         await _send_text_blocks(text_blocks, total)
-                        await self._track_command_feature(
-                            "command_weather_query",
-                            {
-                                "success": True,
-                                "query_mode": str(result.get("query_mode") or "search"),
-                                "is_nationwide": True,
-                                "result_count": int(total or 0),
-                                "has_optional_type": bool(optional_a),
-                                "has_optional_level": bool(optional_b),
-                                "delivery_mode": "text_blocks",
-                            },
+                        await _report_weather_query(
+                            success=True,
+                            query_mode=str(result.get("query_mode") or "search"),
+                            is_nationwide=True,
+                            result_count=int(total or 0),
+                            delivery_mode="text_blocks",
+                            has_optional_type=bool(optional_a),
+                            has_optional_level=bool(optional_b),
                         )
                         return
                     except Exception as text_error:
@@ -584,17 +589,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 try:
                     ok = await _send_forward_batches(text_blocks)
                     if ok:
-                        await self._track_command_feature(
-                            "command_weather_query",
-                            {
-                                "success": True,
-                                "query_mode": str(result.get("query_mode") or "search"),
-                                "is_nationwide": is_nationwide,
-                                "result_count": int(total or 0),
-                                "has_optional_type": bool(optional_a),
-                                "has_optional_level": bool(optional_b),
-                                "delivery_mode": "forward_batches",
-                            },
+                        await _report_weather_query(
+                            success=True,
+                            query_mode=str(result.get("query_mode") or "search"),
+                            is_nationwide=is_nationwide,
+                            result_count=int(total or 0),
+                            delivery_mode="forward_batches",
+                            has_optional_type=bool(optional_a),
+                            has_optional_level=bool(optional_b),
                         )
                         return
                 except Exception as forward_error:
@@ -603,17 +605,14 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                     )
                     try:
                         await _send_text_blocks(text_blocks, total)
-                        await self._track_command_feature(
-                            "command_weather_query",
-                            {
-                                "success": True,
-                                "query_mode": str(result.get("query_mode") or "search"),
-                                "is_nationwide": is_nationwide,
-                                "result_count": int(total or 0),
-                                "has_optional_type": bool(optional_a),
-                                "has_optional_level": bool(optional_b),
-                                "delivery_mode": "text_blocks",
-                            },
+                        await _report_weather_query(
+                            success=True,
+                            query_mode=str(result.get("query_mode") or "search"),
+                            is_nationwide=is_nationwide,
+                            result_count=int(total or 0),
+                            delivery_mode="text_blocks",
+                            has_optional_type=bool(optional_a),
+                            has_optional_level=bool(optional_b),
                         )
                         return
                     except Exception as text_error:
@@ -631,16 +630,13 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 if idx != len(items) - 1:
                     lines.append("")
 
-            await self._track_command_feature(
-                "command_weather_query",
-                {
-                    "success": True,
-                    "query_mode": str(result.get("query_mode") or "search"),
-                    "is_nationwide": is_nationwide,
-                    "result_count": int(total or 0),
-                    "has_optional_type": bool(optional_a),
-                    "has_optional_level": bool(optional_b),
-                },
+            await _report_weather_query(
+                success=True,
+                query_mode=str(result.get("query_mode") or "search"),
+                is_nationwide=is_nationwide,
+                result_count=int(total or 0),
+                has_optional_type=bool(optional_a),
+                has_optional_level=bool(optional_b),
             )
             yield _quoted_plain_result("\n".join(lines))
         except Exception as e:
@@ -1144,6 +1140,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             yield _quoted_plain_result("\n".join(report_lines))
         except Exception as e:
             logger.error(f"[灾害预警] 模拟预警失败: {e}\n{traceback.format_exc()}")
+            await self._track_command_error(e, "simulate_disaster")
             yield _quoted_plain_result(f"❌ 模拟失败: {e}")
 
     async def handle_query_earthquake_warning_with_timeout(
@@ -1196,6 +1193,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] JMA 震央分布查询失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_jma_hypo_list")
             yield _quoted_plain_result(f"❌ JMA 震央分布查询失败: {e}")
 
     async def handle_query_jma_hypo_plot(
@@ -1303,6 +1301,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] JMA 震央分布绘图失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_jma_hypo_plot")
             yield _quoted_plain_result(f"❌ JMA 震央分布绘图失败: {e}")
 
     async def handle_query_snet(self, event, arg: str | None = None):
@@ -1460,6 +1459,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                         pass
         except Exception as e:
             logger.error(f"[灾害预警] /snet 查询失败: {e}\n{traceback.format_exc()}")
+            await self._track_command_error(e, "query_snet")
             yield _quoted_plain_result(f"❌ S-Net 查询失败: {e}")
 
     async def handle_query_radar(
@@ -1530,6 +1530,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             )
         except Exception as e:
             logger.error(f"[灾害预警] /雷达 查询失败: {e}\n{traceback.format_exc()}")
+            await self._track_command_error(e, "query_radar")
             yield quoted_plain_result(self.plugin, event, f"❌ 雷达图查询失败: {e}")
 
     async def handle_query_radar_gif(
@@ -1601,6 +1602,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] /雷达动图 查询失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_radar_gif")
             yield quoted_plain_result(self.plugin, event, f"❌ 雷达动图查询失败: {e}")
 
     async def handle_query_radar_list(self, event):
@@ -1633,6 +1635,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] /雷达列表 查询失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_radar_list")
             yield quoted_plain_result(self.plugin, event, f"❌ 雷达列表查询失败: {e}")
 
     # ------------------------------------------------------------------
@@ -1705,6 +1708,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] 降水量预报查询失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_precipitation")
             yield quoted_plain_result(self.plugin, event, f"❌ 降水量预报查询失败: {e}")
 
     async def handle_query_precipitation_gif(
@@ -1754,6 +1758,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] 降水量预报动图查询失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "query_precipitation_gif")
             yield quoted_plain_result(
                 self.plugin, event, f"❌ 降水量预报动图查询失败: {e}"
             )
@@ -2236,6 +2241,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             yield quoted_plain_result(self.plugin, event, text)
         except Exception as e:
             logger.error(f"[灾害预警] 地震动预测失败: {e}\n{traceback.format_exc()}")
+            await self._track_command_error(e, "ground_motion_predict")
             yield quoted_plain_result(self.plugin, event, f"❌ 地震动预测失败: {e}")
 
     async def handle_local_ground_motion_predict(
@@ -2288,6 +2294,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             logger.error(
                 f"[灾害预警] 本地地震动预测失败: {e}\n{traceback.format_exc()}"
             )
+            await self._track_command_error(e, "local_ground_motion_predict")
             yield quoted_plain_result(self.plugin, event, f"❌ 本地地震动预测失败: {e}")
 
     def _resolve_local_point(
