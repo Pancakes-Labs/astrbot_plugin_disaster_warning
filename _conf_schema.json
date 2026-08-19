@@ -42,7 +42,7 @@
           "enabled": {
             "description": "启用 FAN Studio 数据源",
             "type": "bool",
-            "default": false,
+            "default": true,
             "hint": "启用后将连接 FAN Studio WebSocket。需配置下方 API Key，否则会跳过建连"
           },
           "api_key": {
@@ -50,6 +50,13 @@
             "type": "string",
             "default": "",
             "hint": "到 https://api.fanstudio.tech/dev-platform/ 选择本应用申请。格式通常为 sk- 开头。每个部署实例使用自己的 Key，请勿把 Key 提交到公开仓库或发给他人"
+          },
+          "fan_server_preference": {
+            "description": "FAN Studio 服务器偏好",
+            "type": "string",
+            "options": ["主服务器优先", "备用服务器优先", "自动"],
+            "default": "主服务器优先",
+            "hint": "主服务器优先：始终优先连接主服务器；备用服务器优先：始终优先连接备用服务器；自动：主断后自动切备，重连时优先回主"
           },
           "china_earthquake_warning": {
             "description": "中国地震网地震预警",
@@ -180,7 +187,7 @@
           "china_cenc_eew": {
             "description": "中国地震台网（CENC）：地震预警",
             "type": "bool",
-            "default": true,
+            "default": false,
             "hint": "通过 Wolfx API 接收中国地震台网地震预警"
           },
           "taiwan_cwa_eew": {
@@ -386,7 +393,7 @@
         "type": "string",
         "options": ["自动判定", "中国烈度", "日本震度"],
         "default": "自动判定",
-        "hint": "自动判定: 按本地坐标自动选择（中国→烈度，日本→震度）；中国烈度: 强制使用中国烈度公式（按坐标经度自动切换东西部参数）；日本震度: 强制使用日本震度公式"
+        "hint": "自动判定: 按本地坐标自动选择（中国→烈度，日本→震度）；中国烈度: 强制使用中国烈度公式；日本震度: 强制使用日本震度公式"
       }
     }
   },

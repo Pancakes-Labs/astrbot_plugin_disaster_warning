@@ -204,7 +204,7 @@ class EqscCencIntensityClient(EqscHttpClient):
         except Exception as e:
             logger.error(
                 f"[灾害预警] EQSC 查询 CENC 烈度速报列表异常: "
-                f"{type(e).__name__}: {e or repr(e)}"
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return []
 
@@ -249,7 +249,7 @@ class EqscCencIntensityClient(EqscHttpClient):
         except Exception as e:
             logger.error(
                 f"[灾害预警] EQSC 查询 CENC 烈度速报详情 {normalized_id} 异常: "
-                f"{type(e).__name__}: {e or repr(e)}"
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return None
 

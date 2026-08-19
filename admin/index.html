@@ -105,11 +105,21 @@
         <div id="bl-loading">
             <div class="boot-loader__logo" aria-hidden="true">
                 <img src="../logo.png" alt="" width="56" height="56">
+                <!-- Logo 脉冲波纹扩散环 -->
+                <div class="boot-loader__logo-pulse"></div>
             </div>
             <div class="boot-loader__title">灾害预警管理端</div>
-            <div class="boot-loader__subtitle">正在加载...</div>
+            <div class="boot-loader__subtitle" id="bl-status-text">正在加载...</div>
             <div class="boot-loader__progress" aria-hidden="true">
-                <div class="boot-loader__progress-bar"></div>
+                <div class="boot-loader__progress-bar" id="bl-progress-bar"></div>
+            </div>
+            <!-- 阶段指示器：5个圆点对应加载阶段 -->
+            <div class="bl-stage-dots" aria-hidden="true">
+                <span class="bl-stage-dot" data-stage="0"></span>
+                <span class="bl-stage-dot" data-stage="1"></span>
+                <span class="bl-stage-dot" data-stage="2"></span>
+                <span class="bl-stage-dot" data-stage="3"></span>
+                <span class="bl-stage-dot" data-stage="4"></span>
             </div>
             <span class="visually-hidden">应用资源加载中，请稍候</span>
         </div>

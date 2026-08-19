@@ -9,6 +9,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ...network.websocket.fan_studio_connection_policy import (
+    resolve_active_server_label,
+)
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -65,12 +68,50 @@ class DisasterServiceStatusService:
             except Exception:
                 silence_status = None
 
+        # 解析 FAN Studio 连接的活跃服务器信息
+        fan_server_info = self._resolve_fan_server_info(connection_status)
+
         return {
             **snapshot,
             # 统计摘要直接挂在顶层，便于管理端一次请求同时拿到运行状态与统计概览。
             "statistics_summary": self.service.statistics_manager.get_summary(),
             "startup_silence": silence_status,
+            "fan_server_info": fan_server_info,
         }
+
+    def _resolve_fan_server_info(
+        self,
+        connection_status: dict[str, dict[str, Any]],
+    ) -> dict[str, str]:
+        """解析 FAN Studio 连接的活跃服务器信息。"""
+        result: dict[str, str] = {}
+        fan_connections = {
+            "fan_studio_all": "FAN Studio",
+            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        }
+        for conn_name, display_name in fan_connections.items():
+            info = connection_status.get(conn_name, {})
+            if isinstance(info, dict):
+                label = resolve_active_server_label(info)
+                if label != "未知":
+                    result[conn_name] = label
+                else:
+                    # 连接未建立时，根据 connection_info 判断偏好
+                    conn_info = self.service.ws_manager.connection_info.get(
+                        conn_name, {}
+                    )
+                    if isinstance(conn_info, dict):
+                        uri = str(conn_info.get("uri") or "").strip()
+                        # 使用原始地址（未受偏好交换影响）判断
+                        conn_config = conn_info.get("connection_config", {}) or {}
+                        original_backup = str(
+                            conn_config.get("original_backup") or ""
+                        ).strip()
+                        if uri and original_backup and uri == original_backup:
+                            result[conn_name] = "备用服务器"
+                        elif uri:
+                            result[conn_name] = "主服务器"
+        return result
 
     def get_sub_source_status(self) -> dict[str, dict[str, bool]]:
         """获取所有子数据源的启用状态。"""

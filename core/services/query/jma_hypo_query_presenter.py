@@ -87,8 +87,8 @@ def build_jma_hypo_list_text(result: dict[str, Any]) -> str:
         f"时间范围：{range_text}（{requested_days}天）",
         f"总震央数：{total}",
         f"覆盖天数：{covered_days}",
-        f"震级范围：{_fmt_mag(stats.get('min_mag'))} ~ {_fmt_mag(stats.get('max_mag'))}",
-        f"平均深度：{_fmt_dep(stats.get('avg_dep'))}",
+        f"最大震级：{_fmt_mag(stats.get('max_mag'))}",
+        f"最深地震：{_fmt_dep(stats.get('max_dep'))}",
     ]
 
     mag_bins = stats.get("mag_bins") or {}
@@ -147,7 +147,8 @@ def build_jma_hypo_plot_caption(result: dict[str, Any]) -> str:
         f"时间范围：{range_text}（{int(result.get('requested_days') or 0)}天）",
         f"总震央数：{int(stats.get('total') or 0)}",
         f"覆盖天数：{int(result.get('covered_days') or 0)}",
-        f"震级范围：{_fmt_mag(stats.get('min_mag'))} ~ {_fmt_mag(stats.get('max_mag'))}",
+        f"最大震级：{_fmt_mag(stats.get('max_mag'))}",
+        f"最深地震：{_fmt_dep(stats.get('max_dep'))}",
     ]
     return "\n".join(lines)
 

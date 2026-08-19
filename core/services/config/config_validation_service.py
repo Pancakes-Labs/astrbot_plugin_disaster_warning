@@ -17,6 +17,7 @@ from ....utils.map_tile_sources import (
     MAP_TILE_SOURCES,
     normalize_map_source,
 )
+from ...network.websocket.fan_studio_connection_policy import ServerPreference
 from ..snet.snet_filter_constants import (
     DEFAULT_MIN_SHINDO,
     DEFAULT_MIN_TRIGGERED_STATIONS,
@@ -1408,6 +1409,32 @@ class ConfigValidator:
                     "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 api_key，"
                     "WebSocket 鉴权将无法完成，相关连接会被跳过。"
                 )
+
+            # fan_server_preference：FAN Studio 主备服务器偏好
+            # 可选值：主服务器优先 / 备用服务器优先 / 自动；
+            # 缺省按 schema 默认"主服务器优先"填充，非法值规范化回退默认。
+            if "fan_server_preference" not in fan_studio_cfg:
+                fan_studio_cfg["fan_server_preference"] = (
+                    ServerPreference.PRIMARY_FIRST.value
+                )
+            else:
+                raw_pref = fan_studio_cfg.get("fan_server_preference")
+                if not isinstance(raw_pref, str):
+                    logger.warning(
+                        "[灾害预警] 配置警告: FAN Studio 服务器偏好类型错误，"
+                        "已重置为默认值。"
+                    )
+                    fan_studio_cfg["fan_server_preference"] = (
+                        ServerPreference.PRIMARY_FIRST.value
+                    )
+                else:
+                    normalized = ServerPreference.normalize(raw_pref)
+                    if normalized != str(raw_pref).strip():
+                        logger.warning(
+                            f"[灾害预警] 配置警告: FAN Studio 服务器偏好值无效"
+                            f"（{raw_pref}），已重置为默认值。"
+                        )
+                    fan_studio_cfg["fan_server_preference"] = normalized
 
         # 校验 EQSC 数据源配置（组总闸 + 台风富化 + 海啸轮询子开关）
         eqsc_cfg = cfg.get("eqsc")

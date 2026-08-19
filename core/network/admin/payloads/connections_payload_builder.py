@@ -11,7 +11,10 @@ from typing import Any
 
 from ....app.services.eqsc_channel_service import EqscChannelService
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
-from ....sources.display_registry import CONNECTION_DISPLAY_NAMES
+from ....sources.display_registry import (
+    ACTIVE_SERVER_LABELS,
+    CONNECTION_DISPLAY_NAMES,
+)
 
 
 class ConnectionsPayloadBuilder:
@@ -255,6 +258,29 @@ class ConnectionsPayloadBuilder:
             "last_timestamp": last_ts,
         }
 
+    def _enrich_fan_server_info(self, connections: dict[str, dict[str, Any]]) -> None:
+        """为 FAN Studio 连接条目补充活跃服务器信息。"""
+        ws_manager = getattr(self.disaster_service, "ws_manager", None)
+        if ws_manager is None:
+            return
+        for conn_key, conn_info in connections.items():
+            if not isinstance(conn_info, dict):
+                continue
+            # 判断是否为 FAN Studio 连接
+            group_key = str(conn_info.get("group_key") or "").strip()
+            if not group_key.startswith("fan_studio"):
+                continue
+            # 从 ws_manager 获取原始连接信息中的 active_server 字段
+            raw_info = ws_manager.connection_info.get(group_key, {})
+            if not isinstance(raw_info, dict):
+                continue
+            active_server = raw_info.get("active_server")
+            if active_server:
+                conn_info["active_server"] = active_server
+                conn_info["active_server_label"] = ACTIVE_SERVER_LABELS.get(
+                    active_server, str(active_server)
+                )
+
     def build(
         self, expected_sources: dict[str, str] | None = None
     ) -> dict[str, dict[str, Any]]:
@@ -278,9 +304,9 @@ class ConnectionsPayloadBuilder:
         connections = dict(snapshot.get("connections", {}))
         # HTTP 通道不是 WebSocket 连接组，单独合并进连接状态面板。
         # catalog 里 jma_tsunami_eqsc 的 connection_group="eqsc" 会生成占位条目：
-        # - 旧逻辑展示键为原始 "eqsc"，status 默认 “未连接”
+        # - 旧逻辑展示键为原始 "eqsc"，status 默认 "未连接"
         # - 新逻辑展示键为 "EQSC API"
-        # 两种都要先剔除，再写入正式 HTTP 通道状态，避免前端读到占位“未连接”。
+        # 两种都要先剔除，再写入正式 HTTP 通道状态，避免前端读到占位"未连接"。
         for stale_key, info in list(connections.items()):
             key_lower = str(stale_key or "").strip().lower()
             provider = ""
@@ -295,6 +321,8 @@ class ConnectionsPayloadBuilder:
         connections[self.EQSC_DISPLAY_NAME] = self._build_eqsc_connection_info()
         # 覆盖 catalog 占位条目，附带轮询运行态与 HTTP 语义
         connections[self.SNET_DISPLAY_NAME] = self._build_snet_connection_info()
+        # 补充 FAN Studio 服务器信息
+        self._enrich_fan_server_info(connections)
         return connections
 
     def build_api_payload(

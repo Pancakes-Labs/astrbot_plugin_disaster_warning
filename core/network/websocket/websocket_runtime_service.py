@@ -66,11 +66,32 @@ class WebSocketRuntimeService:
             self.manager.connection_info.pop(name, None)
             self.manager.last_heartbeat_time.pop(name, None)
 
-        # 清除处于等待队列中的重连任务
-        if name in self.manager.reconnect_tasks:
-            task = self.manager.reconnect_tasks.pop(name, None)
-            if task is not None and not task.done():
-                task.cancel()
+        # 统一回收该连接名下所有挂起的后台任务：
+        # - reconnect_tasks：等待重试调度的重连任务
+        # - _fan_secondary_wait_tasks / _fan_secondary_cleanup_tasks：
+        #   FAN 次要通道静默等待/超时清理任务，若残留会在服务器切换后
+        #   仍用捕获的旧 URI 建连，覆盖切换效果
+        # 先从任务映射中移除，再取消并等待任务真正结束，
+        # 避免旧任务在响应取消前继续执行建连或发送回调。
+        pending: list[asyncio.Task] = []
+
+        reconnect_task = self.manager.reconnect_tasks.pop(name, None)
+        if reconnect_task is not None and not reconnect_task.done():
+            pending.append(reconnect_task)
+
+        wait_tasks = getattr(self.manager, "_fan_secondary_wait_tasks", {})
+        if hasattr(self.manager, "_fan_secondary_wait_tasks"):
+            wait_task = wait_tasks.pop(name, None)
+            if wait_task is not None and not wait_task.done():
+                pending.append(wait_task)
+
+        cleanup_tasks = getattr(self.manager, "_fan_secondary_cleanup_tasks", {})
+        if hasattr(self.manager, "_fan_secondary_cleanup_tasks"):
+            cleanup_task = cleanup_tasks.pop(name, None)
+            if cleanup_task is not None and not cleanup_task.done():
+                pending.append(cleanup_task)
+
+        await self.cancel_and_wait(pending)
 
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""
@@ -113,13 +134,18 @@ class WebSocketRuntimeService:
                 await self.cancel_and_wait(reconnect_tasks)
                 self.manager.reconnect_tasks.clear()
 
-                # 2 取消 FAN 次要通道静默等待任务，避免停机后仍尝试建连
+                # 2 取消 FAN 次要通道静默等待/超时清理任务，避免停机后仍尝试建连
                 wait_tasks = list(
                     getattr(self.manager, "_fan_secondary_wait_tasks", {}).values()
                 )
-                await self.cancel_and_wait(wait_tasks)
+                cleanup_tasks = list(
+                    getattr(self.manager, "_fan_secondary_cleanup_tasks", {}).values()
+                )
+                await self.cancel_and_wait(wait_tasks + cleanup_tasks)
                 if hasattr(self.manager, "_fan_secondary_wait_tasks"):
                     self.manager._fan_secondary_wait_tasks.clear()
+                if hasattr(self.manager, "_fan_secondary_cleanup_tasks"):
+                    self.manager._fan_secondary_cleanup_tasks.clear()
 
                 # 3. 取消所有还在运行的心跳保活任务
                 heartbeat_tasks = [

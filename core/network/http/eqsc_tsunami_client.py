@@ -102,7 +102,8 @@ class EqscTsunamiClient(EqscHttpClient):
             return data
         except Exception as e:
             logger.error(
-                f"[灾害预警] EQSC 查询海啸情报异常: {type(e).__name__}: {e or repr(e)}"
+                f"[灾害预警] EQSC 查询海啸情报异常: "
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return None
 

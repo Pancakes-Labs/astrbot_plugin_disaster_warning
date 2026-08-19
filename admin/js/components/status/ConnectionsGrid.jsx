@@ -122,9 +122,16 @@ function ConnectionsGrid() {
         );
 
         const allSubSources = {};
+        let activeServer = undefined;
         matchedEntries.forEach(([, info]) => {
             if (info.sub_sources) {
                 Object.assign(allSubSources, info.sub_sources);
+            }
+            // 提取活跃服务器信息（FAN Studio 主备）
+            if (info.active_server) {
+                activeServer = info.active_server;
+            } else if (info.active_server_label) {
+                activeServer = info.active_server_label;
             }
         });
 
@@ -195,6 +202,7 @@ function ConnectionsGrid() {
             connection_type: connectionType,
             circuit_open: circuitOpen,
             compact: !!target.compact,
+            active_server: activeServer,
         };
     };
 
@@ -506,6 +514,21 @@ function ConnectionsGrid() {
     /**
      * 渲染卡片顶栏（标题 / 重试 / 可选翻转按钮 / 状态灯）
      */
+    const renderServerBadge = (conn) => {
+        // 仅在 FAN Studio 相关连接上显示主备服务器标签
+        if (!conn.name || !conn.name.includes('FAN')) return null;
+        const activeServer = conn.active_server || conn.active_server_label;
+        if (!activeServer) return null;
+        const isPrimary = activeServer === 'primary' || activeServer === '主服务器';
+        const badgeClass = isPrimary ? 'server-badge server-badge--primary' : 'server-badge server-badge--backup';
+        const badgeLabel = isPrimary ? '主服务器' : '备用服务器';
+        return (
+            <Typography variant="caption" className={badgeClass}>
+                {badgeLabel}
+            </Typography>
+        );
+    };
+
     const renderCardHeader = (conn, {
         showFlipButton = false,
         flipTitle = '',
@@ -515,6 +538,7 @@ function ConnectionsGrid() {
         <Box className="connection-card-header">
             <Typography className="connection-title">
                 {conn.name}
+                {renderServerBadge(conn)}
             </Typography>
 
             <Box className="connection-status-cluster">

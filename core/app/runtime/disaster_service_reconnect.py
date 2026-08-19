@@ -348,6 +348,7 @@ class DisasterServiceReconnectService:
             "data_source": conn_config.get("data_source", conn_name),
             "established_time": None,
             "backup_url": conn_config.get("backup_url"),
+            "connection_config": dict(conn_config),
         }
         # FAN Studio 鉴权字段需一并补齐，否则手动重连后无法发送 auth 包。
         attach_fan_auth_from_plan(connection_info, conn_config)

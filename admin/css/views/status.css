@@ -241,6 +241,61 @@
     width: 60%;
 }
 
+/* 接口服务提供商名字（与主备标签水平垂直居中） */
+.connection-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+    line-height: 1.3 !important;
+    color: var(--md-sys-color-on-surface);
+}
+
+/* 服务器主备标签 */
+.server-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    transform: translateY(-1px);
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.server-badge--primary {
+    background: rgba(76, 175, 80, 0.15);
+    color: #2E7D32;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.server-badge--backup {
+    background: rgba(255, 193, 7, 0.15);
+    color: #B26A00;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+html.theme-dark .server-badge--primary,
+body.dark-theme .server-badge--primary {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81C784;
+    border-color: rgba(76, 175, 80, 0.4);
+}
+
+html.theme-dark .server-badge--backup,
+body.dark-theme .server-badge--backup {
+    background: rgba(255, 193, 7, 0.2);
+    color: #FFD54F;
+    border-color: rgba(255, 193, 7, 0.4);
+}
+
 /* 单个连接通道卡片本体 —— 命中壳 / 视觉面分离 */
 .connection-item {
     --hover-lift: 2px;
@@ -345,13 +400,6 @@ body.dark-theme .connection-item {
     margin-bottom: 12px;
 }
 
-/* 接口服务提供商名字 */
-.connection-title {
-    font-weight: 700 !important;
-    font-size: 1.1rem !important;
-    line-height: 1.3 !important;
-    color: var(--md-sys-color-on-surface);
-}
 
 .connection-status-cluster {
     display: flex;

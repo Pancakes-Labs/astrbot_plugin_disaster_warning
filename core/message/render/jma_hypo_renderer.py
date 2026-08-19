@@ -82,42 +82,65 @@ DEPTH_FRAC_PAD = 0.06
 DEPTH_FRAC_SHALLOW = 0.54
 DEPTH_FRAC_DEEP = 0.40
 
-# 震级色阶（10 档）：对齐 earthquake_list.html 震度色
-MAG_COLORS: list[tuple[float, tuple[int, int, int], str]] = [
-    (0.0, (107, 120, 120), "M0.0~M0.5"),  # #6B7878
-    (0.5, (30, 110, 230), "M0.5~M1.0"),  # #1E6EE6
-    (1.0, (50, 180, 100), "M1.0~M2.0"),  # #32B464
-    (2.0, (255, 224, 93), "M2.0~M3.0"),  # #FFE05D
-    (3.0, (255, 170, 19), "M3.0~M4.0"),  # #FFAA13
-    (4.0, (239, 112, 15), "M4.0~M5.0"),  # #EF700F
-    (5.0, (230, 0, 0), "M5.0~M6.0"),  # #E60000
-    (6.0, (160, 0, 0), "M6.0~M7.0"),  # #A00000
-    (7.0, (93, 0, 144), "M7.0~M8.0"),  # #5D0090
-    (8.0, (60, 0, 100), "≥M8.0"),  # 更深紫，预留超大震
+# 震源深度色阶：对齐 JMA 官方标准色阶图例 (0, 10, 20, 30, 50, 100, 200, 700km)
+DEPTH_COLORS: list[tuple[float, tuple[int, int, int], str]] = [
+    (0.0, (230, 0, 0), "0 ~ 10km"),  # 红 (极浅源)
+    (10.0, (255, 120, 0), "10 ~ 20km"),  # 橙
+    (20.0, (255, 210, 0), "20 ~ 30km"),  # 黄
+    (30.0, (150, 230, 0), "30 ~ 50km"),  # 黄绿
+    (50.0, (0, 210, 140), "50 ~ 100km"),  # 绿
+    (100.0, (0, 160, 255), "100 ~ 200km"),  # 浅蓝
+    (200.0, (0, 30, 220), "≥ 200km"),  # 深蓝 (深源地震)
 ]
 
-MIN_DOT_RADIUS = 2.5
-MAX_DOT_RADIUS = 16.0
+# 震级图例（示例气泡大小）
+MAG_LEGENDS: list[tuple[float, str]] = [
+    (1.0, "~1"),
+    (2.0, "2"),
+    (3.0, "3"),
+    (4.0, "4"),
+    (5.0, "5"),
+    (6.0, "6"),
+    (7.0, "7"),
+    (8.0, "≥8"),
+]
+
+MIN_DOT_RADIUS = 1.8
+MAX_DOT_RADIUS = 18.0
 # 半径随震级连续增长的参考上限（≥ 此值取 MAX_DOT_RADIUS）
 DOT_RADIUS_REF_MAG = 8.0
 # 经度纬度地图：主图震点整体缩小一圈（散点图保持原尺寸）
-MAP_DOT_SCALE = 0.70
+MAP_DOT_SCALE = 0.58
 
 
-def _get_mag_color(magnitude: float) -> tuple[int, int, int]:
-    for threshold, color, _ in reversed(MAG_COLORS):
-        if magnitude >= threshold:
+# 缺失深度时的中性色（区别于 0 ~ 10km 浅源红色，避免误判为极浅源）
+COLOR_DEPTH_MISSING = (140, 140, 150)
+
+
+def _get_depth_color(depth: float) -> tuple[int, int, int]:
+    """根据震源深度返回色阶颜色。
+
+    仅对有效数值深度着色；缺失/空深度返回中性灰 COLOR_DEPTH_MISSING，
+    避免被当作 0 km 浅源渲染成红色。
+    """
+    try:
+        dep = float(depth)
+    except (TypeError, ValueError):
+        return COLOR_DEPTH_MISSING
+    if dep < 0:
+        dep = 0.0
+    for threshold, color, _ in reversed(DEPTH_COLORS):
+        if dep >= threshold:
             return color
-    return MAG_COLORS[0][1]
+    return DEPTH_COLORS[0][1]
 
 
 def _dot_radius(magnitude: float) -> float:
-    """震级 → 圆点半径；M0~M8 连续递增，避免 M5 以后视觉上同大。"""
+    """震级 → 圆点半径；拉大梯度差距使震级大小区分更明显。"""
     mag = max(0.0, float(magnitude or 0.0))
     if mag <= 0:
         return MIN_DOT_RADIUS
-    # 用平方根映射，低震级区分细、高震级仍保持可见梯度
-    ratio = (mag**0.5) / (DOT_RADIUS_REF_MAG**0.5)
+    ratio = (mag / DOT_RADIUS_REF_MAG) ** 0.65
     r = MIN_DOT_RADIUS + (MAX_DOT_RADIUS - MIN_DOT_RADIUS) * ratio
     return max(MIN_DOT_RADIUS, min(r, MAX_DOT_RADIUS))
 
@@ -294,13 +317,19 @@ def _axis_values(
         return xs, ys, "经度 (°E)", "纬度 (°N)", False
     if mode == PLOT_LON_DEP:
         for e in events:
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
             xs.append(float(e["lon"]))
-            ys.append(float(e["dep"]))
+            ys.append(float(dep))
         return xs, ys, "经度 (°E)", "深度 (km)", True
     if mode == PLOT_LAT_DEP:
         for e in events:
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
             xs.append(float(e["lat"]))
-            ys.append(float(e["dep"]))
+            ys.append(float(dep))
         return xs, ys, "纬度 (°N)", "深度 (km)", True
     if mode == PLOT_LON_TIME:
         for e in events:
@@ -323,7 +352,10 @@ def _axis_values(
             t = _event_time_value(e)
             if t is None:
                 continue
-            xs.append(float(e["dep"]))
+            dep = e.get("dep")
+            if dep is None or str(dep).strip() == "":
+                continue
+            xs.append(float(dep))
             ys.append(t)
         return xs, ys, "深度 (km)", "时间", False
     # 默认经度纬度
@@ -352,8 +384,8 @@ def _geo_axis_setup(
     values: list[float],
     fallback: tuple[float, float],
     *,
-    pad_ratio: float = 0.05,
-    min_pad: float = 0.5,
+    pad_ratio: float = 0.025,
+    min_pad: float = 0.25,
     target_count: int = 6,
 ) -> tuple[float, float, list[float]]:
     """
@@ -770,12 +802,14 @@ class JmaHypoRenderer:
                 draw.polygon(poly, fill=COLOR_LAND)
                 draw.line(poly, fill=COLOR_COAST, width=max(1, s))
 
-        # 低震级先画、高震级后画，避免大震被小震遮挡（不再画大震外圈）
-        # 经度纬度主图震点整体缩小一圈，减少重叠遮挡
+        # 低震级先画、高震级后画，避免大震被小震遮挡
+        # 圆圈大小表示震级，圆圈颜色表示深度色阶
         for ev in _sort_events_by_mag_asc(events):
             x, y = _lonlat_to_xy(float(ev["lon"]), float(ev["lat"]))
             mag = float(ev.get("mag") or 0.0)
-            color = _get_mag_color(mag)
+            # 保留原始深度值（可为 None/""），由 _get_depth_color 识别缺失并着中性色
+            dep = ev.get("dep")
+            color = _get_depth_color(dep)
             r = max(MIN_DOT_RADIUS * 0.85, _dot_radius(mag) * MAP_DOT_SCALE)
             _draw_dot(draw, x * s, y * s, r, color, outline=True, scale=s)
 
@@ -873,12 +907,14 @@ class JmaHypoRenderer:
             x_lo, x_hi, x_ticks = _depth_axis_setup(xs)
         elif x_is_geo:
             x_lo, x_hi, x_ticks = _geo_axis_setup(
-                xs, x_fallback, pad_ratio=0.05, min_pad=0.5, target_count=6
+                xs, x_fallback, pad_ratio=0.025, min_pad=0.25, target_count=6
             )
         else:
             x_raw_lo, x_raw_hi = _nice_range(xs, x_fallback)
+            # 缩减非地理 X 轴两端留白比例
+            pad = (x_raw_hi - x_raw_lo) * 0.03 if (x_raw_hi - x_raw_lo) > 1e-9 else 0.5
             x_lo, x_hi, x_ticks = _nice_ticks(
-                x_raw_lo, x_raw_hi, target_count=6, prefer_5=False
+                x_raw_lo - pad, x_raw_hi + pad, target_count=6, prefer_5=False
             )
 
         # Y 轴
@@ -944,11 +980,18 @@ class JmaHypoRenderer:
             )
 
         # 散点：低震级先画、高震级后画；细描边提升边缘清晰度
+        # 圆圈大小表示震级，圆圈颜色表示深度色阶
         for e in _sort_events_by_mag_asc(aligned_events):
             if mode == PLOT_LON_DEP:
-                xv, yv = float(e["lon"]), float(e["dep"])
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(e["lon"]), float(dep)
             elif mode == PLOT_LAT_DEP:
-                xv, yv = float(e["lat"]), float(e["dep"])
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(e["lat"]), float(dep)
             elif mode == PLOT_LON_TIME:
                 t = _event_time_value(e)
                 if t is None:
@@ -963,13 +1006,18 @@ class JmaHypoRenderer:
                 t = _event_time_value(e)
                 if t is None:
                     continue
-                xv, yv = float(e["dep"]), t
+                dep = e.get("dep")
+                if dep is None or str(dep).strip() == "":
+                    continue
+                xv, yv = float(dep), t
             else:
                 xv, yv = float(e["lon"]), float(e["lat"])
             x = _x_to_px(xv)
             y = _y_to_px(yv)
             mag = float(e.get("mag") or 0.0)
-            color = _get_mag_color(mag)
+            # 保留原始深度值（可为 None/""），由 _get_depth_color 识别缺失并着中性色
+            dep = e.get("dep")
+            color = _get_depth_color(dep)
             r = _dot_radius(mag)
             _draw_dot(draw, x, y, r, color, outline=True, scale=s)
 
@@ -1122,35 +1170,26 @@ class JmaHypoRenderer:
 
         # ── 统计数据 ──
         total = int(stats.get("total") or len(events) or 0)
-        min_mag = stats.get("min_mag")
         max_mag = stats.get("max_mag")
-        avg_dep = stats.get("avg_dep")
-        mag_range_text = (
-            f"M{(min_mag if min_mag is not None else 0):.1f} ~ "
-            f"M{(max_mag if max_mag is not None else 0):.1f}"
-        )
-        avg_dep_text = f"{(avg_dep if avg_dep is not None else 0):.0f} km"
+        max_dep = stats.get("max_dep")
+
+        max_mag_text = f"M {max_mag:.1f}" if max_mag is not None else "--"
+        max_dep_text = f"{max_dep:.0f} km" if max_dep is not None else "--"
         total_text = f"{total} 次"
 
         lcy = cy + ch + 12 * s
 
+        # 统计卡片：总地震数 / 今日最大 / 今日最深
+        items = [
+            ("总地震数", total_text),
+            ("最大震级", max_mag_text),
+            ("最深地震", max_dep_text),
+        ]
+
         if is_scatter:
-            # 窄卡：三项上下堆叠，标签在上、数值在下，避免左右重叠
-            # 结构：
-            #   总地震数
-            #   2199 次
-            #   震级范围
-            #   M-0.9 ~ M4.8
-            #   平均深度
-            #   27 km
-            items = [
-                ("总地震数", total_text),
-                ("震级范围", mag_range_text),
-                ("平均深度", avg_dep_text),
-            ]
-            item_h = 70 * s
-            gap = 10 * s
-            outer_pad = 12 * s
+            item_h = 58 * s
+            gap = 8 * s
+            outer_pad = 10 * s
             lch = outer_pad * 2 + item_h * len(items) + gap * (len(items) - 1)
             draw.rounded_rectangle(
                 [px, lcy, px + pw, lcy + lch],
@@ -1177,29 +1216,21 @@ class JmaHypoRenderer:
                     (content_left + 10 * s, y_cursor + item_h * 0.30),
                     label,
                     fill=COLOR_TEXT_SEC,
-                    font=_get_font(14 * s),
+                    font=_get_font(13 * s),
                     anchor="lm",
                 )
-                # 震级范围数值略小，避免窄卡撑爆
-                value_size = 15 * s if label == "震级范围" else 18 * s
                 draw.text(
-                    (content_left + 10 * s, y_cursor + item_h * 0.68),
+                    (content_left + 10 * s, y_cursor + item_h * 0.70),
                     value,
                     fill=COLOR_TEXT,
-                    font=_get_font(value_size, bold=True),
+                    font=_get_font(17 * s, bold=True),
                     anchor="lm",
                 )
                 y_cursor += item_h + gap
         else:
-            # 宽卡（经度纬度）：三项统一左右布局，震级范围不换行
-            items = [
-                ("总地震数", total_text),
-                ("震级范围", mag_range_text),
-                ("平均深度", avg_dep_text),
-            ]
-            row_h = 58 * s
-            gap = 10 * s
-            outer_pad = 12 * s
+            row_h = 52 * s
+            gap = 8 * s
+            outer_pad = 10 * s
             lch = outer_pad * 2 + row_h * len(items) + gap * (len(items) - 1)
             draw.rounded_rectangle(
                 [px, lcy, px + pw, lcy + lch],
@@ -1227,49 +1258,24 @@ class JmaHypoRenderer:
                     (content_left + 10 * s, mid_y),
                     label,
                     fill=COLOR_TEXT_SEC,
-                    font=_get_font(16 * s),
+                    font=_get_font(15 * s),
                     anchor="lm",
                 )
                 draw.text(
                     (content_right - 10 * s, mid_y),
                     value,
                     fill=COLOR_TEXT,
-                    font=_get_font(20 * s, bold=True),
+                    font=_get_font(19 * s, bold=True),
                     anchor="rm",
                 )
                 y_cursor += row_h + gap
 
-        # ── 图例 ──
-        # 经度纬度：图例与主图共用 MAP_DOT_SCALE，保证同档大小一致
-        # 散点图：保持原尺寸（1.0）
-        legend_scale = MAP_DOT_SCALE if not is_scatter else 1.0
-        min_legend_r = MIN_DOT_RADIUS * 0.85 if not is_scatter else MIN_DOT_RADIUS
-
-        def _legend_r(threshold: float) -> float:
-            # 与主图同一公式：max(min_r, _legend_dot_radius * scale)
-            return max(
-                min_legend_r, _legend_dot_radius(float(threshold)) * legend_scale
-            )
-
-        max_legend_r_logic = _legend_r(8.0)
-        max_legend_r = max_legend_r_logic * s
-        # 行高按圆点直径留余量，避免大档圆点互相挤压
-        row_h = max(
-            int(22 * s * (0.88 if not is_scatter else 1.0)),
-            int(max_legend_r * 2 + 6 * s * legend_scale),
-        )
-        title_h = int(30 * s) if not is_scatter else 38 * s
-        bottom_pad = int(10 * s) if not is_scatter else 12 * s
-        ly = lcy + lch + 12 * s
-        lh = title_h + len(MAG_COLORS) * row_h + bottom_pad
-        max_bottom = canvas_h - pad
-        if ly + lh > max_bottom:
-            available = max_bottom - ly - title_h - bottom_pad
-            row_h = max(
-                int(max_legend_r * 2 + 2 * s),
-                available // max(len(MAG_COLORS), 1),
-            )
-            lh = title_h + len(MAG_COLORS) * row_h + bottom_pad
+        # ── 图例：深度颜色 (色阶) ──
+        ly = lcy + lch + 10 * s
+        dep_row_h = 20 * s if is_scatter else 22 * s
+        title_h = 28 * s
+        bottom_pad = 8 * s
+        lh = title_h + len(DEPTH_COLORS) * dep_row_h + bottom_pad
 
         draw.rounded_rectangle(
             [px, ly, px + pw, ly + lh],
@@ -1278,32 +1284,26 @@ class JmaHypoRenderer:
             outline=COLOR_BORDER,
             width=max(1, s),
         )
-        legend_title_size = 15 * s if not is_scatter else 17 * s
+        legend_title_size = 14 * s if is_scatter else 15 * s
         draw.text(
             (content_cx, ly + title_h / 2.0),
-            "震级图例",
+            "震源深度 [km]",
             fill=COLOR_TEXT,
             font=_get_font(legend_title_size, bold=True),
             anchor="mm",
         )
-        # 圆点列宽按最大半径预留，保证各档左对齐
-        dot_col_w = max(max_legend_r * 2, 14 * s * legend_scale)
-        dot_cx = content_left + dot_col_w / 2.0
-        label_x = content_left + dot_col_w + 10 * s
-        legend_label_size = 13 * s if not is_scatter else 14 * s
-        for i, (threshold, color, label) in enumerate(MAG_COLORS):
-            iy = ly + title_h + i * row_h + row_h / 2.0
-            r_logic = _legend_r(float(threshold))
-            # 小圆点关闭描边，大圆点保留细描边；统一走 SSAA 抗锯齿
-            use_outline = r_logic >= 4.5
-            _draw_dot(
-                draw,
-                dot_cx,
-                iy,
-                r_logic,
-                color,
-                outline=use_outline,
-                scale=s,
+        box_w = 18 * s
+        box_h = 10 * s
+        box_x = content_left + 6 * s
+        label_x = box_x + box_w + 10 * s
+        legend_label_size = 12 * s if is_scatter else 13 * s
+        for i, (_, color, label) in enumerate(DEPTH_COLORS):
+            iy = ly + title_h + i * dep_row_h + dep_row_h / 2.0
+            draw.rectangle(
+                [box_x, iy - box_h / 2.0, box_x + box_w, iy + box_h / 2.0],
+                fill=color,
+                outline=COLOR_DOT_OUTLINE,
+                width=max(1, s),
             )
             draw.text(
                 (label_x, iy),
@@ -1312,6 +1312,109 @@ class JmaHypoRenderer:
                 font=_get_font(legend_label_size),
                 anchor="lm",
             )
+
+        # ── 图例：震级气泡大小 ──
+        # 散点图模式：侧栏空间更窄，转为竖向排版；地图模式：维持横向横排
+        ly_mag = ly + lh + 10 * s
+        max_bottom = canvas_h - pad
+
+        if is_scatter:
+            # 考虑最大圆点直径，增大垂直行高避免气泡上下重叠
+            max_r_legend = max(_dot_radius(m_val) * 0.95 for m_val, _ in MAG_LEGENDS)
+            mag_row_h = max(24 * s, int(max_r_legend * 2 * s + 4 * s))
+            title_h_mag = 26 * s
+            bottom_pad_mag = 6 * s
+            lh_mag = title_h_mag + len(MAG_LEGENDS) * mag_row_h + bottom_pad_mag
+
+            # 若溢出画布底部，按剩余空间缩减行高
+            if ly_mag + lh_mag > max_bottom:
+                avail_mag = max_bottom - ly_mag - title_h_mag - bottom_pad_mag
+                mag_row_h = max(
+                    int(max_r_legend * 2 * s + 1 * s),
+                    avail_mag // max(len(MAG_LEGENDS), 1),
+                )
+                lh_mag = title_h_mag + len(MAG_LEGENDS) * mag_row_h + bottom_pad_mag
+
+            if ly_mag + lh_mag <= max_bottom:
+                draw.rounded_rectangle(
+                    [px, ly_mag, px + pw, ly_mag + lh_mag],
+                    radius=16 * s,
+                    fill=COLOR_CARD_BG,
+                    outline=COLOR_BORDER,
+                    width=max(1, s),
+                )
+                draw.text(
+                    (content_cx, ly_mag + title_h_mag / 2.0),
+                    "震级 M",
+                    fill=COLOR_TEXT,
+                    font=_get_font(13 * s, bold=True),
+                    anchor="mm",
+                )
+                # 圆点中心及文字起始点：按照最大圆点半径留足间距
+                dot_cx_mag = content_left + max_r_legend * s + 6 * s
+                label_x_mag = dot_cx_mag + max_r_legend * s + 10 * s
+                for i, (m_val, m_label) in enumerate(MAG_LEGENDS):
+                    iy_mag = ly_mag + title_h_mag + i * mag_row_h + mag_row_h / 2.0
+                    r_item = max(1.8, _dot_radius(m_val) * 0.95)
+                    _draw_dot(
+                        draw,
+                        dot_cx_mag,
+                        iy_mag,
+                        r_item,
+                        (180, 185, 195),
+                        outline=True,
+                        scale=s,
+                    )
+                    draw.text(
+                        (label_x_mag, iy_mag),
+                        m_label,
+                        fill=COLOR_TEXT,
+                        font=_get_font(12 * s),
+                        anchor="lm",
+                    )
+        else:
+            lh_mag = 46 * s
+            if ly_mag + lh_mag <= max_bottom:
+                draw.rounded_rectangle(
+                    [px, ly_mag, px + pw, ly_mag + lh_mag],
+                    radius=14 * s,
+                    fill=COLOR_CARD_BG,
+                    outline=COLOR_BORDER,
+                    width=max(1, s),
+                )
+                cy_card = ly_mag + lh_mag / 2.0
+                draw.text(
+                    (content_left + 4 * s, cy_card),
+                    "震级 M",
+                    fill=COLOR_TEXT_SEC,
+                    font=_get_font(12 * s, bold=True),
+                    anchor="lm",
+                )
+                legend_scale = MAP_DOT_SCALE
+                for i, (m_val, m_label) in enumerate(MAG_LEGENDS):
+                    cx_item = (
+                        content_left
+                        + 54 * s
+                        + i * ((pw - 74 * s) / len(MAG_LEGENDS))
+                        + 6 * s
+                    )
+                    r_item = max(1.8, _dot_radius(m_val) * legend_scale * 0.95)
+                    _draw_dot(
+                        draw,
+                        cx_item,
+                        cy_card - 6 * s,
+                        r_item,
+                        (180, 185, 195),
+                        outline=True,
+                        scale=s,
+                    )
+                    draw.text(
+                        (cx_item, cy_card + 10 * s),
+                        m_label,
+                        fill=COLOR_TEXT,
+                        font=_get_font(11 * s),
+                        anchor="mm",
+                    )
 
 
 __all__ = ["JmaHypoRenderer"]

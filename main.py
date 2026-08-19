@@ -231,6 +231,7 @@ class DisasterWarningPlugin(Star):
             (
                 "🛠️ 运维管理\n"
                 "• /灾害预警状态 - 服务运行状态\n"
+                "• /服务器切换 - 查看/切换数据源主备服务器\n"
                 "• /灾害预警重连 - 强制重连离线数据源\n"
                 "• /灾害预警统计 / 灾害预警统计清除\n"
                 "• /灾害预警推送开关 - 会话推送开关\n"
@@ -667,6 +668,16 @@ class DisasterWarningPlugin(Star):
     async def disaster_status(self, event: AstrMessageEvent):
         """查看灾害预警服务状态"""
         async for result in self._admin_command_service.handle_disaster_status(event):
+            yield result
+
+    @filter.command("服务器切换")
+    async def server_switch(
+        self, event: AstrMessageEvent, data_source: str = None, preference: str = None
+    ):
+        """切换数据源主备服务器。"""
+        async for result in self._admin_command_service.handle_server_switch(
+            event, data_source, preference
+        ):
             yield result
 
     @filter.command("灾害预警重连")
