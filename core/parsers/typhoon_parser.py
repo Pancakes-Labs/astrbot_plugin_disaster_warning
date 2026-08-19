@@ -15,6 +15,7 @@ from ...utils.plugin_logger import plugin_logger
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, TyphoonEvent
 from ..domain.event_payload import SourcePayload
+from ..domain.typhoon.typhoon_values import clean_text
 from ..sources.source_catalog import get_source_entry
 from .base_parser import BaseParser
 
@@ -85,9 +86,11 @@ class TyphoonParser(BaseParser):
             plugin_logger.debug(f"[灾害预警] {self.source_id} 台风消息缺少ID，跳过处理")
             return None
 
-        name = str(typhoon_data.get("name", "") or "").strip()
-        name_en = str(typhoon_data.get("name_en", "") or "").strip()
-        typhoon_type = str(typhoon_data.get("type", "") or "").strip()
+        # 使用 clean_text 清洗名称/类型：无名低压的 name 可能是占位字符串
+        # "None"/"NULL"，若不清洗会写入领域事件，阻断后续富化覆盖有效名称。
+        name = clean_text(typhoon_data.get("name"))
+        name_en = clean_text(typhoon_data.get("name_en"))
+        typhoon_type = clean_text(typhoon_data.get("type"))
 
         # 若名称和类型全部缺失，视为无效数据
         if not name and not name_en and not typhoon_type:

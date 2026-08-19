@@ -228,9 +228,11 @@ class TyphoonEnrichmentService:
         eqsc_name_en = clean_text(eqsc_typhoon.get("nameEN")) or clean_text(
             eqsc_typhoon.get("name_en")
         )
-        if eqsc_name_cn and not typhoon_event.name:
+        # 覆盖判断同样基于清洗值：FAN 侧可能残留占位字符串（如 "None"），
+        # 若仅判断 truthy 会阻断 EQSC 有效名称的覆盖。
+        if eqsc_name_cn and not clean_text(typhoon_event.name):
             typhoon_event.name = eqsc_name_cn
-        if eqsc_name_en and not typhoon_event.name_en:
+        if eqsc_name_en and not clean_text(typhoon_event.name_en):
             typhoon_event.name_en = eqsc_name_en
 
         # EQSC 的 isActive 字段
