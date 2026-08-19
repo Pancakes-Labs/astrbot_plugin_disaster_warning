@@ -384,7 +384,7 @@ class TelemetryManager:
                             self._last_429_time is None
                             or (now - self._last_429_time).total_seconds() > 600
                         ):
-                            logger.debug("[灾害预警] 遥测请求频率超限")
+                            logger.warning("[灾害预警] 遥测请求频率超限")
                             self._last_429_time = now
                     else:
                         logger.debug(
