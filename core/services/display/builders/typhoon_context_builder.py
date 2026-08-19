@@ -27,6 +27,7 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
                 projection_view.get("typhoon_id"),
                 "",
             )
+            or ""
         ).strip(),
         "name": str(
             first_non_empty(
@@ -34,6 +35,7 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
                 projection_view.get("name"),
                 "",
             )
+            or ""
         ).strip(),
         "name_en": str(
             first_non_empty(
@@ -41,6 +43,7 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
                 projection_view.get("name_en"),
                 "",
             )
+            or ""
         ).strip(),
         "typhoon_type": str(
             first_non_empty(
@@ -48,6 +51,7 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
                 projection_view.get("typhoon_type"),
                 "",
             )
+            or ""
         ).strip(),
         "is_active": bool(
             first_non_empty(

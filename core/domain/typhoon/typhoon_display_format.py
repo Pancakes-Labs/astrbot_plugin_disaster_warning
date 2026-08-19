@@ -174,6 +174,61 @@ def get_typhoon_level_emoji(typhoon_type: str | None) -> str:
     return typhoon_level_emoji(typhoon_type)
 
 
+def format_typhoon_short_id(*candidates: object) -> str:
+    """统一输出台风短编号，规则与前端 formatTyphoonShortId 对齐。
+
+    - 纯数字官方编号：202609 / 2609 -> 2609
+    - NAMELESS 无名低压：NAMELESS_2604 / NAMELESS_07 -> TD04 / TD07
+      （避免与正式编号 2604 冲突；07 与 EQSC 侧 TD07 归一到同一展示格式）
+    - 其他非标准编号：原样返回，不从混合文本硬抠数字
+
+    供推送 Presenter 与查询 Presenter 共用，避免展示逻辑分叉。
+    """
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in {"unknown", "未知"}:
+            continue
+
+        if text.isdigit() and len(text) >= 4:
+            return text[-4:]
+
+        upper = text.upper()
+        # 裸 NAMELESS / NAMELESS_03 / NAMELESS_2604 均统一为 TD + 两位短编号
+        if (
+            upper == "NAMELESS"
+            or upper.startswith("NAMELESS_")
+            or upper.startswith("NAMELESS-")
+        ):
+            if upper == "NAMELESS":
+                return "TD"
+            suffix = (
+                text.split("_", 1)[1].strip()
+                if "_" in text
+                else text.split("-", 1)[1].strip()
+                if "-" in text
+                else text[8:].lstrip("_-")
+            )
+            suffix = suffix.strip()
+            if not suffix:
+                return "TD"
+            digits = "".join(char for char in suffix if char.isdigit())
+            if digits:
+                # 统一 TD + 两位短编号（如 NAMELESS_2604 -> TD04）
+                return f"TD{digits[-2:]}"
+            if suffix.upper().startswith("TD"):
+                return suffix.upper()
+            return f"TD{suffix}"
+
+        if upper.startswith("TD"):
+            return "TD" + text[2:].lstrip("_-")
+
+        return text
+    return ""
+
+
 def format_move_direction(direction: str | None) -> str:
     """把源侧移动方向本地化为日常可读写法（仅展示层）。"""
     text = clean_text(direction)
@@ -191,6 +246,7 @@ __all__ = [
     "TYPHOON_LEVEL_EMOJI",
     "format_coordinates",
     "format_move_direction",
+    "format_typhoon_short_id",
     "format_wind_circle",
     "format_wind_speed",
     "get_typhoon_level_emoji",

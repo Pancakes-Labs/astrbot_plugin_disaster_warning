@@ -12,6 +12,7 @@ from typing import Any
 from ...domain.typhoon.typhoon_display_format import (
     format_coordinates,
     format_move_direction,
+    format_typhoon_short_id,
     format_wind_circle,
     format_wind_speed,
     get_typhoon_level_emoji,
@@ -20,55 +21,8 @@ from ...domain.typhoon.typhoon_display_format import (
 from ..geo.region_service import region_service
 from .typhoon_query_parser import DETAIL_CURRENT, DETAIL_FULL
 
-
-def _format_typhoon_short_id(*candidates: object) -> str:
-    """统一输出台风短编号，规则与前端 formatTyphoonShortId 对齐。
-
-    - 纯数字官方编号：202609 / 2609 -> 2609
-    - NAMELESS 无名低压：NAMELESS_2604 -> TD2604（避免与正式编号 2604 冲突）
-    - 其他非标准编号：原样返回，不从混合文本硬抠数字
-    """
-    for candidate in candidates:
-        text = str(candidate or "").strip()
-        if not text:
-            continue
-        lowered = text.lower()
-        if lowered in {"unknown", "未知"}:
-            continue
-
-        if text.isdigit() and len(text) >= 4:
-            return text[-4:]
-
-        upper = text.upper()
-        # 裸 NAMELESS / NAMELESS_03 / NAMELESS_2604 均统一为 TD 前缀
-        if (
-            upper == "NAMELESS"
-            or upper.startswith("NAMELESS_")
-            or upper.startswith("NAMELESS-")
-        ):
-            if upper == "NAMELESS":
-                return "TD"
-            suffix = (
-                text.split("_", 1)[1].strip()
-                if "_" in text
-                else text.split("-", 1)[1].strip()
-                if "-" in text
-                else text[8:].lstrip("_-")
-            )
-            suffix = suffix.strip()
-            if not suffix:
-                return "TD"
-            if suffix.isdigit():
-                return f"TD{suffix}"
-            if suffix.upper().startswith("TD"):
-                return suffix.upper()
-            return f"TD{suffix}"
-
-        if upper.startswith("TD"):
-            return "TD" + text[2:].lstrip("_-")
-
-        return text
-    return ""
+# 统一短编号格式化复用公共展示工具，避免展示逻辑分叉。
+_format_typhoon_short_id = format_typhoon_short_id
 
 
 def _format_reference_place(latitude: Any, longitude: Any) -> str:
