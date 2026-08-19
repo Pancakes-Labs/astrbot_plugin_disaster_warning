@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
+from astrbot.api.event import MessageChain
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
@@ -162,7 +163,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             if session_sender is None:
                 logger.warning("[灾害预警] 会话发送器不可用，无法发送重连回执")
                 return
-            await session_sender.send(session, Comp.Plain(text))
+            await session_sender.send(session, MessageChain([Comp.Plain(text)]))
         except Exception as e:
             logger.error(f"[灾害预警] 重连回执发送到 {session} 失败: {e}")
 
