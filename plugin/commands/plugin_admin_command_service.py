@@ -218,10 +218,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             if success_count > 0:
                 lines.append("⏳ 重连结果将稍后推送，请留意后续消息。")
-            # 匿名上报功能执行遥测
+            # 匿名上报功能执行遥测（管理类命令统一归并到 command_admin_action）
             await self._track_command_feature(
-                "command_force_reconnect",
+                "command_admin_action",
                 {
+                    "action": "force_reconnect",
                     "success": True,
                     "triggered_count": success_count,
                     "failed_count": fail_count,
@@ -231,8 +232,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             await self._track_command_feature(
-                "command_force_reconnect",
-                {"success": False},
+                "command_admin_action",
+                {"action": "force_reconnect", "success": False},
             )
             logger.error(f"[灾害预警] 重连操作失败: {e}")
             yield event.plain_result(f"❌ 重连操作失败: {str(e)}")
@@ -604,15 +605,23 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             if nodes:
                 await self._track_command_feature(
-                    "command_status_query",
-                    {"success": True, "running": bool(status.get("running"))},
+                    "command_admin_action",
+                    {
+                        "action": "status_query",
+                        "success": True,
+                        "running": bool(status.get("running")),
+                    },
                 )
                 yield event.chain_result([nodes])
                 return
 
             await self._track_command_feature(
-                "command_status_query",
-                {"success": True, "running": bool(status.get("running"))},
+                "command_admin_action",
+                {
+                    "action": "status_query",
+                    "success": True,
+                    "running": bool(status.get("running")),
+                },
             )
             yield quoted_plain_result(self.plugin, event, "\n".join(overview_lines))
         except Exception as e:
@@ -653,8 +662,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                         f"📊 总计拦截: {filter_stats.get('total_filtered', 0)}"
                     )
             await self._track_command_feature(
-                "command_stats_query",
-                {"success": True},
+                "command_admin_action",
+                {"action": "stats_query", "success": True},
             )
             # 统计报告显式走合并转发，失败则回退普通引用回复
             ok = await send_forward_blocks(
@@ -748,8 +757,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             status = "启用" if new_state else "禁用"
             action = "开始" if new_state else "停止"
             await self._track_command_feature(
-                "command_toggle_raw_logging",
-                {"enabled": bool(new_state)},
+                "command_admin_action",
+                {
+                    "action": "toggle_raw_logging",
+                    "success": True,
+                    "enabled": bool(new_state),
+                },
             )
             yield event.plain_result(
                 f"✅ 原始消息日志记录已{status}\n\n插件将{action}记录所有数据源的原始消息格式。"
@@ -796,8 +809,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         try:
             await self.plugin.disaster_service.statistics_manager.reset_stats()
             await self._track_command_feature(
-                "command_clear_statistics",
-                {"success": True},
+                "command_admin_action",
+                {"action": "clear_statistics", "success": True},
             )
             yield event.plain_result(
                 "✅ 统计数据已重置\n\n所有历史统计记录已被清除，新的统计将重新开始。"
@@ -830,8 +843,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": False, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": False,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已关闭\n\n{session_log_str} 已从推送列表中移除。"
@@ -842,8 +860,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": True, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": True,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已开启\n\n{session_log_str} 已添加到推送列表。"
