@@ -16,6 +16,7 @@ from playwright.async_api import Browser, Page, async_playwright
 
 from astrbot.api import logger
 
+from ....core.services.telemetry.telemetry_utils import track_error_safely
 from ....utils.plugin_logger import plugin_logger
 
 
@@ -579,11 +580,13 @@ class BrowserManager:
 
             except Exception as e:
                 logger.error(f"[灾害预警] 浏览器初始化失败: {e}")
-                # 上报浏览器初始化错误到遥测
-                if self._telemetry and self._telemetry.enabled:
-                    await self._telemetry.track_error(
-                        e, module="core.browser_manager.initialize"
-                    )
+                # 上报浏览器初始化错误到遥测（统一 best-effort 封装）
+                await track_error_safely(
+                    self._telemetry,
+                    e,
+                    module="core.browser_manager.initialize",
+                    log_context="浏览器初始化错误遥测",
+                )
                 # 清理已创建的资源
                 await self._cleanup()
                 raise
@@ -687,6 +690,9 @@ class BrowserManager:
         """
         resolved_viewport = self._normalize_viewport(viewport)
         label = self._normalize_render_label(render_label)
+        # 统一计时起点：覆盖本地模式各失败返回路径（浏览器不可用/信号量超时等），
+        # 使所有失败路径都能上报准确的渲染耗时。
+        start_time = time.time()
         # 远程模式直接走 HTTP 渲染接口，本地模式则复用页面池执行截图。
         if self._mode == "remote":
             if not self._initialized:
@@ -704,12 +710,18 @@ class BrowserManager:
         # 本地模式：使用 Playwright
         if not await self._ensure_local_browser_ready():
             logger.error(f"[灾害预警] 浏览器不可用，无法渲染{label}")
+            # 上报渲染性能指标（浏览器不可用失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type="BrowserUnavailable",
+            )
             return None
 
         page: Page | None = None
         page_returned = False
         render_succeeded = False
-        start_time = time.time()
 
         acquired_semaphore = False
         console_messages: list[str] = []
@@ -729,6 +741,13 @@ class BrowserManager:
                 acquired_semaphore = True
             except asyncio.TimeoutError:
                 logger.error("[灾害预警] 等待渲染信号量超时，系统负载过高")
+                # 上报渲染性能指标（信号量超时失败路径）
+                await self._track_render_performance(
+                    success=False,
+                    render_label=label,
+                    elapsed_seconds=time.time() - start_time,
+                    failure_type="SemaphoreTimeout",
+                )
                 return None
 
             try:
@@ -736,6 +755,13 @@ class BrowserManager:
                 page = await self._acquire_usable_page()
                 if page is None:
                     logger.error("[灾害预警] 无法获取可用页面对象")
+                    # 上报渲染性能指标（无可用页面失败路径）
+                    await self._track_render_performance(
+                        success=False,
+                        render_label=label,
+                        elapsed_seconds=time.time() - start_time,
+                        failure_type="NoUsablePage",
+                    )
                     return None
 
                 try:
@@ -972,6 +998,13 @@ class BrowserManager:
                         await self._log_page_diagnostics(
                             page, reason="screenshot-missing"
                         )
+                        # 上报渲染性能指标（截图缺失失败路径）
+                        await self._track_render_performance(
+                            success=False,
+                            render_label=label,
+                            elapsed_seconds=time.time() - start_time,
+                            failure_type="ScreenshotMissing",
+                        )
                         return None
 
                 finally:
@@ -1023,11 +1056,13 @@ class BrowserManager:
 
         except Exception as e:
             logger.error(f"[灾害预警] {label}渲染失败: {e}")
-            # 上报卡片渲染错误到遥测
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.browser_manager.render_card"
-                )
+            # 上报卡片渲染错误到遥测（统一 best-effort 封装）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.browser_manager.render_card",
+                log_context="卡片渲染错误遥测",
+            )
             # 上报渲染性能指标（失败路径）
             await self._track_render_performance(
                 success=False,
@@ -1251,6 +1286,13 @@ class BrowserManager:
                                 logger.error(
                                     f"[灾害预警] browserless API 降级重试请求失败: {fallback_ex}"
                                 )
+                        # 上报渲染性能指标（非 200 响应失败路径，含降级重试失败）
+                        await self._track_render_performance(
+                            success=False,
+                            render_label=label,
+                            elapsed_seconds=time.time() - start_time,
+                            failure_type=f"HTTP_{response.status}",
+                        )
                         return None
 
         except asyncio.TimeoutError:
@@ -1265,10 +1307,13 @@ class BrowserManager:
             return None
         except Exception as e:
             logger.error(f"[灾害预警] {label} browserless API 请求失败: {e}")
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.browser_manager._render_card_via_http"
-                )
+            # 上报远程渲染错误到遥测（统一 best-effort 封装）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.browser_manager._render_card_via_http",
+                log_context="远程渲染错误遥测",
+            )
             # 上报渲染性能指标（远程失败路径）
             await self._track_render_performance(
                 success=False,

@@ -13,7 +13,10 @@ from typing import Any
 from ....utils.plugin_logger import plugin_logger
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
 from ...services.identity.event_identity import resolve_report_num
-from ...services.telemetry.telemetry_utils import track_feature_safely
+from ...services.telemetry.telemetry_utils import (
+    track_error_safely,
+    track_feature_safely,
+)
 from ...sources.source_catalog import get_source_ids_by_type
 from ...sources.source_entry import SourceType
 
@@ -119,11 +122,13 @@ class PushFlowHandler:
                         plugin_logger.warning(
                             f"[灾害预警] 去重状态回滚失败: {rollback_e}"
                         )
-                if self.manager._telemetry and self.manager._telemetry.enabled:
-                    await self.manager._telemetry.track_error(
-                        e,
-                        module="core.push_flow_handler.execute_push",
-                    )
+                # 统一 best-effort 封装上报推送错误（内部自带启用检查与异常吞噬）
+                await track_error_safely(
+                    self.manager._telemetry,
+                    e,
+                    module="core.push_flow_handler.execute_push",
+                    log_context="推送错误遥测",
+                )
                 return False
 
     async def handle_execution_result(

@@ -13,6 +13,8 @@ from aiohttp import ClientWebSocketResponse, WSMsgType
 
 from astrbot.api import logger
 
+from ...services.telemetry.telemetry_utils import track_error_safely
+
 
 class WebSocketDispatchService:
     """WebSocket 消息循环分发服务。"""
@@ -269,18 +271,15 @@ class WebSocketDispatchService:
             logger.error(f"[灾害预警] {error_label} {name}: {e}")
             logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
             # 消息在分发到处理器之前的解码/路由异常，只有日志没有遥测，这里补上报。
+            # 统一 best-effort 封装上报分发错误（内部自带启用检查与异常吞噬，
+            # 且不会中断消息循环继续运行）。
             telemetry = getattr(self.manager, "_telemetry", None)
-            if telemetry and telemetry.enabled:
-                try:
-                    await telemetry.track_error(
-                        e,
-                        module="core.websocket_dispatch_service._handle_payload_message",
-                    )
-                except Exception as telemetry_exc:
-                    # 遥测上报失败不得影响消息循环继续运行。
-                    logger.debug(
-                        f"[灾害预警] 分发错误遥测上报失败（已忽略）: {telemetry_exc}"
-                    )
+            await track_error_safely(
+                telemetry,
+                e,
+                module="core.websocket_dispatch_service._handle_payload_message",
+                log_context="分发错误遥测",
+            )
 
     def _touch_connection(self, name: str) -> None:
         """刷新连接最近活跃时间。"""

@@ -21,6 +21,7 @@ from jinja2 import Template
 
 from astrbot.api import logger
 
+from ....core.services.telemetry.telemetry_utils import track_error_safely
 from ....utils.converters import ScaleConverter
 from ....utils.version import get_plugin_version
 
@@ -269,18 +270,13 @@ class SnetMapRenderer:
         self, exception: Exception, label: str
     ) -> None:
         """上报模板渲染阶段（render_card 之前）的失败，覆盖渲染性能指标的盲区。"""
-        telemetry = getattr(
-            getattr(self.browser_manager, "_telemetry", None), "enabled", False
+        telemetry = getattr(self.browser_manager, "_telemetry", None)
+        await track_error_safely(
+            telemetry,
+            exception,
+            module=f"core.render.{label}.render_template",
+            log_context="SNET 模板渲染错误遥测",
         )
-        if not telemetry:
-            return
-        try:
-            await self.browser_manager._telemetry.track_error(
-                exception,
-                module=f"core.render.{label}.render_template",
-            )
-        except Exception as track_err:
-            logger.debug(f"[灾害预警] 模板渲染错误遥测上报失败（已忽略）: {track_err}")
 
     def _get_template(self) -> str:
         if self._template_cache is not None:

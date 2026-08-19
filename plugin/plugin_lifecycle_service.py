@@ -16,6 +16,7 @@ from astrbot.api import logger
 from ..core.app.disaster_service import stop_disaster_service
 from ..core.services.config.config_validation_service import ConfigValidator
 from ..core.services.telemetry.telemetry_service import TelemetryManager
+from ..core.services.telemetry.telemetry_utils import track_error_safely
 from ..utils.banner import print_stop_summary
 from ..utils.geolocation import close_geoip_session
 from ..utils.version import get_plugin_version
@@ -259,7 +260,7 @@ class PluginLifecycleService:
         else:
             logger.error(f"[灾害预警] 捕获未处理的异步错误: {message}")
 
-        if exception and self.plugin.telemetry and self.plugin.telemetry.enabled:
+        if exception:
             # 仅在遥测启用时补充异常上报，避免在禁用状态下继续创建额外任务。
             task = context.get("future")
             # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
@@ -272,10 +273,14 @@ class PluginLifecycleService:
                         match = re.search(r"name='([^']+)'", task_repr)
                         if match:
                             task_name = match.group(1)
+            # 统一 best-effort 封装上报未处理异步异常（内部自带启用检查与异常吞噬），
+            # 以独立任务方式调度，避免阻塞异常处理回调。
             error_task = asyncio.create_task(
-                self.plugin.telemetry.track_error(
+                track_error_safely(
+                    self.plugin.telemetry,
                     exception,
                     module=f"main.unhandled_async.{task_name}",
+                    log_context="未处理异步异常遥测",
                 )
             )
             self.plugin._telemetry_tasks.add(error_task)
