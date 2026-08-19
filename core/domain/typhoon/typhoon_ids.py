@@ -42,7 +42,8 @@ def extract_td_short_id(typhoon_id: object) -> str:
 
     仅接受完整合法格式（NAMELESS / TD + 可选分隔符 + 数字后缀）：
     - NAMELESS / TD（裸）-> TD
-    - NAMELESS_07 / TD07 / TD_07 / NAMELESS07 -> TD07
+    - NAMELESS_07 / TD07 / TD_07 / NAMELESS07 / TD7 / NAMELESS_7 -> TD07
+      （末两位统一补零，保证 TD7 与 TD07 归一到同一去重键）
     - NAMELESS_2604 -> TD04（仅取两位短编号，避免与正式编号 2604 混淆）
 
     格式不匹配（如 NAMELESSNESS_07 / TDX_07）时返回空字符串，
@@ -59,7 +60,8 @@ def extract_td_short_id(typhoon_id: object) -> str:
         return "TD"
     digits = "".join(char for char in raw if char.isdigit())
     if digits:
-        return f"TD{digits[-2:]}"
+        # 末两位统一补零：TD7 / NAMELESS_7 / NAMELESS_2607 均归一到 TD07。
+        return f"TD{digits[-2:].zfill(2)}"
     return "TD"
 
 
