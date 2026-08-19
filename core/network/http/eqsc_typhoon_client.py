@@ -113,7 +113,7 @@ class EqscTyphoonClient(EqscHttpClient):
         except Exception as e:
             logger.error(
                 f"[灾害预警] EQSC 查询台风 {typhoon_id} 异常: "
-                f"{type(e).__name__}: {e or repr(e)}"
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return None
 
@@ -158,14 +158,16 @@ class EqscTyphoonClient(EqscHttpClient):
             error_name = type(e).__name__
             # DNS 解析失败（getaddrinfo failed）等连接层错误对普通用户是黑话，
             # 先给出人性化提示，再附带原始技术细节便于排障。
-            if "DNS" in error_name or "getaddrinfo" in repr(e).lower():
+            # 注意：DNS 失败常以 socket.gaierror 作为 __cause__ 被 ClientConnectorError
+            # 包装，或作为 __context__ 关联，因此需遍历整条异常链判断，而非只看顶层类型名。
+            if self._is_dns_error(e):
                 logger.error(
                     f"[灾害预警] EQSC 查询台风列表失败：无法解析域名 {self._base_url}，"
-                    f"请检查网络或 DNS 配置（原始错误: {error_name}: {e or repr(e)}）"
+                    f"请检查网络或 DNS 配置（原始错误: {error_name}: {str(e) or repr(e)}）"
                 )
             else:
                 logger.error(
-                    f"[灾害预警] EQSC 查询台风列表异常: {error_name}: {e or repr(e)}"
+                    f"[灾害预警] EQSC 查询台风列表异常: {error_name}: {str(e) or repr(e)}"
                 )
             return []
 

@@ -302,14 +302,14 @@ class EqscTokenManager:
         except aiohttp.ClientError as e:
             logger.error(
                 f"[灾害预警] EQSC 创建 AccessToken 网络异常（{url}）: "
-                f"{type(e).__name__}: {e or repr(e)}"
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return False
         except Exception as e:
             # 某些超时/取消异常 str(e) 为空，必须打印类型和 repr
             logger.error(
                 f"[灾害预警] EQSC 创建 AccessToken 异常（{url}）: "
-                f"{type(e).__name__}: {e or repr(e)}"
+                f"{type(e).__name__}: {str(e) or repr(e)}"
             )
             return False
 

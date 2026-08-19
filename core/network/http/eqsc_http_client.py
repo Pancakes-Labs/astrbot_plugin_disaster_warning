@@ -126,6 +126,30 @@ class EqscHttpClient:
             return value[:2] + "***"
         return f"{value[:6]}...{value[-4:]}(长度 {len(value)})"
 
+    @staticmethod
+    def _is_dns_error(exc: BaseException) -> bool:
+        """判断异常（含其 cause/context 链）是否为 DNS 解析失败。
+
+        aiohttp 的 DNS 失败通常表现为 ClientConnectorDNSError，但实际可能
+        以 socket.gaierror（getaddrinfo failed）作为 __cause__ 被
+        ClientConnectorError 包装，或作为 __context__ 关联。因此遍历整条
+        异常链逐层判断，避免只看顶层类型名而漏判。
+        """
+        seen: set[int] = set()
+        current: BaseException | None = exc
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            error_name = type(current).__name__
+            if "DNS" in error_name:
+                return True
+            detail = str(current) or repr(current)
+            if "getaddrinfo" in detail.lower():
+                return True
+            # 优先沿 __cause__ 追踪（显式 raise ... from），
+            # 未设置时再沿 __context__ 追踪（隐式链）。
+            current = current.__cause__ or current.__context__
+        return False
+
     def _build_request_url(
         self,
         url: str,
