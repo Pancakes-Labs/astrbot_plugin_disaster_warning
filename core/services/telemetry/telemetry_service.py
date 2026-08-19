@@ -42,6 +42,10 @@ class TelemetryManager:
     _APP_KEY = base64.b64decode(_ENCODED_KEY).decode()
 
     # 特定高频事件的最小加入队列间隔（秒），用于在内存中提前丢弃同质化冗余遥测
+    # 节流键规则：
+    # - feature 事件默认键为 feature:{feature}；
+    # - 若事件携带 action 字段，则键为 feature:{feature}:{action}，未命中时回退到
+    #   feature:{feature}，从而允许同一 feature 下按 action 维度分别节流（如管理类命令）。
     _THROTTLE_CONFIG = {
         "feature:push_result": 30.0,  # 地震等高频新报的推送结果，30秒内仅保留第一笔
         "feature:command_admin_action": 10.0,  # 管理类命令（状态/统计等）统一节流
@@ -151,6 +155,7 @@ class TelemetryManager:
         event_name: str,
         data: dict[str, Any] | None = None,
         immediate: bool = False,
+        bypass_rate_limit: bool = False,
     ) -> bool:
         """
         发送遥测事件。
@@ -159,6 +164,8 @@ class TelemetryManager:
         - event_name: 事件名称
         - data: 附加数据对象
         - immediate: 是否立即发送，不经过缓冲队列
+        - bypass_rate_limit: 是否绕过物理发送最小间隔。仅用于关机/退出等关键路径
+            （如 track_shutdown），避免被 _MIN_REQUEST_INTERVAL 限速等待阻塞资源清理。
         """
         if not self._enabled:
             return False
@@ -166,7 +173,15 @@ class TelemetryManager:
         # 对高频冗余事件进行内存节流过滤
         throttle_key = event_name
         if event_name == "feature" and data and "feature" in data:
-            throttle_key = f"feature:{data['feature']}"
+            feature_name = data["feature"]
+            action = data.get("action")
+            # 携带 action 字段时按 action 维度细化节流键，避免同一 feature 下
+            # 多个操作互相挤占节流配额（如管理类命令各自独立计数）。
+            throttle_key = (
+                f"feature:{feature_name}:{action}"
+                if action
+                else f"feature:{feature_name}"
+            )
         elif event_name == "error" and data:
             # 错误事件按"模块 + 异常类型"维度聚合，避免同一错误点刷屏
             throttle_key = (
@@ -175,6 +190,10 @@ class TelemetryManager:
             )
 
         throttle_seconds = self._THROTTLE_CONFIG.get(throttle_key)
+        if throttle_seconds is None and throttle_key.startswith("feature:"):
+            # 细化后的 feature:{feature}:{action} 未命中时回退到 feature:{feature} 基础节流
+            base_key = throttle_key.rsplit(":", 1)[0]
+            throttle_seconds = self._THROTTLE_CONFIG.get(base_key)
         if throttle_seconds is None and throttle_key.startswith("error:"):
             # 错误事件统一按 _ERROR_THROTTLE_SECONDS 间隔节流（默认 60 秒）
             throttle_seconds = self._ERROR_THROTTLE_SECONDS
@@ -202,7 +221,9 @@ class TelemetryManager:
         }
 
         if immediate:
-            return await self._send_batch_raw([event_item])
+            return await self._send_batch_raw(
+                [event_item], bypass_rate_limit=bypass_rate_limit
+            )
 
         async with self._queue_lock:
             self._queue.append(event_item)
@@ -226,7 +247,7 @@ class TelemetryManager:
             except Exception as e:
                 logger.debug(f"[灾害预警] 遥测后台批处理循环异常: {e}")
 
-    async def flush(self) -> bool:
+    async def flush(self, bypass_rate_limit: bool = False) -> bool:
         """立即清空缓冲区并批量发送所有缓存的事件。"""
         if not self._enabled:
             return False
@@ -237,10 +258,24 @@ class TelemetryManager:
             batch_data = list(self._queue)
             self._queue.clear()
 
-        return await self._send_batch_raw(batch_data)
+        return await self._send_batch_raw(
+            batch_data, bypass_rate_limit=bypass_rate_limit
+        )
 
-    async def _send_batch_raw(self, batch_data: list[dict[str, Any]]) -> bool:
-        """底层实际网络上报接口，包含强制发送速率限制。"""
+    async def _send_batch_raw(
+        self,
+        batch_data: list[dict[str, Any]],
+        *,
+        bypass_rate_limit: bool = False,
+    ) -> bool:
+        """底层实际网络上报接口，包含强制发送速率限制。
+
+        Args:
+            batch_data: 待上报的事件批。
+            bypass_rate_limit: 是否绕过物理发送最小间隔。仅用于关机/退出等
+                关键路径（如 track_shutdown 与 close 兜底 flush），避免限速等待
+                阻塞资源清理流程；其余日常发送一律保持限速，防范 429。
+        """
         payload = {
             "instance_id": self._instance_id,
             "version": self._plugin_version,
@@ -248,11 +283,12 @@ class TelemetryManager:
             "batch": batch_data,
         }
 
-        # 强制两次物理发送之间必须有 _MIN_REQUEST_INTERVAL 秒间隔，避免短时间内并发多个物理请求导致 429
+        # 强制两次物理发送之间必须有 _MIN_REQUEST_INTERVAL 秒间隔，
+        # 避免短时间内并发多个物理请求导致 429（关机路径可显式绕过）。
         async with self._send_semaphore:
             now_ts = time.time()
             elapsed = now_ts - self._last_send_time
-            if elapsed < self._MIN_REQUEST_INTERVAL:
+            if not bypass_rate_limit and elapsed < self._MIN_REQUEST_INTERVAL:
                 wait_time = self._MIN_REQUEST_INTERVAL - elapsed
                 logger.debug(
                     f"[灾害预警] 遥测请求物理限速，后台挂起等待 {wait_time:.2f} 秒"
@@ -328,7 +364,11 @@ class TelemetryManager:
     async def track_shutdown(
         self, exit_code: int = 0, runtime_seconds: float = 0
     ) -> bool:
-        """上报退出事件。"""
+        """上报退出事件。
+
+        退出事件走立即发送，并绕过物理最小间隔限速，
+        避免关机/重载路径被 _MIN_REQUEST_INTERVAL 限速等待阻塞资源清理。
+        """
         return await self.track(
             "shutdown",
             {
@@ -336,6 +376,7 @@ class TelemetryManager:
                 "runtime_seconds": runtime_seconds,
             },
             immediate=True,
+            bypass_rate_limit=True,
         )
 
     async def track_heartbeat(self, uptime_seconds: float = 0) -> bool:
@@ -351,23 +392,39 @@ class TelemetryManager:
         )
 
     # 配置快照中可能携带真实凭据的敏感键集合。
+    # 集合内统一存"去空白、转小写、去除分隔符"后的规范化键名，
+    # 匹配时经 _normalize_credential_key 规范化，从而同时覆盖 snake_case /
+    # camelCase / kebab-case 等命名风格（如 refresh_token / refreshToken）。
     # 命中即整体替换为脱敏占位符，避免 API Key、刷新令牌等凭据随匿名遥测外泄。
     _SENSITIVE_CREDENTIAL_KEYS = {
-        "api_key",
         "apikey",
-        "refresh_token",
-        "access_token",
+        "refreshtoken",
+        "accesstoken",
         "token",
         "secret",
         "password",
         "pwd",
         "cookie",
-        "cookie_str",
-        "app_key",
-        "app_secret",
-        "client_secret",
+        "cookiestr",
+        "appkey",
+        "appsecret",
+        "clientsecret",
         "authorization",
     }
+
+    # URL query 中凭据类参数的键名模式（允许 -/_ 分隔符，大小写不敏感），
+    # 用于脱敏异常消息与堆栈中拼接的带鉴权参数 URL，
+    # 同时覆盖 snake_case / camelCase / kebab-case 变体（如 refreshToken、apiKey）。
+    _CREDENTIAL_URL_KEY_PATTERN = (
+        r"(?:token|key|secret|password|pwd|cookie|authorization|"
+        r"api[-_]?key|refresh[-_]?token|access[-_]?token|app[-_]?key|"
+        r"app[-_]?secret|client[-_]?secret|cookie[-_]?str)"
+    )
+
+    @staticmethod
+    def _normalize_credential_key(key: str) -> str:
+        """规范化凭据键：去空白、转小写、去除 _ - 等分隔符，实现命名风格无关匹配。"""
+        return re.sub(r"[\s_\-]+", "", str(key).strip().lower())
 
     async def track_config(self, config: dict) -> bool:
         """
@@ -415,13 +472,18 @@ class TelemetryManager:
     def _sanitize_credentials(self, node: Any) -> None:
         """就地递归脱敏配置树中的凭据类键值。
 
-        对 dict 的键做大小写不敏感匹配；命中 _SENSITIVE_CREDENTIAL_KEYS
-        的值统一替换为脱敏占位符。list 内元素继续递归，确保嵌套配置结构
+        注意：本方法会**就地修改**传入的配置节点。调用方若需保留原始凭据值
+        （例如后续仍会复用同一配置字典），请先自行 copy.deepcopy 再传入，
+        以免原始凭据在内存中被覆盖为脱敏占位符。
+
+        对 dict 的键做"去分隔符 + 大小写不敏感"匹配（覆盖 snake_case /
+        camelCase / kebab-case）；命中 _SENSITIVE_CREDENTIAL_KEYS 的值统一
+        替换为脱敏占位符。list 内元素继续递归，确保嵌套配置结构
         （如数据源列表）中的凭据同样被覆盖。
         """
         if isinstance(node, dict):
             for key in list(node.keys()):
-                normalized = str(key).strip().lower()
+                normalized = self._normalize_credential_key(key)
                 if normalized in self._SENSITIVE_CREDENTIAL_KEYS:
                     node[key] = "***"
                 else:
@@ -474,8 +536,12 @@ class TelemetryManager:
                 type(exception), exception, exception.__traceback__
             )
         )
-        # 对异常堆栈进行强力脱敏过滤，剔除涉及宿主机私人用户名及本地系统特有文件绝对路径的信息
-        data["stack"] = self._sanitize_stack(stack)[:4000]
+        # 对异常堆栈进行强力脱敏过滤：
+        # 1. 先剔除宿主机私人用户名及本地系统特有文件绝对路径信息（_sanitize_stack）；
+        # 2. 再复用 _sanitize_message 的 URL 凭据正则——traceback.format_exception
+        #    会把原始异常消息（可能拼接了带鉴权参数的 URL）重新嵌入 stack，
+        #    仅靠 _sanitize_stack 无法覆盖，必须再做一次 URL 凭据脱敏。
+        data["stack"] = self._sanitize_message(self._sanitize_stack(stack))[:4000]
 
         return await self.track("error", data)
 
@@ -564,8 +630,10 @@ class TelemetryManager:
         message = re.sub(r"[A-Za-z]:\\Users\\[^\\\s]+\\", r"<USER_HOME>\\", message)
         # 脱敏 URL query 中的凭据类参数（token/key/secret/password 等），
         # 避免异常消息里拼接的带鉴权参数的 URL 把真实凭据带进遥测。
+        # 键名模式允许 -/_ 分隔符且大小写不敏感，同时覆盖 snake_case /
+        # camelCase / kebab-case 变体（如 refreshToken、accessToken、apiKey）。
         message = re.sub(
-            r"(?i)([?&](?:token|key|secret|password|pwd|api_key|apikey|refresh_token|access_token|authorization|cookie)=)[^&\s\"']+",
+            rf"(?i)([?&](?:{self._CREDENTIAL_URL_KEY_PATTERN})=)[^&\s\"']+",
             r"\1***",
             message,
         )
@@ -582,8 +650,8 @@ class TelemetryManager:
                 pass
             self._send_task = None
 
-        # 2. 强行上报缓冲中剩余的数据
-        await self.flush()
+        # 2. 强行上报缓冲中剩余的数据（关机路径绕过物理限速，避免阻塞会话关闭）
+        await self.flush(bypass_rate_limit=True)
 
         # 3. 关闭底层会话
         if self._session and not self._session.closed:
