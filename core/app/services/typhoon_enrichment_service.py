@@ -24,6 +24,7 @@ from typing import Any
 from ....utils.plugin_logger import plugin_logger as logger
 from ...domain.event_models import EventEnvelope, TyphoonEvent
 from ...domain.typhoon import (
+    clean_text,
     clean_wind_circle,
     constrain_wind_circle_by_fan_radius,
     to_eqsc_id,
@@ -216,9 +217,15 @@ class TyphoonEnrichmentService:
         typhoon_event.future_track = track_data["future_track"]
         typhoon_event.wind_circle = track_data["wind_circle"]
 
-        # 如果 EQSC 提供了更丰富的名称信息，补充到事件中
-        eqsc_name_cn = str(eqsc_typhoon.get("nameCN", "") or "").strip()
-        eqsc_name_en = str(eqsc_typhoon.get("nameEN", "") or "").strip()
+        # 如果 EQSC 提供了更丰富的名称信息，补充到事件中。
+        # 必须使用 clean_text 清洗，避免 EQSC 返回字符串 "None"/"NULL" 时
+        # 被 str(... or "") 误当成有效名称写入事件，导致推送正文出现裸 "None"。
+        eqsc_name_cn = clean_text(
+            eqsc_typhoon.get("nameCN") or eqsc_typhoon.get("name")
+        )
+        eqsc_name_en = clean_text(
+            eqsc_typhoon.get("nameEN") or eqsc_typhoon.get("name_en")
+        )
         if eqsc_name_cn and not typhoon_event.name:
             typhoon_event.name = eqsc_name_cn
         if eqsc_name_en and not typhoon_event.name_en:

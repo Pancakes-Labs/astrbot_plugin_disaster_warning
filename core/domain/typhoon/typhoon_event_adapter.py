@@ -135,6 +135,10 @@ def build_typhoon_event_envelope(
     fan_id = to_fan_id(eqsc_id)
     name_cn = clean_text(raw.get("nameCN") or raw.get("name"))
     name_en = clean_text(raw.get("nameEN") or raw.get("name_en"))
+    if name_cn.upper() in {"NONE", "NULL"}:
+        name_cn = ""
+    if name_en.upper() in {"NONE", "NULL"}:
+        name_en = ""
     history_track = raw.get("historyTrack") or raw.get("history_track") or []
     future_track = raw.get("futureTrack") or raw.get("future_track") or []
     if not isinstance(history_track, list):
