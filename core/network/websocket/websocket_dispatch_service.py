@@ -268,6 +268,19 @@ class WebSocketDispatchService:
         except Exception as e:
             logger.error(f"[灾害预警] {error_label} {name}: {e}")
             logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            # 消息在分发到处理器之前的解码/路由异常，只有日志没有遥测，这里补上报。
+            telemetry = getattr(self.manager, "_telemetry", None)
+            if telemetry and telemetry.enabled:
+                try:
+                    await telemetry.track_error(
+                        e,
+                        module="core.websocket_dispatch_service._handle_payload_message",
+                    )
+                except Exception as telemetry_exc:
+                    # 遥测上报失败不得影响消息循环继续运行。
+                    logger.debug(
+                        f"[灾害预警] 分发错误遥测上报失败（已忽略）: {telemetry_exc}"
+                    )
 
     def _touch_connection(self, name: str) -> None:
         """刷新连接最近活跃时间。"""
