@@ -984,12 +984,12 @@ class HTTPDataFetcher:
             logger.error(f"[灾害预警] HTTP 请求超时 {url}")
         except aiohttp.ClientError as e:
             logger.error(
-                f"[灾害预警] HTTP 请求网络异常 {url}: {type(e).__name__}: {e or repr(e)}"
+                f"[灾害预警] HTTP 请求网络异常 {url}: {type(e).__name__}: {str(e) or repr(e)}"
             )
         except Exception as e:
             # 某些超时/取消异常 str(e) 为空，必须打印类型和 repr
             logger.error(
-                f"[灾害预警] HTTP 请求异常 {url}: {type(e).__name__}: {e or repr(e)}"
+                f"[灾害预警] HTTP 请求异常 {url}: {type(e).__name__}: {str(e) or repr(e)}"
             )
 
         return None
