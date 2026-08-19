@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Any
 
 import astrbot.api.message_components as Comp
@@ -94,12 +95,24 @@ class DisasterWarningPlugin(Star):
 
         except Exception as e:
             logger.error(f"[灾害预警] 插件初始化失败: {e}")
-            # 上报初始化失败错误到遥测
+            # 上报初始化失败错误到遥测。
+            # 若异常已内部上报过，此处跳过，避免同一异常产生两条遥测记录。
             if hasattr(self, "telemetry") and self.telemetry and self.telemetry.enabled:
-                try:
-                    await self.telemetry.track_error(e, module="main.initialize")
-                except Exception:
-                    pass
+                inner_reported = False
+                _tb = e.__traceback__
+                while _tb is not None:
+                    if (
+                        _tb.tb_frame.f_code.co_name == "initialize"
+                        and "disaster_service" in _tb.tb_frame.f_code.co_filename
+                    ):
+                        inner_reported = True
+                        break
+                    _tb = _tb.tb_next
+                if not inner_reported:
+                    try:
+                        await self.telemetry.track_error(e, module="main.initialize")
+                    except Exception:
+                        pass
 
             # 发生异常时，确保清理已启动的任务和资源，防止任务泄露
             await self.terminate()
@@ -114,14 +127,29 @@ class DisasterWarningPlugin(Star):
         try:
             await self._lifecycle_service.stop_heartbeat_task()
             self._lifecycle_service.restore_asyncio_exception_handler()
+
+            # 上报退出事件（统计实例运行时长与退出码）。
+            # 必须在 shutdown_plugin_resources()（内部会关闭遥测会话）之前执行，
+            # 否则 track_shutdown 会重新拉起已关闭的发送链路，退出事件大概率丢失。
+            if hasattr(self, "telemetry") and self.telemetry and self.telemetry.enabled:
+                runtime_seconds = time.monotonic() - getattr(
+                    self, "_start_time", time.monotonic()
+                )
+                await self.telemetry.track_shutdown(
+                    exit_code=0, runtime_seconds=max(0.0, runtime_seconds)
+                )
+
             await self._cleanup_telemetry_tasks()
             await self._lifecycle_service.shutdown_plugin_resources()
 
         except Exception as e:
             logger.error(f"[灾害预警] 插件停止时出错: {e}")
-            # 上报停止错误到遥测
+            # 上报停止错误到遥测（best-effort，遥测自身故障不影响停机流程）
             if hasattr(self, "telemetry") and self.telemetry and self.telemetry.enabled:
-                await self.telemetry.track_error(e, module="main.terminate")
+                try:
+                    await self.telemetry.track_error(e, module="main.terminate")
+                except Exception:
+                    pass
 
     def _handle_asyncio_exception(self, loop, context):
         """

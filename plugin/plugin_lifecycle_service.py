@@ -259,34 +259,25 @@ class PluginLifecycleService:
         else:
             logger.error(f"[灾害预警] 捕获未处理的异步错误: {message}")
 
-        if self.plugin.telemetry and self.plugin.telemetry.enabled:
+        if exception and self.plugin.telemetry and self.plugin.telemetry.enabled:
             # 仅在遥测启用时补充异常上报，避免在禁用状态下继续创建额外任务。
-            if exception:
-                task = context.get("future")
-                # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
-                task_name = "unknown"
-                if task:
-                    task_name = getattr(task, "get_name", lambda: str(task))()
-                    if not task_name or task_name == str(task):
-                        task_repr = repr(task)
-                        if "name=" in task_repr:
-                            match = re.search(r"name='([^']+)'", task_repr)
-                            if match:
-                                task_name = match.group(1)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        exception,
-                        module=f"main.unhandled_async.{task_name}",
-                    )
+            task = context.get("future")
+            # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
+            task_name = "unknown"
+            if task:
+                task_name = getattr(task, "get_name", lambda: str(task))()
+                if not task_name or task_name == str(task):
+                    task_repr = repr(task)
+                    if "name=" in task_repr:
+                        match = re.search(r"name='([^']+)'", task_repr)
+                        if match:
+                            task_name = match.group(1)
+            error_task = asyncio.create_task(
+                self.plugin.telemetry.track_error(
+                    exception,
+                    module=f"main.unhandled_async.{task_name}",
                 )
-            else:
-                runtime_error = RuntimeError(message)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        runtime_error,
-                        module="main.unhandled_async",
-                    )
-                )
+            )
             self.plugin._telemetry_tasks.add(error_task)
             error_task.add_done_callback(self.plugin._telemetry_tasks.discard)
 
