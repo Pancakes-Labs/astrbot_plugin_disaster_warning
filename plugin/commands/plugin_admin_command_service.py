@@ -86,13 +86,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # 插件名取自 metadata.yaml 的 name 字段，避免硬编码与元数据配置漂移；
             # 读取失败时回退到插件目录名，保证兼容旧逻辑。
             plugin_name = get_plugin_name()
-            # 触发前上报请求状态（重载成功会销毁当前实例，无法在完成后上报，故先记录 requested）
+            # 触发前上报请求状态（重载成功会销毁当前实例，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（reload_plugin_requested）避免与失败事件
+            # （reload_plugin/success=False）共享节流键，防止 10 秒节流吞掉紧随其后的失败事件。
             await self._track_command_feature(
                 "command_admin_action",
                 {
-                    "action": "reload_plugin",
+                    "action": "reload_plugin_requested",
                     "success": True,
-                    "state": "requested",
                     "plugin": plugin_name,
                 },
             )
@@ -105,13 +106,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     MessageChain([Comp.Plain("✅ 灾害预警插件重载完成，正在重新启动")]),
                 )
             else:
-                # 上报失败（reload 返回失败结果）
+                # 上报失败（reload 返回失败结果）。
+                # reason 仅用固定失败码，不上报原始 message 文本，避免插件管理器
+                # 返回的 URL 凭据/令牌/内部路径等敏感信息随遥测外泄。
                 await self._track_command_feature(
                     "command_admin_action",
                     {
                         "action": "reload_plugin",
                         "success": False,
-                        "reason": str(message or "reload_failed"),
+                        "reason": "reload_failed",
                     },
                 )
                 await self.plugin.context.send_message(
@@ -120,13 +123,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 )
         except Exception as e:
             logger.error(f"[灾害预警] 插件重载失败: {e}")
-            # 上报失败（异常路径）
+            # 上报失败（异常路径）。reason 仅用固定失败码 + 异常类型名，
+            # 不上报原始异常消息文本，避免敏感信息随遥测外泄。
             await self._track_command_feature(
                 "command_admin_action",
                 {
                     "action": "reload_plugin",
                     "success": False,
-                    "reason": str(e),
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
                 },
             )
             try:
@@ -168,13 +173,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         yield event.plain_result("🔄 即将重启 AstrBot，约 3 秒后进程将重新启动…")
 
         try:
-            # 触发前上报请求状态（成功路径进程将被替换，无法在完成后上报，故先记录 requested）
+            # 触发前上报请求状态（成功路径进程将被替换，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（restart_astrbot_requested）避免与失败事件共享节流键，
+            # 防止 10 秒节流吞掉线程内随后上报的失败事件。
             await self._track_command_feature(
                 "command_admin_action",
                 {
-                    "action": "restart_astrbot",
+                    "action": "restart_astrbot_requested",
                     "success": True,
-                    "state": "requested",
                 },
             )
             # 重启前先通过 context.send_message 发送最终提示：
@@ -222,13 +228,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             ).start()
         except Exception as e:
             logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
-            # 上报失败（启动线程前的异常路径）
+            # 上报失败（启动线程前的异常路径）。
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
             await self._track_command_feature(
                 "command_admin_action",
                 {
                     "action": "restart_astrbot",
                     "success": False,
-                    "reason": str(e),
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
                 },
             )
             try:
@@ -251,12 +259,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception:
             pass
         try:
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
             await self._track_command_feature(
                 "command_admin_action",
                 {
                     "action": "restart_astrbot",
                     "success": False,
-                    "reason": str(error),
+                    "reason": "exception",
+                    "error_type": type(error).__name__,
                 },
             )
         except Exception:
