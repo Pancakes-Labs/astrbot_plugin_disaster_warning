@@ -133,12 +133,10 @@ def build_typhoon_event_envelope(
 
     # 对外领域身份继续使用 6 位编号，便于跨源去重与查询。
     fan_id = to_fan_id(eqsc_id)
-    name_cn = clean_text(raw.get("nameCN") or raw.get("name"))
-    name_en = clean_text(raw.get("nameEN") or raw.get("name_en"))
-    if name_cn.upper() in {"NONE", "NULL"}:
-        name_cn = ""
-    if name_en.upper() in {"NONE", "NULL"}:
-        name_en = ""
+    # 先分别清洗每个候选值，再取第一个非空结果：
+    # 避免 nameCN 为占位字符串（如 "NULL"）时屏蔽有效的 name 备用值。
+    name_cn = clean_text(raw.get("nameCN")) or clean_text(raw.get("name"))
+    name_en = clean_text(raw.get("nameEN")) or clean_text(raw.get("name_en"))
     history_track = raw.get("historyTrack") or raw.get("history_track") or []
     future_track = raw.get("futureTrack") or raw.get("future_track") or []
     if not isinstance(history_track, list):

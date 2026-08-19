@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from ....utils.severity_emoji import TYPHOON_LEVEL_EMOJI, typhoon_level_emoji
+from .typhoon_ids import extract_td_short_id
 from .typhoon_values import clean_text, to_float
 
 # 移动方向展示映射：仅用于展示本地化，不改动原始业务字段。
@@ -196,34 +197,12 @@ def format_typhoon_short_id(*candidates: object) -> str:
             return text[-4:]
 
         upper = text.upper()
-        # 裸 NAMELESS / NAMELESS_03 / NAMELESS_2604 均统一为 TD + 两位短编号
-        if (
-            upper == "NAMELESS"
-            or upper.startswith("NAMELESS_")
-            or upper.startswith("NAMELESS-")
-        ):
-            if upper == "NAMELESS":
-                return "TD"
-            suffix = (
-                text.split("_", 1)[1].strip()
-                if "_" in text
-                else text.split("-", 1)[1].strip()
-                if "-" in text
-                else text[8:].lstrip("_-")
-            )
-            suffix = suffix.strip()
-            if not suffix:
-                return "TD"
-            digits = "".join(char for char in suffix if char.isdigit())
-            if digits:
-                # 统一 TD + 两位短编号（如 NAMELESS_2604 -> TD04）
-                return f"TD{digits[-2:]}"
-            if suffix.upper().startswith("TD"):
-                return suffix.upper()
-            return f"TD{suffix}"
-
-        if upper.startswith("TD"):
-            return "TD" + text[2:].lstrip("_-")
+        # NAMELESS/TD 无名低压统一复用共享提取逻辑（与去重键同规则）
+        if upper.startswith("NAMELESS") or upper.startswith("TD"):
+            short_id = extract_td_short_id(text)
+            if short_id:
+                return short_id
+            continue
 
         return text
     return ""

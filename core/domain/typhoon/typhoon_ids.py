@@ -27,6 +27,36 @@ def to_fan_id(typhoon_id: object) -> str:
     return text
 
 
+def extract_td_short_id(typhoon_id: object) -> str:
+    """从 NAMELESS/TD 前缀的无名低压编号中提取 TD + 两位短编号。
+
+    - NAMELESS / TD（裸）-> TD
+    - NAMELESS_07 / TD07 / TD_07 -> TD07
+    - NAMELESS_2604 -> TD04（仅取两位短编号，避免与正式编号 2604 混淆）
+
+    供去重键（normalize_typhoon_id）与展示格式（format_typhoon_short_id）
+    共用，避免两处规则在未来产生差异。
+    """
+    raw = _clean_id(typhoon_id)
+    if not raw:
+        return ""
+    upper = raw.upper()
+    if upper == "NAMELESS" or upper == "TD":
+        return "TD"
+    if upper.startswith("NAMELESS"):
+        remainder = raw[len("NAMELESS") :].lstrip("_-")
+    elif upper.startswith("TD"):
+        remainder = raw[2:].lstrip("_-")
+    else:
+        return ""
+    if not remainder:
+        return "TD"
+    digits = "".join(char for char in remainder if char.isdigit())
+    if digits:
+        return f"TD{digits[-2:]}"
+    return "TD"
+
+
 def normalize_typhoon_id(typhoon_id: object) -> str:
     """返回用于缓存、去重和跨来源匹配的稳定编号。
 
@@ -41,15 +71,11 @@ def normalize_typhoon_id(typhoon_id: object) -> str:
     if not raw:
         return ""
     upper = raw.upper()
-    digits = "".join(char for char in raw if char.isdigit())
-
-    # NAMELESS / TD 前缀的无名低压：统一为 TD + 两位短编号
+    # 无名低压统一键
     if upper.startswith("NAMELESS") or upper.startswith("TD"):
-        if digits:
-            return f"TD{digits[-2:]}"
-        # 无数字可提取（如裸 TD / NAMELESS）：保持前缀本身
-        if upper.startswith("NAMELESS"):
-            return "TD"
-        return "TD"
-
-    return digits[-4:] if len(digits) >= 4 else raw
+        return extract_td_short_id(raw)
+    # 纯数字官方编号统一为 4 位短编号
+    if raw.isdigit():
+        return raw[-4:]
+    # 如果有其他非标准编号，原样返回，避免不同 ID 因硬抠数字而误共享同一去重键。
+    return raw

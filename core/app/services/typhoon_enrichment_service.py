@@ -220,11 +220,13 @@ class TyphoonEnrichmentService:
         # 如果 EQSC 提供了更丰富的名称信息，补充到事件中。
         # 必须使用 clean_text 清洗，避免 EQSC 返回字符串 "None"/"NULL" 时
         # 被 str(... or "") 误当成有效名称写入事件，导致推送正文出现裸 "None"。
-        eqsc_name_cn = clean_text(
-            eqsc_typhoon.get("nameCN") or eqsc_typhoon.get("name")
+        # 注意先分别清洗每个候选值再取非空：避免 nameCN 为占位字符串
+        # （如 "NULL"）时屏蔽有效的 name 备用值。
+        eqsc_name_cn = clean_text(eqsc_typhoon.get("nameCN")) or clean_text(
+            eqsc_typhoon.get("name")
         )
-        eqsc_name_en = clean_text(
-            eqsc_typhoon.get("nameEN") or eqsc_typhoon.get("name_en")
+        eqsc_name_en = clean_text(eqsc_typhoon.get("nameEN")) or clean_text(
+            eqsc_typhoon.get("name_en")
         )
         if eqsc_name_cn and not typhoon_event.name:
             typhoon_event.name = eqsc_name_cn
