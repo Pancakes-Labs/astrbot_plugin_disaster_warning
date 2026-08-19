@@ -230,6 +230,10 @@ class TelemetryManager:
             )
 
         async with self._queue_lock:
+            # 获取锁后复查关闭状态：等待锁期间 close() 可能已完成，
+            # 此时禁止再入队，避免关闭后的队列残留。
+            if self._closed:
+                return False
             self._queue.append(event_item)
             should_flush = (
                 len(self._queue) >= 100
@@ -242,7 +246,8 @@ class TelemetryManager:
 
     async def _batch_sender_loop(self) -> None:
         """后台批处理发送循环"""
-        while self._enabled:
+        # close() 置位 _closed 后循环立即退出，避免残留后台任务继续轮询。
+        while self._enabled and not self._closed:
             try:
                 await asyncio.sleep(15.0)  # 延长至每 15 秒自动轮询上报一次，平滑低峰段
                 await self.flush()
@@ -252,11 +257,19 @@ class TelemetryManager:
                 logger.debug(f"[灾害预警] 遥测后台批处理循环异常: {e}")
 
     async def flush(self, bypass_rate_limit: bool = False) -> bool:
-        """立即清空缓冲区并批量发送所有缓存的事件。"""
-        if not self._enabled:
+        """立即清空缓冲区并批量发送所有缓存的事件。
+
+        close() 的兜底 flush 传入 bypass_rate_limit=True，可在 _closed 置位后
+        仍完成最后一次发送；其余调用一律在关闭后拒绝，避免缓冲数据落空。
+        """
+        if not self._enabled or (self._closed and not bypass_rate_limit):
             return False
 
         async with self._queue_lock:
+            # 持锁后复查关闭状态：等待锁期间 close() 可能已完成。
+            # 仅允许 close() 的兜底发送（bypass_rate_limit=True）绕过该检查。
+            if self._closed and not bypass_rate_limit:
+                return False
             if not self._queue:
                 return False
             batch_data = list(self._queue)
@@ -298,6 +311,13 @@ class TelemetryManager:
                     f"[灾害预警] 遥测请求物理限速，后台挂起等待 {wait_time:.2f} 秒"
                 )
                 await asyncio.sleep(wait_time)
+
+            # 获取信号量并完成限速等待后复查关闭状态：
+            # 等待期间 close() 可能已完成，此时禁止继续发送，
+            # 避免 _get_session() 重新创建已关闭的 aiohttp 会话。
+            # 仅 close() 的兜底发送（bypass_rate_limit=True 由 close 传入）允许通过。
+            if self._closed and not bypass_rate_limit:
+                return False
 
             # 更新发送时间戳，确保后续请求准确排队
             self._last_send_time = time.time()
@@ -657,6 +677,9 @@ class TelemetryManager:
         self._closed = True
 
         # 1. 取消后台批处理任务并安全等待其结束
+        # 注：_batch_sender_loop 循环条件为 self._enabled，close 置位 _closed 后
+        # 该循环可能仍在 sleep 中；flush 内部复查 _closed 会拒绝继续发送，
+        # 因此取消任务以确保其尽快退出。
         if self._send_task and not self._send_task.done():
             self._send_task.cancel()
             try:
