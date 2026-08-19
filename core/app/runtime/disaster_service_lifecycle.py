@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 from astrbot.api import logger
 
+from ...services.telemetry.telemetry_utils import track_error_safely
+
 
 class DisasterServiceLifecycleService:
     """灾害服务生命周期编排服务。"""
@@ -149,10 +151,19 @@ class DisasterServiceLifecycleService:
                 coordinator = getattr(self.service, "startup_silence", None)
                 if coordinator is not None:
                     coordinator.disarm()
-                if self.service._telemetry and self.service._telemetry.enabled:
-                    await self.service._telemetry.track_error(
-                        e, module="core.disaster_service.start"
-                    )
+                # 统一 best-effort 封装上报启动错误（该处为服务层内部上报点之一，
+                # 异常会继续向上传播；上层 main.initialize 通过 _telemetry_reported 标记去重）。
+                await track_error_safely(
+                    self.service._telemetry,
+                    e,
+                    module="core.disaster_service.start",
+                    log_context="服务启动错误遥测",
+                )
+                # 标记该异常已在服务内部上报过遥测，供外层（main.initialize）去重。
+                try:
+                    setattr(e, "_telemetry_reported", True)
+                except Exception:
+                    pass
                 raise
 
     def arm_startup_silence(self, *, hard_timeout_seconds: float | None = None) -> None:
@@ -405,10 +416,13 @@ class DisasterServiceLifecycleService:
                 logger.debug("[灾害预警] 灾害预警服务已停止")
             except Exception as e:
                 logger.error(f"[灾害预警] 停止服务时出错: {e}")
-                if self.service._telemetry and self.service._telemetry.enabled:
-                    await self.service._telemetry.track_error(
-                        e, module="core.disaster_service.stop"
-                    )
+                # 统一 best-effort 封装上报停止错误
+                await track_error_safely(
+                    self.service._telemetry,
+                    e,
+                    module="core.disaster_service.stop",
+                    log_context="服务停止错误遥测",
+                )
             finally:
                 # 无论停止是否成功，都要清除“正在停止”标记，防止后续流程被永久阻塞。
                 self.service._stopping = False

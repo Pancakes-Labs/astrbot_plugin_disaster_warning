@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import traceback
@@ -14,6 +15,7 @@ from typing import Any
 
 from ...utils.plugin_logger import plugin_logger
 from ...utils.time_converter import TimeConverter
+from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import get_source_entry
 
 
@@ -27,6 +29,8 @@ class BaseParser:
         self.source_entry = get_source_entry(source_id)
         self.source_config = self.source_entry
         self.message_logger = message_logger
+        # 遥测管理器引用（由主服务在 set_telemetry 时注入），用于解析失败的轻量上报
+        self._telemetry = None
 
         # 存放上一次接收到心跳或空载荷数据的时间戳，用于节流检测，避免过多 debug 日志输出
         self._last_heartbeat_check: dict[str, float] = {}
@@ -49,11 +53,34 @@ class BaseParser:
             return self.build_event(payload)
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")
+            # JSON 解码失败已被内部吞掉，不会冒泡到路由层，需在此主动上报。
+            # 同步上下文无法 await，通过事件循环创建后台任务安全上报。
+            self._track_parse_error(exc, stage="json_decode")
             return None
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 消息处理失败: {exc}")
             plugin_logger.error(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            self._track_parse_error(exc, stage="build_event")
             return None
+
+    def _track_parse_error(self, exception: Exception, stage: str) -> None:
+        """在同步上下文中安全上报解析器异常（best-effort，不影响主流程）。"""
+        if not self._telemetry or not getattr(self._telemetry, "enabled", False):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(
+            track_error_safely(
+                self._telemetry,
+                exception,
+                module=f"core.parser.{self.source_id}.{stage}",
+                log_context="解析器错误遥测",
+            )
+        )
+        # 绑定 done 回调吞噬结果，避免 "Task exception was never retrieved" 噪音
+        task.add_done_callback(lambda _t: None)
 
     def decode_message(self, message: str | bytes) -> Any:
         """解码原始消息。"""

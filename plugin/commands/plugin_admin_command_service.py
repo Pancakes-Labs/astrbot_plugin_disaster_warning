@@ -6,16 +6,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections import OrderedDict
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
+from astrbot.core import DEMO_MODE
+from astrbot.core.desktop_runtime import is_desktop_managed_backend
+from astrbot.core.updator import AstrBotUpdator
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
-from ...utils.version import get_plugin_version
+from ...utils.version import get_plugin_name, get_plugin_version
 from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 
@@ -42,6 +47,230 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         if mgr:
             return mgr.get_session_log_str(session_umo)
         return session_umo
+
+    async def handle_disaster_restart(self, event):
+        """处理插件重载命令，等价于 AstrBot WebUI 中的重载插件操作。
+
+        重载时会依次触发：
+        1. 终止旧插件实例（调用 terminate()，回收服务/WebServer/浏览器资源）
+        2. 解绑旧插件注册表
+        3. 重新导入模块并创建新实例（调用 initialize()）
+        4. 新实例自动完成数据源装配与 WebAdmin 启动
+
+        重载成功后旧实例被销毁，因此最终结果通过 context.send_message 直接发送，
+        不再通过 yield 返回。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 向用户发送"正在重载"提示（此时旧实例尚未销毁，yield 安全可用）
+        yield event.plain_result("🔄 正在重载灾害预警插件，请稍候…")
+
+        try:
+            # 通过 Context._star_manager 获取 PluginManager 实例
+            plugin_manager = getattr(self.plugin.context, "_star_manager", None)
+            if plugin_manager is None:
+                # 上报失败（管理器不可用，命令未真正执行）
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "no_plugin_manager",
+                    },
+                )
+                yield event.plain_result("❌ 无法获取 AstrBot 插件管理器")
+                return
+
+            # 插件名取自 metadata.yaml 的 name 字段，避免硬编码与元数据配置漂移；
+            # 读取失败时回退到插件目录名，保证兼容旧逻辑。
+            plugin_name = get_plugin_name()
+            # 触发前上报请求状态（重载成功会销毁当前实例，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（reload_plugin_requested）避免与失败事件
+            # （reload_plugin/success=False）共享节流键，防止 10 秒节流吞掉紧随其后的失败事件。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin_requested",
+                    "success": True,
+                    "plugin": plugin_name,
+                },
+            )
+            success, message = await plugin_manager.reload(plugin_name)
+
+            # 重载后旧实例已销毁，改用 context.send_message 直接发送结果
+            if success:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain("✅ 灾害预警插件重载完成，正在重新启动")]),
+                )
+            else:
+                # 上报失败（reload 返回失败结果）。
+                # reason 仅用固定失败码，不上报原始 message 文本，避免插件管理器
+                # 返回的 URL 凭据/令牌/内部路径等敏感信息随遥测外泄。
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "reload_failed",
+                    },
+                )
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {message}")]),
+                )
+        except Exception as e:
+            logger.error(f"[灾害预警] 插件重载失败: {e}")
+            # 上报失败（异常路径）。reason 仅用固定失败码 + 异常类型名，
+            # 不上报原始异常消息文本，避免敏感信息随遥测外泄。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
+                },
+            )
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {e}")]),
+                )
+            except Exception:
+                pass
+
+    async def handle_restart_astrbot(self, event):
+        """处理重启 AstrBot 命令，等价于 AstrBot WebUI 中「设置 → 维护 → 重启 AstrBot」。
+
+        重启是进程级的 os.exec* 替换，不依赖插件实例存活，因此：
+        1. 先通过 yield 发送「即将重启」提示（此时管道仍可用）
+        2. 检查桌面版托管 / DEMO 模式守卫，拒绝时直接提示
+        3. 通过 context.send_message 发送最终提示（进程即将替换，yield 管道已不可靠）
+        4. 起 daemon 线程调用 AstrBotUpdator()._reboot()，内部 sleep 3 秒后
+           终止全部子进程并 os.exec* 替换当前进程完成重启
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 桌面版 Launcher 托管后端时不允许核心直接重启，_reboot() 内部也会抛错，
+        # 这里提前拦截并给出更友好的提示。
+        if is_desktop_managed_backend():
+            yield event.plain_result(
+                "❌ 当前由 AstrBot Desktop 托管运行，无法通过核心命令重启。\n"
+                "请从桌面客户端执行重启或更新。"
+            )
+            return
+
+        if DEMO_MODE:
+            yield event.plain_result("❌ 演示模式（DEMO_MODE）下不允许执行此操作。")
+            return
+
+        # 告知用户即将重启（此时事件管道仍可用，yield 安全）
+        yield event.plain_result("🔄 即将重启 AstrBot，约 3 秒后进程将重新启动…")
+
+        try:
+            # 触发前上报请求状态（成功路径进程将被替换，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（restart_astrbot_requested）避免与失败事件共享节流键，
+            # 防止 10 秒节流吞掉线程内随后上报的失败事件。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot_requested",
+                    "success": True,
+                },
+            )
+            # 重启前先通过 context.send_message 发送最终提示：
+            # 进程级替换不销毁任何插件对象，但事件总线管道可能在进程退出瞬间被中断，
+            # 因此最终提示不依赖 yield，直接用 send_message 发送，_reboot 内部会
+            # sleep 3 秒，足以让消息送达平台。
+            await self.plugin.context.send_message(
+                event.unified_msg_origin,
+                MessageChain(
+                    [
+                        Comp.Plain(
+                            "✅ 已触发 AstrBot 重启，进程将在数秒内重新启动，请稍候…"
+                        )
+                    ]
+                ),
+            )
+
+            # _reboot 是同步阻塞函数（内部 sleep 3s + 杀子进程 + os.exec*），
+            # 必须放入 daemon 线程执行，避免阻塞事件循环。
+            # 线程内用包装函数捕获异常，防止 _reboot 抛错时用户收到成功提示却无失败反馈。
+            loop = asyncio.get_running_loop()
+            unified_msg_origin = event.unified_msg_origin
+
+            def _reboot_wrapper() -> None:
+                try:
+                    AstrBotUpdator()._reboot()
+                except Exception as reboot_err:
+                    logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {reboot_err}")
+                    # 线程内无法直接 await，用 run_coroutine_threadsafe 将失败通知
+                    # 与失败遥测调度回事件循环执行（线程安全）。
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            self._notify_restart_astrbot_failure(
+                                unified_msg_origin, reboot_err
+                            ),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+
+            threading.Thread(
+                target=_reboot_wrapper,
+                name="astrbot-core-restart",
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
+            # 上报失败（启动线程前的异常路径）。
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
+                },
+            )
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 触发 AstrBot 重启失败: {e}")]),
+                )
+            except Exception:
+                pass
+
+    async def _notify_restart_astrbot_failure(
+        self, unified_msg_origin: str, error: Exception
+    ) -> None:
+        """AstrBot 重启线程失败时，向原会话推送失败通知并上报失败遥测。"""
+        try:
+            await self.plugin.context.send_message(
+                unified_msg_origin,
+                MessageChain([Comp.Plain(f"❌ AstrBot 重启失败: {error}")]),
+            )
+        except Exception:
+            pass
+        try:
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(error).__name__,
+                },
+            )
+        except Exception:
+            pass
 
     async def handle_disaster_reconnect(self, event):
         """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
@@ -100,10 +329,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             if success_count > 0:
                 lines.append("⏳ 重连结果将稍后推送，请留意后续消息。")
-            # 匿名上报功能执行遥测
+            # 匿名上报功能执行遥测（管理类命令统一归并到 command_admin_action）
             await self._track_command_feature(
-                "command_force_reconnect",
+                "command_admin_action",
                 {
+                    "action": "force_reconnect",
                     "success": True,
                     "triggered_count": success_count,
                     "failed_count": fail_count,
@@ -113,8 +343,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             await self._track_command_feature(
-                "command_force_reconnect",
-                {"success": False},
+                "command_admin_action",
+                {"action": "force_reconnect", "success": False},
             )
             logger.error(f"[灾害预警] 重连操作失败: {e}")
             yield event.plain_result(f"❌ 重连操作失败: {str(e)}")
@@ -486,15 +716,23 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             if nodes:
                 await self._track_command_feature(
-                    "command_status_query",
-                    {"success": True, "running": bool(status.get("running"))},
+                    "command_admin_action",
+                    {
+                        "action": "status_query",
+                        "success": True,
+                        "running": bool(status.get("running")),
+                    },
                 )
                 yield event.chain_result([nodes])
                 return
 
             await self._track_command_feature(
-                "command_status_query",
-                {"success": True, "running": bool(status.get("running"))},
+                "command_admin_action",
+                {
+                    "action": "status_query",
+                    "success": True,
+                    "running": bool(status.get("running")),
+                },
             )
             yield quoted_plain_result(self.plugin, event, "\n".join(overview_lines))
         except Exception as e:
@@ -535,8 +773,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                         f"📊 总计拦截: {filter_stats.get('total_filtered', 0)}"
                     )
             await self._track_command_feature(
-                "command_stats_query",
-                {"success": True},
+                "command_admin_action",
+                {"action": "stats_query", "success": True},
             )
             # 统计报告显式走合并转发，失败则回退普通引用回复
             ok = await send_forward_blocks(
@@ -630,8 +868,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             status = "启用" if new_state else "禁用"
             action = "开始" if new_state else "停止"
             await self._track_command_feature(
-                "command_toggle_raw_logging",
-                {"enabled": bool(new_state)},
+                "command_admin_action",
+                {
+                    "action": "toggle_raw_logging",
+                    "success": True,
+                    "enabled": bool(new_state),
+                },
             )
             yield event.plain_result(
                 f"✅ 原始消息日志记录已{status}\n\n插件将{action}记录所有数据源的原始消息格式。"
@@ -678,8 +920,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         try:
             await self.plugin.disaster_service.statistics_manager.reset_stats()
             await self._track_command_feature(
-                "command_clear_statistics",
-                {"success": True},
+                "command_admin_action",
+                {"action": "clear_statistics", "success": True},
             )
             yield event.plain_result(
                 "✅ 统计数据已重置\n\n所有历史统计记录已被清除，新的统计将重新开始。"
@@ -712,8 +954,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": False, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": False,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已关闭\n\n{session_log_str} 已从推送列表中移除。"
@@ -724,8 +971,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": True, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": True,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已开启\n\n{session_log_str} 已添加到推送列表。"

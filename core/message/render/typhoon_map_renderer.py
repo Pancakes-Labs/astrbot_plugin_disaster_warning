@@ -18,6 +18,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ....core.services.telemetry.telemetry_utils import track_error_safely
 from ....utils.map_tile_sources import get_tile_url_js
 from ....utils.time_converter import TimeConverter
 from ....utils.version import get_plugin_version
@@ -417,6 +418,18 @@ class TyphoonMapRenderer:
         self._helper_js_cache: str | None = None
         self._helper_js_mtime: float | None = None
 
+    async def _track_render_template_error(
+        self, exception: Exception, label: str
+    ) -> None:
+        """上报模板渲染阶段（render_card 之前）的失败，覆盖渲染性能指标的盲区。"""
+        telemetry = getattr(self.browser_manager, "_telemetry", None)
+        await track_error_safely(
+            telemetry,
+            exception,
+            module=f"core.render.{label}.render_template",
+            log_context="台风模板渲染错误遥测",
+        )
+
     def _get_template(self) -> str:
         """读取 HTML 模板原文（含占位符）。
 
@@ -499,6 +512,8 @@ class TyphoonMapRenderer:
             )
         except Exception as e:
             logger.error(f"[灾害预警] 台风模板渲染失败: {e}", exc_info=True)
+            # 模板渲染失败发生在 render_card 之前，是 render_performance 指标的盲区，需补上报。
+            await self._track_render_template_error(e, "typhoon")
             return None
 
         if not self.browser_manager:

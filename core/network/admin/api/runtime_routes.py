@@ -135,7 +135,6 @@ def register_runtime_routes(app, disaster_service, config: dict[str, Any]):
         try:
             client_ip = request.client.host if request.client else None
             location_data = await fetch_location_from_ip(ip=client_ip)
-            await _track_runtime_feature("web_geolocate", {"success": True})
             return ApiResponse.success(
                 {
                     "success": True,
@@ -150,7 +149,6 @@ def register_runtime_routes(app, disaster_service, config: dict[str, Any]):
                 }
             )
         except Exception as e:
-            await _track_runtime_feature("web_geolocate", {"success": False})
             logger.error(f"[灾害预警] IP地理定位失败: {e}")
             return ApiResponse.error(
                 f"获取地理位置失败: {str(e)}", status_code=500, success=False

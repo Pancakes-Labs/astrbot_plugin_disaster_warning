@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...core.services.telemetry.telemetry_utils import track_feature_safely
+from ...core.services.telemetry.telemetry_utils import (
+    track_error_safely,
+    track_feature_safely,
+)
 
 
 class CommandTelemetryMixin:
@@ -37,6 +40,22 @@ class CommandTelemetryMixin:
         )
         # 对遥测缓冲队列进行主动的异步调度尝试（如 telemetry 存在并且满足条件）
         return res
+
+    async def _track_command_error(
+        self,
+        exception: Exception,
+        command_name: str,
+        *,
+        log_context: str = "命令错误遥测",
+    ) -> bool:
+        """安全上报命令执行失败的错误事件。"""
+        telemetry = getattr(getattr(self, "plugin", None), "telemetry", None)
+        return await track_error_safely(
+            telemetry,
+            exception,
+            module=f"command.{command_name}",
+            log_context=log_context,
+        )
 
 
 __all__ = ["CommandTelemetryMixin"]

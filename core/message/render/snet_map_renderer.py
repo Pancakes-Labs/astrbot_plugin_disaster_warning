@@ -21,6 +21,7 @@ from jinja2 import Template
 
 from astrbot.api import logger
 
+from ....core.services.telemetry.telemetry_utils import track_error_safely
 from ....utils.converters import ScaleConverter
 from ....utils.version import get_plugin_version
 
@@ -265,6 +266,18 @@ class SnetMapRenderer:
         # key 为字符串阈值（如 "6.5"），与前端 toFixed(1) 对齐
         self._icon_cache: dict[str, str] | None = None
 
+    async def _track_render_template_error(
+        self, exception: Exception, label: str
+    ) -> None:
+        """上报模板渲染阶段（render_card 之前）的失败，覆盖渲染性能指标的盲区。"""
+        telemetry = getattr(self.browser_manager, "_telemetry", None)
+        await track_error_safely(
+            telemetry,
+            exception,
+            module=f"core.render.{label}.render_template",
+            log_context="SNET 模板渲染错误遥测",
+        )
+
     def _get_template(self) -> str:
         if self._template_cache is not None:
             return self._template_cache
@@ -322,6 +335,8 @@ class SnetMapRenderer:
             html_content = template.render(**ctx)
         except Exception as e:
             logger.error(f"[灾害预警] 模板渲染失败: {e}", exc_info=True)
+            # 模板渲染失败发生在 render_card 之前，是 render_performance 指标的盲区，需补上报。
+            await self._track_render_template_error(e, "snet")
             return None
 
         if not self.browser_manager:
@@ -345,6 +360,8 @@ class SnetMapRenderer:
             return None
         except Exception as e:
             logger.error(f"[灾害预警] Playwright 渲染失败: {e}", exc_info=True)
+            # Playwright 渲染阶段由 browser_manager 的 track_error + render_performance 指标覆盖，
+            # 此处不再重复上报，仅保留日志。
             return None
 
     def _build_context(

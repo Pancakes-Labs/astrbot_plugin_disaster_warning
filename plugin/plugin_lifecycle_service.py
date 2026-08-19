@@ -16,6 +16,7 @@ from astrbot.api import logger
 from ..core.app.disaster_service import stop_disaster_service
 from ..core.services.config.config_validation_service import ConfigValidator
 from ..core.services.telemetry.telemetry_service import TelemetryManager
+from ..core.services.telemetry.telemetry_utils import track_error_safely
 from ..utils.banner import print_stop_summary
 from ..utils.geolocation import close_geoip_session
 from ..utils.version import get_plugin_version
@@ -259,34 +260,29 @@ class PluginLifecycleService:
         else:
             logger.error(f"[灾害预警] 捕获未处理的异步错误: {message}")
 
-        if self.plugin.telemetry and self.plugin.telemetry.enabled:
+        if exception:
             # 仅在遥测启用时补充异常上报，避免在禁用状态下继续创建额外任务。
-            if exception:
-                task = context.get("future")
-                # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
-                task_name = "unknown"
-                if task:
-                    task_name = getattr(task, "get_name", lambda: str(task))()
-                    if not task_name or task_name == str(task):
-                        task_repr = repr(task)
-                        if "name=" in task_repr:
-                            match = re.search(r"name='([^']+)'", task_repr)
-                            if match:
-                                task_name = match.group(1)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        exception,
-                        module=f"main.unhandled_async.{task_name}",
-                    )
+            task = context.get("future")
+            # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
+            task_name = "unknown"
+            if task:
+                task_name = getattr(task, "get_name", lambda: str(task))()
+                if not task_name or task_name == str(task):
+                    task_repr = repr(task)
+                    if "name=" in task_repr:
+                        match = re.search(r"name='([^']+)'", task_repr)
+                        if match:
+                            task_name = match.group(1)
+            # 统一 best-effort 封装上报未处理异步异常（内部自带启用检查与异常吞噬），
+            # 以独立任务方式调度，避免阻塞异常处理回调。
+            error_task = asyncio.create_task(
+                track_error_safely(
+                    self.plugin.telemetry,
+                    exception,
+                    module=f"main.unhandled_async.{task_name}",
+                    log_context="未处理异步异常遥测",
                 )
-            else:
-                runtime_error = RuntimeError(message)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        runtime_error,
-                        module="main.unhandled_async",
-                    )
-                )
+            )
             self.plugin._telemetry_tasks.add(error_task)
             error_task.add_done_callback(self.plugin._telemetry_tasks.discard)
 

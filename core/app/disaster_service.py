@@ -57,6 +57,7 @@ from ..services.query.earthquake_list_service import EarthquakeListService
 from ..services.query.eew_query_state_service import EEWQueryStateService
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
 from ..services.snet.snet_poll_service import SnetPollService
+from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import SOURCE_CATALOG
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
@@ -312,6 +313,12 @@ class DisasterWarningService:
             self.ws_manager._telemetry = telemetry
         if self.message_manager:
             self.message_manager.set_telemetry(telemetry)
+        # 解析器也会在同步上下文内部捕获异常（如 JSON 解码失败），
+        # 需要注入遥测引用以便解析层也能轻量上报。
+        if self.parsers:
+            for parser in self.parsers.values():
+                if parser is not None:
+                    parser._telemetry = telemetry
 
     async def initialize(self):
         """初始化服务。"""
@@ -357,10 +364,19 @@ class DisasterWarningService:
 
         except Exception as e:
             logger.error(f"[灾害预警] 初始化服务失败: {e}")
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.disaster_service.initialize"
-                )
+            # 统一 best-effort 封装上报初始化错误（服务层内部上报点）。
+            # 上报成功后为异常打上标记，供外层（main.initialize）去重，
+            # 避免同一异常产生两条遥测记录。
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.disaster_service.initialize",
+                log_context="服务初始化错误遥测",
+            )
+            try:
+                setattr(e, "_telemetry_reported", True)
+            except Exception:
+                pass
             raise
 
     def schedule_eqsc_token_warmup(self) -> None:
@@ -655,13 +671,13 @@ class DisasterWarningService:
                 f"[灾害预警] 失败的事件ID: {event.id if hasattr(event, 'id') else 'unknown'}"
             )
             logger.error(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
-            if self._telemetry and self._telemetry.enabled:
-                asyncio.create_task(
-                    self._telemetry.track_error(
-                        exception=e,
-                        module="disaster_service._handle_disaster_event",
-                    )
-                )
+            # 统一 best-effort 封装上报事件处理错误（内部自带启用检查与异常吞噬）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.disaster_service._handle_disaster_event",
+                log_context="事件处理错误遥测",
+            )
             return False
 
     async def _handle_offline_notification(self, payload: dict[str, Any]) -> None:

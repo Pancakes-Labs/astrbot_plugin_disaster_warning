@@ -14,6 +14,7 @@ from aiohttp import ClientWebSocketResponse
 
 from astrbot.api import logger
 
+from ...services.telemetry.telemetry_utils import track_error_safely
 from .fan_studio_connection_policy import (
     is_connection_limit_signal,
     is_fan_primary_connection,
@@ -362,12 +363,14 @@ class WebSocketManager:
             # 非预期类型错误，上报异常遥测
             logger.error(f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {e}")
             logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
-            if self._telemetry and self._telemetry.enabled:
-                asyncio.create_task(
-                    self._telemetry.track_error(
-                        e, module=f"core.websocket_manager.connect.{name}"
-                    )
-                )
+            # 统一 best-effort 封装上报连接错误（内部自带启用检查与异常吞噬，
+            # 不会中断后续配额策略与重连调度）。
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module=f"core.websocket_manager.connect.{name}",
+                log_context="连接错误遥测",
+            )
             await self._apply_fan_quota_policy_on_error(name, e)
             self._handle_connection_error(name, uri, headers, e)
         finally:
