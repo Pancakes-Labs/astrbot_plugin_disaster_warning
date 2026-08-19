@@ -155,9 +155,18 @@ class EqscTyphoonClient(EqscHttpClient):
             return typhoon_list
 
         except Exception as e:
-            logger.error(
-                f"[灾害预警] EQSC 查询台风列表异常: {type(e).__name__}: {e or repr(e)}"
-            )
+            error_name = type(e).__name__
+            # DNS 解析失败（getaddrinfo failed）等连接层错误对普通用户是黑话，
+            # 先给出人性化提示，再附带原始技术细节便于排障。
+            if "DNS" in error_name or "getaddrinfo" in repr(e).lower():
+                logger.error(
+                    f"[灾害预警] EQSC 查询台风列表失败：无法解析域名 {self._base_url}，"
+                    f"请检查网络或 DNS 配置（原始错误: {error_name}: {e or repr(e)}）"
+                )
+            else:
+                logger.error(
+                    f"[灾害预警] EQSC 查询台风列表异常: {error_name}: {e or repr(e)}"
+                )
             return []
 
     def find_typhoon_by_name(

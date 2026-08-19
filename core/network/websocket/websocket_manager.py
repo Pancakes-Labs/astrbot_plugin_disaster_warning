@@ -979,7 +979,17 @@ class HTTPDataFetcher:
                     return await response.json()
                 else:
                     logger.warning(f"[灾害预警] HTTP 请求失败 {url}: {response.status}")
+        except asyncio.TimeoutError:
+            # 超时异常 str(e) 通常为空串，若不单独捕获日志里只会看到 url 后冒号空白
+            logger.error(f"[灾害预警] HTTP 请求超时 {url}")
+        except aiohttp.ClientError as e:
+            logger.error(
+                f"[灾害预警] HTTP 请求网络异常 {url}: {type(e).__name__}: {e or repr(e)}"
+            )
         except Exception as e:
-            logger.error(f"[灾害预警] HTTP 请求异常 {url}: {e}")
+            # 某些超时/取消异常 str(e) 为空，必须打印类型和 repr
+            logger.error(
+                f"[灾害预警] HTTP 请求异常 {url}: {type(e).__name__}: {e or repr(e)}"
+            )
 
         return None
