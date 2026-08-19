@@ -197,12 +197,13 @@ def format_typhoon_short_id(*candidates: object) -> str:
             return text[-4:]
 
         upper = text.upper()
-        # NAMELESS/TD 无名低压统一复用共享提取逻辑（与去重键同规则）
+        # NAMELESS/TD 无名低压统一复用共享提取逻辑（与去重键同规则）。
+        # 提取失败（格式不合法）时原样返回当前编号，不丢弃非标准编号。
         if upper.startswith("NAMELESS") or upper.startswith("TD"):
             short_id = extract_td_short_id(text)
             if short_id:
                 return short_id
-            continue
+            return text
 
         return text
     return ""
