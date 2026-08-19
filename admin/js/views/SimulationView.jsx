@@ -696,7 +696,7 @@ function SimulationView() {
             {/* 保存草稿对话框 */}
             <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} maxWidth="xs" fullWidth>
                 <DialogTitle>保存模拟流草稿</DialogTitle>
-                <DialogContent>
+                <DialogContent style={{ paddingTop: '16px' }}>
                     <TextField
                         fullWidth
                         size="small"

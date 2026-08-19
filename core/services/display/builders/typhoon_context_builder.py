@@ -5,9 +5,26 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ....domain.display_models import TyphoonDisplayModel
 from ....domain.event_context import TyphoonDisplayContext
+from ....domain.typhoon.typhoon_values import clean_text
 from .common import build_projection_view, coerce_dict, first_non_empty
+
+
+def _pick_cleaned_text(*values: Any) -> str:
+    """先分别清洗各文本候选，再取第一个非空结果。
+
+    first_non_empty 只跳过 None 和空白字符串，会把 "None"/"NULL"/"无数据"
+    等占位字符串当作有效值；这里统一用 clean_text 清洗后再选值，
+    避免展示层输出裸 "None" 等占位文本。
+    """
+    for value in values:
+        cleaned = clean_text(value)
+        if cleaned:
+            return cleaned
+    return ""
 
 
 def _extract_typhoon_projection_details(metadata, source_payload, domain_event=None):
@@ -21,34 +38,22 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
         metadata=metadata,
     )
     return {
-        "typhoon_id": str(
-            first_non_empty(
-                getattr(domain_event, "typhoon_id", None),
-                projection_view.get("typhoon_id"),
-                "",
-            )
-        ).strip(),
-        "name": str(
-            first_non_empty(
-                getattr(domain_event, "name", None),
-                projection_view.get("name"),
-                "",
-            )
-        ).strip(),
-        "name_en": str(
-            first_non_empty(
-                getattr(domain_event, "name_en", None),
-                projection_view.get("name_en"),
-                "",
-            )
-        ).strip(),
-        "typhoon_type": str(
-            first_non_empty(
-                getattr(domain_event, "typhoon_type", None),
-                projection_view.get("typhoon_type"),
-                "",
-            )
-        ).strip(),
+        "typhoon_id": _pick_cleaned_text(
+            getattr(domain_event, "typhoon_id", None),
+            projection_view.get("typhoon_id"),
+        ),
+        "name": _pick_cleaned_text(
+            getattr(domain_event, "name", None),
+            projection_view.get("name"),
+        ),
+        "name_en": _pick_cleaned_text(
+            getattr(domain_event, "name_en", None),
+            projection_view.get("name_en"),
+        ),
+        "typhoon_type": _pick_cleaned_text(
+            getattr(domain_event, "typhoon_type", None),
+            projection_view.get("typhoon_type"),
+        ),
         "is_active": bool(
             first_non_empty(
                 getattr(domain_event, "is_active", None)
@@ -88,13 +93,10 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
             else None,
             projection_view.get("power"),
         ),
-        "move_direction": str(
-            first_non_empty(
-                getattr(domain_event, "move_direction", None),
-                projection_view.get("move_direction"),
-                "",
-            )
-        ).strip(),
+        "move_direction": _pick_cleaned_text(
+            getattr(domain_event, "move_direction", None),
+            projection_view.get("move_direction"),
+        ),
         "move_speed": first_non_empty(
             getattr(domain_event, "move_speed", None)
             if domain_event is not None and hasattr(domain_event, "move_speed")
@@ -215,20 +217,12 @@ def build_typhoon_display_context(projection: dict, options: dict | None = None)
         event_id=envelope.id,
         source_id=resolved_source_id,
         title=title,
-        typhoon_id=(
-            getattr(domain_event, "typhoon_id", None)
-            or payload_details["typhoon_id"]
-            or ""
-        ),
-        name=(getattr(domain_event, "name", None) or payload_details["name"] or ""),
-        name_en=(
-            getattr(domain_event, "name_en", None) or payload_details["name_en"] or ""
-        ),
-        typhoon_type=(
-            getattr(domain_event, "typhoon_type", None)
-            or payload_details["typhoon_type"]
-            or ""
-        ),
+        typhoon_id=(payload_details["typhoon_id"] or ""),
+        # 文本字段一律使用 payload_details 已清洗结果，
+        # 避免 domain_event 原始占位值（如 "None"）绕过清洗进入展示。
+        name=(payload_details["name"] or ""),
+        name_en=(payload_details["name_en"] or ""),
+        typhoon_type=(payload_details["typhoon_type"] or ""),
         is_active=bool(
             getattr(domain_event, "is_active", True)
             if hasattr(domain_event, "is_active")
@@ -259,11 +253,7 @@ def build_typhoon_display_context(projection: dict, options: dict | None = None)
             if hasattr(domain_event, "power")
             else payload_details["power"]
         ),
-        move_direction=(
-            getattr(domain_event, "move_direction", None)
-            or payload_details["move_direction"]
-            or ""
-        ),
+        move_direction=(payload_details["move_direction"] or ""),
         move_speed=(
             getattr(domain_event, "move_speed", None)
             if hasattr(domain_event, "move_speed")

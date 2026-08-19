@@ -17,6 +17,7 @@ from ...domain.event_context import TyphoonDisplayContext
 from ...domain.typhoon.typhoon_display_format import (
     format_coordinates,
     format_move_direction,
+    format_typhoon_short_id,
     format_wind_circle,
     format_wind_speed,
     get_typhoon_level_emoji,
@@ -139,9 +140,11 @@ class TyphoonPresenter(BasePresenter):
         # 编号
         id_display = display_context.typhoon_id or ""
         if id_display:
-            # 按模板展示为 4 位编号（如 2609）
-            short_id = id_display[-4:] if len(id_display) >= 4 else id_display
-            lines.append(f"📌编号：{short_id}")
+            # 统一短编号格式：纯数字官方编号取 4 位（2609），
+            # NAMELESS 无名低压取 TD + 两位短编号（TD07），避免出现 S_07 这类截断。
+            short_id = format_typhoon_short_id(id_display)
+            if short_id:
+                lines.append(f"📌编号：{short_id}")
 
         # 等级（后附圆形颜色emoji指示器）
         if display_context.typhoon_type:

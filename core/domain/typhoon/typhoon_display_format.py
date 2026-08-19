@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from ....utils.severity_emoji import TYPHOON_LEVEL_EMOJI, typhoon_level_emoji
+from .typhoon_ids import extract_td_short_id
 from .typhoon_values import clean_text, to_float
 
 # 移动方向展示映射：仅用于展示本地化，不改动原始业务字段。
@@ -174,6 +175,40 @@ def get_typhoon_level_emoji(typhoon_type: str | None) -> str:
     return typhoon_level_emoji(typhoon_type)
 
 
+def format_typhoon_short_id(*candidates: object) -> str:
+    """统一输出台风短编号，规则与前端 formatTyphoonShortId 对齐。
+
+    - 纯数字官方编号：202609 / 2609 -> 2609
+    - NAMELESS 无名低压：NAMELESS_2604 / NAMELESS_07 -> TD04 / TD07
+      （避免与正式编号 2604 冲突；07 与 EQSC 侧 TD07 归一到同一展示格式）
+    - 其他非标准编号：原样返回，不从混合文本硬抠数字
+
+    供推送 Presenter 与查询 Presenter 共用，避免展示逻辑分叉。
+    """
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in {"unknown", "未知"}:
+            continue
+
+        if text.isdigit() and len(text) >= 4:
+            return text[-4:]
+
+        upper = text.upper()
+        # NAMELESS/TD 无名低压统一复用共享提取逻辑（与去重键同规则）。
+        # 提取失败（格式不合法）时原样返回当前编号，不丢弃非标准编号。
+        if upper.startswith("NAMELESS") or upper.startswith("TD"):
+            short_id = extract_td_short_id(text)
+            if short_id:
+                return short_id
+            return text
+
+        return text
+    return ""
+
+
 def format_move_direction(direction: str | None) -> str:
     """把源侧移动方向本地化为日常可读写法（仅展示层）。"""
     text = clean_text(direction)
@@ -191,6 +226,7 @@ __all__ = [
     "TYPHOON_LEVEL_EMOJI",
     "format_coordinates",
     "format_move_direction",
+    "format_typhoon_short_id",
     "format_wind_circle",
     "format_wind_speed",
     "get_typhoon_level_emoji",
