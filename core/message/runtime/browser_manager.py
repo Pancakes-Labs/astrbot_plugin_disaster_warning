@@ -180,6 +180,30 @@ class BrowserManager:
             return text
         return f"{text[:limit]}..."
 
+    async def _track_render_performance(
+        self,
+        *,
+        success: bool,
+        render_label: str,
+        elapsed_seconds: float,
+        failure_type: str | None = None,
+    ) -> None:
+        """上报卡片渲染性能指标（成功率与耗时，供遥测分析渲染稳定性）。"""
+        if not self._telemetry or not self._telemetry.enabled:
+            return
+        try:
+            extra = {
+                "success": bool(success),
+                "mode": str(self._mode),
+                "render_label": str(render_label or "unknown"),
+                "elapsed_ms": int(max(0.0, float(elapsed_seconds)) * 1000),
+            }
+            if failure_type:
+                extra["failure_type"] = failure_type
+            await self._telemetry.track_feature("render_performance", extra)
+        except Exception as track_err:
+            logger.debug(f"[灾害预警] 渲染性能遥测上报失败: {track_err}")
+
     async def _is_page_usable(self, page: Page | None) -> bool:
         """检查页面是否仍可用于渲染。"""
         if page is None:
@@ -936,6 +960,12 @@ class BrowserManager:
                             is_silent_window=True,
                         )
                         render_succeeded = True
+                        # 上报渲染性能指标（成功路径）
+                        await self._track_render_performance(
+                            success=True,
+                            render_label=label,
+                            elapsed_seconds=elapsed,
+                        )
                         return output_path
                     else:
                         logger.warning(f"[灾害预警] {label}截图未生成文件")
@@ -998,6 +1028,13 @@ class BrowserManager:
                 await self._telemetry.track_error(
                     e, module="core.browser_manager.render_card"
                 )
+            # 上报渲染性能指标（失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type=type(e).__name__,
+            )
 
             # 内层 finally 通常已处理页面回收；这里再兜底一次，避免异常路径泄漏坏页。
             if page and not page_returned:
@@ -1155,6 +1192,12 @@ class BrowserManager:
                             event_stream=event_stream,
                             is_silent_window=True,
                         )
+                        # 上报渲染性能指标（远程模式成功路径）
+                        await self._track_render_performance(
+                            success=True,
+                            render_label=label,
+                            elapsed_seconds=elapsed,
+                        )
                         return output_path
                     else:
                         error_text = await response.text()
@@ -1192,6 +1235,12 @@ class BrowserManager:
                                             event_stream=event_stream,
                                             is_silent_window=True,
                                         )
+                                        # 上报渲染性能指标（远程降级重试成功路径）
+                                        await self._track_render_performance(
+                                            success=True,
+                                            render_label=label,
+                                            elapsed_seconds=elapsed,
+                                        )
                                         return output_path
                                     else:
                                         fallback_error = await fallback_response.text()
@@ -1206,6 +1255,13 @@ class BrowserManager:
 
         except asyncio.TimeoutError:
             logger.error(f"[灾害预警] {label} browserless API 请求超时")
+            # 上报渲染性能指标（远程超时失败）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type="TimeoutError",
+            )
             return None
         except Exception as e:
             logger.error(f"[灾害预警] {label} browserless API 请求失败: {e}")
@@ -1213,6 +1269,13 @@ class BrowserManager:
                 await self._telemetry.track_error(
                     e, module="core.browser_manager._render_card_via_http"
                 )
+            # 上报渲染性能指标（远程失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type=type(e).__name__,
+            )
             return None
 
     async def close(self):
