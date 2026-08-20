@@ -11,7 +11,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from ...domain.typhoon import format_display_name
+from ...domain.typhoon import format_display_name, normalize_typhoon_id
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
@@ -416,6 +416,9 @@ class StatsLoadService:
             fallback=typhoon_id or "未知台风",
         )
         display_name = display_name.replace("TD No.", "TD")
+        # 与实时路径对齐：以归一化台风编号作为统计身份键，条目内保留展示名，
+        # 避免同一台风展示名变化导致统计分裂；实时/重建共用同一身份键规则。
+        identity_key = normalize_typhoon_id(typhoon_id)
         # 主表已经保存历史峰值，因此重建时把它作为一次完整观测输入即可。
         record_typhoon_observation(
             {
@@ -426,6 +429,7 @@ class StatsLoadService:
                 "_typhoon_max_level_map": typhoon_max_level_map,
             },
             display_name=display_name,
+            identity_key=identity_key,
             level=str(event.get("level") or "未知").strip() or "未知",
             wind_speed=event.get("wind_speed"),
             pressure=event.get("pressure"),

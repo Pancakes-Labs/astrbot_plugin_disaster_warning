@@ -64,10 +64,10 @@
         // 台风强度等级分布（按台风个体最高等级去重）：按数量降序排列
         const typhoonLevels = entriesToSortedList(typhoonStats.by_max_level, 'level');
 
-        // 风王榜：兼容旧结构 number，以及新结构 {wind_speed, pressure}
+        // 风王榜：兼容旧结构 number，以及新结构 {wind_speed, pressure, display_name}
         const rawWindKing = typhoonStats.max_wind_typhoons || {};
         const windKingList = Object.entries(rawWindKing)
-            .map(([name, entry]) => {
+            .map(([key, entry]) => {
                 if (entry && typeof entry === 'object') {
                     const windSpeed = Number(entry.wind_speed ?? entry.windSpeed) || 0;
                     const pressureRaw = entry.pressure;
@@ -75,13 +75,14 @@
                         ? null
                         : Number(pressureRaw);
                     return {
-                        name,
+                        // 优先取条目内展示名（身份键结构），兼容旧结构（key 即展示名）
+                        name: String(entry.display_name || '').trim() || key,
                         windSpeed,
                         pressure: Number.isFinite(pressure) && pressure > 0 ? pressure : null,
                     };
                 }
                 return {
-                    name,
+                    name: key,
                     windSpeed: Number(entry) || 0,
                     pressure: null,
                 };
@@ -90,13 +91,21 @@
             .sort((a, b) => b.windSpeed - a.windSpeed)
             .slice(0, 10);
 
-        // 最低气压榜：数值越低越强
+        // 最低气压榜：数值越低越强；兼容旧结构 float，以及新结构 {pressure, display_name}
         const rawPressureKing = typhoonStats.min_pressure_typhoons || {};
         const pressureKingList = Object.entries(rawPressureKing)
-            .map(([name, pressure]) => ({
-                name,
-                pressure: Number(pressure) || 0,
-            }))
+            .map(([key, entry]) => {
+                let pressure = 0;
+                let name = key;
+                if (entry && typeof entry === 'object') {
+                    const pressureRaw = entry.pressure;
+                    pressure = Number(pressureRaw) || 0;
+                    name = String(entry.display_name || '').trim() || key;
+                } else {
+                    pressure = Number(entry) || 0;
+                }
+                return { name, pressure };
+            })
             .filter(item => item.pressure > 0)
             .sort((a, b) => a.pressure - b.pressure)
             .slice(0, 10);
