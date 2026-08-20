@@ -1,7 +1,17 @@
 name: astrbot_plugin_disaster_warning
 display_name: 灾害预警
-desc: 多数据源灾害预警插件，支持地震、海啸、气象预警实时推送。集成中国地震台网、中国气象局气象预警、台湾中央气象署、日本气象厅、USGS、Global Quake等多个数据源。
-version: v1.6.0-beta.1
-author: DBJD-CR & Aloys233 & Kimi & Gemini & Claude & GPT
+desc: 为 AstrBot 而生的全球灾害预警与气象情报插件，聚合多机构数据源，让地震、海啸、气象、台风情报与专业分析一键直达你的 Bot。
+version: v1.6.0
+author: DBJD-CR & Aloys233
 repo: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning
 astrbot_version: ">=4.11.2"
+social_link: https://github.com/DBJD-CR
+tags:
+  - 灾害预警
+  - 防灾减灾
+  - 地震预警
+  - 气象预警
+  - 海啸预警
+  - 台风信息
+  - 生活实用
+  - 三方集成
