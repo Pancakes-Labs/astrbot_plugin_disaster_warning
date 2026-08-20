@@ -11,6 +11,7 @@ from ..event_models import EventEnvelope, TyphoonEvent
 from ..event_payload import SourcePayload
 from .typhoon_ids import to_fan_id
 from .typhoon_levels import level_weight
+from .typhoon_names import build_td_fallback_names
 from .typhoon_values import clean_text, is_nullish, to_float
 from .typhoon_winds import extract_max_radius
 
@@ -204,6 +205,16 @@ def build_typhoon_event_envelope(
         move_speed = to_float(peak_node.get("speed"))
         message_type = "typhoon_history"
         mode_label = "eqsc_rebuild"
+
+    # EQSC 活跃无名低压的名称常为占位符（如 "None"），清洗后为空。
+    # 基于编号与实际等级生成与停编条目一致的可读名称（07号热带低压 / TD No.07），
+    # 避免推送正文缺失名称行。
+    if not name_cn and not name_en and eqsc_id:
+        fallback_cn, fallback_en = build_td_fallback_names(eqsc_id, level)
+        if fallback_cn:
+            name_cn = fallback_cn
+        if fallback_en:
+            name_en = fallback_en
 
     # EventEnvelope.metadata 只记录流水线形态，原始 EQSC 字典留在 SourcePayload。
     identity = EventIdentity(

@@ -12,7 +12,7 @@ from .typhoon_event_adapter import build_typhoon_event_envelope
 from .typhoon_ids import normalize_typhoon_id, to_eqsc_id, to_fan_id
 from .typhoon_levels import LEVEL_WEIGHTS, compare_levels, level_weight, normalize_level
 from .typhoon_modes import resolve_data_mode
-from .typhoon_names import format_display_name
+from .typhoon_names import build_td_fallback_names, format_display_name
 from .typhoon_peaks import merge_peak_metrics, resolve_storage_peak_fields
 from .typhoon_values import clean_text, is_nullish, to_float, to_int
 from .typhoon_winds import (
@@ -28,6 +28,7 @@ __all__ = [
     "LEVEL_WEIGHTS",
     "WIND_CIRCLE_KEYS",
     "WIND_CIRCLE_LABELS",
+    "build_td_fallback_names",
     "build_typhoon_event_envelope",
     "clean_text",
     "clean_wind_circle",
