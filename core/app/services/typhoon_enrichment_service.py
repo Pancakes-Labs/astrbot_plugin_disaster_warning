@@ -232,11 +232,20 @@ class TyphoonEnrichmentService:
         # 若不清洗保存，占位文本会继续进入后续数据和通知。
         typhoon_event.name = clean_text(typhoon_event.name)
         typhoon_event.name_en = clean_text(typhoon_event.name_en)
-        # EQSC 提供有效名称且当前名称为空（清洗后）时覆盖。
-        if eqsc_name_cn and not typhoon_event.name:
+        # 当前名称是否为回退生成：是则 EQSC 有效名称可覆盖，
+        # 避免 parser 侧生成的占位回退名阻断真实名称写入。
+        name_is_fallback = bool((envelope.metadata or {}).get("name_is_fallback"))
+        # EQSC 提供有效名称且当前名称为空（清洗后）或为回退名时覆盖。
+        if eqsc_name_cn and (not typhoon_event.name or name_is_fallback):
             typhoon_event.name = eqsc_name_cn
-        if eqsc_name_en and not typhoon_event.name_en:
+        if eqsc_name_en and (not typhoon_event.name_en or name_is_fallback):
             typhoon_event.name_en = eqsc_name_en
+        # 覆盖完成后清理标记，避免下游误判名称仍为回退态。
+        if (envelope.metadata or {}).get("name_is_fallback"):
+            envelope.metadata = {
+                **envelope.metadata,
+                "name_is_fallback": False,
+            }
 
         # EQSC 的 isActive 字段
         eqsc_is_active = eqsc_typhoon.get("isActive")
