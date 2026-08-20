@@ -15,6 +15,7 @@ from ...utils.plugin_logger import plugin_logger
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, TyphoonEvent
 from ..domain.event_payload import SourcePayload
+from ..domain.typhoon.typhoon_names import build_td_fallback_names
 from ..domain.typhoon.typhoon_values import clean_text
 from ..sources.source_catalog import get_source_entry
 from .base_parser import BaseParser
@@ -91,6 +92,15 @@ class TyphoonParser(BaseParser):
         name = clean_text(typhoon_data.get("name"))
         name_en = clean_text(typhoon_data.get("name_en"))
         typhoon_type = clean_text(typhoon_data.get("type"))
+
+        # FAN 无名低压同样可能只有占位名称：清洗后为空时，基于编号+等级
+        # 生成可读回退名，避免 EQSC 不可用或同样返回占位名时推送缺名称。
+        if not name and not name_en and typhoon_id:
+            fallback_cn, fallback_en = build_td_fallback_names(typhoon_id, typhoon_type)
+            if fallback_cn:
+                name = fallback_cn
+            if fallback_en:
+                name_en = fallback_en
 
         # 若名称和类型全部缺失，视为无效数据
         if not name and not name_en and not typhoon_type:

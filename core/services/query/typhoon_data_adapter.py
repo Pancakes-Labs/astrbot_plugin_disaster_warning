@@ -205,14 +205,6 @@ def normalize_eqsc_typhoon(
     # 避免 nameCN 为占位字符串（如 "NULL"）时屏蔽有效的 name 备用值。
     name_cn = clean_text(raw.get("nameCN")) or clean_text(raw.get("name"))
     name_en = clean_text(raw.get("nameEN")) or clean_text(raw.get("name_en"))
-    # EQSC 活跃无名低压的名称常为占位符（如 "None"），清洗后为空。
-    # 基于编号与等级生成可读回退名，与推送路径保持一致。
-    if not name_cn and not name_en and eqsc_id:
-        fallback_cn, fallback_en = build_td_fallback_names(eqsc_id)
-        if fallback_cn:
-            name_cn = fallback_cn
-        if fallback_en:
-            name_en = fallback_en
     # EQSC 历史轨迹顺序不保证：先按时间升序，再取最新观测。
     history_track = sort_history_track(
         raw.get("historyTrack") or raw.get("history_track") or []
@@ -241,6 +233,14 @@ def normalize_eqsc_typhoon(
     typhoon_type = clean_text(
         latest.get("typeNameCN") or latest.get("type") or raw.get("type")
     )
+    # EQSC 活跃无名低压的名称常为占位符（如 "None"），清洗后为空。
+    # 基于编号与实际等级生成可读回退名，与推送路径保持一致。
+    if not name_cn and not name_en and eqsc_id:
+        fallback_cn, fallback_en = build_td_fallback_names(eqsc_id, typhoon_type)
+        if fallback_cn:
+            name_cn = fallback_cn
+        if fallback_en:
+            name_en = fallback_en
     radius7_raw = extract_max_radius(wind_circle, "30KTS")
     radius10_raw = extract_max_radius(wind_circle, "50KTS")
     radius7 = int(radius7_raw) if radius7_raw is not None else None
