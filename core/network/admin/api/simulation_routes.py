@@ -103,17 +103,17 @@ def _resolve_target_session(
 ) -> str | None:
     """解析模拟发送目标会话（显式指定优先，否则回退首个配置会话）。
 
-    白名单校验：显式传入的目标会话必须属于 config["target_sessions"]，
-    不在白名单内返回 None（调用处返回 400），避免把模拟消息推送到任意会话。
+    白名单校验（fail-closed）：显式传入的目标会话必须属于
+    config["target_sessions"]。未配置目标会话或目标不存在
+    白名单内一律返回 None（调用处返回 400），避免把模拟消息推送到任意
+    会话——空白名单时放行任意会话会把"未配置"静默变成"全放行"。
     """
     target_sessions = [str(s) for s in config.get("target_sessions", [])]
+    if not target_sessions:
+        return None
     if target_session:
-        if target_sessions and target_session not in target_sessions:
-            return None
-        return target_session
-    if target_sessions:
-        return target_sessions[0]
-    return None
+        return target_session if target_session in target_sessions else None
+    return target_sessions[0]
 
 
 def register_simulation_routes(app, disaster_service, config: dict[str, Any]):

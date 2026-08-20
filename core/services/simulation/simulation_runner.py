@@ -338,19 +338,21 @@ class SimulationRunner:
         if not target_session:
             target_session = str(step.params.get("target_session") or "").strip()
 
-        # 会话白名单校验：仅允许推送到已配置的目标会话，避免任意会话标识被滥用
+        # 会话白名单校验（fail-closed）：仅允许推送到已配置的目标会话，
+        # 避免任意会话标识被滥用。未配置目标会话或目标不在白名单内一律拒绝，
+        # 避免空白名单时放行任意会话（把"未配置"静默变成"全放行"）。
         if self.session_config_manager is not None:
-            allowed_sessions = set(
-                self.session_config_manager.list_target_sessions() or []
-            )
-            if allowed_sessions and target_session not in allowed_sessions:
+            allowed_sessions = self.session_config_manager.list_target_sessions()
+            if not allowed_sessions:
+                raise ValueError("未配置目标会话，无法发送模拟事件")
+            allowed_set = set(allowed_sessions)
+            if not target_session:
+                # 未显式指定时回退到首个配置会话
+                target_session = str(allowed_sessions[0])
+            elif target_session not in allowed_set:
                 raise ValueError(
                     f"目标会话 {target_session!r} 不在已配置的目标会话列表中，拒绝发送"
                 )
-
-        if not target_session and self.session_config_manager is not None:
-            target_sessions = self.session_config_manager.list_target_sessions()
-            target_session = target_sessions[0] if target_sessions else ""
 
         if not target_session:
             raise ValueError("未配置目标会话，无法发送模拟事件")
