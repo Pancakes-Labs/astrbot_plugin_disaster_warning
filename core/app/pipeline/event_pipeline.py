@@ -319,10 +319,15 @@ class EventPipeline:
         if max_batch < 1:
             max_batch = 20
 
-        # 并发执行规则链复核与消息构建，避免大量条目串行 await 拉散发送节奏
+        # 并发执行规则链复核与消息构建，避免大量条目串行 await 拉散发送节奏。
+        # 返回值区分三类结果：
+        # - (entry, message)：构建成功，进入发送节点；
+        # - ("failed", entry)：消息构建异常，需走失败重试路径（累计重试计数），
+        #   避免瞬时构建错误把预警静默丢弃；
+        # - None：规则链复核未通过（正常过滤路径），不发送也不重试。
         async def _review_and_build(
             entry: WeatherBufferEntry,
-        ) -> tuple[WeatherBufferEntry, MessageChain] | None:
+        ):
             if not isinstance(entry, WeatherBufferEntry):
                 return None
             try:
@@ -355,16 +360,28 @@ class EventPipeline:
                 logger.error(
                     f"[灾害预警] 聚合推送构建消息失败: {e}, 事件: {entry.event.id}"
                 )
-                return None
+                # 构建异常与规则链过滤不同：这是可重试的瞬时故障，
+                # 返回失败标记让调用方把它并入 failed_entries 走重试路径。
+                return "failed", entry
 
         results = await asyncio.gather(*[_review_and_build(entry) for entry in entries])
-        built_messages: list[tuple[WeatherBufferEntry, MessageChain]] = [
-            result for result in results if result is not None
-        ]
+        built_messages: list[tuple[WeatherBufferEntry, MessageChain]] = []
+        # 构建失败条目：并入 failed_entries 走失败重试路径（累计重试计数，
+        # 达到上限后丢弃），避免瞬时构建错误把预警静默丢弃。
+        build_failed_entries: list[WeatherBufferEntry] = []
+        for result in results:
+            if result is None:
+                continue
+            if isinstance(result, tuple) and len(result) == 2 and result[0] == "failed":
+                build_failed_entries.append(result[1])
+                continue
+            built_messages.append(result)
 
         if not built_messages:
-            # 全部条目被规则链复核过滤或构建失败，实际未发送任何预警
-            return 0, [], []
+            # 全部条目被规则链复核过滤或构建失败，实际未发送任何预警：
+            # 规则链过滤属正常业务路径，不重试；构建失败条目仍需走重试路径，
+            # 避免瞬时构建错误把预警静默丢弃。
+            return 0, [], build_failed_entries
 
         if mode == "forward":
             # 构建合并转发节点
@@ -456,6 +473,11 @@ class EventPipeline:
                         f"发送失败 ({session_log}): {e}"
                     )
 
+            # 构建失败条目统一并入 failed_entries：构建失败发生在发送前，
+            # 不归属于任何节点，因此在节点循环结束后合并，走失败重试路径
+            # （累计重试计数，达到上限后丢弃），避免瞬时构建错误把预警静默丢弃。
+            failed_entries.extend(build_failed_entries)
+
             if sent_nodes == 0 and failed_nodes > 0:
                 # 全部节点都发送失败：向上抛出，让调用方感知到平台当前不可用，
                 # 避免"假装成功"导致用户完全收不到任何预警。
@@ -497,5 +519,6 @@ class EventPipeline:
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"
                     )
                     raise
-            # 返回实际成功发送的条目数（供聚合服务统计真实转发量）
-            return len(built_messages), [], []
+            # 返回实际成功发送的条目数（供聚合服务统计真实转发量）；
+            # 构建失败条目同样并入失败重试路径，避免瞬时构建错误把预警静默丢弃。
+            return len(built_messages), [], build_failed_entries

@@ -110,8 +110,11 @@ class PushOrchestrator:
                             logger.warning(
                                 f"[灾害预警] 静默吸收回调执行失败（已放行推送）: {exc}"
                             )
+                        else:
+                            # 吸收成功：事件已进入静默吸收，不再进入推送链。
                             return False
-                    return False
+                    else:
+                        return False
             except Exception as exc:
                 # 判定异常时按不静默处理，避免静默判定故障导致推送完全中断。
                 logger.warning(f"[灾害预警] 静默判定异常（已按非静默放行推送）: {exc}")
