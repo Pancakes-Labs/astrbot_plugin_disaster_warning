@@ -1,9 +1,267 @@
 <!-- markdownlint-disable MD024 -->
 <!-- markdownlint-disable MD025 -->
+<!-- markdownlint-disable MD028 -->
 <!-- markdownlint-disable MD033 -->
 <!-- markdownlint-disable MD034 -->
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
+
+# 2026/08/21 v1.6.0
+
+经历了几次跳票、砍需求、加上我连续一个多月的爆肝后，灾害预警 v1.6.0 正式版本（没错原先计划的其他 beta 版直接跳过了）也是终于问世了！
+
+在这个版本中，我们带来了非常多的新功能，以及大量优化。现在它不仅是一个预警推送插件，更是一个初具规模的预警信息分析平台。
+
+我们还顺便更新了一下插件 Logo 的视觉形象，希望你喜欢~  ~~PS：缩小了看怎么那么像冰与火之舞~~
+
+未来我们还计划推出拓展系统（Extension），面向更多的开发者，支持社区扩展数据源，规则和展示等能力。
+
+另外本次更新有部分默认行为发生了改变，请您仔细阅读下方更新日志的提示内容。
+
+## 🚀 What's Changed
+
+### ✨ New Features (新功能)
+
+- 支持将 P2P `各地震度详情` 中详细的町丁目名称转换为**地域**级别展示 by @DBJD-CR in #142 #180
+- 支持台风信息推送，并完成了完整的前后端适配 by @DBJD-CR in #147 #158 #160 #167 #176 #183 #184 #189 #190 #196 #204 #208 #209
+- 在地震预警消息推送中新增预估走时信息与本地 S 波到达的预估倒计时信息 by @DBJD-CR in #148 #184 #190 #195
+- 在预警信息推送中新增 `预估影响区县`（中国） 与 `预估影响地域`（日本）信息 by @DBJD-CR in #148 #203
+- 支持 NIED S-Net 海底震度分布推送，并完成了完整的前后端适配 by @DBJD-CR in #150 #151 #156 #157 #175
+- 支持在推送文本中对 Emoji 进行可选的三档级别的过滤 by @DBJD-CR in #152
+- 支持为各个过滤器自定义逻辑组合（`OR` 逻辑与 `AND` 逻辑） by @DBJD-CR in #156
+- 支持 JMA 震央分布查询与绘图功能 by @DBJD-CR in #161 #206
+- 支持中国地震台网烈度速报推送，并完成了完整的前后端适配 by @DBJD-CR in #163 #175 #181
+- 支持美国 ShakeAlert 地震预警推送，并完成了完整的前后端适配 by @DBJD-CR in #165
+- 支持 FSSN 矩心矩张量解 (CMT) 推送，并完成了完整的前后端适配 by @DBJD-CR in #174
+- 新增沙滩球绘图功能 by @DBJD-CR in #174 #203
+- 支持全量的气象预警推送，并补充聚合推送（合并转发）能力 by @DBJD-CR in #180 #203
+- 新增启动横幅与信息汇总大屏，优化启动阶段的日志打印 by @DBJD-CR in #184 #190
+- 气象预警查询支持取消 72 小时的时间过滤 by @DBJD-CR in #184
+- 支持气象雷达（组合反射率）查询功能 by @DBJD-CR in #188
+- 新增气象实况排行查询相关功能 by @DBJD-CR in #189 #194
+- 新增气象站实况查询相关功能 by @DBJD-CR in #191
+- 支持 AQI（空气质量指数）查询功能 by @DBJD-CR in #193 #194
+- 新增地震动预测功能，支持自动提取地震参数并解析 by @DBJD-CR in #195 #203
+- 新增模拟预警系统，支持多灾种事件流编排 by @DBJD-CR in #196 #198
+- 新增降水量预报查询功能 by @DBJD-CR in #197
+- 支持在本地监控中根据位置自动解析并应用合适的烈度/震度体系，当然也可以自己选择它 by @DBJD-CR in #203
+- 支持 FAN Studio 主备服务器偏好切换 by @DBJD-CR in #206
+- 支持通过命令控制插件与 AstrBot 重载 by @DBJD-CR in #207
+
+### 🎨 Visualization (可视化与渲染)
+
+- 新增会话推送 Top10 卡片、风王榜卡片与台风强度等级卡片 by @DBJD-CR in #147
+- 支持渲染 S-Net 测站分布图 by @DBJD-CR in #150
+- 新增 S-Net 历史最大震度卡片并优化最大震级卡片样式与排版 by @DBJD-CR in #150
+- 优化了统计口径说明卡片 by @DBJD-CR in #151
+- 优化海啸卡片信息展示 by @DBJD-CR in #154
+- 支持渲染台风路径图 by @DBJD-CR in #158 #176 #183
+- 添加可翻转的 FAN Studio 状态卡片，正面显示主通道，背面显示 CENC 烈度速报 by @DBJD-CR in #168
+  - 同时优化了连接矩阵卡片的布局
+- 新增 `通道健康` 面板，基于本地网络可用性，展示整体状态、90 天可用性趋势、每日健康详情及历史事故 by @DBJD-CR in #169 #174 #192
+- 大幅优化了事件列表里对各类型事件的展示行为，提供更丰富和详细的信息 by @DBJD-CR in #177
+- 重构跑马灯为三栏竖向滚动并且能感知气象预警类型和级别，显示对应 emoji by @DBJD-CR in #187 #190
+- 为通用地图瓦片附加简单的事件描述标签 by @DBJD-CR in #187
+- 支持发送气象雷达图（组合反射率）与动图版本 by @DBJD-CR in #188
+- 新增 `模拟预警` 页面 by @DBJD-CR in #196
+- 支持发送降水量预报图与动图版本 by @DBJD-CR in #197
+- 在配置页面中添加了实时推文预览面板，并将布局重构为“编辑器 / 预览”的双栏设计 by @DBJD-CR in #198
+- 重新设计侧边栏页脚以及 GitHub/插件目录按钮 by @DBJD-CR in #198
+- 修复了 Mermaid 图表在暗色模式下的可读性问题 by @DBJD-CR in #201
+- 重构 Markdown 代码块为 VSCode 风格语法高亮与明暗双主题终端外观 by @DBJD-CR in #202
+- 重构管理端首屏加载体验 by @DBJD-CR in #206
+- 管理端连接矩阵面板展示 FAN Studio 主备服务器标签 by @DBJD-CR in #206
+- 微调了 Global Quake 卡片样式，以保证在烈度 10 及以上时的视觉效果 by @DBJD-CR in #208
+
+### 🌐 Data Sources & Network (数据源与网络)
+
+- 接入 EQSC 数据源 by @DBJD-CR in #147 #154 #175 #183 #192
+  - 实时活跃台风轮询
+  - JMA 海啸情报轮询
+  - CENC 烈度速报轮询
+- 接入 MSIL 的 S-Net 瓦片轮询 by @DBJD-CR in #150
+- 实现 FAN Studio 连接配额与优先级策略，保证 `/all` 始终作为主连接，次级连接能正确延迟与退避 by @DBJD-CR in #163
+- 支持 FAN Studio 应用鉴权 by @DBJD-CR in #167
+- 迁移 Global Quake 连接端点 by @DBJD-CR in #168 #175
+- 接入 OpenQuakeAPI 数据源 by @DBJD-CR in #173 #180
+  - Global Quake
+  - 中国气象局：气象预警
+- 使用 ResAPI 进行气象预警地区查询 by @DBJD-CR in #186 #190 #191 #194
+- 优化了抓取远程图件的稳定性 by @DBJD-CR in #203
+- 改进在 TLS 阻断场景下的主备切换与重连行为，避免在不可用地址上反复重试 by @DBJD-CR in #206
+- 加强遥测覆盖率、隐私保护、节流控制和生命周期清理 by @DBJD-CR in #207
+
+### 🧠 Rules & Filters (规则与过滤)
+
+- 新增台风过滤相关规则 by @DBJD-CR in #147
+- 新增 S-Net 过滤相关规则 by @DBJD-CR in #150 #156
+- 针对性的放宽时间规则，避免丢弃诸如烈度速报、CMT 等有效但略有延迟的产品 by @DBJD-CR in #177
+
+### 📊 Statistics & Storage (统计与存储)
+
+- 增强数据库以支持台风信息持久化 by @DBJD-CR in #147
+  - 支持数据库台风信息过少时自动重建最新 20 个的台风数据
+- 增强数据库以支持 S-Net 信息持久化 by @DBJD-CR in #151
+- 自动折叠和清理历史脏数据 by @DBJD-CR in #154 #157 #170
+- 改善事件历史记录合并与去重，减少重复或来源不完整的记录 by @DBJD-CR in #170
+- 扩展基于数据库的唯一键跟踪和短窗口解析缓存，优化气象预警的去重逻辑与统计数据恢复 by @DBJD-CR in #194
+- 扩展备份还原功能，支持缓存/模拟流/通知/日志等 7 类数据 by @DBJD-CR in #199
+
+### ⚙️ Configuration (配置)
+
+- 新增 `JMA 震度按地域汇总` 配置项 by @DBJD-CR in #142
+- 新增 `EQSC API` 配置组 by @DBJD-CR in #147 #154 #175
+- 为 `FAN Studio Websocket 数据源` 添加多个子数据源 by @DBJD-CR in #147 #163 #165 #174
+  - 新增 `中国气象局：实时活跃台风` 推送开关，默认关闭
+  - 新增 `中国地震台网（CENC）：烈度速报` 推送开关，默认关闭
+  - 新增 `美国 ShakeAlert：地震预警` 推送开关，默认开启
+  - 新增 `FSSN：矩心矩张量解 (CMT)` 推送开关，默认开启
+- 新增 `🌀 台风信息配置` 配置组 by @DBJD-CR in #147
+- 新增 `NIED S-Net 海底震度` 与 `S-Net 海底震度专用过滤器` 配置组 by @DBJD-CR in #150 #156
+- 增强了**会话差异配置**的稳定性 by @DBJD-CR in #151
+- 新增 `推送文本 Emoji 过滤` 配置项 by @DBJD-CR in #152
+- 新增 `🌊 海啸信息配置` 配置组 by @DBJD-CR in #154
+- 为各个过滤器新增 `条件组合方式` 配置项 by @DBJD-CR in #156
+- 新增 `台风路径图瓦片源` 配置项 by @DBJD-CR in #158
+- 调整 `📍本地监控配置` 的 `通知阈值(烈度)` 默认值为 `2.0` by @DBJD-CR in #163
+- 新增 `FAN Studio API Key` 配置项 by @DBJD-CR in #167
+- **移除** `启动后静默时间` 配置项，新增 `是否静默启动插件` 配置项并默认开启 by @DBJD-CR in #171
+- 新增 `OpenQuakeAPI 数据源` 配置组 by @DBJD-CR in #173 #180
+  - 新增 `Global Quake` 配置项，默认开启
+  - 新增 `中国气象局：气象预警` 配置项，默认开启
+- 新增 `气象预警聚合推送` 配置组 by @DBJD-CR in #180
+- 新增 `事件流日志级别覆盖` 配置组 by @DBJD-CR in #180
+- 调整 FAN Studio 的 `中国气象局：气象预警` 配置项为**默认关闭** by @DBJD-CR in #180
+- 新增 `台风停编通知` 与 `静默启动期间丢弃事件流日志` 配置项，默认启用 by @DBJD-CR in #184
+- 新增 `包含测站分布图` 与 `包含台风路径图` 配置项并默认开启 by @DBJD-CR in #192
+- 新增 `忽略浏览器 HTTPS 证书错误（仅本地模式）` 配置项，默认关闭 by @DBJD-CR in #192
+- **移除**了 `原始消息日志文件路径` 配置项 by @DBJD-CR in #192
+- 新增 `记录气象预警正文` 配置项并默认开启 by @DBJD-CR in #194
+- 新增 `通知阈值(震度)` 与 `本地强度体系` 配置项 by @DBJD-CR in #203
+- 新增 `节点未满时等待凑满再推送` 配置项并默认开启 by @DBJD-CR in #203
+- 新增 `附加中国区县烈度预估` 和 `附加日本地域震度预估` 配置项，默认关闭。您可以根据自己的情况决定是否启用 by @DBJD-CR in #203
+
+### 💻 WebUI / Frontend (前端)
+
+- 优化了前端卡片的响应式设计，防止抖动与文字发糊 by @DBJD-CR in #150 #162
+- 增强事件列表的筛选功能，提升查询能力 by @DBJD-CR in #155
+  - 支持按时间筛选
+  - 地震支持按深度筛选
+  - 地震支持按烈度/震度筛选
+  - 台风支持按各核心参数与活跃状态筛选
+- 优化了前端 a11y 支持、小屏适配、暗色主题增强，提升使用体验 by @DBJD-CR in #201
+- 新增 `markedjs` `mermaidjs` `DOMPurify` 三个本地库 by @DBJD-CR in #201
+- 重构文档浏览页面，优化阅读体验 by @DBJD-CR in #205
+
+### ♻️ Refactor (重构)
+
+- 对海啸相关的前后端内容与推送文本进行了大幅重构与增强 by @DBJD-CR in #154
+- 重构静默启动流程，使其在插件重载和 AstrBot 启动/重载的场景下都更加科学且无感 by @DBJD-CR in #171 #174 #180 #181
+- 将 Global Quake 纳入为 OpenQuakeAPI 的子源并统一修改内部和外部展示名 by @DBJD-CR in #173 #183
+- 气象预警图标优先使用本地图标，并拓展更多气象预警图标 by @DBJD-CR in #181 #187 #203
+- 将所有数据源别名、展示名称映射以及连接展示元数据集中到单一的后端注册表 by @DBJD-CR in #185
+- 将合并转发消息的构造与发送集中到可复用的辅助工具中，并更新多个命令，显式使用合并转发进行回复 by @DBJD-CR in #191
+- 抽取省份/文本格式化公共工具，并在气象、统计和站点查询中复用 by @DBJD-CR in #193
+- 引入统一的严重程度指示 emoji 模块，并在地震、气象、海啸、台风、AQI 以及排名展示中统一使用 by @DBJD-CR in #194
+- 移除基于旧版的地震模拟 API 及相关 UI 弹窗样式，将模拟能力整合到新的多灾害模拟系统中 by @DBJD-CR in #196
+
+### ⚡ Performance (性能优化)
+
+- 优化通知中心启动为异步，避免阻塞启动主流程 by @DBJD-CR in #148
+- 大幅优化了事件列表页面中的事件加载速度 by @DBJD-CR in #201
+
+### 🐛 Bug Fixes (修复)
+
+- 加固 Websocket 连接生命周期，避免挤占上游连接配额 by @DBJD-CR in #148
+- 修复 Global Quake 不支持最终报的问题 by @DBJD-CR in #154
+- 修复震度 5弱 以上时的震度解析问题并修正 PLUM 占位震级，优化展示文本 by @DBJD-CR in #177 #180
+- 修复并优化有关海啸事件的去重问题 by @DBJD-CR in #177
+- 修复升级/降级类预警颜色识别错误与机构名提取遗漏的问题 by @DBJD-CR in #180
+- 修复了 `Task was destroyed but it is pending!` 的事件循环噪音 和 `GeneratorExit` 报错 by @DBJD-CR in #184
+- 修复气象预警查询误匹配预警类型的问题 by @DBJD-CR in #193
+- 改进 websocket 重连通知，避免在重连间隔非常短时出现误报的「离线时间过长」提示 by @DBJD-CR in #194
+- 修复网络错误被误判为 SSL 错误并导致提前停止重连的问题 by @DBJD-CR in #206
+
+### 🛡️ Stability & Security (稳定性与安全)
+
+- 提升卡片截图浏览器的渲染健壮性，包括浏览器/页面健康检查、自动重建池、字体就绪超时以及更好的错误处理 by @DBJD-CR in #154
+- 优化了启动时序，推迟浏览器预热，避免出现 `创建页面 1 超时` `浏览器初始化失败` `捕获未处理的异步异常: Task exception was never retrieved` 等报错 by @DBJD-CR in #191
+
+### 🛠️ Commands (指令系统)
+
+- 新增 `/台风信息查询` 命令 by @DBJD-CR in #147
+- 新增 `/snet` 命令 by @DBJD-CR in #150
+- 新增 `/JMA震央分布` 和 `/JMA震央分布绘图` 命令 by @DBJD-CR in #161
+- 新增 `/生成沙滩球` 和 `/节面解析` 命令 by @DBJD-CR in #174
+- 优化了数据源离线通知的文案 by @DBJD-CR in #184
+- 新增 `/雷达` `/雷达动图` `/雷达列表` 命令 by @DBJD-CR in #188
+- 新增 `/气温排行` `/最低气温排行` `/降水排行` `/风速排行` 命令 by @DBJD-CR in #189
+- 新增 `/气象站实况` `/气象站历史` `气象站列表` 命令 by @DBJD-CR in #191
+- 新增 `/空气质量` `/空气质量排行` `/空气质量列表` 命令 by @DBJD-CR in #193
+- 新增 `/地震动预测` 和 `/本地地震动预测` 命令 by @DBJD-CR in #195
+- 升级了 `/灾害预警模拟` 命令，支持全灾种简单模拟 by @DBJD-CR in #196
+- 新增 `/降水量预报` 和 `/降水量预报动图` by @DBJD-CR in #197
+- 优化 `/灾害预警重连` 命令，新增重连结果反馈与展示名优化 by @DBJD-CR in #204
+- 新增 `/灾害预警重启` 和 `/重启AstrBot` 命令 by @DBJD-CR in #207
+
+### 📚 Documentation (文档)
+
+- 新增 EQSC API 文档 by @DBJD-CR in #147 #175
+- 新增 OpenQuakeAPI 文档并移除了过时的 Global Quake (HTML) 文档 by @DBJD-CR in #173
+- 更新各文档至最新官方版本 by @DBJD-CR in #191 #210
+- 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210
+
+~~### 🧪 Testing & CI (测试与CI)~~
+
+### 📦 Dependencies (依赖)
+
+- 新增依赖 `Pillow>=10.0.0` by @DBJD-CR in #150
+
+### 🔧 Chore (杂项)
+
+- 调整日志打印风格 by @DBJD-CR in #142 #203
+- 优化了部分日志的打印级别 by @DBJD-CR in #151 #200
+- 现在日志在打印渲染耗时可以显示对应的卡片类型并优化相关渲染时误报 by @DBJD-CR in #172 #192
+- 支持过滤对应事件流的日志 by @DBJD-CR in #180 #181
+- 优化了项目内的行内导入情况 by @DBJD-CR in #192
+- 为模拟事件消息增加 `[模拟]` 标识 by @DBJD-CR in #196
+- 优化全链路日志输出策略，削减高频 DEBUG 刷屏 by @DBJD-CR in #200
+- 增强了原始消息日志中的 JSON 字段格式化功能 by @DBJD-CR in #203
+
+---
+
+## ❤️ New Contributors
+
+- @coderabbitai[bot] made their first contribution in #151
+- @chatgpt-codex-connector[bot] made their first contribution in #151
+- @qodo-free-for-open-source-projects[bot] made their first contribution in #192
+
+此外还要感谢 @Grok4.5（已降智）、@DeepSeekV4Flash（已涨价）、@GLM5.2（更贵了） 在本版本开发中的杰出表现。
+以及 @coderabbitai[bot]、@sourcery-ai[bot]、@qodo-free-for-open-source-projects[bot] 兢兢业业的 Review。
+
+---
+
+> [!CAUTION]
+> FAN Studio 与 EQSC 数据源现在需要鉴权，为了正常使用本插件功能，更新后请务必阅读 README 中的 `🔑 数据源鉴权引导` 章节，并根据引导完成鉴权。
+
+> [!WARNING]
+>
+> 在新版本中，我们将 FAN Studio 的气象预警改为默认关闭，转为默认使用插件自建源的全量气象预警。
+>
+> 如果感觉气象预警的推送数量过多，请善用我们新增的聚合推送相关功能与原有的过滤功能。
+>
+> 如果发现数据库大小增长过快或存储空间紧张，可尝试**关闭** `记录气象预警正文` 配置项。
+>
+> 此外还有部分新增的数据源为默认开启，也有部分数据源被调整为默认关闭。如果不希望被无关的消息打扰，更新后请检查各数据源的启用状况。
+>
+> `附加中国区县烈度预估` 和 `附加日本地域震度预估` 配置项默认关闭，您可以根据自己的情况决定是否启用。
+>
+> 如果你发现插件启动时的 ASCII 艺术字出现了换行错位，在终端窗口一起按 `CTRL` 和 `-` 缩放终端大小即可正常显示。
+
+**Full Changelog**: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/compare/v1.6.0-beta.1...v1.6.0
+
+<details>
+<summary>点击查看历史更新内容</summary>
 
 # 2026/07/12 v1.6.0-beta.1
 
@@ -33,9 +291,6 @@
 ---
 
 **Full Changelog**: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/compare/v1.5.3...v1.6.0-beta.1
-
-<details>
-<summary>点击查看历史更新内容</summary>
 
 # 2026/06/15 v1.5.3
 
@@ -410,7 +665,7 @@ Hot Fix For v1.3.7
 >
 > 我们在 v1.3.5 版本的更新中引入了基于关键词的地震事件过滤器，如果你要填写黑白名单，请注意：
 >
-> - 关键词填写应以 `省州市区/督道府县` 的级别填写， **请勿填写国家/地区名**，这会导致绝大部分符合推送条件的消息被过滤。
+> - 关键词填写应以 `省州市区/都道府县` 的级别填写， **请勿填写国家/地区名**，这会导致绝大部分符合推送条件的消息被过滤。
 > - 关键词填写应该尽量简短 (避免填写完整的省市名，如 `XX省XX市`，根据过滤范围直接填 `浙江`、`杭州` 即可)。
 > - ✅ 正确示例（精确过滤）：“新疆”、“西双版纳州”、“大同市”、“陇西县”、“宜蘭縣”、“千葉県”、“能登半島”、“宗谷地方”、“阿拉斯加”
 > - ✅ 正确示例（模糊匹配）：“省”、“州”、“市”、“县”、“県”、“区”、“地区”、“道”、“附近”、“岛”、“海”、“沖”

@@ -14,11 +14,11 @@
   
   <!-- 排名文字 -->
   <foreignObject width="230" height="35" style="font-size: 14px;color: rgb(67, 39, 135);font-family: Arial;font-weight: 700;text-align: left;letter-spacing: 0em;line-height: 1.5;" x="64" y="24">
-    <div xmlns="http://www.w3.org/1999/xhtml">#11 Plugin Of The Week</div>
+    <div xmlns="http://www.w3.org/1999/xhtml">#1 Plugin Of Third-party</div>
   </foreignObject>
   
   <!-- 排名数字 -->
   <foreignObject width="141" height="36" style="font-size: 18px;color: rgb(74, 14, 153);font-family: Arial;font-weight: 400;text-align: center;letter-spacing: 0em;line-height: 1.5;" x="-36" y="9">
-    <div xmlns="http://www.w3.org/1999/xhtml">11</div>
+    <div xmlns="http://www.w3.org/1999/xhtml">1</div>
   </foreignObject>
 </svg>
