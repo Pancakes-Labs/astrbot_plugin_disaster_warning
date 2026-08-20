@@ -95,16 +95,18 @@ class TyphoonParser(BaseParser):
 
         # FAN 无名低压同样可能只有占位名称：清洗后为空时，基于编号+等级
         # 生成可读回退名，避免 EQSC 不可用或同样返回占位名时推送缺名称。
-        # 回退名打标记：后续 EQSC 富化提供有效名称时允许覆盖回退名。
-        name_is_fallback = False
+        # 回退名按语言分别打标记：后续 EQSC 富化提供对应语言的有效名称时
+        # 允许覆盖该语言的回退名（单语言覆盖不影响另一语言标记）。
+        name_is_fallback_cn = False
+        name_is_fallback_en = False
         if not name and not name_en and typhoon_id:
             fallback_cn, fallback_en = build_td_fallback_names(typhoon_id, typhoon_type)
-            if fallback_cn or fallback_en:
-                name_is_fallback = True
             if fallback_cn:
                 name = fallback_cn
+                name_is_fallback_cn = True
             if fallback_en:
                 name_en = fallback_en
+                name_is_fallback_en = True
 
         # 若名称和类型全部缺失，视为无效数据
         if not name and not name_en and not typhoon_type:
@@ -144,9 +146,11 @@ class TyphoonParser(BaseParser):
             "source_type": source_entry.source_type.value
             if source_entry
             else "typhoon",
-            # 标记名称是否为回退生成的占位名：EQSC 富化提供有效名称时
-            # 允许覆盖，避免回退名阻断真实名称写入。
-            "name_is_fallback": name_is_fallback,
+            # 按语言分别标记名称是否为回退生成的占位名：EQSC 富化提供
+            # 对应语言的有效名称时允许覆盖该语言回退名；单语言覆盖
+            # 不清除另一语言标记，避免残留回退名无法被后续覆盖。
+            "name_is_fallback_cn": name_is_fallback_cn,
+            "name_is_fallback_en": name_is_fallback_en,
         }
 
         # 实例化台风领域模型（唯一业务状态真源）
