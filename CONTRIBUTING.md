@@ -137,7 +137,7 @@
 - @qodo-free-for-open-source-projects[bot]
 - @gemini-code-assist[bot]
 - @Copilot-pullrequest-reviewer[bot]
-- @@chatgpt-codex-connector[bot]
+- @chatgpt-codex-connector[bot]
 - @dependabot[bot]
 
 🚀 再次感谢您的贡献！
