@@ -265,12 +265,12 @@ class StatsQueryService:
                         try:
                             value = entry.get("pressure")
                             number = float(value) if value is not None else None
-                        except (TypeError, ValueError):
+                        except (TypeError, ValueError, OverflowError):
                             return None
                     else:
                         try:
                             number = float(entry)
-                        except (TypeError, ValueError):
+                        except (TypeError, ValueError, OverflowError):
                             return None
                     if number is None or not math.isfinite(number) or number <= 0:
                         return None
