@@ -312,11 +312,15 @@ class SessionConfigManager:
         return copy.deepcopy(value)
 
     def list_target_sessions(self) -> list[str]:
-        """列出全局配置中声明的目标会话。"""
+        """列出全局配置中声明的目标会话。
+
+        在共享配置边界统一去除首尾空白，确保常规推送与模拟推送等所有消费路径复用同一规范化标识，
+        避免 " session-a " 在不同路径产生不同目标会话。
+        """
         sessions = self.default_config_ref.get("target_sessions", [])
         if not isinstance(sessions, list):
             return []
-        return [s for s in sessions if isinstance(s, str) and s]
+        return [s.strip() for s in sessions if isinstance(s, str) and s.strip()]
 
     def list_all_known_sessions(self) -> list[str]:
         """列出当前已知的全部会话标识。"""

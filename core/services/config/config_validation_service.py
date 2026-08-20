@@ -1010,8 +1010,13 @@ class ConfigValidator:
             )
             return []
 
-        # 过滤非字符串项，清洗空字符串或类型错误的会话标识
-        valid_sessions = [s for s in sessions if isinstance(s, str) and s.strip()]
+        # 过滤非字符串项，清洗空字符串或类型错误的会话标识；
+        # 同时在共享配置边界去除首尾空白，确保常规推送与模拟推送
+        # 等所有消费路径复用同一规范化后的会话标识（避免 " session-a "
+        # 在不同路径产生不同目标）。
+        valid_sessions = [
+            s.strip() for s in sessions if isinstance(s, str) and s.strip()
+        ]
         if len(valid_sessions) != len(sessions):
             logger.warning(
                 f"[灾害预警] 配置警告: {key_name} 中包含无效项，已自动过滤。"

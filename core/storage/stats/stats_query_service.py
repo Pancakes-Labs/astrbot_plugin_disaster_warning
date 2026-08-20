@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -222,12 +223,21 @@ class StatsQueryService:
                     except (TypeError, ValueError):
                         return None
 
+                def _typhoon_display_name(key: str, entry: Any) -> str:
+                    """优先取条目内展示名，兼容旧结构（key 即展示名）。"""
+                    if isinstance(entry, dict):
+                        name = str(entry.get("display_name") or "").strip()
+                        if name:
+                            return name
+                    return key
+
                 sorted_wind = sorted(
                     max_wind_typhoons.items(),
                     key=lambda x: _wind_entry_speed(x[1]),
                     reverse=True,
                 )
-                for typhoon_name, entry in sorted_wind[:10]:
+                for typhoon_key, entry in sorted_wind[:10]:
+                    typhoon_name = _typhoon_display_name(typhoon_key, entry)
                     wind_speed = _wind_entry_speed(entry)
                     pressure = _wind_entry_pressure(entry)
                     if pressure is not None and pressure > 0:
@@ -244,14 +254,40 @@ class StatsQueryService:
             if min_pressure_typhoons:
                 text.append("")
                 text.append("🎈 最低气压榜Top10 (数值越低越强):")
-                sorted_pressure = sorted(
-                    (
-                        (name, float(pressure))
-                        for name, pressure in min_pressure_typhoons.items()
-                        if pressure is not None
-                    ),
-                    key=lambda x: x[1],
-                )
+
+                def _pressure_entry_value(entry: Any) -> float | None:
+                    """兼容旧结构 float 与新结构 {"pressure": .., "display_name": ..}。
+
+                    仅返回有限且大于零的气压值；零、负数、NaN、无穷及非法文本
+                    均视为无效（返回 None），避免脏数据进入最低气压榜。
+                    """
+                    if isinstance(entry, dict):
+                        try:
+                            value = entry.get("pressure")
+                            number = float(value) if value is not None else None
+                        except (TypeError, ValueError, OverflowError):
+                            return None
+                    else:
+                        try:
+                            number = float(entry)
+                        except (TypeError, ValueError, OverflowError):
+                            return None
+                    if number is None or not math.isfinite(number) or number <= 0:
+                        return None
+                    return number
+
+                pressure_items = []
+                for key, entry in min_pressure_typhoons.items():
+                    value = _pressure_entry_value(entry)
+                    if value is None:
+                        continue
+                    display = key
+                    if isinstance(entry, dict):
+                        name = str(entry.get("display_name") or "").strip()
+                        if name:
+                            display = name
+                    pressure_items.append((display, value))
+                sorted_pressure = sorted(pressure_items, key=lambda x: x[1])
                 for typhoon_name, pressure in sorted_pressure[:10]:
                     pressure_text = (
                         str(int(pressure))

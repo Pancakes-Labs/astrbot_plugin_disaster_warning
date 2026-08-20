@@ -17,7 +17,7 @@ from ...domain.event_models import (
     TyphoonEvent,
     WeatherEvent,
 )
-from ...domain.typhoon import format_display_name
+from ...domain.typhoon import format_display_name, normalize_typhoon_id
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
@@ -279,9 +279,13 @@ class StatsRuleService:
             str(data.typhoon_id or "").strip(),
             fallback="",
         )
+        # 以归一化台风编号作为统计身份键（跨来源/无名低压阶段稳定），
+        # 条目内保留展示名供榜单展示，避免同一台风展示名变化导致统计分裂。
+        identity_key = normalize_typhoon_id(str(data.typhoon_id or "").strip())
         record_typhoon_observation(
             self.manager.stats["typhoon_stats"],
             display_name=display_name,
+            identity_key=identity_key,
             level=str(data.typhoon_type or "未知").strip(),
             wind_speed=data.wind_speed,
             pressure=data.pressure,
