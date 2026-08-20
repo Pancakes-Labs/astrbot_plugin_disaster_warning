@@ -4,12 +4,6 @@
 <!-- markdownlint-disable MD041 -->
 ![astrbot_plugin_disaster_warning](https://socialify.git.ci/Pancakes-Labs/astrbot_plugin_disaster_warning/image?custom_description=%F0%9F%9A%A8+%E4%B8%80%E4%B8%AA%E5%9F%BA%E4%BA%8E+AstrBot+%E7%9A%84%E5%A4%9A%E6%95%B0%E6%8D%AE%E6%BA%90%E7%81%BE%E5%AE%B3%E9%A2%84%E8%AD%A6%E6%8F%92%E4%BB%B6&description=1&font=Inter&forks=1&issues=1&language=1&name=1&owner=1&pattern=Charlie+Brown&pulls=1&stargazers=1&theme=Auto)
 
-<div align="center">
-
-简体中文 | [English](README_EN.md) | [日本語](README_JP.md)
-
-</div>
-
 <p align="center">
   <img src="resources/PluginRank.svg" alt="PluginRank">
   <img src="resources/StarRank.svg" alt="StarRank">
