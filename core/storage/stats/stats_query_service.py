@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -255,17 +256,25 @@ class StatsQueryService:
                 text.append("🎈 最低气压榜Top10 (数值越低越强):")
 
                 def _pressure_entry_value(entry: Any) -> float | None:
-                    """兼容旧结构 float 与新结构 {"pressure": .., "display_name": ..}。"""
+                    """兼容旧结构 float 与新结构 {"pressure": .., "display_name": ..}。
+
+                    仅返回有限且大于零的气压值；零、负数、NaN、无穷及非法文本
+                    均视为无效（返回 None），避免脏数据进入最低气压榜。
+                    """
                     if isinstance(entry, dict):
                         try:
                             value = entry.get("pressure")
-                            return float(value) if value is not None else None
+                            number = float(value) if value is not None else None
                         except (TypeError, ValueError):
                             return None
-                    try:
-                        return float(entry)
-                    except (TypeError, ValueError):
+                    else:
+                        try:
+                            number = float(entry)
+                        except (TypeError, ValueError):
+                            return None
+                    if number is None or not math.isfinite(number) or number <= 0:
                         return None
+                    return number
 
                 pressure_items = []
                 for key, entry in min_pressure_typhoons.items():

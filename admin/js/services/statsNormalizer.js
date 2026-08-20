@@ -92,6 +92,7 @@
             .slice(0, 10);
 
         // 最低气压榜：数值越低越强；兼容旧结构 float，以及新结构 {pressure, display_name}
+        // 仅保留有限且大于零的气压值，避免 NaN/Infinity/0/负数 进入榜单
         const rawPressureKing = typhoonStats.min_pressure_typhoons || {};
         const pressureKingList = Object.entries(rawPressureKing)
             .map(([key, entry]) => {
@@ -106,7 +107,7 @@
                 }
                 return { name, pressure };
             })
-            .filter(item => item.pressure > 0)
+            .filter(item => Number.isFinite(item.pressure) && item.pressure > 0)
             .sort((a, b) => a.pressure - b.pressure)
             .slice(0, 10);
 
