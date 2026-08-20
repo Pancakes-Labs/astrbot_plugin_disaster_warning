@@ -104,15 +104,20 @@ def _resolve_target_session(
     """解析模拟发送目标会话（显式指定优先，否则回退首个配置会话）。
 
     白名单校验（fail-closed）：显式传入的目标会话必须属于
-    config["target_sessions"]。未配置目标会话或目标不存在
-    白名单内一律返回 None（调用处返回 400），避免把模拟消息推送到任意
-    会话——空白名单时放行任意会话会把"未配置"静默变成"全放行"。
+    config["target_sessions"]。未配置目标会话或目标不在白名单内一律
+    返回 None（调用处返回 400），避免把模拟消息推送到任意会话——
+    空白名单时放行任意会话会把"未配置"静默变成"全放行"。
     """
-    target_sessions = [str(s) for s in config.get("target_sessions", [])]
+    # 白名单统一规范化：去除首尾空白、字符串化，与整流接口
+    # （simulation_runner）的会话比较规则保持一致。
+    target_sessions = [
+        str(s).strip() for s in config.get("target_sessions", []) if str(s).strip()
+    ]
     if not target_sessions:
         return None
-    if target_session:
-        return target_session if target_session in target_sessions else None
+    target = str(target_session or "").strip()
+    if target:
+        return target if target in target_sessions else None
     return target_sessions[0]
 
 
@@ -337,14 +342,18 @@ def register_simulation_routes(app, disaster_service, config: dict[str, Any]):
                 )
 
             # 发送模式：解析目标会话后推送（含白名单校验）
-            target_session = data.get("target_session") or ""
+            # 先规范化显式目标，避免与整流接口（simulation_runner）比较规则不一致。
+            target_session = str(data.get("target_session") or "").strip()
             final_target_session = _resolve_target_session(config, target_session)
-            if target_session and final_target_session is None:
+            if not target_session:
+                # 未显式指定时回退到首个配置会话
+                if not final_target_session:
+                    return ApiResponse.error("未配置目标会话", status_code=400)
+            elif final_target_session is None:
+                # 显式指定的目标不在白名单内（与"未配置"区分，便于排查）
                 return ApiResponse.error(
                     "目标会话不在已配置的目标会话列表中", status_code=400
                 )
-            if not final_target_session:
-                return ApiResponse.error("未配置目标会话", status_code=400)
 
             runtime_config = None
             if session_config_manager is not None:
