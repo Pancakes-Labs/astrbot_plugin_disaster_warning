@@ -196,6 +196,38 @@ wss://ws-api.wolfx.jp/jma_eew
 | `isCancel` | 是否为取消报（布尔类型） |
 | `OriginalText` | 气象厅发布的原文（字符串类型） |
 
+## 中国地震台网 地震预警 JSON API
+
+- 描述: 实时获取中国地震台网发布的地震预警
+- HTTP GET API地址:
+
+```bash
+https://api.wolfx.jp/cenc_eew.json
+```
+
+- WebSocket API地址:
+
+```bash
+wss://ws-api.wolfx.jp/cenc_eew
+```
+
+- JSON字段解析(数据类型):
+
+| Field | Description |
+| --- | --- |
+| `type` | （WebSocket专用）cenc\_eew(字符串型) |
+| `ID` | EEW发报ID(字符串型) |
+| `EventID` | EEW发报事件ID(字符串型) |
+| `ReportTime` | EEW发报时间(UTC+8)(字符串型) |
+| `ReportNum` | EEW发报数(数值型) |
+| `OriginTime` | 发震时间(UTC+8)(字符串型) |
+| `HypoCenter` | 震源地(字符串型) |
+| `Latitude` | 震源地纬度(数值型) |
+| `Longitude` | 震源地经度(数值型) |
+| `Magnitude` | 震级(数值型) |
+| `Depth` | 震源深度(可能为null)(数值型) |
+| `MaxIntensity` | 最大烈度(数值型) |
+
 ## 中国地震台网 地震信息 JSON API
 
 - 描述: 获取中国地震台网发布的最新地震信息, 共50条
