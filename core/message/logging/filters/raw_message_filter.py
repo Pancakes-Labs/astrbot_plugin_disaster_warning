@@ -74,9 +74,22 @@ class RawMessageFilter:
                 )
                 # 只有当二进制解析成功且确实是结构化 dict 时，我们才继续交给 common 过滤器
                 if isinstance(parsed_binary, dict):
-                    # 判断如果解析出来的不是实际需要的地震业务类型（比如是 status、heartbeat 或 ping/pong），直接执行过滤
+                    # OpenQuakeAPI 聚合连接的二进制负载同样先做业务类型检查
+                    # （earthquake 与 weather 均属支持的业务类型，保留放行；
+                    # tsunami/station/status 等其余类型直接过滤），
+                    # 与字符串/字典入口保持一致，避免二进制天气消息被误过滤。
+                    reason = self._check_openquake_api_type(parsed_binary, source_id)
+                    if reason:
+                        return reason
                     inner_type = str(parsed_binary.get("type") or "").lower()
-                    if inner_type != "earthquake":
+                    # 非 OpenQuake 来源的二进制包（解析器仅对 global_quake/openquake
+                    # 来源生效，此处为防御）仅保留 earthquake 业务类型，
+                    # status/heartbeat/ping/pong 等直接过滤。
+                    if (
+                        inner_type != "earthquake"
+                        and "global_quake" not in source_id.lower()
+                        and "openquake" not in source_id.lower()
+                    ):
                         return f"非地震业务的二进制消息过滤: {inner_type}"
                     return self.should_filter_message(parsed_binary, source_id)
                 else:
