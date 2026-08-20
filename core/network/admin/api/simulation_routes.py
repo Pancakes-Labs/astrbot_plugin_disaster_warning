@@ -108,10 +108,15 @@ def _resolve_target_session(
     返回 None（调用处返回 400），避免把模拟消息推送到任意会话——
     空白名单时放行任意会话会把"未配置"静默变成"全放行"。
     """
-    # 白名单统一规范化：去除首尾空白、字符串化，与整流接口
-    # （simulation_runner）的会话比较规则保持一致。
+    # 白名单统一规范化：仅接受非空字符串列表（与 SessionConfigManager
+    # 的契约一致），去除首尾空白后与整流接口（simulation_runner）比较规则
+    # 保持一致。配置值类型非法（字符串/字典/None 等）一律视为未配置，
+    # 按 fail-closed 拒绝发送，避免把任意可迭代对象误当成白名单。
+    raw_target_sessions = config.get("target_sessions", [])
+    if not isinstance(raw_target_sessions, list):
+        return None
     target_sessions = [
-        str(s).strip() for s in config.get("target_sessions", []) if str(s).strip()
+        str(s).strip() for s in raw_target_sessions if isinstance(s, str) and s.strip()
     ]
     if not target_sessions:
         return None
