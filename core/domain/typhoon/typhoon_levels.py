@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# 顺序必须从长关键词到短关键词，避免“强台风”先命中“台风”。
+# 顺序必须从长关键词到短关键词，避免"强台风"先命中"台风"。
 LEVEL_WEIGHTS: dict[str, int] = {
     "超强台风": 6,
     "强台风": 5,
@@ -12,6 +12,17 @@ LEVEL_WEIGHTS: dict[str, int] = {
     "热带风暴": 2,
     "热带低压": 1,
     "台风": 4,
+}
+
+# 中文等级 → 英文缩写映射，供英文名称回退等场景使用，
+# 确保英文字段不混入中文内容。
+LEVEL_EN_ABBR: dict[str, str] = {
+    "热带低压": "TD",
+    "热带风暴": "TS",
+    "强热带风暴": "STS",
+    "台风": "TY",
+    "强台风": "STY",
+    "超强台风": "Super TY",
 }
 
 

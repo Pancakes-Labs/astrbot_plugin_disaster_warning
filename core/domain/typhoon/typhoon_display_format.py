@@ -10,7 +10,7 @@ import math
 from typing import Any
 
 from ....utils.severity_emoji import TYPHOON_LEVEL_EMOJI, typhoon_level_emoji
-from .typhoon_ids import _PLACEHOLDER_ID_FORMAT, extract_td_short_id
+from .typhoon_ids import extract_td_short_id, is_eqsc_placeholder_id
 from .typhoon_values import clean_text, to_float
 
 # 移动方向展示映射：仅用于展示本地化，不改动原始业务字段。
@@ -212,7 +212,7 @@ def format_typhoon_short_id(*candidates: object) -> str:
 
         # EQSC 占位编号（26XX / 2026XX）：尚未正式编号，展示为 TD，
         # 避免把 "26XX" 这类占位符直接展示给用户。
-        if _PLACEHOLDER_ID_FORMAT.match(text):
+        if is_eqsc_placeholder_id(text):
             return "TD"
 
         return text

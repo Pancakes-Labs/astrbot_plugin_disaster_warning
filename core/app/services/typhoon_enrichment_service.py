@@ -24,6 +24,7 @@ from typing import Any
 from ....utils.plugin_logger import plugin_logger as logger
 from ...domain.event_models import EventEnvelope, TyphoonEvent
 from ...domain.typhoon import (
+    clean_name_text,
     clean_text,
     clean_wind_circle,
     constrain_wind_circle_by_fan_radius,
@@ -218,20 +219,21 @@ class TyphoonEnrichmentService:
         typhoon_event.wind_circle = track_data["wind_circle"]
 
         # 如果 EQSC 提供了更丰富的名称信息，补充到事件中。
-        # 必须使用 clean_text 清洗，避免 EQSC 返回字符串 "None"/"NULL" 时
-        # 被 str(... or "") 误当成有效名称写入事件，导致推送正文出现裸 "None"。
+        # 必须使用 clean_name_text 清洗名称字段，避免 EQSC 返回字符串
+        # "None"/"NULL"/"NAMELESS" 时被 str(... or "") 误当成有效名称写入事件，
+        # 导致推送正文出现裸 "None"。
         # 注意先分别清洗每个候选值再取非空：避免 nameCN 为占位字符串
         # （如 "NULL"）时屏蔽有效的 name 备用值。
-        eqsc_name_cn = clean_text(eqsc_typhoon.get("nameCN")) or clean_text(
+        eqsc_name_cn = clean_name_text(eqsc_typhoon.get("nameCN")) or clean_name_text(
             eqsc_typhoon.get("name")
         )
-        eqsc_name_en = clean_text(eqsc_typhoon.get("nameEN")) or clean_text(
+        eqsc_name_en = clean_name_text(eqsc_typhoon.get("nameEN")) or clean_name_text(
             eqsc_typhoon.get("name_en")
         )
         # 先回写清洗后的名称：FAN 侧可能残留占位字符串（如 "None"），
         # 若不清洗保存，占位文本会继续进入后续数据和通知。
-        typhoon_event.name = clean_text(typhoon_event.name)
-        typhoon_event.name_en = clean_text(typhoon_event.name_en)
+        typhoon_event.name = clean_name_text(typhoon_event.name)
+        typhoon_event.name_en = clean_name_text(typhoon_event.name_en)
         # 按语言分别跟踪回退标记：EQSC 提供对应语言的有效名称且该语言
         # 名称为空（清洗后）或为回退名时覆盖；单语言覆盖不影响另一语言，
         # 避免残留回退名无法被后续富化覆盖。

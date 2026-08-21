@@ -13,6 +13,7 @@ from typing import Any
 from ....utils.time_converter import TimeConverter
 from ...domain.typhoon import (
     build_td_fallback_names,
+    clean_name_text,
     clean_text,
     extract_max_radius,
     format_display_name,
@@ -202,9 +203,9 @@ def normalize_eqsc_typhoon(
 
     fan_id = to_fan_id(eqsc_id)
     # 先分别清洗每个候选值，再取第一个非空结果：
-    # 避免 nameCN 为占位字符串（如 "NULL"）时屏蔽有效的 name 备用值。
-    name_cn = clean_text(raw.get("nameCN")) or clean_text(raw.get("name"))
-    name_en = clean_text(raw.get("nameEN")) or clean_text(raw.get("name_en"))
+    # 避免 nameCN 为占位字符串（如 "NULL"/"NAMELESS"）时屏蔽有效的 name 备用值。
+    name_cn = clean_name_text(raw.get("nameCN")) or clean_name_text(raw.get("name"))
+    name_en = clean_name_text(raw.get("nameEN")) or clean_name_text(raw.get("name_en"))
     # EQSC 历史轨迹顺序不保证：先按时间升序，再取最新观测。
     history_track = sort_history_track(
         raw.get("historyTrack") or raw.get("history_track") or []

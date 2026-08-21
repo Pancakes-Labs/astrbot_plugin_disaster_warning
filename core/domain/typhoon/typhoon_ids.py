@@ -22,6 +22,14 @@ def _clean_id(typhoon_id: object) -> str:
     return str(typhoon_id or "").strip()
 
 
+def is_eqsc_placeholder_id(typhoon_id: object) -> bool:
+    """判断是否为 EQSC 占位编号（如 26XX / 2026XX）。
+
+    公开接口，供展示层与名称生成层复用，避免跨模块直接导入私有正则。
+    """
+    return bool(_PLACEHOLDER_ID_FORMAT.match(_clean_id(typhoon_id)))
+
+
 def to_eqsc_id(typhoon_id: object) -> str:
     """将 4/6 位编号转换为 EQSC 4 位形式。"""
     text = _clean_id(typhoon_id)
@@ -82,8 +90,10 @@ def normalize_typhoon_id(typhoon_id: object) -> str:
     - 无名低压（NAMELESS_07 / NAMELESS-2604 / TD07 等合法格式）：
       统一为 TD + 两位短编号（TD07 / TD04），
       与 FAN Studio 侧 TDxx 编号归一到同一去重键，避免同源台风重复推送；
-    - EQSC 占位编号（26XX / 2026XX）：归一化为 "TD"，
-      因其尚未分配正式编号，与裸 NAMELESS / TD 同属无名低压族；
+    - EQSC 占位编号（26XX / 2026XX）：归一化为 "TD" + 原始占位编号，
+      因其尚未分配正式编号，与裸 NAMELESS / TD 同属无名低压族，
+      但保留原始占位编号作为后缀以区分不同物理台风，
+      避免多个未编号台风共享同一去重键导致互相覆盖；
     - 其他非标准编号：原样返回，不从混合文本硬抠数字。
     """
     raw = _clean_id(typhoon_id)
@@ -94,10 +104,11 @@ def normalize_typhoon_id(typhoon_id: object) -> str:
     td_short = extract_td_short_id(raw)
     if td_short:
         return td_short
-    # EQSC 占位编号（26XX）：尚未正式编号，归一化为裸 TD，
-    # 与同源的 NAMELESS_07 / 2619 等条目在正式编号分配前共享同一去重键。
-    if _PLACEHOLDER_ID_FORMAT.match(raw):
-        return "TD"
+    # EQSC 占位编号（26XX）：尚未正式编号，归一化为 TD + 原始占位编号，
+    # 与同源的 NAMELESS_07 / 2619 等条目在正式编号分配前共享同一去重键前缀，
+    # 但后缀保留原始占位编号以区分不同物理台风，避免键冲突导致互相覆盖。
+    if is_eqsc_placeholder_id(raw):
+        return f"TD_{raw}"
     # 纯数字官方编号统一为 4 位短编号
     if raw.isdigit():
         return raw[-4:]
