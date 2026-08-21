@@ -25,7 +25,6 @@ from ....utils.plugin_logger import plugin_logger as logger
 from ...domain.event_models import EventEnvelope, TyphoonEvent
 from ...domain.typhoon import (
     clean_name_text,
-    clean_text,
     clean_wind_circle,
     constrain_wind_circle_by_fan_radius,
     to_eqsc_id,
