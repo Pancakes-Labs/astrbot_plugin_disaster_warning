@@ -25,7 +25,17 @@ def format_display_name(
         if en in cn or f"（{en}）" in cn or f"({en})" in cn:
             return cn
         return f"{cn}（{en}）"
-    return cn or en or tid or fallback
+    if cn or en:
+        return cn or en
+    # 名称都为空时，用规范化短编号回退，避免直接展示 NAMELESS / 26XX 占位符。
+    if tid:
+        short = extract_td_short_id(tid)
+        if short:
+            return short
+        if is_eqsc_placeholder_id(tid):
+            return "TD"
+        return tid
+    return fallback
 
 
 def _level_to_en_abbr(level_cn: str) -> str:
