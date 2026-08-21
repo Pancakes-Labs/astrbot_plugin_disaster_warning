@@ -104,11 +104,13 @@ def normalize_typhoon_id(typhoon_id: object) -> str:
     td_short = extract_td_short_id(raw)
     if td_short:
         return td_short
-    # EQSC 占位编号（26XX）：尚未正式编号，归一化为 TD + 原始占位编号，
+    # EQSC 占位编号（26XX）：尚未正式编号，归一化为 TD + 大写占位编号，
     # 与同源的 NAMELESS_07 / 2619 等条目在正式编号分配前共享同一去重键前缀，
-    # 但后缀保留原始占位编号以区分不同物理台风，避免键冲突导致互相覆盖。
+    # 但后缀保留大写占位编号以区分不同物理台风，避免键冲突导致互相覆盖。
+    # 统一转大写：is_eqsc_placeholder_id 同时接受 26xx 和 26XX，
+    # 若保留原始大小写会使同一台风进入不同的去重缓存和停编重试集合。
     if is_eqsc_placeholder_id(raw):
-        return f"TD_{raw}"
+        return f"TD_{raw.upper()}"
     # 纯数字官方编号统一为 4 位短编号
     if raw.isdigit():
         return raw[-4:]
