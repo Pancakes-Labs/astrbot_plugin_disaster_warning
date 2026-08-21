@@ -10,7 +10,7 @@ import math
 from typing import Any
 
 from ....utils.severity_emoji import TYPHOON_LEVEL_EMOJI, typhoon_level_emoji
-from .typhoon_ids import extract_td_short_id
+from .typhoon_ids import extract_td_short_id, is_eqsc_placeholder_id
 from .typhoon_values import clean_text, to_float
 
 # 移动方向展示映射：仅用于展示本地化，不改动原始业务字段。
@@ -59,6 +59,9 @@ MOVE_DIRECTION_DISPLAY_MAP: dict[str, str] = {
     "西偏南": "西南偏西",
     "西偏北": "西北偏西",
     "北偏西": "西北偏北",
+    # EQSC 特殊方向值：原地回旋少动 / 未知方向，直接透传展示。
+    "原地回旋少动": "原地回旋少动",
+    "未知方向": "未知方向",
 }
 
 WIND_CIRCLE_LABELS = {
@@ -181,6 +184,8 @@ def format_typhoon_short_id(*candidates: object) -> str:
     - 纯数字官方编号：202609 / 2609 -> 2609
     - NAMELESS 无名低压：NAMELESS_2604 / NAMELESS_07 -> TD04 / TD07
       （避免与正式编号 2604 冲突；07 与 EQSC 侧 TD07 归一到同一展示格式）
+    - EQSC 占位编号（26XX）：展示为 "TD"（尚未正式编号），
+      与同源 NAMELESS_07 / 2619 在正式编号分配前保持一致展示
     - 其他非标准编号：原样返回，不从混合文本硬抠数字
 
     供推送 Presenter 与查询 Presenter 共用，避免展示逻辑分叉。
@@ -204,6 +209,11 @@ def format_typhoon_short_id(*candidates: object) -> str:
             if short_id:
                 return short_id
             return text
+
+        # EQSC 占位编号（26XX / 2026XX）：尚未正式编号，展示为 TD，
+        # 避免把 "26XX" 这类占位符直接展示给用户。
+        if is_eqsc_placeholder_id(text):
+            return "TD"
 
         return text
     return ""

@@ -16,7 +16,7 @@ from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, TyphoonEvent
 from ..domain.event_payload import SourcePayload
 from ..domain.typhoon.typhoon_names import build_td_fallback_names
-from ..domain.typhoon.typhoon_values import clean_text
+from ..domain.typhoon.typhoon_values import clean_name_text, clean_text
 from ..sources.source_catalog import get_source_entry
 from .base_parser import BaseParser
 
@@ -87,10 +87,12 @@ class TyphoonParser(BaseParser):
             plugin_logger.debug(f"[灾害预警] {self.source_id} 台风消息缺少ID，跳过处理")
             return None
 
-        # 使用 clean_text 清洗名称/类型：无名低压的 name 可能是占位字符串
-        # "None"/"NULL"，若不清洗会写入领域事件，阻断后续富化覆盖有效名称。
-        name = clean_text(typhoon_data.get("name"))
-        name_en = clean_text(typhoon_data.get("name_en"))
+        # 使用 clean_name_text 清洗名称：无名低压的 name 可能是占位字符串
+        # "None"/"NULL"/"NAMELESS"，若不清洗会写入领域事件，阻断后续富化覆盖有效名称。
+        # 注意：名称字段用 clean_name_text（额外清洗 NAMELESS），
+        # 等级字段用 clean_text（NAMELESS 不是合法等级，但通用清洗已足够）。
+        name = clean_name_text(typhoon_data.get("name"))
+        name_en = clean_name_text(typhoon_data.get("name_en"))
         typhoon_type = clean_text(typhoon_data.get("type"))
 
         # FAN 无名低压同样可能只有占位名称：清洗后为空时，基于编号+等级

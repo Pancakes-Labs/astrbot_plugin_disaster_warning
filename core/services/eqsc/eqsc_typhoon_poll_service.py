@@ -9,17 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from astrbot.api import logger
 
 from ....utils.plugin_logger import plugin_logger
+from ....utils.time_converter import TimeConverter
 from ...app.services.eqsc_channel_service import EqscChannelService
 from ...domain.event_models import TyphoonEvent
 from ...domain.typhoon import (
     build_typhoon_event_envelope,
     clean_text,
     normalize_typhoon_id,
+    to_float,
 )
 from ...network.http.eqsc_token_manager import EqscTokenManager
 from ...network.http.eqsc_typhoon_client import EqscTyphoonClient
@@ -239,6 +242,82 @@ class EqscTyphoonPollService:
         # 缺省字段时保守视为活跃，避免漏推
         return True
 
+    @staticmethod
+    def _parse_track_time(value: Any) -> datetime | None:
+        """把 EQSC 时间字符串解析为带时区的 datetime。
+
+        与 typhoon_event_adapter._normalize_time 保持一致的时区处理规则：
+        无时区信息的时间按北京时间（UTC+8）解释，避免混合时区导致排序错误。
+        无法解析时返回 None。
+        """
+        if not value:
+            return None
+        # 直接传原始值给 TimeConverter.parse_datetime，不先转 str：
+        # 该方法已支持 str/int/float/datetime，先转 str 会使数值时间戳无法识别。
+        parsed = TimeConverter.parse_datetime(value)
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone(timedelta(hours=8)))
+        return parsed
+
+    @staticmethod
+    def _latest_track_timestamp(raw: dict[str, Any]) -> float:
+        """提取台风历史轨迹中最新的观测时间戳，用于同源去重排序。
+
+        EQSC historyTrack 顺序不保证，取所有节点时间解析后的最大 timestamp。
+        使用带时区解析而非原始字符串字典序比较，避免混合时区
+        （如 +08:00 与 Z）导致错误选出非最新条目。
+        无法解析的时间视为 0（排序时排在最前），确保不会因个别坏数据
+        导致整个条目被丢弃。
+        """
+        history = raw.get("historyTrack") or raw.get("history_track") or []
+        if not isinstance(history, list):
+            return 0.0
+        timestamps: list[float] = []
+        for node in history:
+            if not isinstance(node, dict):
+                continue
+            parsed = EqscTyphoonPollService._parse_track_time(node.get("time"))
+            if parsed is not None:
+                timestamps.append(parsed.timestamp())
+        return max(timestamps) if timestamps else 0.0
+
+    @staticmethod
+    def _track_node_fingerprints(raw: dict[str, Any]) -> set[str]:
+        """提取历史轨迹所有观测节点的 (timestamp, lat, lon) 指纹集合。
+
+        用于检测两个台风是否为同一物理台风的不同编报阶段条目：
+        EQSC 对同一台风在未编号/已编号/占位阶段会返回不同 id 的条目，
+        但它们的轨迹节点完全重叠。
+
+        跳过缺失坐标（lat/lon 为 None）的节点，避免 None 值参与指纹
+        导致不同数据源间的虚假不匹配。
+
+        时间键使用解析后的 timestamp（秒级整数），而非原始时间字符串：
+        相同瞬间的 Z 和 +08:00 表示会生成相同指纹，避免不同编报阶段
+        条目因时区表示差异而被误判为不同源。
+        """
+        history = raw.get("historyTrack") or raw.get("history_track") or []
+        if not isinstance(history, list):
+            return set()
+        fingerprints: set[str] = set()
+        for node in history:
+            if not isinstance(node, dict):
+                continue
+            parsed = EqscTyphoonPollService._parse_track_time(node.get("time"))
+            if parsed is None:
+                continue
+            lat = to_float(node.get("latitude"))
+            lon = to_float(node.get("longitude"))
+            # 跳过缺失坐标的节点：None 值参与指纹会导致不同数据源间
+            # 的虚假不匹配（如某源缺坐标而另一源有坐标时指纹不同）。
+            if lat is None or lon is None:
+                continue
+            # 用秒级整数 timestamp 作时间键，消除时区表示差异。
+            fingerprints.add(f"{int(parsed.timestamp())}|{lat:.1f}|{lon:.1f}")
+        return fingerprints
+
     def _build_live_envelope(self, raw: dict[str, Any]):
         """从 EQSC 原始对象构建实时推送事件。"""
         envelope = build_typhoon_event_envelope(
@@ -267,13 +346,64 @@ class EqscTyphoonPollService:
           直到投递成功后才从该集合移除，避免停编通知因瞬时失败永久丢失；
         - 早已停编的历史台风不在上述两个集合中，不进入投递，
           由 time_rule 兜底过滤，避免冷启动/每轮刷屏。
+
+        同源去重：EQSC 对同一物理台风在不同编报阶段会返回多个条目
+        （如 NAMELESS_07 停编 + 2619 活跃 + 26XX 占位活跃），
+        它们原始 id 不同且归一化键也不同（TD07 / 2619 / TD_26XX），
+        但轨迹节点完全重叠。此处用轨迹节点指纹集合检测同源关系：
+        若两个台风的轨迹节点有显著重叠（交集 >= 较小集合的 60%），
+        视为同一物理台风，只保留最新观测时间的条目，
+        避免同一台风推多条且停编/活跃状态反复横跳。
         """
-        current_active_ids: set[str] = set()
-        candidates: list[dict[str, Any]] = []
+        # 第一阶段：同源去重。
+        # 先按归一化 id 去重（处理同 id 的重复条目），
+        # 再按轨迹重叠检测跨 id 的同源条目。
+        valid_items: list[dict[str, Any]] = []
         for item in typhoon_list:
             if not isinstance(item, dict):
                 continue
-            typhoon_id = clean_text(item.get("id"))
+            raw_id = clean_text(item.get("id"))
+            if not raw_id:
+                continue
+            valid_items.append(item)
+
+        # 按最新观测时间降序排列，确保同源去重时保留最新条目
+        valid_items.sort(
+            key=lambda it: self._latest_track_timestamp(it),
+            reverse=True,
+        )
+
+        deduped: list[dict[str, Any]] = []
+        kept_fingerprints: list[set[str]] = []
+        for item in valid_items:
+            item_fps = self._track_node_fingerprints(item)
+            is_duplicate = False
+            for idx, kept_fps in enumerate(kept_fingerprints):
+                if not item_fps or not kept_fps:
+                    continue
+                # 轨迹节点重叠率 >= 60% 视为同源
+                overlap = len(item_fps & kept_fps)
+                smaller = min(len(item_fps), len(kept_fps))
+                if smaller > 0 and overlap / smaller >= 0.6:
+                    # 同源：当前条目已按时间降序排列，
+                    # 先加入的（deduped 中）观测时间更晚，跳过当前条目。
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                deduped.append(item)
+                kept_fingerprints.append(item_fps)
+
+        # 第二阶段：从去重后的条目中筛出活跃 + 刚停编台风。
+        # ID 口径统一：使用归一化 ID 检查 _last_active_ids / _pending_deactivate_ids，
+        # 与 _process_typhoon_updates 写入这两个集合时使用的归一化 ID 保持一致，
+        # 避免 26XX 停编投递失败后集合保存 TD_26XX，下一轮却用 26XX 检查导致漏重试。
+        current_active_ids: set[str] = set()
+        candidates: list[dict[str, Any]] = []
+        for item in deduped:
+            raw_id = clean_text(item.get("id"))
+            if not raw_id:
+                continue
+            typhoon_id = normalize_typhoon_id(raw_id)
             if not typhoon_id:
                 continue
             if self._is_active_typhoon(item):
