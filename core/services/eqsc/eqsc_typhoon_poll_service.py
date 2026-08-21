@@ -252,7 +252,9 @@ class EqscTyphoonPollService:
         """
         if not value:
             return None
-        parsed = TimeConverter.parse_datetime(str(value).strip())
+        # 直接传原始值给 TimeConverter.parse_datetime，不先转 str：
+        # 该方法已支持 str/int/float/datetime，先转 str 会使数值时间戳无法识别。
+        parsed = TimeConverter.parse_datetime(value)
         if parsed is None:
             return None
         if parsed.tzinfo is None:
@@ -283,7 +285,7 @@ class EqscTyphoonPollService:
 
     @staticmethod
     def _track_node_fingerprints(raw: dict[str, Any]) -> set[str]:
-        """提取历史轨迹所有观测节点的 (time, lat, lon) 指纹集合。
+        """提取历史轨迹所有观测节点的 (timestamp, lat, lon) 指纹集合。
 
         用于检测两个台风是否为同一物理台风的不同编报阶段条目：
         EQSC 对同一台风在未编号/已编号/占位阶段会返回不同 id 的条目，
@@ -291,6 +293,10 @@ class EqscTyphoonPollService:
 
         跳过缺失坐标（lat/lon 为 None）的节点，避免 None 值参与指纹
         导致不同数据源间的虚假不匹配。
+
+        时间键使用解析后的 timestamp（秒级整数），而非原始时间字符串：
+        相同瞬间的 Z 和 +08:00 表示会生成相同指纹，避免不同编报阶段
+        条目因时区表示差异而被误判为不同源。
         """
         history = raw.get("historyTrack") or raw.get("history_track") or []
         if not isinstance(history, list):
@@ -299,8 +305,8 @@ class EqscTyphoonPollService:
         for node in history:
             if not isinstance(node, dict):
                 continue
-            time = str(node.get("time") or "").strip()
-            if not time:
+            parsed = EqscTyphoonPollService._parse_track_time(node.get("time"))
+            if parsed is None:
                 continue
             lat = to_float(node.get("latitude"))
             lon = to_float(node.get("longitude"))
@@ -308,7 +314,8 @@ class EqscTyphoonPollService:
             # 的虚假不匹配（如某源缺坐标而另一源有坐标时指纹不同）。
             if lat is None or lon is None:
                 continue
-            fingerprints.add(f"{time}|{lat:.1f}|{lon:.1f}")
+            # 用秒级整数 timestamp 作时间键，消除时区表示差异。
+            fingerprints.add(f"{int(parsed.timestamp())}|{lat:.1f}|{lon:.1f}")
         return fingerprints
 
     def _build_live_envelope(self, raw: dict[str, Any]):
