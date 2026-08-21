@@ -395,7 +395,7 @@ class TelemetryManager:
                 logger.debug("[灾害预警] 遥测请求超时")
                 return False
             except aiohttp.ClientConnectionError as e:
-                logger.warning(f"[灾害预警] 遥测连接失败: {e}")
+                logger.debug(f"[灾害预警] 遥测连接失败: {e}")
                 return False
             except aiohttp.ClientPayloadError as e:
                 logger.debug(f"[灾害预警] 遥测数据负载异常，错误为 {e}")
