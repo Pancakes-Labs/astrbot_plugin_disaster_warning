@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-NULL_TEXTS = {"NULL", "NONE", "N/A", "-", "无数据"}
+# NAMELESS：EQSC 对未命名台风返回的字面量占位符，与 NULL/NONE 语义一致，
+# 必须当作空值清洗，否则会屏蔽 fallback 名称生成并直接展示在推送正文。
+NULL_TEXTS = {"NULL", "NONE", "N/A", "-", "无数据", "NAMELESS"}
 
 
 def is_nullish(value: Any) -> bool:
