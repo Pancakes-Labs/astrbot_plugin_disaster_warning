@@ -170,7 +170,7 @@ class NotificationCenter:
                 self._cache = next_cache
                 return changed
         except Exception as e:
-            logger.debug(f"[灾害预警] 同步远端通知失败: {e} (可忽略)")
+            logger.warning(f"[灾害预警] 同步远端通知失败: {e} (可忽略)")
             return False
         finally:
             async with self._sync_state_lock:
