@@ -84,7 +84,7 @@ class RegionService:
                     region_name += "附近"
                 return region_name
             return None
-        except (IndexError, ValueError, TypeError):
+        except (IndexError, ValueError, TypeError, OverflowError):
             return None
 
     def translate_place_name(

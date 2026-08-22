@@ -12,6 +12,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...app.services.eqsc_channel_service import EqscChannelService
 from ...services.config.config_service import ConfigAccessor
 from ...services.identity.event_deduplication_service import EventDeduplicationService
 from ..builders.card_message_builder import CardMessageBuilder
@@ -19,6 +20,8 @@ from ..builders.global_quake_card_builder import GlobalQuakeCardBuilder
 from ..builders.map_attachment_builder import MapAttachmentBuilder
 from ..builders.text_message_builder import TextMessageBuilder
 from ..render.remote_media_fetcher import RemoteMediaFetcher
+from ..render.snet_map_renderer import SnetMapRenderer
+from ..render.typhoon_map_renderer import TyphoonMapRenderer
 from .browser_manager import BrowserManager
 
 
@@ -33,7 +36,11 @@ class MessageManagerBootstrapService:
         self.text_message_builder = None
         self.card_message_builder = None
         self.global_quake_card_builder = None
+        self.snet_map_renderer = None
+        self.typhoon_map_renderer = None
         self.remote_media_fetcher = None
+        # 浏览器预热登记标志：构造阶段只登记不执行，待静默协调器武装后统一触发。
+        self._browser_warmup_pending = False
 
     def setup_filters(self, config: dict[str, Any]) -> None:
         """初始化全局过滤器与去重器。"""
@@ -70,21 +77,104 @@ class MessageManagerBootstrapService:
 
         playwright_mode = msg_config.get("playwright_mode", "local")
         playwright_server_url = msg_config.get("playwright_server_url", "")
+        # 仅本地模式生效：部分瓦片源（如 FAN Studio）证书过期时，
+        # 开启后可继续加载底图；会信任自签/过期证书，默认关闭。
+        ignore_https_errors = bool(msg_config.get("browser_ignore_https_errors", False))
         self.manager.browser_manager = BrowserManager(
             pool_size=pool_size,
             telemetry=telemetry,
             mode=playwright_mode,
             server_url=playwright_server_url,
+            ignore_https_errors=ignore_https_errors,
         )
 
         # 只有本地浏览器模式且确实需要图形渲染时才后台预热，
         # 这样既能缩短首次渲染等待，也能避免无地图场景白白消耗资源。
-        if playwright_mode == "local" and (
+        # include_map / GQ 卡 / S-Net / 台风路径图任一启用都预热。
+        data_sources = (
+            self.manager.config.get("data_sources", {})
+            if isinstance(self.manager.config, dict)
+            else {}
+        )
+        snet_cfg = (
+            data_sources.get("snet", {}) if isinstance(data_sources, dict) else {}
+        )
+        # 台风源：FAN 遗留开关 + EQSC 独立轮询开关
+        fan_studio_cfg = (
+            data_sources.get("fan_studio", {}) if isinstance(data_sources, dict) else {}
+        )
+        eqsc_cfg = (
+            data_sources.get("eqsc", {}) if isinstance(data_sources, dict) else {}
+        )
+        need_browser = (
             msg_config.get("include_map", False)
             or msg_config.get("use_global_quake_card", False)
-        ):
-            logger.debug("[灾害预警] 检测到已启用卡片渲染功能，正在后台预热浏览器...")
-            asyncio.create_task(self.manager.browser_manager.initialize())
+            or (
+                bool(isinstance(snet_cfg, dict) and snet_cfg.get("enabled", False))
+                and bool(snet_cfg.get("include_station_map", True))
+            )
+            # 台风路径图查询/推送也依赖 Playwright，启用台风源且开启路径图时一并预热。
+            or (
+                bool(
+                    isinstance(fan_studio_cfg, dict)
+                    and fan_studio_cfg.get("china_typhoon", False)
+                )
+                and bool(
+                    isinstance(self.manager.config.get("typhoon_config", {}), dict)
+                    and self.manager.config.get("typhoon_config", {}).get(
+                        "include_track_map", True
+                    )
+                )
+            )
+            or (
+                bool(
+                    isinstance(eqsc_cfg, dict)
+                    and EqscChannelService.resolve_eqsc_flags(eqsc_cfg) == (True, True)
+                )
+                and bool(
+                    isinstance(self.manager.config.get("typhoon_config", {}), dict)
+                    and self.manager.config.get("typhoon_config", {}).get(
+                        "include_track_map", True
+                    )
+                )
+            )
+        )
+        # 是否需要在合适的时机后台预热浏览器：只登记标志，真正预热推迟到
+        # 静默协调器武装后由 warmup_browser() 触发，避免在 AstrBot 加载窗口内
+        # 抢占事件循环导致页面创建超时（对应启动日志中的“创建页面 1 超时”）。
+        self._browser_warmup_pending = playwright_mode == "local" and need_browser
+
+    def warmup_browser(self, register_task=None) -> None:
+        """在合适的时机（静默协调器武装后）后台预热浏览器渲染底座。
+
+        预热任务自带异常吞噬，避免“Task exception was never retrieved”噪音；
+        预热失败仅降级为 WARN，渲染时按需重试，不影响主链路。
+
+        Args:
+            register_task: 可选回调，用于把预热任务登记到服务级后台任务集合，
+                便于停机时统一回收（例如 DisasterService.register_background_task）。
+        """
+        if not getattr(self, "_browser_warmup_pending", False):
+            return
+        self._browser_warmup_pending = False
+        browser_manager = self.manager.browser_manager
+        if browser_manager is None:
+            return
+
+        async def _safe_initialize() -> None:
+            try:
+                await browser_manager.initialize()
+            except Exception as exc:
+                logger.warning(f"[灾害预警] 浏览器后台预热失败（已记录）: {exc}")
+
+        logger.debug("[灾害预警] 检测到已启用卡片渲染功能，正在后台预热浏览器...")
+        task = asyncio.create_task(_safe_initialize(), name="dw_browser_warmup")
+        # 登记到后台任务集合，防止停机后任务仍持有浏览器引用导致重新拉起
+        if callable(register_task):
+            try:
+                register_task(task)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 浏览器预热任务登记失败（已忽略）: {exc}")
 
     def setup_message_components(self) -> None:
         """初始化消息构建与远程媒体依赖。"""
@@ -109,10 +199,21 @@ class MessageManagerBootstrapService:
             temp_dir=str(self.manager.temp_dir),
             browser_manager=self.manager.browser_manager,
         )
+        self.snet_map_renderer = SnetMapRenderer(
+            browser_manager=self.manager.browser_manager,
+            plugin_root=self.manager.plugin_root,
+        )
+        self.typhoon_map_renderer = TyphoonMapRenderer(
+            browser_manager=self.manager.browser_manager,
+            plugin_root=self.manager.plugin_root,
+        )
         self.remote_media_fetcher = RemoteMediaFetcher(
             # 远程媒体抓取器本身不关心底层会话如何创建，
             # 统一通过回调注入获取会话与判定内容类型的能力。
             session_getter=self.manager.get_remote_media_session,
             image_type_checker=self.manager._remote_media_service.is_image_content_type,
             content_type_guesser=self.manager._remote_media_service.guess_image_content_type,
+            image_bytes_checker=self.manager._remote_media_service.looks_like_image_bytes,
+            # 按目标 URL 生成请求级 Referer，规避 CWA 等图片站的防盗链拦截。
+            referer_builder=self.manager._remote_media_service.guess_referer,
         )

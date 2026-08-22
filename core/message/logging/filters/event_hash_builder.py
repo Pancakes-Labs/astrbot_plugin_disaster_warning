@@ -85,26 +85,77 @@ class EventHashBuilder:
         if event_id:
             hash_parts.append(f"eid:{event_id}")
 
-            report_num = (
-                data.get("updates") or data.get("ReportNum") or data.get("Serial")
+            # OpenQuake/GQ 使用 revisionId；其他 EEW 使用 updates/ReportNum/Serial。
+            # 严格查找第一个非 None 且非空字符串的字段，确保 0 (如第 0 报或 revisionId 0) 作为有效标识被保留
+            report_num_keys = [
+                "updates",
+                "ReportNum",
+                "Serial",
+                "revisionId",
+                "revision_id",
+            ]
+            report_num = next(
+                (
+                    data[k]
+                    for k in report_num_keys
+                    if data.get(k) is not None and str(data[k]) != ""
+                ),
+                None,
             )
-            if report_num:
+            if report_num is not None:
                 hash_parts.append(f"rn:{report_num}")
 
-            if not report_num:
-                updated = data.get("updated") or data.get("updateTime")
-                if updated:
+            # 动作维度：同一事件的 update / archived / cancelled 应分别落盘。
+            action = data.get("action")
+            if action:
+                hash_parts.append(f"act:{action}")
+
+            if report_num is None:
+                updated_keys = ["updated", "updateTime", "lastUpdateMs", "timestampMs"]
+                updated = next(
+                    (
+                        data[k]
+                        for k in updated_keys
+                        if data.get(k) is not None and str(data[k]) != ""
+                    ),
+                    None,
+                )
+                if updated is not None:
                     hash_parts.append(f"up:{str(updated)}")
 
-                mag = data.get("magnitude") or data.get("Magnitude")
-                if mag:
+                mag = (
+                    data.get("magnitude")
+                    if data.get("magnitude") is not None
+                    else data.get("Magnitude")
+                )
+                if mag is not None:
                     hash_parts.append(f"m:{mag}")
 
             return "|".join(hash_parts)
 
-        time_info = data.get("shockTime") or data.get("time") or data.get("OriginTime")
-        if time_info:
-            hash_parts.append(f"et:{str(time_info)[:16]}")
+        # 退化匹配路径：时间字段可能为 ISO 字符串或毫秒时间戳，保留原字符串精细度以防截断后冲突
+        time_info_keys = [
+            "shockTime",
+            "time",
+            "OriginTime",
+            "originTimeIso",
+            "originTimeMs",
+        ]
+        time_info = next(
+            (
+                data[k]
+                for k in time_info_keys
+                if data.get(k) is not None and str(data[k]) != ""
+            ),
+            None,
+        )
+        if time_info is not None:
+            time_str = str(time_info)
+            # 如果是普通的简短时间串截取前 16 位，如果是精确 ISO/毫秒串则全量保留
+            if "T" in time_str or len(time_str) > 16:
+                hash_parts.append(f"et:{time_str}")
+            else:
+                hash_parts.append(f"et:{time_str[:16]}")
 
         mag = data.get("magnitude") or data.get("Magnitude")
         if mag:
@@ -118,14 +169,26 @@ class EventHashBuilder:
             except (ValueError, TypeError):
                 pass
 
+        action = data.get("action")
+        if action:
+            hash_parts.append(f"act:{action}")
+
         return "|".join(hash_parts)
 
     def generate_tsunami_hash(self, data: dict[str, Any], hash_parts: list[str]) -> str:
         """生成海啸类消息的去重哈希。"""
-        event_id = data.get("id") or data.get("code")
+        # EQSC 使用 eventID；中国海啸常用 id/code；一并兼容
+        event_id = (
+            data.get("id")
+            or data.get("code")
+            or data.get("eventID")
+            or data.get("eventId")
+        )
         if event_id:
             hash_parts.append(f"tid:{event_id}")
-            time_info = data.get("issue_time") or data.get("time")
+            time_info = (
+                data.get("issue_time") or data.get("time") or data.get("register")
+            )
             if time_info:
                 hash_parts.append(f"tt:{str(time_info)[:16]}")
             return "|".join(hash_parts)

@@ -55,12 +55,52 @@ class PluginCommandSupportService:
             self.plugin._config_schema = {}
         return self.plugin._config_schema
 
+    # 敏感字段名集合：在配置查看指令中这些字段的值会被脱敏为 ***
+    # 包含 schema 中标记了 hidden 的字段，以及虽未标记但含敏感信息的字段
+    _SENSITIVE_KEY_NAMES = frozenset(
+        {
+            "password",
+            "refresh_token",
+            "secret",
+            "token",
+            "api_key",
+            "apikey",
+            "private_key",
+            "access_key",
+            "refresh_token",
+            "playwright_server_url",
+        }
+    )
+
+    @classmethod
+    def _is_sensitive_key(cls, key: str, item_schema: dict[str, Any]) -> bool:
+        """判断字段是否为敏感字段。
+
+        判定规则：schema 中标记 hidden=true，或字段名命中敏感字段集合。
+        """
+        if item_schema.get("hidden") is True:
+            return True
+        # 去除下划线和中划线后做大小写不敏感匹配
+        normalized_key = key.replace("-", "_").lower()
+        return normalized_key in cls._SENSITIVE_KEY_NAMES
+
+    @staticmethod
+    def _mask_sensitive_value(value: Any) -> Any:
+        """对敏感字段值进行脱敏处理。
+
+        非空字符串值替换为 ***，空值保持原样展示，
+        非字符串类型（如 bool/int）不脱敏。
+        """
+        if isinstance(value, str) and value.strip():
+            return "***"
+        return value
+
     def translate_config_recursive(
         self,
         config_item: Any,
         schema_item: dict[str, Any] | None,
     ) -> Any:
-        """递归将配置键名转换为中文描述。"""
+        """递归将配置键名转换为中文描述，并对敏感字段脱敏。"""
         if isinstance(config_item, list):
             return [
                 self.translate_config_recursive(item, schema_item)
@@ -86,6 +126,11 @@ class PluginCommandSupportService:
                 schema_item.get(key, {}) if isinstance(schema_item, dict) else {}
             )
             description = item_schema.get("description", legacy_alias_map.get(key, key))
+
+            # 敏感字段脱敏：schema 标记 hidden 或字段名命中敏感字段集合时替换为 ***
+            if self._is_sensitive_key(key, item_schema):
+                translated[description] = self._mask_sensitive_value(value)
+                continue
 
             if isinstance(value, dict):
                 # 嵌套配置继续按子结构递归翻译，保持整棵配置树的展示风格一致

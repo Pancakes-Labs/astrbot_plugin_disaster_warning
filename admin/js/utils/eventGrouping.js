@@ -10,6 +10,19 @@
     }
 
     /**
+     * 台风路径点时间解析：兼容 EQSC 的斜杠时间与主表 ISO 时间，
+     * 避免不同格式导致主表最新点被排到历史点之后。
+     */
+    function getTyphoonTimeMs(event) {
+        const raw = String(event?.time || event?.timestamp || event?.recorded_at || '').trim();
+        if (!raw) return 0;
+        const normalized = raw.replace(/\//g, '-').replace(' ', 'T');
+        const timestamp = Date.parse(normalized);
+        if (Number.isFinite(timestamp)) return timestamp;
+        return getEventTimeMs(event);
+    }
+
+    /**
      * 精细化事件版本/报数排序算法
      * 
      * 排序策略：
@@ -63,20 +76,98 @@
         const safeEvents = Array.isArray(events) ? events : [];
 
         // Step 1: 扫描并依据事件 ID 划分群组
+        // 台风事件优先使用 real_event_id（台风编号）作为分组键，
+        // 因为台风的 event_id 可能因数据形态（Fan/EQSC）不同而变化，
+        // 但 real_event_id（如 202609）在同一台风生命周期内保持稳定。
         for (const evt of safeEvents) {
-            const eventId = evt.event_id || evt.id || `${evt.time}-${evt.description}`;
-            if (!groups[eventId]) {
-                groups[eventId] = { id: eventId, events: [], latestEvent: null };
+            const evtType = String(evt.type || evt._groupType || '').toLowerCase();
+            let groupKey;
+            if (evtType === 'typhoon' && evt.real_event_id) {
+                // 台风用 real_event_id + source 组合，避免不同源同编号误合并
+                groupKey = `typhoon:${evt.real_event_id}:${evt.source || evt.source_id || ''}`;
+            } else if (evtType === 'tsunami') {
+                // 海啸按稳定事件 ID 折叠多报：
+                // unique_id 可能是 "source|uuid" 或裸 uuid；real_event_id / event_id 也可能是业务编号
+                const rawUnique = String(evt.unique_id || '').trim();
+                const bareUnique = rawUnique.includes('|')
+                    ? rawUnique.split('|').pop().trim()
+                    : rawUnique;
+                const stableId = String(
+                    evt.real_event_id
+                    || bareUnique
+                    || evt.event_id
+                    || evt.code
+                    || ''
+                ).trim();
+                // 规范化中国海啸历史别名，避免 fan_studio_tsunami 与
+                // china_tsunami_fanstudio 被拆成两个分组。
+                const rawSource = String(evt.source || evt.source_id || '').trim();
+                const sourceKey = (() => {
+                    const lower = rawSource.toLowerCase();
+                    if (
+                        lower === 'fan_studio_tsunami'
+                        || lower === 'china_tsunami'
+                        || lower === 'china_tsunami_fanstudio'
+                    ) {
+                        return 'china_tsunami_fanstudio';
+                    }
+                    if (
+                        lower === 'jma_tsunami_p2p'
+                        || lower === 'jma_tsunami'
+                        || lower === 'japan_jma_tsunami'
+                        || lower === 'p2p_tsunami'
+                    ) {
+                        return 'jma_tsunami_p2p';
+                    }
+                    if (
+                        lower === 'jma_tsunami_eqsc'
+                        || lower === 'eqsc_tsunami'
+                    ) {
+                        return 'jma_tsunami_eqsc';
+                    }
+                    return rawSource || 'unknown';
+                })();
+                if (stableId) {
+                    groupKey = `tsunami:${stableId}:${sourceKey}`;
+                } else {
+                    groupKey = evt.event_id || evt.id || `${evt.time}-${evt.description}`;
+                }
+            } else {
+                groupKey = evt.event_id || evt.id || `${evt.time}-${evt.description}`;
             }
-            groups[eventId].events.push(evt);
+            if (!groups[groupKey]) {
+                groups[groupKey] = { id: groupKey, events: [], latestEvent: null };
+            }
+            groups[groupKey].events.push(evt);
         }
 
         // Step 2: 组内精密排序与历史去重合并
         Object.keys(groups).forEach((id) => {
             const group = groups[id];
-            group.events.sort(compareEvents); // 组内排序
+            const groupType = String(group.events[0]?.type || group.events[0]?._groupType || '').toLowerCase();
+            if (groupType === 'typhoon') {
+                // events 分页结果中的第一条台风主记录代表当前综合状态；
+                // 先固定主记录，再按观测时间排列历史快照，避免主记录被排到末尾。
+                const primaryEvent = group.events[0];
+                if (primaryEvent) primaryEvent._isTyphoonPrimary = true;
+                group.events.sort((a, b) => {
+                    if (a._isTyphoonPrimary !== b._isTyphoonPrimary) {
+                        return a._isTyphoonPrimary ? -1 : 1;
+                    }
+                    return getTyphoonTimeMs(b) - getTyphoonTimeMs(a);
+                });
+            } else {
+                group.events.sort(compareEvents);
+            }
             group.latestEvent = group.events[0];
-            
+
+            // 台风最新一报的 level 是峰值，需要用 _snapshot_level 覆盖为当前观测等级，
+            // 使 EventGroupTimeline 中最新路径点展示的是当前强度而非峰值。
+            const latestType = String(group.latestEvent.type || group.latestEvent._groupType || '').toLowerCase();
+            if (latestType === 'typhoon' && group.latestEvent._snapshot_level) {
+                group.latestEvent.level = group.latestEvent._snapshot_level;
+            }
+
             const source = group.latestEvent.source || group.latestEvent.source_id || '';
             const sourceLower = String(source).toLowerCase();
             
@@ -90,18 +181,44 @@
             // 合并历史事件备份
             if (group.latestEvent.history && Array.isArray(group.latestEvent.history)) {
                 const existingKeys = new Set(group.events.map((event) => buildDedupKey(event)));
-                const historyEvents = group.latestEvent.history.filter((historyEvent) => {
-                    const key = buildDedupKey(historyEvent);
-                    if (existingKeys.has(key)) return false;
-                    existingKeys.add(key);
-                    return true;
-                });
+                const parentSource = group.latestEvent.source || group.latestEvent.source_id || '';
+                const parentSourceId = group.latestEvent.source_id || group.latestEvent.source || '';
+                const parentType = group.latestEvent.type || group.latestEvent._groupType || '';
+                const historyEvents = group.latestEvent.history
+                    .map((historyEvent) => {
+                        if (!historyEvent || typeof historyEvent !== 'object') return null;
+                        // event_updates 快照可能缺 source；继承主事件来源，避免「未知来源」
+                        const enriched = { ...historyEvent };
+                        if (!enriched.source) enriched.source = parentSource;
+                        if (!enriched.source_id) enriched.source_id = parentSourceId;
+                        if (!enriched.type) enriched.type = parentType;
+                        return enriched;
+                    })
+                    .filter((historyEvent) => {
+                        if (!historyEvent) return false;
+                        const key = buildDedupKey(historyEvent);
+                        if (existingKeys.has(key)) return false;
+                        existingKeys.add(key);
+                        return true;
+                    });
                 if (historyEvents.length > 0) {
                     group.events.push(...historyEvents);
-                    group.events.sort(compareEvents); // 再次排序
+                    if (groupType === 'typhoon') {
+                        group.events.sort((a, b) => {
+                            if (a._isTyphoonPrimary !== b._isTyphoonPrimary) {
+                                return a._isTyphoonPrimary ? -1 : 1;
+                            }
+                            return getTyphoonTimeMs(b) - getTyphoonTimeMs(a);
+                        });
+                    } else {
+                        group.events.sort(compareEvents);
+                    }
                     group.updateCount = isHttpListBased ? 1 : Math.max(group.events.length, backendCount);
                 }
             }
+
+            // 合并历史快照后重新同步最新点，避免 latestEvent 仍指向合并前的旧引用。
+            group.latestEvent = group.events[0] || group.latestEvent;
         });
 
         // Step 3: 将群组按时间重新排布并输出为数组

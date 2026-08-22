@@ -83,22 +83,23 @@
     padding: 22px 24px;
 }
 
-/* 顶部通知中心横幅卡片 (Hero Banner) */
+/* 顶部通知中心横幅卡片 (Hero Banner) —— 背景写入视觉面变量 */
 .notifications-hero-card {
-    padding: 18px 24px;
-    background:
+    --card-bg:
         linear-gradient(135deg, rgba(103, 80, 164, 0.08), rgba(103, 80, 164, 0.025) 48%, rgba(255, 255, 255, 0.72) 100%),
         var(--md-sys-color-surface);
+    --hover-lift: 0px;
+    padding: 18px 24px;
     position: relative;
-    overflow: hidden;
+    overflow: hidden; /* 裁剪右下角装饰光晕，避免溢出卡片圆角 */
 }
 
 body.dark-theme .notifications-hero-card {
-    background:
+    --card-bg:
         linear-gradient(135deg, rgba(208, 188, 255, 0.10), rgba(79, 55, 139, 0.08) 48%, rgba(20, 18, 24, 0.86) 100%),
         rgba(28, 27, 31, 0.92);
-    border-color: rgba(208, 188, 255, 0.12);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.30);
+    --card-border-color: rgba(208, 188, 255, 0.12);
+    --card-shadow: 0 10px 28px rgba(0, 0, 0, 0.30);
 }
 
 /* 右下角极简虚化渐变装饰大圆，丰富画面背景细节 */
@@ -263,26 +264,27 @@ body.dark-theme .notifications-inline-meta-item.is-pill {
     gap: 16px;
     min-height: 320px;
     position: relative;
-    overflow: hidden;
+    overflow: hidden; /* 裁剪装饰光晕；关闭上浮见 --hover-lift: 0 */
 }
 
 .notification-feed-card {
+    --card-bg:
+        linear-gradient(180deg, rgba(103, 80, 164, 0.06), rgba(103, 80, 164, 0.02) 34%, rgba(255, 255, 255, 0.78) 100%),
+        var(--md-sys-color-surface);
+    --card-shadow: 0 8px 24px rgba(103, 80, 164, 0.08);
+    --hover-lift: 0px;
     min-height: auto;
     padding: 18px 20px 16px;
     gap: 12px;
     border-radius: 20px;
-    background:
-        linear-gradient(180deg, rgba(103, 80, 164, 0.06), rgba(103, 80, 164, 0.02) 34%, rgba(255, 255, 255, 0.78) 100%),
-        var(--md-sys-color-surface);
-    box-shadow: 0 8px 24px rgba(103, 80, 164, 0.08);
 }
 
 body.dark-theme .notification-feed-card {
-    background:
+    --card-bg:
         linear-gradient(180deg, rgba(208, 188, 255, 0.075), rgba(79, 55, 139, 0.055) 34%, rgba(20, 18, 24, 0.90) 100%),
         rgba(28, 27, 31, 0.92);
-    border-color: rgba(208, 188, 255, 0.11);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.30);
+    --card-border-color: rgba(208, 188, 255, 0.11);
+    --card-shadow: 0 10px 26px rgba(0, 0, 0, 0.30);
 }
 
 /* 通知馈送卡片背景光晕装饰 */
@@ -299,13 +301,13 @@ body.dark-theme .notification-feed-card {
 /* 已读通知馈送卡片半透明变淡展示，突出未读消息 */
 .notification-feed-card.is-read {
     opacity: 0.82;
-    border-color: rgba(103, 80, 164, 0.10);
+    --card-border-color: rgba(103, 80, 164, 0.10);
 }
 
 /* 紧急/严重级别通知的特殊红色警告边框 */
 .task-card-enhanced.is-urgent,
 .notification-feed-card.is-urgent {
-    border-color: rgba(245, 158, 11, 0.35);
+    --card-border-color: rgba(245, 158, 11, 0.35);
 }
 
 /* 通知馈送单卡片顶栏排版 */

@@ -16,11 +16,15 @@ from playwright.async_api import Browser, Page, async_playwright
 
 from astrbot.api import logger
 
+from ....core.services.telemetry.telemetry_utils import track_error_safely
 from ....utils.plugin_logger import plugin_logger
 
 
 class BrowserManager:
     """浏览器管理器。"""
+
+    # 页面池默认视口；大尺寸卡片（如 S-Net 1400×1000）可在 render_card 临时覆盖
+    DEFAULT_VIEWPORT: dict[str, int] = {"width": 800, "height": 800}
 
     def __init__(
         self,
@@ -28,13 +32,30 @@ class BrowserManager:
         telemetry=None,
         mode: str = "local",
         server_url: str = "",
+        ignore_https_errors: bool = False,
     ):
-        """初始化浏览器管理器。"""
+        """初始化浏览器管理器。
+
+        Args:
+            pool_size: 页面池大小。
+            telemetry: 遥测服务实例。
+            mode: 运行模式，local 或 remote。
+            server_url: 远程浏览器服务地址。
+            ignore_https_errors: 是否忽略 HTTPS 证书错误（仅本地模式生效）。
+                默认关闭。某些地图瓦片源（如 FAN Studio ）证书过期时，
+                开启后底图可继续加载；但会信任自签/过期证书，请谨慎使用。
+        """
         self.pool_size = pool_size
         self._browser: Browser | None = None
         self._playwright = None
         # 远程连接场景下可能需要保留上下文对象引用。
         self._context = None
+        # 共享 context 是否已关闭（由 _cleanup 联动维护，不依赖属性探测）。
+        self._context_closed = False
+        # 共享 context 创建/关闭互斥锁：_create_local_page 可能在
+        # 补池、应急建页等多协程路径并发调用，不加锁会重复创建 context 造成泄漏。
+        self._context_lock = asyncio.Lock()
+        self._ignore_https_errors = bool(ignore_https_errors)
         self._page_pool: asyncio.Queue = asyncio.Queue(maxsize=pool_size)
         # 信号量用于限制同时渲染数量，页面创建锁与初始化锁用于避免并发竞争。
         self._semaphore = asyncio.Semaphore(pool_size)
@@ -46,6 +67,113 @@ class BrowserManager:
         self._mode = mode
         self._server_url = server_url
 
+    @staticmethod
+    def _normalize_viewport(
+        viewport: dict | None,
+    ) -> dict[str, int] | None:
+        """把可选 viewport 规整为整数宽高；非法时返回 None。"""
+        if not viewport or not isinstance(viewport, dict):
+            return None
+        try:
+            width = int(viewport.get("width", 0))
+            height = int(viewport.get("height", 0))
+        except (TypeError, ValueError):
+            return None
+        if width < 1 or height < 1:
+            return None
+        return {"width": width, "height": height}
+
+    @staticmethod
+    def _normalize_render_label(render_label: str | None) -> str:
+        """规范化渲染来源标签，供成功/失败日志使用。"""
+        text = str(render_label or "").strip()
+        return text or "卡片"
+
+    @staticmethod
+    def _is_target_closed_error(error: Exception | str | None) -> bool:
+        """判断是否为 Playwright 目标/浏览器已关闭类错误。"""
+        message = str(error or "").lower()
+        return any(
+            marker in message
+            for marker in (
+                "target page, context or browser has been closed",
+                "browser has been closed",
+                "target closed",
+                "page has been closed",
+                "context has been closed",
+            )
+        )
+
+    @staticmethod
+    def _is_map_tile_url(url: str | None) -> bool:
+        """判断 URL 是否为地图瓦片资源。"""
+        text = str(url or "").lower()
+        if not text:
+            return False
+        if "tilemap.fanstudio.tech" in text:
+            return True
+        if "appmaptile" in text or "webrd0" in text:
+            return True
+        if "/petaldark/" in text or "/petallight/" in text:
+            return True
+        return any(
+            marker in text
+            for marker in (
+                "/arcwi/",
+                "/arcwob/",
+                "/arcwh/",
+                "/geovis/",
+                "tile.openstreetmap",
+                "tiles.",
+                "/tiles/",
+            )
+        )
+
+    @classmethod
+    def _is_benign_request_failure(
+        cls,
+        *,
+        url: str | None,
+        failure_text: str | None,
+        resource_type: str | None = None,
+    ) -> bool:
+        """识别渲染过程中可忽略的资源失败。
+
+        Leaflet 在瓦片重试、视野更新、截图收尾时会主动中止旧请求，
+        Playwright 常以 net::ERR_ABORTED 上报；出图成功时这些属于噪声。
+        """
+        failure = str(failure_text or "").lower()
+        is_aborted = (
+            "err_aborted" in failure
+            or "net::err_aborted" in failure
+            or failure.strip() in {"aborted", "abort", "canceled", "cancelled"}
+        )
+        if not is_aborted:
+            return False
+        return cls._is_map_tile_url(url)
+
+    @staticmethod
+    def _dedupe_failures(entries: list[str]) -> list[str]:
+        """按条目内容去重并保持首次出现顺序，供汇总日志使用。
+
+        Args:
+            entries: 原始失败条目列表（如 "GET https://... -> net::ERR_CERT_DATE_INVALID"）。
+
+        Returns:
+            去重后的条目列表；若输入为空则返回空列表。
+        """
+        if not entries:
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        for entry in entries:
+            key = str(entry).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(entry)
+        return result
+
     def _truncate_debug_text(self, value, limit: int = 240) -> str:
         """截断浏览器侧日志文本，避免单条日志过长。"""
         text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
@@ -53,13 +181,330 @@ class BrowserManager:
             return text
         return f"{text[:limit]}..."
 
+    async def _track_render_performance(
+        self,
+        *,
+        success: bool,
+        render_label: str,
+        elapsed_seconds: float,
+        failure_type: str | None = None,
+    ) -> None:
+        """上报卡片渲染性能指标（成功率与耗时，供遥测分析渲染稳定性）。"""
+        if not self._telemetry or not self._telemetry.enabled:
+            return
+        try:
+            extra = {
+                "success": bool(success),
+                "mode": str(self._mode),
+                "render_label": str(render_label or "unknown"),
+                "elapsed_ms": int(max(0.0, float(elapsed_seconds)) * 1000),
+            }
+            if failure_type:
+                extra["failure_type"] = failure_type
+            await self._telemetry.track_feature("render_performance", extra)
+        except Exception as track_err:
+            logger.debug(f"[灾害预警] 渲染性能遥测上报失败: {track_err}")
+
+    async def _is_page_usable(self, page: Page | None) -> bool:
+        """检查页面是否仍可用于渲染。"""
+        if page is None:
+            return False
+        try:
+            if page.is_closed():
+                return False
+            # 轻量探测：页面所属浏览器/上下文若已失效，这里会抛出。
+            _ = page.context
+            # 给探测加超时，避免页面卡死时把归还/取用流程一起拖死。
+            await asyncio.wait_for(page.evaluate("() => true"), timeout=1.0)
+            return True
+        except Exception:
+            return False
+
+    async def _is_browser_alive(self) -> bool:
+        """检查本地浏览器进程是否仍可用。"""
+        if self._closed or self._browser is None:
+            return False
+        try:
+            # Playwright Browser.is_connected() 在进程崩溃后会返回 False。
+            is_connected = getattr(self._browser, "is_connected", None)
+            if callable(is_connected):
+                return bool(is_connected())
+            return True
+        except Exception:
+            return False
+
+    async def _ensure_local_browser_ready(self) -> bool:
+        """确保本地浏览器与页面池可用；必要时自动重建。"""
+        if self._mode != "local":
+            return self._initialized and not self._closed
+
+        if self._closed:
+            return False
+
+        # 快路径：已初始化且浏览器仍连接时直接复用。
+        if self._initialized and await self._is_browser_alive():
+            return True
+
+        # 慢路径：加初始化锁，避免并发渲染同时触发多次重建。
+        async with self._init_lock:
+            if self._closed:
+                return False
+            if self._initialized and await self._is_browser_alive():
+                return True
+
+            logger.warning("[灾害预警] 检测到浏览器不可用，尝试重新初始化...")
+            try:
+                # 注意：这里不能调用 initialize() 内部的 _init_lock（同协程重入会卡死），
+                # 因此在已持有锁的情况下直接执行重建步骤。
+                await self._cleanup()
+                self._closed = False
+
+                logger.info(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
+                start_time = time.time()
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    args=["--no-sandbox", "--disable-setuid-sandbox"]
+                )
+                logger.info("[灾害预警] 本地浏览器启动成功")
+                await self._initialize_local_page_pool()
+                elapsed = time.time() - start_time
+                self._initialized = True
+                logger.info(
+                    f"[灾害预警] 浏览器重建完成，耗时 {elapsed:.2f}秒，页面池大小: {self.pool_size}"
+                )
+                return await self._is_browser_alive()
+            except Exception as reinit_err:
+                logger.error(f"[灾害预警] 浏览器重新初始化失败: {reinit_err}")
+                await self._cleanup()
+                return False
+
+    async def _ensure_local_context(self):
+        """确保本地浏览器共享上下文就绪。
+
+        并发安全：context 的重新创建受 _context_lock 保护，避免
+        补池/应急建页等多协程路径并发进入时各自创建 context 造成泄漏。
+        存活性以 _context_closed 显式标志为准（由 _cleanup 联动维护），
+        不依赖 .browser 属性探测——该属性在 close() 后仍可访问，无法可靠识别已关闭的 context。
+        """
+        if not self._browser:
+            raise RuntimeError("浏览器未就绪，无法创建页面")
+        async with self._context_lock:
+            # double-check：锁内再次确认，避免重复创建。
+            if self._context is not None and not self._context_closed:
+                return self._context
+            self._context = await self._browser.new_context(
+                viewport=dict(self.DEFAULT_VIEWPORT),
+                device_scale_factor=2,
+                ignore_https_errors=self._ignore_https_errors,
+            )
+            self._context_closed = False
+            if self._ignore_https_errors:
+                logger.debug(
+                    "[灾害预警] 已启用忽略 HTTPS 证书错误（仅对瓦片等资源加载生效）"
+                )
+            return self._context
+
+    async def _create_local_page(self) -> Page:
+        """创建本地页面池中的新页面。"""
+        context = await self._ensure_local_context()
+        return await context.new_page()
+
+    async def _put_page_into_pool(self, page: Page) -> bool:
+        """非阻塞入池；池满时关闭多余页面，避免 put 永久阻塞。"""
+        try:
+            self._page_pool.put_nowait(page)
+            return True
+        except asyncio.QueueFull:
+            logger.debug("[灾害预警] 页面池已满，关闭多余页面")
+            try:
+                if not page.is_closed():
+                    await page.close()
+            except Exception:
+                pass
+            return False
+        except Exception as put_err:
+            logger.debug(f"[灾害预警] 页面入池失败: {put_err}")
+            try:
+                if not page.is_closed():
+                    await page.close()
+            except Exception:
+                pass
+            return False
+
+    async def _return_page_to_pool(self, page: Page | None) -> None:
+        """仅在页面仍可用时归还页面池，避免把坏页重新投入复用。"""
+        if page is None:
+            return
+        try:
+            if await self._is_page_usable(page):
+                if await self._put_page_into_pool(page):
+                    return
+                # 入池失败（满/异常）时页面已关闭，仍尝试补齐容量
+                await self._replenish_page_pool()
+                return
+        except Exception as return_err:
+            logger.debug(f"[灾害预警] 归还页面到池失败: {return_err}")
+
+        # 页面已不可用：尽量关闭，并补一个新页面维持池容量。
+        try:
+            if not page.is_closed():
+                await page.close()
+        except Exception:
+            pass
+        await self._replenish_page_pool()
+
+    async def _acquire_usable_page(self, timeout: float = 5.0) -> Page | None:
+        """从页面池获取可用页面；遇到坏页时丢弃并补充，必要时直接新建。"""
+        if not await self._ensure_local_browser_ready():
+            return None
+
+        deadline = time.time() + max(timeout, 0.1)
+        discarded = 0
+
+        while time.time() < deadline:
+            remaining = max(0.05, deadline - time.time())
+            page: Page | None = None
+            try:
+                page = await asyncio.wait_for(self._page_pool.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+
+            if await self._is_page_usable(page):
+                return page
+
+            discarded += 1
+            try:
+                if page and not page.is_closed():
+                    await page.close()
+            except Exception:
+                pass
+
+            # 坏页不回池，异步补齐容量后继续取下一个。
+            await self._replenish_page_pool()
+
+        if discarded:
+            logger.warning(
+                f"[灾害预警] 页面池中发现 {discarded} 个不可用页面，已丢弃并尝试补充"
+            )
+
+        # 池中暂时没有可用页时，直接新建一个应急页面。
+        try:
+            if await self._ensure_local_browser_ready():
+                page = await self._create_local_page()
+                return page
+        except Exception as create_err:
+            logger.error(f"[灾害预警] 创建应急页面失败: {create_err}")
+
+        return None
+
+    async def _replenish_page_pool(self) -> None:
+        """在页面损坏或关闭后，尽量把页面池补回到目标容量。"""
+        if self._mode != "local" or self._closed:
+            return
+
+        async with self._page_creation_lock:
+            if not await self._ensure_local_browser_ready():
+                return
+
+            while self._page_pool.qsize() < self.pool_size:
+                try:
+                    new_page = await self._create_local_page()
+                    if not await self._put_page_into_pool(new_page):
+                        # 池已满：停止补充
+                        break
+                except Exception as recover_err:
+                    logger.error(f"[灾害预警] 页面恢复失败: {recover_err}")
+                    break
+
+    async def _wait_for_fonts_ready(self, page: Page, timeout_ms: int = 1500) -> None:
+        """等待网页字体就绪，超时后继续截图，避免卡死在 fonts.ready。"""
+        # JS 侧有 timeoutMs 竞速；Python 侧再加 wait_for，防止连接挂死时永久占用页面。
+        python_timeout = max(1.0, (timeout_ms / 1000.0) + 1.0)
+        try:
+            await asyncio.wait_for(
+                page.evaluate(
+                    """
+                    async (timeoutMs) => {
+                        if (!document.fonts || !document.fonts.ready) {
+                            return "unsupported";
+                        }
+                        const timeoutPromise = new Promise((resolve) => {
+                            setTimeout(() => resolve("timeout"), timeoutMs);
+                        });
+                        const readyPromise = document.fonts.ready
+                            .then(() => "ready")
+                            .catch(() => "error");
+                        return await Promise.race([readyPromise, timeoutPromise]);
+                    }
+                    """,
+                    timeout_ms,
+                ),
+                timeout=python_timeout,
+            )
+        except Exception as font_err:
+            # 字体等待失败不应阻断截图；Playwright 截图本身仍会再做一次字体检查。
+            logger.debug(f"[灾害预警] 等待字体就绪失败，继续截图: {font_err}")
+
+    async def _screenshot_card(
+        self,
+        page: Page,
+        selector: str,
+        output_path: str,
+        *,
+        timeout_ms: int = 10000,
+    ) -> None:
+        """对卡片元素截图，并在字体等待超时场景下做一次降级重试。"""
+        await self._wait_for_fonts_ready(page, timeout_ms=1500)
+        card = page.locator(selector)
+        try:
+            await card.screenshot(
+                path=output_path,
+                omit_background=True,
+                timeout=timeout_ms,
+            )
+            return
+        except Exception as first_err:
+            # Playwright 默认截图会等待字体加载；若仍超时，强制结束字体加载后重试一次。
+            message = str(first_err).lower()
+            if "font" not in message and "timeout" not in message:
+                raise
+
+            logger.warning(
+                f"[灾害预警] 卡片截图超时，尝试强制结束字体加载后重试: {first_err}"
+            )
+            try:
+                await page.evaluate(
+                    """
+                    async () => {
+                        try {
+                            if (document.fonts && document.fonts.ready) {
+                                // 主动触发一次 ready 竞争，尽量让后续截图不再长时间阻塞。
+                                await Promise.race([
+                                    document.fonts.ready,
+                                    new Promise((resolve) => setTimeout(resolve, 50)),
+                                ]);
+                            }
+                        } catch (e) {}
+                        return true;
+                    }
+                    """
+                )
+            except Exception:
+                pass
+
+            await card.screenshot(
+                path=output_path,
+                omit_background=True,
+                timeout=min(timeout_ms, 5000),
+            )
+
     async def _log_page_diagnostics(self, page: Page, *, reason: str) -> None:
         """输出页面级诊断信息，辅助定位资源加载、脚本执行与选择器状态问题。"""
         try:
             diagnostics = await page.evaluate(
                 """
                 () => {
-                    const mapEl = document.querySelector('#map-container');
+                    const mapEl = document.querySelector('#map-container') || document.querySelector('#map-area') || document.querySelector('#map');
                     const cardEl = document.querySelector('#card-wrapper') || document.querySelector('.quake-card');
                     const html = document.documentElement;
                     const body = document.body;
@@ -67,7 +512,7 @@ class BrowserManager:
                         title: document.title || '',
                         readyState: document.readyState,
                         bodyClasses: body ? body.className || '' : '',
-                        mapReady: !!document.querySelector('.map-ready'),
+                        mapReady: !!document.querySelector('.map-ready') || (body && body.classList.contains('map-ready')),
                         mapContainerExists: !!mapEl,
                         mapContainerSize: mapEl ? {
                             width: mapEl.clientWidth,
@@ -112,7 +557,7 @@ class BrowserManager:
                     self._initialized = True
                     return
 
-                logger.info(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
+                logger.debug(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
                 start_time = time.time()
 
                 # 启动 Playwright
@@ -122,40 +567,39 @@ class BrowserManager:
                 self._browser = await self._playwright.chromium.launch(
                     args=["--no-sandbox", "--disable-setuid-sandbox"]
                 )
-                logger.info("[灾害预警] 本地浏览器启动成功")
+                logger.debug("[灾害预警] 本地浏览器启动成功")
 
                 # 本地模式：直接创建页面池
                 await self._initialize_local_page_pool()
 
                 elapsed = time.time() - start_time
                 self._initialized = True
-                logger.info(
+                logger.debug(
                     f"[灾害预警] 浏览器启动完成，耗时 {elapsed:.2f}秒，页面池大小: {self.pool_size}"
                 )
 
             except Exception as e:
                 logger.error(f"[灾害预警] 浏览器初始化失败: {e}")
-                # 上报浏览器初始化错误到遥测
-                if self._telemetry and self._telemetry.enabled:
-                    await self._telemetry.track_error(
-                        e, module="core.browser_manager.initialize"
-                    )
+                # 上报浏览器初始化错误到遥测（统一 best-effort 封装）
+                await track_error_safely(
+                    self._telemetry,
+                    e,
+                    module="core.browser_manager.initialize",
+                    log_context="浏览器初始化错误遥测",
+                )
                 # 清理已创建的资源
                 await self._cleanup()
                 raise
 
     async def _initialize_local_page_pool(self):
         """初始化本地浏览器的页面池"""
+        # 统一走共享 context 创建页面，以支持 ignore_https_errors 等上下文级配置。
+        context = await self._ensure_local_context()
         for i in range(self.pool_size):
             try:
-                page = await asyncio.wait_for(
-                    self._browser.new_page(
-                        viewport={"width": 800, "height": 800}, device_scale_factor=2
-                    ),
-                    timeout=10.0,
-                )
-                await self._page_pool.put(page)
-                logger.debug(f"[灾害预警] 页面 {i + 1}/{self.pool_size} 已创建")
+                page = await asyncio.wait_for(context.new_page(), timeout=10.0)
+                if not await self._put_page_into_pool(page):
+                    break
             except asyncio.TimeoutError:
                 logger.error(f"[灾害预警] 创建页面 {i + 1} 超时")
                 if i == 0:
@@ -172,18 +616,15 @@ class BrowserManager:
         try:
             # browserless CDP：必须使用默认 context
             contexts = self._browser.contexts
-            logger.debug(f"[灾害预警] 发现 {len(contexts)} 个现有 context")
 
             if contexts:
                 # 使用第一个 context（browserless 的默认 context）
                 self._context = contexts[0]
-                logger.debug("[灾害预警] 使用现有 context")
             else:
                 # 没有现有 context，创建新的
-                logger.debug("[灾害预警] 创建新 context")
                 self._context = await asyncio.wait_for(
                     self._browser.new_context(
-                        viewport={"width": 800, "height": 800},
+                        viewport=dict(self.DEFAULT_VIEWPORT),
                         device_scale_factor=2,
                     ),
                     timeout=15.0,
@@ -195,8 +636,8 @@ class BrowserManager:
                     page = await asyncio.wait_for(
                         self._context.new_page(), timeout=10.0
                     )
-                    await self._page_pool.put(page)
-                    logger.debug(f"[灾害预警] 页面 {i + 1}/{self.pool_size} 已创建")
+                    if not await self._put_page_into_pool(page):
+                        break
                 except asyncio.TimeoutError:
                     logger.error(f"[灾害预警] 创建页面 {i + 1} 超时")
                     if i == 0:
@@ -231,31 +672,68 @@ class BrowserManager:
         output_path: str,
         selector: str = "#card-wrapper",
         wait_until: str = "domcontentloaded",
+        viewport: dict | None = None,
+        render_label: str | None = None,
+        event_stream: str | None = None,
     ) -> str | None:
-        """把 HTML 内容渲染为图片文件。"""
+        """把 HTML 内容渲染为图片文件。
+
+        Args:
+            html_content: 完整 HTML 字符串。
+            output_path: 输出 PNG 路径。
+            selector: 截图目标选择器。
+            wait_until: 预留参数（本地加载仍用 domcontentloaded + 地图就绪等待）。
+            viewport: 可选临时视口 {"width": int, "height": int}。
+                用于大尺寸卡片（如 S-Net 1400×1000）；截图后会恢复默认 800×800，
+                避免污染页面池中的其它渲染任务。
+            render_label: 渲染来源标签，用于成功日志区分场景。
+        """
+        resolved_viewport = self._normalize_viewport(viewport)
+        label = self._normalize_render_label(render_label)
+        # 统一计时起点：覆盖本地模式各失败返回路径（浏览器不可用/信号量超时等），
+        # 使所有失败路径都能上报准确的渲染耗时。
+        start_time = time.time()
         # 远程模式直接走 HTTP 渲染接口，本地模式则复用页面池执行截图。
         if self._mode == "remote":
             if not self._initialized:
                 logger.warning("[灾害预警] 浏览器未初始化，尝试初始化...")
                 await self.initialize()
-            return await self._render_card_via_http(html_content, output_path, selector)
+            return await self._render_card_via_http(
+                html_content,
+                output_path,
+                selector,
+                viewport=resolved_viewport,
+                render_label=label,
+                event_stream=event_stream,
+            )
 
         # 本地模式：使用 Playwright
-        if not self._initialized:
-            logger.warning("[灾害预警] 浏览器未初始化，尝试初始化...")
-            await self.initialize()
-
-        if self._closed:
-            logger.error("[灾害预警] 浏览器已关闭，无法渲染")
+        if not await self._ensure_local_browser_ready():
+            logger.error(f"[灾害预警] 浏览器不可用，无法渲染{label}")
+            # 上报渲染性能指标（浏览器不可用失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type="BrowserUnavailable",
+            )
             return None
 
         page: Page | None = None
-        start_time = time.time()
+        page_returned = False
+        render_succeeded = False
 
         acquired_semaphore = False
         console_messages: list[str] = []
         page_errors: list[str] = []
         request_failures: list[str] = []
+        # 瓦片类资源失败：方案A降级为 debug 收集，末尾统一去重汇总。
+        tile_request_failures: list[str] = []
+        benign_request_failures: list[str] = []
+        listeners_attached = False
+        _record_console = None
+        _record_page_error = None
+        _record_request_failed = None
         try:
             # 并发控制 - 限制同时渲染的数量
             try:
@@ -263,14 +741,27 @@ class BrowserManager:
                 acquired_semaphore = True
             except asyncio.TimeoutError:
                 logger.error("[灾害预警] 等待渲染信号量超时，系统负载过高")
+                # 上报渲染性能指标（信号量超时失败路径）
+                await self._track_render_performance(
+                    success=False,
+                    render_label=label,
+                    elapsed_seconds=time.time() - start_time,
+                    failure_type="SemaphoreTimeout",
+                )
                 return None
 
             try:
-                # 本地模式：从池中获取页面
-                try:
-                    page = await asyncio.wait_for(self._page_pool.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    logger.error("[灾害预警] 从池中获取页面对象超时")
+                # 本地模式：从池中获取可用页面；坏页直接丢弃并补充。
+                page = await self._acquire_usable_page()
+                if page is None:
+                    logger.error("[灾害预警] 无法获取可用页面对象")
+                    # 上报渲染性能指标（无可用页面失败路径）
+                    await self._track_render_performance(
+                        success=False,
+                        render_label=label,
+                        elapsed_seconds=time.time() - start_time,
+                        failure_type="NoUsablePage",
+                    )
                     return None
 
                 try:
@@ -283,7 +774,33 @@ class BrowserManager:
                                 f" @ {location.get('url', '')}:{location.get('lineNumber', '')}:{location.get('columnNumber', '')}"
                             )
                             console_messages.append(entry)
-                            if msg.type in {"error", "warning"}:
+                            if msg.type not in {"error", "warning"}:
+                                return
+                            text_lower = str(msg.text or "").lower()
+                            # 方案A：瓦片资源加载失败时，requestfailed 事件已精确记录
+                            # URL 与错误码，此处浏览器侧 console 的 "Failed to load resource"
+                            # 是同一事件的重复上报。降级为 debug，避免每条瓦片刷两条 WARN。
+                            is_dup_resource_log = (
+                                "failed to load resource" in text_lower
+                                and any(
+                                    marker in text_lower
+                                    for marker in (
+                                        "tilemap.fanstudio.tech",
+                                        "/petallight/",
+                                        "/petaldark/",
+                                        "/arcwi/",
+                                        "/arcwob/",
+                                        "/arcwh/",
+                                        "/geovis/",
+                                        "tile.openstreetmap",
+                                        "tiles.",
+                                        "/tiles/",
+                                    )
+                                )
+                            )
+                            # 与资源请求失败重复的控制台日志仅追加，不逐条打日志；
+                            # 渲染结束时由汇总逻辑统一输出，避免每条瓦片刷两条日志。
+                            if not is_dup_resource_log:
                                 logger.warning(f"[灾害预警] 页面控制台{entry}")
                         except Exception as hook_err:
                             logger.debug(f"[灾害预警] 记录控制台日志失败: {hook_err}")
@@ -305,7 +822,34 @@ class BrowserManager:
                                     failure_text = failure.get("errorText", "")
                                 else:
                                     failure_text = str(failure)
-                            entry = f"{req.method} {req.url} -> {self._truncate_debug_text(failure_text or 'unknown failure')}"
+                            resource_type = ""
+                            try:
+                                resource_type = str(
+                                    getattr(req, "resource_type", "") or ""
+                                )
+                            except Exception:
+                                resource_type = ""
+                            entry = (
+                                f"{req.method} {req.url} -> "
+                                f"{self._truncate_debug_text(failure_text or 'unknown failure')}"
+                            )
+                            is_tile = self._is_map_tile_url(getattr(req, "url", None))
+                            # 先判断良性中止（瓦片重试/视野更新/截图收尾导致的
+                            # net::ERR_ABORTED）：这类噪声直接忽略，不进瓦片汇总，
+                            # 避免出图成功时被 WARN 汇总刷屏。
+                            if self._is_benign_request_failure(
+                                url=getattr(req, "url", None),
+                                failure_text=failure_text,
+                                resource_type=resource_type,
+                            ):
+                                # 良性中止仅收集计数，渲染结束时统一汇总，避免逐条刷屏。
+                                benign_request_failures.append(entry)
+                                return
+                            # 方案A：瓦片类失败（如证书过期等真实错误）一律降级为 debug，
+                            # 仅在末尾统一去重汇总一条，避免每张瓦片刷屏。
+                            if is_tile:
+                                tile_request_failures.append(entry)
+                                return
                             request_failures.append(entry)
                             logger.warning(f"[灾害预警] 页面资源请求失败: {entry}")
                         except Exception as hook_err:
@@ -314,6 +858,11 @@ class BrowserManager:
                     page.on("console", _record_console)
                     page.on("pageerror", _record_page_error)
                     page.on("requestfailed", _record_request_failed)
+                    listeners_attached = True
+
+                    # 大尺寸卡片（如 S-Net）临时放大视口，截图后在 finally 中恢复默认
+                    if resolved_viewport:
+                        await page.set_viewport_size(resolved_viewport)
 
                     # 本地模式：使用 file:// 协议（支持相对路径资源）
                     temp_html = None
@@ -327,7 +876,11 @@ class BrowserManager:
 
                         # 使用 file:// 协议加载，支持相对路径
                         file_url = f"file://{temp_html}"
-                        await page.goto(file_url, wait_until="domcontentloaded")
+                        await page.goto(
+                            file_url,
+                            wait_until="domcontentloaded",
+                            timeout=30000,
+                        )
                     finally:
                         # 清理临时 HTML 文件
                         if temp_html and os.path.exists(temp_html):
@@ -344,6 +897,7 @@ class BrowserManager:
                             const selectors = [
                                 '.map-ready',
                                 '#map',
+                                '#map-area',
                                 '.map-container',
                                 '#map-container',
                                 '.leaflet-container'
@@ -356,18 +910,19 @@ class BrowserManager:
                             await page.wait_for_selector(
                                 ".map-ready", state="attached", timeout=10000
                             )
-                            logger.debug("[灾害预警] 地图渲染标记已就绪")
                         except Exception:
                             logger.warning(
-                                "[灾害预警] 等待 .map-ready 标记超时，地图可能未完全加载"
+                                f"[灾害预警] {label}等待 .map-ready 标记超时，地图可能未完全加载"
                             )
                             if request_failures:
                                 logger.warning(
-                                    f"[灾害预警] 地图等待超时期间捕获到资源失败: {' | '.join(request_failures[-5:])}"
+                                    f"[灾害预警] {label}地图等待超时期间捕获到资源失败: "
+                                    f"{' | '.join(request_failures[-5:])}"
                                 )
                             if page_errors:
                                 logger.warning(
-                                    f"[灾害预警] 地图等待超时期间捕获到脚本异常: {' | '.join(page_errors[-3:])}"
+                                    f"[灾害预警] {label}地图等待超时期间捕获到脚本异常: "
+                                    f"{' | '.join(page_errors[-3:])}"
                                 )
                             await self._log_page_diagnostics(
                                 page, reason="map-ready-timeout"
@@ -381,88 +936,172 @@ class BrowserManager:
                             selector, state="visible", timeout=2000
                         )
                     except Exception:
-                        # 兜底：尝试找常见的类名。该分支在部分模板中属于正常兼容路径，不额外输出诊断日志。
-                        logger.debug(
-                            f"[灾害预警] 选择器 {selector} 未找到，尝试备用选择器"
-                        )
+                        # 兜底：尝试找常见的类名。该分支在部分模板中属于正常兼容路径，不输出诊断日志。
                         selector = ".quake-card"
                         await page.wait_for_selector(
                             selector, state="visible", timeout=1000
                         )
 
-                    # 定位卡片元素
-                    card = page.locator(selector)
-
-                    # 截图：只截取元素，背景透明
-                    await card.screenshot(path=output_path, omit_background=True)
+                    # 截图：只截取元素，背景透明；字体等待超时会自动降级重试。
+                    await self._screenshot_card(
+                        page,
+                        selector,
+                        output_path,
+                        timeout_ms=10000,
+                    )
 
                     elapsed = time.time() - start_time
 
                     if os.path.exists(output_path):
+                        # 方案B：瓦片类失败按 URL->错误码 去重后汇总输出，避免逐条刷屏。
+                        tile_summary = self._dedupe_failures(tile_request_failures)
                         if request_failures:
                             logger.warning(
-                                f"[灾害预警] 卡片渲染虽成功，但捕获到资源请求失败: {' | '.join(request_failures[-5:])}"
+                                f"[灾害预警] {label}渲染虽成功，但捕获到资源请求失败: "
+                                f"{' | '.join(request_failures[-5:])}"
+                            )
+                        if tile_summary:
+                            logger.warning(
+                                f"[灾害预警] {label}渲染虽成功，但有 {len(tile_request_failures)} 个瓦片请求失败"
+                                f"（去重后 {len(tile_summary)} 项）: {' | '.join(tile_summary[-5:])}"
+                            )
+                        if (
+                            not request_failures
+                            and not tile_summary
+                            and benign_request_failures
+                        ):
+                            logger.debug(
+                                f"[灾害预警] {label}渲染成功，已忽略 "
+                                f"{len(benign_request_failures)} 条可预期资源中止"
                             )
                         if page_errors:
                             logger.warning(
-                                f"[灾害预警] 卡片渲染虽成功，但捕获到页面脚本异常: {' | '.join(page_errors[-3:])}"
+                                f"[灾害预警] {label}渲染虽成功，但捕获到页面脚本异常: "
+                                f"{' | '.join(page_errors[-3:])}"
                             )
                         plugin_logger.info(
-                            f"[灾害预警] 卡片渲染成功，耗时 {elapsed:.3f}秒",
+                            f"[灾害预警] {label}渲染成功，耗时 {elapsed:.3f}秒",
                             is_event_linked=True,
+                            event_stream=event_stream,
+                            is_silent_window=True,
+                        )
+                        render_succeeded = True
+                        # 上报渲染性能指标（成功路径）
+                        await self._track_render_performance(
+                            success=True,
+                            render_label=label,
+                            elapsed_seconds=elapsed,
                         )
                         return output_path
                     else:
-                        logger.warning("[灾害预警] 截图未生成文件")
+                        logger.warning(f"[灾害预警] {label}截图未生成文件")
                         await self._log_page_diagnostics(
                             page, reason="screenshot-missing"
+                        )
+                        # 上报渲染性能指标（截图缺失失败路径）
+                        await self._track_render_performance(
+                            success=False,
+                            render_label=label,
+                            elapsed_seconds=time.time() - start_time,
+                            failure_type="ScreenshotMissing",
                         )
                         return None
 
                 finally:
-                    # 本地模式：归还页面到池
-                    if page:
-                        await self._page_pool.put(page)
+                    # 页面池复用前必须卸掉本次监听器，否则 requestfailed 会随复用次数叠加刷屏。
+                    if page and listeners_attached:
+                        for event_name, handler in (
+                            ("console", _record_console),
+                            ("pageerror", _record_page_error),
+                            ("requestfailed", _record_request_failed),
+                        ):
+                            if handler is None:
+                                continue
+                            try:
+                                page.remove_listener(event_name, handler)
+                            except Exception:
+                                try:
+                                    page.off(event_name, handler)
+                                except Exception:
+                                    pass
+                        listeners_attached = False
+
+                    # 成功：恢复视口后归还；失败：直接丢弃坏页并补池，避免污染后续渲染。
+                    if page and not page_returned:
+                        if render_succeeded:
+                            if resolved_viewport:
+                                try:
+                                    if await self._is_page_usable(page):
+                                        await page.set_viewport_size(
+                                            dict(self.DEFAULT_VIEWPORT)
+                                        )
+                                except Exception as restore_err:
+                                    logger.debug(
+                                        f"[灾害预警] 恢复默认视口失败: {restore_err}"
+                                    )
+                            await self._return_page_to_pool(page)
+                        else:
+                            try:
+                                if not page.is_closed():
+                                    await page.close()
+                                    logger.debug("[灾害预警] 已关闭损坏的页面")
+                            except Exception:
+                                pass
+                            await self._replenish_page_pool()
+                        page_returned = True
             finally:
                 # 释放信号量
                 if acquired_semaphore:
                     self._semaphore.release()
 
         except Exception as e:
-            logger.error(f"[灾害预警] 卡片渲染失败: {e}")
-            # 上报卡片渲染错误到遥测
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.browser_manager.render_card"
-                )
-            # 如果页面损坏，关闭它并恢复页面池（仅本地模式）
-            if page:
+            logger.error(f"[灾害预警] {label}渲染失败: {e}")
+            # 上报卡片渲染错误到遥测（统一 best-effort 封装）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.browser_manager.render_card",
+                log_context="卡片渲染错误遥测",
+            )
+            # 上报渲染性能指标（失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type=type(e).__name__,
+            )
+
+            # 内层 finally 通常已处理页面回收；这里再兜底一次，避免异常路径泄漏坏页。
+            if page and not page_returned:
                 try:
-                    await page.close()
-                    logger.debug("[灾害预警] 已关闭损坏的页面")
+                    if not page.is_closed():
+                        await page.close()
+                        logger.debug("[灾害预警] 已关闭损坏的页面")
                 except Exception:
                     pass
+                page_returned = True
+                await self._replenish_page_pool()
 
-                # 恢复页面池
-                async with self._page_creation_lock:
-                    try:
-                        if self._browser and not self._closed:
-                            if self._page_pool.qsize() < self.pool_size:
-                                new_page = await self._browser.new_page(
-                                    viewport={"width": 800, "height": 800},
-                                    device_scale_factor=2,
-                                )
-                                await self._page_pool.put(new_page)
-                                logger.debug("[灾害预警] 已重新创建页面")
-                    except Exception as recover_err:
-                        logger.error(f"[灾害预警] 页面恢复失败: {recover_err}")
+            # 目标关闭类错误即使页面已回收，也主动确认浏览器可恢复。
+            if self._is_target_closed_error(e):
+                await self._ensure_local_browser_ready()
 
             return None
 
     async def _render_card_via_http(
-        self, html_content: str, output_path: str, selector: str
+        self,
+        html_content: str,
+        output_path: str,
+        selector: str,
+        viewport: dict[str, int] | None = None,
+        render_label: str | None = None,
+        event_stream: str | None = None,
     ) -> str | None:
-        """使用 browserless HTTP API 渲染卡片"""
+        """使用 browserless HTTP API 渲染卡片。
+
+        viewport 可选；未提供时使用默认 800×800。
+        """
+        label = self._normalize_render_label(render_label)
         start_time = time.time()
 
         # 对注入的 selector 进行 JSON 编码，规避转义和 JS 语法截断安全风险。
@@ -546,8 +1185,16 @@ class BrowserManager:
                     "timeout": 60000,
                 },
                 "viewport": {
-                    "width": 800,
-                    "height": 800,
+                    "width": (
+                        viewport["width"]
+                        if viewport
+                        else self.DEFAULT_VIEWPORT["width"]
+                    ),
+                    "height": (
+                        viewport["height"]
+                        if viewport
+                        else self.DEFAULT_VIEWPORT["height"]
+                    ),
                     "deviceScaleFactor": 2,
                 },
                 "waitForTimeout": 3000,  # 额外等待 3 秒，确保地图瓦片完全展现并让 JS 执行完锁定尺寸
@@ -574,8 +1221,17 @@ class BrowserManager:
                             f.write(image_data)
 
                         elapsed = time.time() - start_time
-                        logger.info(
-                            f"[灾害预警] 卡片渲染成功（HTTP API），耗时 {elapsed:.3f}秒"
+                        plugin_logger.info(
+                            f"[灾害预警] {label}渲染成功（HTTP API），耗时 {elapsed:.3f}秒",
+                            is_event_linked=True,
+                            event_stream=event_stream,
+                            is_silent_window=True,
+                        )
+                        # 上报渲染性能指标（远程模式成功路径）
+                        await self._track_render_performance(
+                            success=True,
+                            render_label=label,
+                            elapsed_seconds=elapsed,
                         )
                         return output_path
                     else:
@@ -608,8 +1264,17 @@ class BrowserManager:
                                         with open(output_path, "wb") as f:
                                             f.write(image_data)
                                         elapsed = time.time() - start_time
-                                        logger.info(
-                                            f"[灾害预警] 卡片渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒"
+                                        plugin_logger.info(
+                                            f"[灾害预警] {label}渲染通过降级重试成功（HTTP API），耗时 {elapsed:.3f}秒",
+                                            is_event_linked=True,
+                                            event_stream=event_stream,
+                                            is_silent_window=True,
+                                        )
+                                        # 上报渲染性能指标（远程降级重试成功路径）
+                                        await self._track_render_performance(
+                                            success=True,
+                                            render_label=label,
+                                            elapsed_seconds=elapsed,
                                         )
                                         return output_path
                                     else:
@@ -621,31 +1286,58 @@ class BrowserManager:
                                 logger.error(
                                     f"[灾害预警] browserless API 降级重试请求失败: {fallback_ex}"
                                 )
+                        # 上报渲染性能指标（非 200 响应失败路径，含降级重试失败）
+                        await self._track_render_performance(
+                            success=False,
+                            render_label=label,
+                            elapsed_seconds=time.time() - start_time,
+                            failure_type=f"HTTP_{response.status}",
+                        )
                         return None
 
         except asyncio.TimeoutError:
-            logger.error("[灾害预警] browserless API 请求超时")
+            logger.error(f"[灾害预警] {label} browserless API 请求超时")
+            # 上报渲染性能指标（远程超时失败）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type="TimeoutError",
+            )
             return None
         except Exception as e:
-            logger.error(f"[灾害预警] browserless API 请求失败: {e}")
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.browser_manager._render_card_via_http"
-                )
+            logger.error(f"[灾害预警] {label} browserless API 请求失败: {e}")
+            # 上报远程渲染错误到遥测（统一 best-effort 封装）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.browser_manager._render_card_via_http",
+                log_context="远程渲染错误遥测",
+            )
+            # 上报渲染性能指标（远程失败路径）
+            await self._track_render_performance(
+                success=False,
+                render_label=label,
+                elapsed_seconds=time.time() - start_time,
+                failure_type=type(e).__name__,
+            )
             return None
 
     async def close(self):
-        """关闭浏览器管理器"""
-        if self._closed:
-            logger.debug("[灾害预警] 浏览器已关闭，跳过")
-            return
+        """关闭浏览器管理器。
 
-        logger.info("[灾害预警] 正在关闭浏览器...")
-        self._closed = True
+        与 _ensure_local_browser_ready 的重建路径共用 init_lock，
+        避免 close 与 auto-recover 并发导致状态撕裂。
+        """
+        async with self._init_lock:
+            if self._closed:
+                logger.debug("[灾害预警] 浏览器已关闭，跳过")
+                return
 
-        await self._cleanup()
-
-        logger.info("[灾害预警] 浏览器已关闭")
+            logger.debug("[灾害预警] 正在关闭浏览器...")
+            self._closed = True
+            await self._cleanup()
+            logger.debug("[灾害预警] 浏览器已关闭")
 
     async def _cleanup(self):
         """清理资源，确保前一步失败也不影响后续步骤继续执行。"""
@@ -664,7 +1356,24 @@ class BrowserManager:
             cleanup_errors.append(f"清理页面池失败: {e}")
             logger.warning(f"[灾害预警] 清理页面池时发生异常: {e}")
 
-        # 步骤 2: 关闭浏览器
+        # 步骤 2: 关闭共享 context（与页面池同生命周期，先于浏览器关闭）
+        # 加锁防止与 _ensure_local_context 的并发创建交错；并联动维护
+        # _context_closed 标志，供存活判断使用。
+        async with self._context_lock:
+            if self._context is not None:
+                try:
+                    await self._context.close()
+                except Exception as e:
+                    cleanup_errors.append(f"关闭浏览器上下文失败: {e}")
+                    logger.debug(f"[灾害预警] 关闭浏览器上下文失败: {e}")
+                finally:
+                    # 无论成败都置空，避免重建路径残留旧 context 引用。
+                    self._context = None
+            # 显式标记已关闭：.browser 属性在 close() 后仍可访问，
+            # 不能依赖属性探测判断存活，改由标志与清理路径联动。
+            self._context_closed = True
+
+        # 步骤 3: 关闭浏览器
         try:
             if self._browser:
                 await self._browser.close()
@@ -675,7 +1384,7 @@ class BrowserManager:
             # 即使关闭失败,也强制置空引用,防止后续误用
             self._browser = None
 
-        # 步骤 3: 停止 Playwright
+        # 步骤 4: 停止 Playwright
         try:
             if self._playwright:
                 await self._playwright.stop()

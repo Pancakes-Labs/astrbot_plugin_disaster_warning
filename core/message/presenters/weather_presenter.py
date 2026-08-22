@@ -11,10 +11,9 @@ from ....utils.time_converter import TimeConverter
 from ...domain.event_context import WeatherDisplayContext
 from .base_presenter import BasePresenter
 from .weather_constants import (
-    COLOR_LEVEL_EMOJI,
     DEFAULT_MAX_DESCRIPTION_LENGTH,
-    SORTED_WEATHER_TYPES,
-    WEATHER_EMOJI_MAP,
+    resolve_weather_color_emoji,
+    resolve_weather_emoji,
 )
 
 
@@ -61,28 +60,15 @@ class WeatherAlertPresenter(BasePresenter):
             title,
             headline,
         ]
-        match_text = " ".join(
-            str(item).strip() for item in match_candidates if str(item).strip()
-        )
-        emoji = "⛈️"
-        for name in SORTED_WEATHER_TYPES:
-            if name in match_text:
-                emoji = WEATHER_EMOJI_MAP[name]
-                break
+        emoji = resolve_weather_emoji(*match_candidates)
 
-        color_emoji = ""
-        title_candidates = [display_context.severity_color, title, headline]
         # 颜色等级有时直接体现在标题或颜色字段中，这里统一补上颜色提示图标。
-        for color, icon in COLOR_LEVEL_EMOJI.items():
-            if any(
-                color and color in candidate
-                for candidate in title_candidates
-                if candidate
-            ):
-                color_emoji = icon
-                break
+        # 对于"升级为/降级为"类预警，取变更后的最终颜色，避免显示变更前的旧颜色。
+        color_emoji = resolve_weather_color_emoji(
+            display_context.severity_color, title, headline
+        )
 
-        lines = [f"{emoji}[气象预警]"]
+        lines = [f"{emoji}[气象预警] 中国气象局"]
         if title:
             lines.append(f"📋{title}{color_emoji}")
         elif headline:

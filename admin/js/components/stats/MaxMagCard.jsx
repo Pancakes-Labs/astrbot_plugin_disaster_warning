@@ -1,9 +1,8 @@
-const { Box, Typography, Chip } = MaterialUI;
+const { Typography } = MaterialUI;
 
 /**
  * 历史最大地震信息卡片组件 (MaxMagCard)
- * 用于在统计仪表盘显眼位置陈列系统捕获并持久化记录的历史上震级最大的地震事件。
- * 包含特效浮水印、震级大数字渲染、发布源高亮标签、震中地名及发生时间。
+ * 与 S-Net 卡片并排：标题 + 震级大数 + 地点 + 底部左时间/右来源。
  *
  * @param {Object} props
  * @param {Object} [props.style] 外部自定义样式
@@ -13,13 +12,13 @@ function MaxMagCard({ style, className = '' }) {
     const { state } = useAppContext();
     const { stats, config } = state;
     const displayTimezone = config.displayTimezone || 'UTC+8';
-    
-    // 获取历史最大震级地震负载
+
     const maxMag = stats && stats.maxMagnitude ? stats.maxMagnitude : null;
     const magValue = Number(maxMag?.value);
-    
+
     const displayMag = Number.isFinite(magValue) ? magValue.toFixed(1) : '--';
     const displayPlace = maxMag?.place_name || '暂无震中信息';
+    const sourceLabel = maxMag?.source ? formatSourceName(maxMag.source) : '';
 
     /**
      * 格式化震中发震时间
@@ -49,30 +48,29 @@ function MaxMagCard({ style, className = '' }) {
                 <span className="stats-card-header-icon">🔥</span>
                 <Typography variant="h6" className="max-mag-card-title">历史最大地震</Typography>
             </div>
-            
-            {/* 震级高亮大数行与数据源来源标签 */}
-            <div className="max-mag-card-mag-row">
-                <Typography variant="h3" className="max-mag-card-mag-value">
-                    <span className="max-mag-card-mag-prefix">M</span>{displayMag}
+
+            <div className="max-mag-card-body">
+                <div className="max-mag-card-mag-row">
+                    <Typography variant="h3" className="max-mag-card-mag-value">
+                        <span className="max-mag-card-mag-prefix">M</span>{displayMag}
+                    </Typography>
+                </div>
+
+                <Typography variant="body1" className="max-mag-card-place">
+                    {displayPlace}
                 </Typography>
-                {maxMag?.source && (
-                    <Chip
-                        label={formatSourceName(maxMag.source)}
-                        size="small"
-                        className="max-mag-card-source-chip"
-                    />
-                )}
             </div>
 
-            {/* 震中地点名称 */}
-            <Typography variant="body1" className="max-mag-card-place">
-                {displayPlace}
-            </Typography>
-            
-            {/* 发震时间详情 */}
-            <Typography variant="body2" className="max-mag-card-time">
-                {formatTime(maxMag?.time)}
-            </Typography>
+            <div className="max-mag-card-footer">
+                <Typography variant="body2" className="max-mag-card-time">
+                    {formatTime(maxMag?.time)}
+                </Typography>
+                {sourceLabel && (
+                    <Typography variant="caption" className="max-mag-card-source">
+                        {sourceLabel}
+                    </Typography>
+                )}
+            </div>
         </div>
     );
 }

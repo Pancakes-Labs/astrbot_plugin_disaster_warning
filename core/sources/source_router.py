@@ -8,6 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .payload_guards import (
+    is_shakealert_compatible_payload,
+    looks_like_fssn_cmt_payload,
+)
 from .source_catalog import (
     SOURCE_CATALOG,
     get_source_ids_by_family,
@@ -63,9 +67,42 @@ def _payload_matches_predicate(payload: dict[str, Any], predicate: str) -> bool:
         # 中国地震台网正式测定和自动测定消息都会在类型名中带出固定字样
         info_type_name = str(payload.get("infoTypeName", "") or "")
         return "[正式测定]" in info_type_name or "[自动测定]" in info_type_name
+    if predicate == "cenc_intensity_report":
+        # 烈度速报：必须有 uniEventId，且具备速报正文/台站/等震线之一；
+        # 若误带正式/自动测定类型名，直接排除，避免与 /cenc 测定混淆。
+        uni_event_id = str(payload.get("uniEventId", "") or "").strip()
+        if not uni_event_id:
+            return False
+        info_type_name = str(payload.get("infoTypeName", "") or "")
+        if "[正式测定]" in info_type_name or "[自动测定]" in info_type_name:
+            return False
+        has_report_body = any(
+            key in payload
+            for key in (
+                "intensity_info_text",
+                "instrument_intensity_json",
+                "contour_geojson",
+                "nameByInfo",
+            )
+        )
+        return has_report_body
     if predicate == "usgs_report":
         # USGS 报文通常会附带官方详情地址，可作为辅助识别条件
         return "usgs.gov" in str(payload.get("url", "") or "")
+    if predicate == "fssn_cmt":
+        # FSSN CMT：检测到符合 FSSN CMT 特征的载荷
+        return looks_like_fssn_cmt_payload(payload)
+    if predicate == "shakealert_eew":
+        # ShakeAlert 与 FSSN 字段高度重合；共享守卫排除 FSSN/USGS/CMT 特征。
+        return is_shakealert_compatible_payload(payload)
+    if predicate == "typhoon_active":
+        # 台风数据必须包含移动方向、风速和气压字段，且数据为数组格式
+        # FAN Studio 台风推送的 Data 字段是数组，unwrap 后可能仍为数组
+        if isinstance(payload, list):
+            return len(payload) > 0 and isinstance(payload[0], dict)
+        if isinstance(payload, dict):
+            # 兼容单对象格式
+            return "moveDirection" in payload and "windSpeed" in payload
     return False
 
 
@@ -102,10 +139,13 @@ def _matches_payload_rule(payload: dict[str, Any], entry: SourceEntry) -> bool:
 def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
     """按提供方家族导出名称到数据源标识的映射。"""
     result: dict[str, str] = {}
-    # FAN Studio 主要按来源名映射，Wolfx 主要按消息类型映射
+    # FAN Studio / OpenQuakeAPI 主要按来源名映射，Wolfx 主要按消息类型映射
     for source_id in get_source_ids_by_family(provider_family):
         entry = SOURCE_CATALOG[source_id]
-        if provider_family == ProviderFamily.FAN_STUDIO:
+        if provider_family in (
+            ProviderFamily.FAN_STUDIO,
+            ProviderFamily.GLOBAL_QUAKE,
+        ):
             for source_name in entry.provider_source_names:
                 result.setdefault(source_name, source_id)
         elif provider_family == ProviderFamily.WOLFX:
@@ -130,6 +170,40 @@ def get_wolfx_source_id(message_type: str) -> str | None:
     return source_ids[0]
 
 
+def get_openquake_source_id(source_name: str | None) -> str | None:
+    """根据 OpenQuakeAPI RealtimeEvent.source 解析统一数据源标识。
+
+    /ws/all 聚合推送会保留原始 source（gq / nmefc / nmefc-wave / nmefc-surge / cma）。
+    当前已接入 Global Quake（gq）与中国气象局气象预警（cma）；
+    其余 source 返回 None，便于后续继续挂接。
+    source 缺失时按历史兼容回落到 global_quake。
+    """
+    name = str(source_name or "").strip().lower()
+    if not name:
+        return "global_quake"
+
+    # 优先走目录声明的 provider_source_names（大小写不敏感）
+    for source_id in get_source_ids_by_family(ProviderFamily.GLOBAL_QUAKE):
+        entry = SOURCE_CATALOG[source_id]
+        aliases = {
+            str(item or "").strip().lower()
+            for item in (entry.provider_source_names or ())
+        }
+        aliases.update(
+            str(item or "").strip().lower() for item in (entry.provider_aliases or ())
+        )
+        aliases.add(str(entry.source_id or "").strip().lower())
+        if name in aliases:
+            return source_id
+
+    # 兼容直接按 source_id 命中
+    if name in SOURCE_CATALOG and SOURCE_CATALOG[name].provider_family == (
+        ProviderFamily.GLOBAL_QUAKE
+    ):
+        return name
+    return None
+
+
 def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
     """根据消息载荷特征识别 FAN Studio 注册项。"""
     if not isinstance(data, dict):
@@ -143,7 +217,7 @@ def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
         if (entry := SOURCE_CATALOG[source_id]).provider_source_names
     ]
     # 按优先级从高到低排序，高优先级优先检测，防止通用宽松规则覆盖了精确规则
-    fan_entries.sort(key=lambda entry: (entry.priority, entry.source_id))
+    fan_entries.sort(key=lambda entry: (entry.priority, entry.source_id), reverse=True)
 
     for entry in fan_entries:
         if _matches_payload_rule(payload, entry):
@@ -183,29 +257,34 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
         return routed_messages
 
     if msg_type == "update":
-        # update 消息虽然通常携带显式 source，但像 cea / cea-pr 这类同族来源
-        # 仍可能共用同一个外层 source 值，因此优先结合载荷特征做精确识别
+        # update 消息通常携带显式 source。
+        # 1) 已注册显式来源：直接路由，避免被宽松载荷签名覆盖
+        # 2) 未注册显式来源（如 fssn）：直接丢弃，禁止特征猜测误路由
+        # 3) 无显式来源：才按载荷特征做兼容识别
         source_name = str(data.get("source") or "").strip()
+        if source_name:
+            source_id = get_fan_studio_source_id(source_name)
+            if source_id:
+                return [
+                    RoutedMessage(
+                        source_name=source_name, source_id=source_id, payload=data
+                    )
+                ]
+            # 显式来源存在但未适配：不猜测，避免 FSSN 等被误识别为 SA
+            return []
+
         detected_entry = detect_fan_studio_source_entry(data)
         if detected_entry is not None:
             routed_source_name = (
                 detected_entry.provider_source_names[0]
                 if detected_entry.provider_source_names
-                else source_name or detected_entry.source_id
+                else detected_entry.source_id
             )
             return [
                 RoutedMessage(
                     source_name=routed_source_name,
                     source_id=detected_entry.source_id,
                     payload=data,
-                )
-            ]
-
-        source_id = get_fan_studio_source_id(source_name)
-        if source_name and source_id:
-            return [
-                RoutedMessage(
-                    source_name=source_name, source_id=source_id, payload=data
                 )
             ]
 
@@ -233,9 +312,10 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
     ]
 
 
-# 预构建两类常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
+# 预构建常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
 FAN_STUDIO_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.FAN_STUDIO)
 WOLFX_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.WOLFX)
+# OpenQuake 聚合路由走 get_openquake_source_id()，不预构建未使用的 registry
 
 
 __all__ = [
@@ -245,6 +325,7 @@ __all__ = [
     "detect_fan_studio_source_entry",
     "detect_fan_studio_source_id",
     "get_fan_studio_source_id",
+    "get_openquake_source_id",
     "get_provider_source_map",
     "get_wolfx_source_id",
     "route_fan_studio_message",

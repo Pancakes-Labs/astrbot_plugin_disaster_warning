@@ -11,11 +11,11 @@
     function showLogin() {
         const loadingEl = getElement('bl-loading');
         const loginEl = getElement('bl-login');
-        if (loadingEl) loadingEl.style.display = 'none'; // 隐藏加载状态
-        if (loginEl) loginEl.style.display = 'flex';     // 展现登录卡片
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (loginEl) loginEl.style.display = 'flex';
         setTimeout(function () {
             const pw = getElement('bl-password');
-            if (pw) pw.focus(); // 自动聚焦密码框
+            if (pw) pw.focus();
         }, 80);
     }
 
@@ -30,26 +30,30 @@
     // 鉴权通过后的前向引导
     function proceedWithAuth() {
         window.__ASTRBOT_AUTH_PENDING = false;
-        window.dispatchEvent(new Event('auth-ready')); // 广播就绪信号，告知 React 应用可安全构建组件树
+        window.dispatchEvent(new Event('auth-ready'));
     }
 
     // 异步校验令牌是否依然有效
     function verifyToken(token) {
+        // 启动加载进度（首次调用会触发阶段播放和进度条）
+        if (typeof window.__ASTRBOT_UPDATE_PROGRESS === 'function') {
+            window.__ASTRBOT_UPDATE_PROGRESS();
+        }
         window.DisasterApiClient.request('/status', {
             headers: {
                 'Authorization': 'Bearer ' + token,
             },
         })
             .then(function () {
-                proceedWithAuth(); // 校验成功，解锁主界面
+                proceedWithAuth();
             })
             .catch(function (error) {
                 if (error && error.status === 401) {
-                    window.AuthUtil.clearToken(); // 令牌非法或失效，清除并显示登录表单
+                    window.AuthUtil.clearToken();
                     showLogin();
                     return;
                 }
-                proceedWithAuth(); // 其他网络请求异常不予硬阻断，退化通行
+                proceedWithAuth();
             });
     }
 
@@ -60,26 +64,28 @@
         const password = passwordInput ? passwordInput.value : '';
         if (!password) return;
 
+        if (typeof window.__ASTRBOT_UPDATE_PROGRESS === 'function') {
+            window.__ASTRBOT_UPDATE_PROGRESS();
+        }
+
         const errorEl = getElement('bl-login-error');
         const submitBtn = getElement('bl-submit');
-        if (errorEl) errorEl.textContent = ''; // 清空先前的错误文案
+        if (errorEl) errorEl.textContent = '';
         if (submitBtn) {
-            submitBtn.disabled = true;       // 禁用重复点击
+            submitBtn.disabled = true;
             submitBtn.textContent = '登录中...';
         }
 
-        // 向登录接口发起认证请求
         window.DisasterApiClient.request('/login', {
             method: 'POST',
             body: { password },
         })
             .then(function (data) {
-                window.AuthUtil.setToken(data.token); // 缓存令牌
-                proceedWithAuth();                    // 鉴权通行
+                window.AuthUtil.setToken(data.token);
+                proceedWithAuth();
                 showLoading();
             })
             .catch(function (error) {
-                // 登录失败，还原提交按钮状态并渲染错误提示
                 if (errorEl) {
                     errorEl.textContent = (error && error.payload && error.payload.error)
                         || (error && error.message)
@@ -98,8 +104,11 @@
         const passwordInput = getElement('bl-password');
         if (!toggle || !passwordInput) return;
         toggle.addEventListener('click', function () {
-            passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
-            toggle.textContent = passwordInput.type === 'password' ? '👁️' : '🙈'; // 切换 Emoji 图标
+            const isVisible = passwordInput.type !== 'password';
+            passwordInput.type = isVisible ? 'password' : 'text';
+            toggle.textContent = isVisible ? '👁️' : '🙈';
+            toggle.setAttribute('aria-pressed', String(!isVisible));
+            toggle.setAttribute('aria-label', isVisible ? '显示密码' : '隐藏密码');
         });
     }
 
@@ -107,23 +116,27 @@
     function checkAuthRequirement() {
         window.DisasterApiClient.request('/auth-info')
             .then(function (data) {
-                // 若未启用鉴权，跳过登录界面
                 if (!data.auth_required) {
+                    if (typeof window.__ASTRBOT_UPDATE_PROGRESS === 'function') {
+                        window.__ASTRBOT_UPDATE_PROGRESS();
+                    }
                     proceedWithAuth();
                     return;
                 }
 
-                // 启用鉴权下，检查是否有历史令牌
                 const token = window.AuthUtil && window.AuthUtil.getToken();
                 if (!token) {
-                    showLogin(); // 无令牌则前往登录
+                    showLogin();
                     return;
                 }
 
-                verifyToken(token); // 有令牌则异步校验
+                verifyToken(token);
             })
             .catch(function () {
-                proceedWithAuth(); // 网络异常情况下放行，防止面板彻底锁死
+                if (typeof window.__ASTRBOT_UPDATE_PROGRESS === 'function') {
+                    window.__ASTRBOT_UPDATE_PROGRESS();
+                }
+                proceedWithAuth();
             });
     }
 

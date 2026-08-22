@@ -1,18 +1,129 @@
 <!-- markdownlint-disable MD024 -->
 <!-- markdownlint-disable MD034 -->
-# FAN Studio GET 数据服务 API 文档
+# FAN Studio GET 数据服务 API
 
-GET API 提供了通过标准 HTTP GET 请求来获取最新或历史数据的方式。
+GET API 用于获取实时快照、历史记录、气象网格和图片资源。除瓦片服务外，本文档中的相对路径均以 `https://api.fanstudio.tech` 为基础地址。
 
-**基础 URL:**`https://api.fanstudio.tech/`  
-**认证方式:** 当前所有接口均无需认证。  
-**返回格式:** 所有成功响应均为 JSON 格式，并遵循统一的结构。
+## 接入概览
 
-## 通用约定
+| 项目 | 约定 |
+| --- | --- |
+| 请求协议 | HTTPS |
+| 请求方法 | GET |
+| 字符编码 | UTF-8 |
+| 数据格式 | 以各接口页面标注为准，主要为 JSON、GeoJSON 或图片数据 |
+| 时间与坐标 | 以各字段说明为准，不同数据源可能使用不同时区 |
 
-- 所有接口均使用 `GET` 方法。
-- 字符编码统一为 `UTF-8` 。
-- 请遵守合理的请求频率，避免对服务器造成不必要的压力。
+## 基本调用
+
+将接口页面给出的路径拼接到基础地址后发起请求。例如：
+
+```bash
+curl --fail --silent --show-error \
+  --connect-timeout 5 \
+  --max-time 15 \
+  'https://api.fanstudio.tech/tool/ntp.php'
+```
+
+客户端应先检查 HTTP 状态码和 `Content-Type` ，再解析响应体。网络错误或 `5xx` 响应可以有限重试；参数错误等 `4xx` 响应应先修正请求。
+
+## 接口分类
+
+- 环境数据：空气质量、气象站、降水、风场和台风数据。
+- 图像服务：卫星云图、雷达图和气象可视化图。
+- 工具服务：服务器时间、IP 地理位置和基础瓦片地图。
+
+## 使用建议
+
+- 查询参数必须进行 URL 编码，不要直接拼接未经处理的用户输入。
+- 为请求设置连接超时和总超时，避免页面或任务长期阻塞。
+- 对图片、网格和瓦片等较大资源启用客户端缓存。
+- 不要高频轮询更新频率较低的数据；具体频率以业务需要和服务端策略为准。
+- 完整的 JavaScript、PHP 与 cURL 示例请查看“GET API 快速接入”。
+
+---
+
+## GET API 快速接入
+
+GET API 适合获取当前快照、历史数据或静态资源。所有响应均应设置合理超时、检查 HTTP 状态码，并在解析前确认响应类型。
+
+## cURL
+
+```bash
+curl --fail --silent --show-error \
+  --connect-timeout 5 \
+  --max-time 15 \
+  'https://api.fanstudio.tech/tool/ntp.php'
+```
+
+## 浏览器 JavaScript
+
+```javascript
+async function getFanStudioData(path, params = {}) {
+  const url = new URL(path, 'https://api.fanstudio.tech');
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(\`HTTP ${response.status}\`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const serverTime = await getFanStudioData('/tool/ntp.php');
+console.log(serverTime);
+```
+
+## PHP
+
+```php
+<?php
+$context = stream_context_create([
+    'http' => [
+        'method' => 'GET',
+        'timeout' => 10,
+        'header' => "Accept: application/json\r\n",
+        'ignore_errors' => true,
+    ],
+]);
+
+$body = file_get_contents(
+    'https://api.fanstudio.tech/tool/ntp.php',
+    false,
+    $context
+);
+
+if ($body === false) {
+    throw new RuntimeException('请求失败');
+}
+
+$data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+```
+
+## 接入检查清单
+
+- 查询参数统一通过 URL 编码，不手工拼接未转义的用户输入。
+- 设置连接超时和总请求超时。
+- 非 `2xx` 响应不进入正常数据解析流程。
+- 根据响应的 `Content-Type` 选择 JSON、文本或二进制解析。
+- 只对网络错误和 `5xx` 响应进行有限次数重试。
+- 对地图、图片等大文件使用缓存，避免高频重复请求。
 
 ---
 
@@ -98,7 +209,7 @@ curl "https://api.fanstudio.tech/tool/geo_ip.php"
 
 | 参数 | 类型 | 是否必需 | 描述与可选值 |
 | --- | --- | --- | --- |
-| `type` | string | **是** | 指定要查询的气象要素类型。 **如果此参数缺失或无效，将返回错误信息。**   可选值包括： - `temperature` (气温) - `pressure` (气压) - `windspeed` (风速) - `maxwindspeed24h` (24小时最大风速) - `humidity` (湿度) - `visibility` (能见度) |
+| `type` | string | **是** | 指定要查询的气象要素类型。 **如果此参数缺失或无效，将返回错误信息。**   可选值包括： - `temperature` (气温) - `pressure` (气压) - `windspeed` (风速) - `maxwindspeed24h` (24小时最大风速) - `humidity` (相对湿度) - `visibility` (能见度) - `rain` (1小时降水) |
 
 ## 请求示例
 
@@ -236,6 +347,74 @@ curl "https://api.fanstudio.tech/we/station_all.php?type=temperature"
 
 ---
 
+## 气象站单站历史数据 /we/station\_history.php
+
+**请求方法:** `GET`  
+**接口路径:** `/we/station_history.php`  
+**功能描述:** 根据站点ID和日期，获取该站点一整天的逐小时历史气象数据。
+
+## URL 参数
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --- | --- | --- | --- |
+| `id` | string | **是** | 需要查询的气象站点的唯一ID。 |
+| `date` | string | **是** | 需要查询的日期，格式为 `YYYY-MM-DD` 。 |
+
+## 请求示例
+
+查询ID为 `56288` 的气象站在 `2025-01-01` 的历史数据：
+
+```bash
+curl "https://api.fanstudio.tech/we/station_history.php?id=56288&date=2025-01-01"
+```
+
+## 成功响应示例
+
+响应体是一个JSON对象，其中每个键 (key) 是一个具体的时间点，值 (value) 是该时间点的气象数据。
+
+```json
+{
+  "2025-01-01 01:00 +0800": {
+    "temperature": "3.6",
+    "pressure": "961.5",
+    "humidity": "93",
+    "wind_direction": "9/N",
+    "wind_speed": "0.7"
+  },
+  "2025-01-01 02:00 +0800": {
+    "temperature": "3.3",
+    "pressure": "961.2",
+    "humidity": "95",
+    "wind_direction": "304/NW",
+    "wind_speed": "0.2"
+  },
+  "2025-01-01 03:00 +0800": {
+    "temperature": "3.5",
+    "pressure": "961.1",
+    "humidity": "97",
+    "wind_direction": "59/ENE",
+    "wind_speed": "0.3"
+  }
+  // ... 当天其他小时的数据
+}
+```
+
+### 响应字段说明 (每个时间点对象内部)
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `temperature` | string | 温度 (°C)。 |
+| `pressure` | string | 气压 (hPa)。 |
+| `humidity` | string | 相对湿度 (%)。 |
+| `wind_direction` | string | 风向，格式为 "角度/方向缩写"。 |
+| `wind_speed` | string | 风速 (m/s)。 |
+
+## 错误处理
+
+如果提供的 `id` 或 `date` 无效，或找不到对应的数据，可能会返回一个空对象 `{}` 或错误信息。
+
+---
+
 ## 城市空气质量指数 (AQI) /we/aqi.php
 
 **请求方法:**`GET`  
@@ -272,6 +451,8 @@ curl "https://api.fanstudio.tech/we/station_all.php?type=temperature"
 - `TimePoint` 为 ISO 8601 格式的时间字符串，可能需要客户端进行格式化处理。
 
 ---
+
+以下是曾经支持但现已移除出文档的服务：
 
 ## 全球火山喷发通告 /we/volcanic.php
 

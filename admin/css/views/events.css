@@ -87,19 +87,47 @@
 /* ==========================================================================
    4. 地震/灾害事件卡片 (Disaster & Earthquake Cards)
    ========================================================================== */
+/* 事件卡片 —— 命中壳 / 视觉面分离（横向轻移同样不带动 hit-box） */
 .event-card {
+    --hover-shift-x: 2px;
+    --card-bg: var(--md-sys-color-surface);
+    --card-border-color: var(--glass-border);
+    --card-shadow: none;
+    --card-hover-bg: color-mix(in srgb, var(--md-sys-color-surface) 84%, var(--md-sys-color-primary) 16%);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 52%, transparent);
+    --card-hover-shadow: 0 6px 18px rgba(103, 80, 164, 0.10);
     position: relative;
-    background: var(--md-sys-color-surface);
+    isolation: isolate;
+    background: transparent;
     padding: 20px 24px;
     margin-bottom: 0;
     border-radius: var(--radius-lg);
     display: flex;
     align-items: center;
     gap: 24px;
-    border: 1px solid var(--glass-border);
-    transition: background-color 0.18s ease-out,
-                border-color 0.18s ease-out,
-                transform 0.18s ease-out;
+    border: 1px solid transparent;
+    box-shadow: none;
+}
+
+.event-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        background 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-card > * {
+    transition: transform 0.18s ease-out;
 }
 
 /* 折叠事件组内部的嵌套历史事件小卡片 */
@@ -231,13 +259,18 @@
 body.dark-theme .badge-earthquake { background: transparent; color: inherit; }
 body.dark-theme .badge-tsunami { background: #01579B; color: #B3E5FC; }
 body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
+body.dark-theme .badge-unknown { background: #33313A; color: #CAC4D0; }
 
-/* 悬停事件卡片时的特殊过渡渲染 */
-.event-card:hover {
-    background: color-mix(in srgb, var(--md-sys-color-surface) 84%, var(--md-sys-color-primary) 16%);
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 52%, transparent);
-    box-shadow: 0 6px 18px rgba(103, 80, 164, 0.10);
-    transform: translateX(2px);
+/* 悬停事件卡片：仅视觉面/内容横移，命中壳不动 */
+.event-card:hover::before,
+.event-card:hover > * {
+    transform: translateX(var(--hover-shift-x));
+}
+
+.event-card:hover::before {
+    background: var(--card-hover-bg);
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
 }
 
 /* 空白与正在加载等状态占位卡片 */
@@ -342,33 +375,59 @@ body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
     font-size: 0.85rem !important;
 }
 
-/* 事件过滤器磨砂背景总工具箱面板 */
+/* 事件过滤器磨砂背景总工具箱面板 —— 命中壳 / 视觉面分离 */
 .event-filters-toolbar {
+    --hover-lift: 1px;
+    --card-bg:
+        linear-gradient(180deg, rgba(255,255,255,0.54) 0%, rgba(255,255,255,0.34) 100%),
+        radial-gradient(circle at top left, rgba(103, 80, 164, 0.06), transparent 44%);
+    --card-border-color: var(--glass-border);
+    --card-shadow: 0 10px 28px rgba(103, 80, 164, 0.08);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
+    --card-hover-shadow: 0 14px 34px rgba(103, 80, 164, 0.12);
     display: flex;
     flex-direction: column;
     gap: 14px;
     padding: 18px 20px;
     border-radius: 24px;
-    background:
-        linear-gradient(180deg, rgba(255,255,255,0.54) 0%, rgba(255,255,255,0.34) 100%),
-        radial-gradient(circle at top left, rgba(103, 80, 164, 0.06), transparent 44%);
-    border: 1px solid var(--glass-border);
-    box-shadow: 0 10px 28px rgba(103, 80, 164, 0.08);
+    border: 1px solid transparent;
+    background: transparent;
+    box-shadow: none;
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     position: relative;
+    isolation: isolate;
     z-index: 50;
-    transition:
-        background-color 0.18s ease-out,
-        border-color 0.18s ease-out,
-        box-shadow 0.2s ease-out,
-        transform 0.18s ease-out;
 }
 
-.event-filters-toolbar:hover {
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
-    box-shadow: 0 14px 34px rgba(103, 80, 164, 0.12);
-    transform: translateY(-1px);
+.event-filters-toolbar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.2s ease-out;
+}
+
+.event-filters-toolbar > * {
+    transition: transform 0.18s ease-out;
+}
+
+.event-filters-toolbar:hover::before,
+.event-filters-toolbar:hover > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-filters-toolbar:hover::before {
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
 }
 
 /* 工具箱首行：包含主要过滤胶囊（如地震、海啸、天气） */
@@ -401,9 +460,318 @@ body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
 /* 工具箱次行：高级细粒度筛选器字段（如震级阈值选择、发布机构选择、关键字搜索） */
 .event-filters-secondary-row {
     display: grid;
-    grid-template-columns: minmax(280px, 0.78fr) minmax(360px, 1fr) minmax(320px, 1.36fr);
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 12px;
     align-items: stretch;
+}
+
+.event-filters-time-row {
+    display: block;
+}
+
+/* 提高选择器优先级，避免被后文通用 .event-filter-inline-controls 覆盖 */
+.event-filter-field-card.event-filter-field-card-time {
+    min-width: 0;
+    width: 100%;
+    /* 时间卡内容可变高，不要被通用 74px 最小高度撑出空洞 */
+    min-height: 0 !important;
+    gap: 6px;
+    white-space: normal;
+    justify-content: flex-start;
+}
+
+.event-filter-field-card-time .event-filter-label {
+    margin: 0 !important;
+    line-height: 1.2 !important;
+    padding: 0;
+}
+
+/* 同时命中两个 class，确保覆盖后文 .event-filter-inline-controls 的 gap/align */
+.event-filter-field-card-time .event-filter-inline-controls.event-filter-inline-controls-time {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    /* 预设芯片与自定义起止时间要紧挨着 */
+    gap: 6px !important;
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.event-filter-time-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.event-filter-time-chip {
+    --hover-lift: 1px;
+    position: relative;
+    isolation: isolate;
+    min-height: 34px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 88%, transparent);
+    background: rgba(255, 255, 255, 0.72);
+    color: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+        background-color 0.16s ease-out,
+        border-color 0.16s ease-out,
+        box-shadow 0.16s ease-out,
+        transform 0.16s ease-out;
+}
+
+.event-filter-time-chip:hover {
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+    transform: translateY(-1px);
+}
+
+.event-filter-time-chip.active {
+    background: color-mix(in srgb, var(--md-sys-color-primary) 16%, white 84%);
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, transparent);
+    box-shadow: 0 6px 14px rgba(103, 80, 164, 0.12);
+    color: var(--md-sys-color-primary);
+}
+
+/* 开始 / 至 / 结束：默认强制同一行，避免被 min-width 或 wrap 拆成两行 */
+.event-filter-custom-time {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: end;
+    column-gap: 10px;
+    row-gap: 0;
+    width: min(100%, 34rem);
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+.event-filter-datetime-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0.82;
+    margin: 0;
+}
+
+.event-filter-datetime-input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    /* datetime-local 自带图标，右侧留白别过大 */
+    padding-right: 10px;
+    /* 原生控件偏宽时允许收缩，避免把整行撑换行 */
+    box-sizing: border-box;
+}
+
+.event-filter-datetime-separator {
+    opacity: 0.55;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    /* 与输入框中线对齐 */
+    padding-bottom: 12px;
+    align-self: end;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.events-filters-active-count {
+    opacity: 0.62;
+    font-weight: 600 !important;
+    white-space: nowrap;
+}
+
+.event-filters-footer-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 16px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+    border-top: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 88%, transparent);
+    margin-top: 2px;
+}
+
+.event-filters-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.event-filters-footer-hint {
+    opacity: 0.55;
+    font-weight: 600 !important;
+}
+
+.event-filter-reset-btn {
+    min-height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+    background: color-mix(in srgb, var(--md-sys-color-primary) 10%, white 90%);
+    color: var(--md-sys-color-primary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+        background-color 0.16s ease-out,
+        border-color 0.16s ease-out,
+        opacity 0.16s ease-out,
+        box-shadow 0.16s ease-out;
+}
+
+.event-filter-reset-btn:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 42%, transparent);
+    background: color-mix(in srgb, var(--md-sys-color-primary) 16%, white 84%);
+    box-shadow: 0 6px 14px rgba(103, 80, 164, 0.12);
+}
+
+.event-filter-reset-btn:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+    border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 88%, transparent);
+    background: rgba(255, 255, 255, 0.62);
+    color: inherit;
+    box-shadow: none;
+}
+
+.event-filters-summary-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    flex: 1 1 220px;
+    min-width: 0;
+    padding-top: 2px;
+}
+
+.event-filters-summary-label {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 58%, transparent);
+    white-space: nowrap;
+}
+
+.event-filters-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.event-filter-summary-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--md-sys-color-primary) 10%, white 90%);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent);
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 88%, transparent);
+    font-size: 12px;
+    font-weight: 650;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.event-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    width: 100%;
+    padding: 0 14px;
+    border-radius: 14px;
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 90%, transparent);
+    background: rgba(255, 255, 255, 0.88);
+    box-sizing: border-box;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+    user-select: none;
+    transition:
+        background-color 0.16s ease-out,
+        border-color 0.16s ease-out,
+        box-shadow 0.16s ease-out;
+}
+
+.event-filter-toggle input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--md-sys-color-primary);
+}
+
+.event-filter-toggle.active {
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 36%, transparent);
+    background: color-mix(in srgb, var(--md-sys-color-primary) 12%, white 88%);
+    box-shadow: 0 0 0 4px rgba(103, 80, 164, 0.08);
+}
+
+body.dark-theme .event-filter-time-chip,
+html.theme-dark .event-filter-time-chip,
+body.dark-theme .event-filter-toggle,
+html.theme-dark .event-filter-toggle {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(208, 188, 255, 0.14);
+    color: var(--md-sys-color-on-surface);
+}
+
+body.dark-theme .event-filter-reset-btn,
+html.theme-dark .event-filter-reset-btn {
+    background: rgba(208, 188, 255, 0.12);
+    border-color: rgba(208, 188, 255, 0.28);
+    color: var(--md-sys-color-primary);
+}
+
+body.dark-theme .event-filter-reset-btn:disabled,
+html.theme-dark .event-filter-reset-btn:disabled {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(208, 188, 255, 0.14);
+    color: var(--md-sys-color-on-surface);
+}
+
+body.dark-theme .event-filter-time-chip.active,
+html.theme-dark .event-filter-time-chip.active,
+body.dark-theme .event-filter-toggle.active,
+html.theme-dark .event-filter-toggle.active {
+    background: rgba(208, 188, 255, 0.14);
+    border-color: rgba(208, 188, 255, 0.28);
+    color: var(--md-sys-color-primary);
+}
+
+body.dark-theme .event-filter-summary-chip,
+html.theme-dark .event-filter-summary-chip {
+    background: rgba(208, 188, 255, 0.1);
+    border-color: rgba(208, 188, 255, 0.18);
+    color: var(--md-sys-color-on-surface);
 }
 
 .event-filter-group-nowrap {
@@ -421,28 +789,67 @@ body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
     flex: 0 1 auto;
 }
 
-/* 单个高级筛选字段的小卡片包裹区 */
+/* 单个高级筛选字段的小卡片包裹区 —— 命中壳 / 视觉面分离 */
 .event-filter-field-card {
+    --hover-lift: 1px;
+    --card-bg: color-mix(in srgb, var(--md-sys-color-surface) 84%, white 16%);
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 88%, transparent);
+    --card-shadow: inset 0 1px 0 rgba(255,255,255,0.36);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent);
+    --card-hover-shadow:
+        0 10px 22px rgba(103, 80, 164, 0.08),
+        inset 0 1px 0 rgba(255,255,255,0.46);
+    position: relative;
+    isolation: isolate;
     min-height: 74px;
     padding: 12px 14px;
     border-radius: 18px;
-    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 88%, transparent);
-    background: color-mix(in srgb, var(--md-sys-color-surface) 84%, white 16%);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.36);
-    transition:
-        background-color 0.18s ease-out,
-        border-color 0.18s ease-out,
-        box-shadow 0.18s ease-out,
-        transform 0.18s ease-out;
+    border: 1px solid transparent;
+    background: transparent;
+    box-shadow: none;
 }
 
-.event-filter-field-card:hover,
-.event-filter-field-card:focus-within {
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent);
-    box-shadow:
-        0 10px 22px rgba(103, 80, 164, 0.08),
-        inset 0 1px 0 rgba(255,255,255,0.46);
-    transform: translateY(-1px);
+.event-filter-field-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-filter-field-card > * {
+    transition: transform 0.18s ease-out;
+}
+
+/* 时间卡内部子项不要整体上浮，避免 hover 时视觉间距被放大 */
+.event-filter-field-card-time > * {
+    transition: none;
+}
+
+.event-filter-field-card:hover::before,
+.event-filter-field-card:focus-within::before,
+.event-filter-field-card:hover > *,
+.event-filter-field-card:focus-within > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-filter-field-card-time:hover > *,
+.event-filter-field-card-time:focus-within > * {
+    transform: none;
+}
+
+.event-filter-field-card:hover::before,
+.event-filter-field-card:focus-within::before {
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
 }
 
 /* 定制化高级筛选小卡片最小宽度 */
@@ -495,36 +902,66 @@ body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
     width: 100%;
 }
 
-/* 过滤选择胶囊按钮 (Pills) */
+/* 过滤选择胶囊按钮 (Pills) —— 命中壳 / 视觉面分离 */
 .event-filter-pill {
+    --hover-lift: 1px;
+    --card-bg: rgba(255,255,255,0.54);
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 92%, transparent);
+    --card-shadow: 0 2px 10px rgba(103, 80, 164, 0.04);
+    --card-hover-bg: rgba(255,255,255,0.84);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent);
+    --card-hover-shadow: 0 6px 14px rgba(103, 80, 164, 0.08);
+    position: relative;
+    isolation: isolate;
     min-height: 42px;
     padding: 0 18px;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 92%, transparent);
-    background: rgba(255,255,255,0.54);
-    box-shadow: 0 2px 10px rgba(103, 80, 164, 0.04);
-    transition:
-        background-color 0.16s ease-out,
-        border-color 0.16s ease-out,
-        box-shadow 0.18s ease-out,
-        color 0.16s ease-out,
-        transform 0.16s ease-out;
+    border: 1px solid transparent;
+    background: transparent;
+    box-shadow: none;
+    transition: color 0.16s ease-out;
 }
 
-.event-filter-pill:hover {
-    background: rgba(255,255,255,0.84);
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent);
-    box-shadow: 0 6px 14px rgba(103, 80, 164, 0.08);
-    transform: translateY(-1px);
+.event-filter-pill::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.16s ease-out,
+        background 0.16s ease-out,
+        border-color 0.16s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-filter-pill > * {
+    transition: transform 0.16s ease-out;
+}
+
+.event-filter-pill:hover::before,
+.event-filter-pill:hover > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-filter-pill:hover::before {
+    background: var(--card-hover-bg);
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
 }
 
 /* 激活状态的选择胶囊 */
 .event-filter-pill.active {
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);
-    box-shadow: 0 8px 18px rgba(103, 80, 164, 0.12);
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);
+    --card-shadow: 0 8px 18px rgba(103, 80, 164, 0.12);
 }
 
-.event-filter-pill:active {
+.event-filter-pill:active::before,
+.event-filter-pill:active > * {
     transform: translateY(0) scale(0.98);
 }
 
@@ -532,25 +969,33 @@ body.dark-theme .badge-weather { background: #E65100; color: #FFE0B2; }
     font-size: 12px;
 }
 
-/* 深色模式下的过滤器组件及工具箱渲染 */
+/* 深色模式下的过滤器组件及工具箱渲染（变量写入视觉面） */
 body.dark-theme .event-filters-toolbar,
 html.theme-dark .event-filters-toolbar {
-    background:
+    --card-bg:
         linear-gradient(180deg, rgba(44, 40, 52, 0.92) 0%, rgba(30, 27, 37, 0.88) 100%),
         radial-gradient(circle at top left, rgba(208, 188, 255, 0.08), transparent 42%);
-    border-color: rgba(208, 188, 255, 0.12);
-    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+    --card-border-color: rgba(208, 188, 255, 0.12);
+    --card-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
 }
 
 body.dark-theme .event-filter-field-card,
 html.theme-dark .event-filter-field-card {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(208, 188, 255, 0.10);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    --card-bg: rgba(255, 255, 255, 0.04);
+    --card-border-color: rgba(208, 188, 255, 0.10);
+    --card-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 body.dark-theme .event-filter-pill,
-html.theme-dark .event-filter-pill,
+html.theme-dark .event-filter-pill {
+    --card-bg: rgba(255, 255, 255, 0.06);
+    --card-border-color: rgba(208, 188, 255, 0.14);
+    --card-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    --card-hover-bg: rgba(208, 188, 255, 0.10);
+    --card-hover-border-color: rgba(208, 188, 255, 0.22);
+    color: var(--md-sys-color-on-surface);
+}
+
 body.dark-theme .event-filter-select,
 html.theme-dark .event-filter-select,
 body.dark-theme .event-filter-source-summary,
@@ -561,17 +1006,19 @@ html.theme-dark .event-filter-source-summary {
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
 
-body.dark-theme .event-filter-pill:hover,
-html.theme-dark .event-filter-pill:hover {
-    background: rgba(208, 188, 255, 0.10);
-    border-color: rgba(208, 188, 255, 0.22);
-}
-
 body.dark-theme .event-filter-source-menu,
 html.theme-dark .event-filter-source-menu {
     background: var(--md-sys-color-surface);
     border-color: rgba(208, 188, 255, 0.12);
     box-shadow: 0 22px 40px rgba(0,0,0,0.34);
+}
+
+/* 暗色模式：原生 datetime-local 日期选择控件跟随暗色渲染（日历弹层不发白） */
+body.dark-theme .event-filter-datetime-input,
+html.theme-dark .event-filter-datetime-input,
+body.dark-theme .event-filter-source-summary,
+html.theme-dark .event-filter-source-summary {
+    color-scheme: dark;
 }
 
 .horizontal-timeline-display-label {
@@ -582,15 +1029,21 @@ html.theme-dark .event-filter-source-menu {
 .event-filter-select {
     border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 90%, transparent);
     border-radius: 14px;
-    padding: 0 14px;
+    /* 右侧预留下拉箭头空间，避免选中文字被箭头/裁剪挡住 */
+    padding: 0 34px 0 14px;
     background: rgba(255,255,255,0.88);
     color: inherit;
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.25;
     min-height: 42px;
     box-sizing: border-box;
     outline: none;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+    /* 防止原生 select 在窄容器里把文字裁到看不见 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     transition:
         background-color 0.16s ease-out,
         border-color 0.16s ease-out,
@@ -613,38 +1066,101 @@ html.theme-dark .event-filter-source-menu {
 }
 
 .event-filter-select-md {
-    min-width: 124px;
-    flex: 1 1 0;
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
 }
 
 .event-filter-select-sm {
-    min-width: 82px;
-    width: 82px;
-    flex: 0 0 82px;
+    min-width: 4.5rem;
+    width: auto;
+    flex: 0 0 auto;
+    max-width: 100%;
+    padding-left: 12px;
+    padding-right: 28px;
+}
+
+/* 烈度 / 震度同卡分轨：标签在上，避免横向挤占导致截断 */
+.event-filter-field-card-intensity {
+    min-width: min(100%, 300px);
+}
+
+.event-filter-intensity-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+}
+
+.event-filter-intensity-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+}
+
+.event-filter-intensity-rail {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 68%, transparent);
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: keep-all;
+}
+
+.event-filter-intensity-row .event-filter-select {
+    min-width: 0;
+    width: 100%;
+}
+
+/* 数据源卡片：防止固定宽度把工具栏撑破，同时保证文字可读 */
+.event-filter-field-card-source {
+    min-width: min(100%, 280px);
+    overflow: visible;
+}
+
+.event-filter-inline-controls-source {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    overflow: visible;
+    gap: 8px;
 }
 
 /* 过滤发布源的多选框 */
 .event-filter-source-select,
 .event-filter-source-details {
-    width: 240px;
-    min-width: 180px;
-    max-width: min(320px, 100%);
+    flex: 1 1 12rem;
+    width: auto;
+    min-width: min(100%, 12rem);
+    max-width: 100%;
     box-sizing: border-box;
 }
 
 .event-filter-source-select {
-    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .event-filter-keyword-input {
     width: 100%;
     min-width: 0;
     flex: 1 1 100%;
+    padding-right: 14px;
 }
 
 .event-filter-source-details {
     position: relative;
-    flex: 1 1 240px;
+    flex: 1 1 12rem;
+    min-width: min(100%, 12rem);
     overflow: visible;
     z-index: 100;
 }
@@ -784,6 +1300,334 @@ html.theme-dark .event-filter-source-menu {
     opacity: 0.5;
 }
 
+/* 台风 / 海啸 / 地震卡片第二行参数摘要 */
+.event-meta-typhoon,
+.event-meta-tsunami,
+.event-meta-earthquake {
+    opacity: 0.72;
+    margin-top: 2px;
+    font-size: 0.8125rem;
+    line-height: 1.35;
+}
+
+.event-meta-earthquake {
+    opacity: 0.88;
+    gap: 8px;
+}
+
+.event-quake-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--md-sys-color-primary) 10%, var(--md-sys-color-surface));
+    color: var(--md-sys-color-on-surface-variant);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
+}
+
+body.dark-theme .event-quake-chip {
+    background: rgba(103, 80, 164, 0.18);
+    border-color: rgba(103, 80, 164, 0.28);
+}
+
+/* 气象预警 / 地震情报补充正文展开面板 */
+.event-weather-detail-panel {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--md-sys-color-tertiary) 8%, var(--md-sys-color-surface));
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent);
+}
+
+.event-weather-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.event-weather-detail-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.event-weather-detail-title {
+    letter-spacing: 0.01em;
+}
+
+.event-weather-detail-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--md-sys-color-on-surface);
+    opacity: 0.92;
+}
+
+.event-weather-detail-body--timeline {
+    margin-top: 4px;
+    font-size: 12px;
+    opacity: 0.88;
+}
+
+body.dark-theme .event-weather-detail-panel {
+    background: rgba(126, 87, 194, 0.12);
+    border-color: rgba(126, 87, 194, 0.22);
+}
+
+/* ---- 海啸结构化面板（对齐推送展示器信息密度） ---- */
+.event-tsunami-panel {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.event-tsunami-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.event-tsunami-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    border: 1px solid transparent;
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 82%, transparent);
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.event-tsunami-chip-icon {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.event-tsunami-chip-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.event-tsunami-chip.is-info,
+.event-tsunami-chip.is-default {
+    background: color-mix(in srgb, #0288D1 12%, var(--md-sys-color-surface));
+    color: #0277BD;
+    border-color: color-mix(in srgb, #0288D1 22%, transparent);
+}
+
+.event-tsunami-chip.is-blue {
+    background: color-mix(in srgb, #1E88E5 14%, var(--md-sys-color-surface));
+    color: #1565C0;
+    border-color: color-mix(in srgb, #1E88E5 24%, transparent);
+}
+
+.event-tsunami-chip.is-watch {
+    background: color-mix(in srgb, #F9A825 16%, var(--md-sys-color-surface));
+    color: #F57F17;
+    border-color: color-mix(in srgb, #F9A825 28%, transparent);
+}
+
+.event-tsunami-chip.is-warning {
+    background: color-mix(in srgb, #FB8C00 16%, var(--md-sys-color-surface));
+    color: #EF6C00;
+    border-color: color-mix(in srgb, #FB8C00 28%, transparent);
+}
+
+.event-tsunami-chip.is-major,
+.event-tsunami-chip.is-danger {
+    background: color-mix(in srgb, #E53935 14%, var(--md-sys-color-surface));
+    color: #C62828;
+    border-color: color-mix(in srgb, #E53935 26%, transparent);
+}
+
+.event-tsunami-chip.is-wave,
+.event-tsunami-chip.is-area,
+.event-tsunami-chip.is-station {
+    background: color-mix(in srgb, #00ACC1 12%, var(--md-sys-color-surface));
+    color: #00838F;
+    border-color: color-mix(in srgb, #00ACC1 24%, transparent);
+}
+
+.event-tsunami-chip.is-place,
+.event-tsunami-chip.is-mag {
+    background: color-mix(in srgb, var(--md-sys-color-primary) 12%, var(--md-sys-color-surface));
+    color: var(--md-sys-color-primary);
+    border-color: color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
+}
+
+.event-tsunami-chip.is-cancel {
+    background: color-mix(in srgb, #43A047 14%, var(--md-sys-color-surface));
+    color: #2E7D32;
+    border-color: color-mix(in srgb, #43A047 24%, transparent);
+}
+
+.event-tsunami-chip.is-training {
+    background: color-mix(in srgb, #8E24AA 12%, var(--md-sys-color-surface));
+    color: #6A1B9A;
+    border-color: color-mix(in srgb, #8E24AA 24%, transparent);
+}
+
+.event-tsunami-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.event-tsunami-section {
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: color-mix(in srgb, #0288D1 7%, var(--md-sys-color-surface));
+    border: 1px solid color-mix(in srgb, #0288D1 14%, transparent);
+}
+
+.event-tsunami-section.is-forecast {
+    background: color-mix(in srgb, #0288D1 8%, var(--md-sys-color-surface));
+}
+
+.event-tsunami-section.is-station {
+    background: color-mix(in srgb, #00838F 8%, var(--md-sys-color-surface));
+    border-color: color-mix(in srgb, #00838F 16%, transparent);
+}
+
+.event-tsunami-section.is-grade {
+    background: color-mix(in srgb, #5E35B1 8%, var(--md-sys-color-surface));
+    border-color: color-mix(in srgb, #5E35B1 16%, transparent);
+}
+
+.event-tsunami-section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--md-sys-color-on-surface);
+}
+
+.event-tsunami-section-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.event-tsunami-section-title {
+    letter-spacing: 0.01em;
+}
+
+.event-tsunami-section-list {
+    margin: 0;
+    padding-left: 1.1em;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 82%, transparent);
+}
+
+.event-tsunami-section-list li {
+    word-break: break-word;
+}
+
+.event-tsunami-section-body {
+    font-size: 12px;
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 82%, transparent);
+    word-break: break-word;
+}
+
+.event-tsunami-panel.is-history .event-tsunami-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+.event-tsunami-panel.is-history .event-tsunami-section {
+    padding: 6px 8px;
+}
+
+.event-tsunami-panel.is-history .event-tsunami-section-list,
+.event-tsunami-panel.is-history .event-tsunami-section-body,
+.event-tsunami-panel.is-history .event-tsunami-section-head {
+    font-size: 11px;
+}
+
+body.dark-theme .event-tsunami-chip.is-info,
+body.dark-theme .event-tsunami-chip.is-default {
+    background: rgba(3, 169, 244, 0.16);
+    color: #81D4FA;
+    border-color: rgba(3, 169, 244, 0.28);
+}
+
+body.dark-theme .event-tsunami-chip.is-watch {
+    background: rgba(255, 193, 7, 0.16);
+    color: #FFE082;
+    border-color: rgba(255, 193, 7, 0.28);
+}
+
+body.dark-theme .event-tsunami-chip.is-warning {
+    background: rgba(255, 152, 0, 0.16);
+    color: #FFCC80;
+    border-color: rgba(255, 152, 0, 0.28);
+}
+
+body.dark-theme .event-tsunami-chip.is-major,
+body.dark-theme .event-tsunami-chip.is-danger {
+    background: rgba(244, 67, 54, 0.16);
+    color: #EF9A9A;
+    border-color: rgba(244, 67, 54, 0.28);
+}
+
+body.dark-theme .event-tsunami-chip.is-wave,
+body.dark-theme .event-tsunami-chip.is-area,
+body.dark-theme .event-tsunami-chip.is-station {
+    background: rgba(0, 188, 212, 0.14);
+    color: #80DEEA;
+    border-color: rgba(0, 188, 212, 0.26);
+}
+
+body.dark-theme .event-tsunami-chip.is-cancel {
+    background: rgba(76, 175, 80, 0.16);
+    color: #A5D6A7;
+    border-color: rgba(76, 175, 80, 0.28);
+}
+
+body.dark-theme .event-tsunami-chip.is-training {
+    background: rgba(171, 71, 188, 0.16);
+    color: #CE93D8;
+    border-color: rgba(171, 71, 188, 0.28);
+}
+
+body.dark-theme .event-tsunami-section {
+    background: rgba(3, 169, 244, 0.08);
+    border-color: rgba(3, 169, 244, 0.18);
+}
+
+body.dark-theme .event-tsunami-section.is-station {
+    background: rgba(0, 188, 212, 0.08);
+    border-color: rgba(0, 188, 212, 0.18);
+}
+
+body.dark-theme .event-tsunami-section.is-grade {
+    background: rgba(126, 87, 194, 0.12);
+    border-color: rgba(126, 87, 194, 0.22);
+}
+
 /* 标示地震速报已升级或有新的警报更新徽标 */
 .update-badge {
     display: inline-flex;
@@ -818,21 +1662,53 @@ html.theme-dark .event-filter-source-menu {
 /* ==========================================================================
    7. 地震速报同源事件组折叠面板 (Event Group Timeline)
    ========================================================================== */
+/* 同源事件组折叠面板 —— 命中壳 / 视觉面分离 */
 .event-group-expanded {
-    background: var(--md-sys-color-surface);
-    border: 1px solid var(--glass-border);
+    --hover-lift: 1px;
+    --card-bg: var(--md-sys-color-surface);
+    --card-border-color: var(--glass-border);
+    --card-shadow: var(--glass-shadow);
+    --card-hover-bg: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-primary) 10%);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 46%, transparent);
+    --card-hover-shadow: 0 8px 22px rgba(103, 80, 164, 0.10);
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-lg);
-    box-shadow: var(--glass-shadow);
-    transition: background-color 0.18s ease-out,
-                border-color 0.18s ease-out,
-                transform 0.18s ease-out;
+    box-shadow: none;
 }
 
-.event-group-expanded:hover {
-    background: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-primary) 10%);
-    border-color: color-mix(in srgb, var(--md-sys-color-primary) 46%, transparent);
-    box-shadow: 0 8px 22px rgba(103, 80, 164, 0.10);
-    transform: translateY(-1px);
+.event-group-expanded::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        background 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-group-expanded > * {
+    transition: transform 0.18s ease-out;
+}
+
+.event-group-expanded:hover::before,
+.event-group-expanded:hover > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-group-expanded:hover::before {
+    background: var(--card-hover-bg);
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
 }
 
 .event-group-expanded-panel {
@@ -949,6 +1825,235 @@ html.theme-dark .event-filter-source-menu {
 .event-group-quake-text--strong {
     opacity: 0.85;
     font-weight: 600 !important;
+}
+
+/* 台风路径点参数区（强度、风速、气压、位置） */
+.event-group-typhoon-details {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.event-group-typhoon-text {
+    opacity: 0.8;
+    font-size: 13px !important;
+}
+
+.event-group-typhoon-text--strong {
+    opacity: 0.9;
+    font-weight: 600 !important;
+}
+
+/* 展开壳：顶部摘要 + 下方时间线，视觉上连成一张连续卡片 */
+.event-group-expanded-shell {
+    --hover-lift: 1px;
+    --card-bg: var(--md-sys-color-surface);
+    --card-border-color: var(--glass-border);
+    --card-shadow: var(--glass-shadow);
+    --card-hover-bg: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-primary) 10%);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 46%, transparent);
+    --card-hover-shadow: 0 8px 22px rgba(103, 80, 164, 0.10);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-radius: var(--radius-lg);
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    overflow: hidden;
+}
+
+.event-group-expanded-shell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none;
+    transition:
+        transform 0.18s ease-out,
+        background 0.18s ease-out,
+        border-color 0.18s ease-out,
+        box-shadow 0.18s ease-out;
+}
+
+.event-group-expanded-shell > * {
+    transition: transform 0.18s ease-out;
+}
+
+.event-group-expanded-shell:hover::before,
+.event-group-expanded-shell:hover > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
+}
+
+.event-group-expanded-shell:hover::before {
+    background: var(--card-hover-bg);
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
+}
+
+.event-group-sticky-card {
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+}
+
+/* 顶部摘要卡：去掉独立卡片外壳，融入展开壳 */
+.event-group-sticky-card .event-card {
+    margin-bottom: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    border: none;
+}
+
+.event-group-sticky-card .event-card::before {
+    display: none;
+}
+
+/* 时间线区：与顶部摘要用细分割线衔接，不再单独成卡 */
+.event-group-timeline-section {
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    padding: 0 8px 8px;
+}
+
+.event-group-timeline-panel {
+    padding: 8px 16px 16px;
+}
+
+.event-group-timeline-header {
+    display: flex;
+    align-items: center;
+    margin: 0 0 8px 0;
+    padding: 0;
+}
+
+.event-group-timeline-header .event-group-collapse-text {
+    margin: 0 !important;
+    line-height: 1.2 !important;
+}
+
+.event-group-timeline-panel .event-group-collapse-button {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+}
+
+/* 业务报次提示芯片（与更新序号区分） */
+.event-group-business-chip {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--md-sys-color-tertiary) 12%, var(--md-sys-color-surface));
+    color: var(--md-sys-color-on-surface-variant);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 22%, transparent);
+    opacity: 0.92;
+}
+
+body.dark-theme .event-group-business-chip {
+    background: rgba(126, 87, 194, 0.16);
+    border-color: rgba(126, 87, 194, 0.28);
+}
+
+/* 时间线历史行：复用 EventCard 主卡片级详情 */
+.event-group-timeline-row--card {
+    align-items: stretch;
+}
+
+.event-group-history-card-wrap {
+    margin-top: 4px;
+    min-width: 0;
+}
+
+.event-group-history-card-wrap .event-card,
+.event-group-history-card-wrap .event-card-history {
+    padding: 10px 12px;
+    margin-bottom: 0;
+    gap: 12px;
+    border-radius: 12px;
+    box-shadow: none;
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 28%, transparent);
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 55%, transparent);
+}
+
+.event-group-history-card-wrap .event-card::before {
+    display: none;
+}
+
+.event-group-history-card-wrap .event-title-text {
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+}
+
+.event-group-history-card-wrap .event-tsunami-panel {
+    margin-top: 6px;
+}
+
+.event-group-history-card-wrap .event-tsunami-sections {
+    margin-top: 2px;
+}
+
+.event-group-history-card-wrap .mag-badge,
+.event-group-history-card-wrap .mag-badge-history {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+}
+
+body.dark-theme .event-group-history-card-wrap .event-card,
+body.dark-theme .event-group-history-card-wrap .event-card-history {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 海啸时间线详情（兼容旧结构） */
+.event-group-tsunami-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+    min-width: 0;
+}
+
+.event-group-tsunami-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    opacity: 0.9;
+    line-height: 1.4 !important;
+}
+
+.event-group-tsunami-fallback {
+    font-size: 12px !important;
+    opacity: 0.75;
+    line-height: 1.4 !important;
+}
+
+.event-group-tsunami-details .event-tsunami-panel {
+    margin-top: 2px;
+}
+
+/* 气象时间线 / 展开详情 */
+.event-group-weather-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+    min-width: 0;
+}
+
+.event-group-weather-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    opacity: 0.9;
 }
 
 /* 速报更新等级芯片(如 "第1报" 芯片) */
@@ -1427,7 +2532,7 @@ html.theme-dark .horizontal-timeline-nav-btn:hover {
 /* 响应式自适应多栏天气输入栅格 */
 .weather-query-form {
     display: grid;
-    grid-template-columns: minmax(320px, 2.2fr) minmax(150px, 1fr) minmax(132px, 0.8fr) auto auto;
+    grid-template-columns: minmax(320px, 2.2fr) minmax(150px, 1fr) minmax(132px, 0.8fr) minmax(132px, 0.8fr) auto auto;
     gap: 10px;
     align-items: center;
 }
@@ -1599,8 +2704,194 @@ body.dark-theme .weather-query-error {
 
 .weather-query-pagination-row {
     justify-content: center;
-    gap: 12px;
-    margin-top: 16px;
+}
+
+/* ==========================================================================
+   9.1 台风信息快捷查询面板 (Typhoon Query Panel)
+   视觉风格对齐气象预警快捷查询，扩展多参数表单与路径展示
+   ========================================================================== */
+.typhoon-query-panel {
+    margin-top: 0;
+}
+
+.typhoon-query-form {
+    display: grid;
+    /* 台风 ID 加宽，保证 placeholder 完整可读；数量字段带前缀/后缀引导 */
+    grid-template-columns:
+        minmax(280px, 1.8fr)
+        minmax(160px, 1.1fr)
+        minmax(132px, 0.75fr)
+        minmax(120px, 0.75fr)
+        auto
+        auto
+        auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.typhoon-query-id,
+.typhoon-query-keyword {
+    min-width: 0;
+}
+
+/* 数量输入：左侧“数量”+ 中间数字 + 右侧“条”，降低纯数字框的认知成本 */
+.typhoon-query-count-field {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: 10px;
+    background: var(--md-sys-color-surface);
+    overflow: hidden;
+    min-height: 38px;
+}
+
+.typhoon-query-count-field:focus-within {
+    border-color: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 3px rgba(103, 80, 164, 0.12);
+}
+
+.typhoon-query-count-field.is-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.typhoon-query-count-label,
+.typhoon-query-count-suffix {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0.78;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.typhoon-query-count-label {
+    padding: 0 0 0 10px;
+}
+
+.typhoon-query-count-suffix {
+    padding: 0 10px 0 0;
+}
+
+.typhoon-query-count {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    text-align: center;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    background: transparent !important;
+    /* 隐藏 number 输入框多余上下箭头，视觉更干净 */
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+.typhoon-query-count::-webkit-outer-spin-button,
+.typhoon-query-count::-webkit-inner-spin-button {
+    appearance: none;
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.typhoon-query-active-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    white-space: nowrap;
+    user-select: none;
+    opacity: 0.92;
+}
+
+.typhoon-query-active-toggle input {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--md-sys-color-primary);
+}
+
+.typhoon-query-result-card {
+    margin-bottom: 10px;
+}
+
+.typhoon-query-result-body {
+    display: grid;
+    gap: 4px;
+}
+
+.typhoon-query-meta-line {
+    opacity: 0.92;
+    line-height: 1.45 !important;
+}
+
+/* 查询结果正文第一行：台风编号 */
+.typhoon-query-id-line {
+    font-weight: 600;
+    opacity: 0.95;
+}
+
+.typhoon-query-source-line {
+    opacity: 0.7 !important;
+    margin-top: 2px !important;
+}
+
+.typhoon-query-wind-circle {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--glass-border);
+}
+
+.typhoon-query-track-wrap {
+    margin-top: 10px;
+}
+
+.typhoon-query-expand-btn {
+    margin-bottom: 8px;
+}
+
+.typhoon-query-track-block {
+    display: grid;
+    gap: 10px;
+}
+
+.typhoon-query-track-section {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 45%, transparent);
+    padding: 10px 12px;
+}
+
+.typhoon-query-track-title {
+    display: block;
+    font-weight: 700 !important;
+    opacity: 0.86;
+    margin-bottom: 6px !important;
+}
+
+.typhoon-query-track-list {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 4px;
+}
+
+.typhoon-query-track-list li {
+    font-size: 12.5px;
+    line-height: 1.45;
+    opacity: 0.9;
+}
+
+.typhoon-query-list-item-wrap + .typhoon-query-list-item-wrap {
+    margin-top: 8px;
+}
+
+.typhoon-query-caption-muted {
+    opacity: 0.7;
 }
 
 /* 历史列表单行条目卡片 */
@@ -1643,7 +2934,7 @@ body.dark-theme .weather-query-error {
 /* 宽屏平板设备适配（最大宽 1280px） */
 @media (max-width: 1280px) {
     .event-filters-secondary-row {
-        grid-template-columns: minmax(240px, 0.82fr) minmax(320px, 1.18fr);
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     }
 
     .event-filter-field-card-keyword {
@@ -1654,11 +2945,13 @@ body.dark-theme .weather-query-error {
 /* 普通平板或小桌面（最大宽 900px） */
 @media (max-width: 900px) {
     .event-filters-toolbar {
+        --hover-lift: 0px;
         padding: 16px;
         border-radius: 20px;
     }
 
-    .event-filters-toolbar:hover {
+    .event-filters-toolbar:hover::before,
+    .event-filters-toolbar:hover > * {
         transform: none;
     }
 
@@ -1686,10 +2979,18 @@ body.dark-theme .weather-query-error {
         flex-wrap: wrap;
     }
 
+    .event-filter-select-sm {
+        width: 100%;
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
     .event-filter-source-select,
     .event-filter-source-details {
         width: 100%;
+        flex: 1 1 100%;
         max-width: 100%;
+        min-width: 0;
     }
 
     .event-filter-source-menu {
@@ -1702,6 +3003,67 @@ body.dark-theme .weather-query-error {
     .events-filters-header {
         gap: 14px;
         margin-bottom: 24px;
+    }
+
+    /* 时间轴翻页按钮移动端触控放大：保证至少 44x44px 命中区 */
+    .horizontal-timeline-nav-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* 事件卡片展开徽章触控区域放大，便于拇指点击 */
+    .update-badge {
+        min-height: 36px;
+        padding: 6px 14px;
+    }
+
+    /* 时间轴展示数量下拉触发按钮放大触控目标 */
+    .horizontal-timeline-limit-trigger {
+        min-height: 40px;
+        min-width: 96px;
+    }
+
+    /* 天气/台风查询按钮移动端触控目标统一 44px */
+    .weather-query-btn,
+    .typhoon-query-submit-btn {
+        min-height: 44px;
+    }
+
+    .event-filters-footer-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .event-filters-footer-actions {
+        width: 100%;
+        justify-content: flex-end;
+        margin-left: 0;
+    }
+
+    /* 手机端也尽量保持「开始 至 结束」同一行，避免被强行拆成两行 */
+    .event-filter-custom-time {
+        display: grid;
+        width: 100%;
+        max-width: 100%;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: end;
+        column-gap: 8px;
+    }
+
+    .event-filter-datetime-field {
+        width: auto;
+        min-width: 0;
+    }
+
+    .event-filter-datetime-separator {
+        padding-bottom: 12px;
+        align-self: end;
+    }
+
+    .event-filters-summary-row {
+        flex-direction: column;
+        gap: 8px;
     }
 
     /* 主要分类胶囊在手机端拉伸自适应 */
@@ -1747,6 +3109,7 @@ body.dark-theme .weather-query-error {
     }
 
     .event-card {
+        --hover-shift-x: 0px;
         flex-direction: row;
         flex-wrap: wrap;
         align-items: center;
@@ -1754,7 +3117,8 @@ body.dark-theme .weather-query-error {
         padding: 16px;
     }
 
-    .event-card:hover {
+    .event-card:hover::before,
+    .event-card:hover > * {
         transform: none;
     }
 
@@ -1781,6 +3145,16 @@ body.dark-theme .weather-query-error {
     .weather-query-btn {
         width: 100%;
         justify-content: center;
+    }
+
+    /* 台风查询表单在手机端同样改为单列 */
+    .typhoon-query-form {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .typhoon-query-active-toggle {
+        min-height: 38px;
     }
 
     .weather-query-list-item {
@@ -1845,7 +3219,8 @@ body.dark-theme .weather-query-error {
 }
 
 @media print {
-    .event-card:hover {
+    .event-card:hover::before,
+    .event-card:hover > * {
         transform: none !important;
     }
 }

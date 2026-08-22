@@ -85,7 +85,18 @@
         markdownFiles: [],                               // 离线使用文档索引结构数组
         markdownDocument: null,                          // 当前文档渲染器的数据源载荷
         selectedMarkdownPath: '',                        // 被点亮的高亮文档相对路径
-        theme: localStorage.getItem('theme') || 'light', // 全局 UI 主题，启动时优先读取用户上一次的偏好设置
+        // 全局 UI 主题，启动时优先读取用户上一次的偏好设置；
+        // 未显式选择时跟随系统 prefers-color-scheme，避免与首屏主题拦截器（html 预挂 theme-dark 类）不一致导致闪烁
+        theme: (function () {
+            try {
+                const saved = localStorage.getItem('theme');
+                if (saved) return saved;
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+                return 'light';
+            } catch (e) {
+                return 'light';
+            }
+        })(),
         dataLoaded: false,                               // 核心握手成功标识，用于全局解密并展示控制面板界面
     };
 

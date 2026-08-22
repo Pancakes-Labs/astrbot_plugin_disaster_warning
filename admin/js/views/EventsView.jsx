@@ -23,6 +23,11 @@ function EventsView() {
             <div className="events-view-section">
                 <WeatherQueryPanel />
             </div>
+
+            {/* 台风信息快捷查询：与 /台风信息查询 指令等价，优先 EQSC 并支持本地回退 */}
+            <div className="events-view-section">
+                <TyphoonQueryPanel />
+            </div>
             
             {/* 底部的灾害事件主列表组件，包含强大的多维度组合筛选及事件折叠折叠面板 */}
             <EventsList />

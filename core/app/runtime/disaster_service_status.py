@@ -9,6 +9,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ...network.websocket.fan_studio_connection_policy import (
+    resolve_active_server_label,
+)
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -22,43 +25,93 @@ class DisasterServiceStatusService:
     def __init__(self, service):
         # 主服务提供运行标志、连接任务、统计管理器等原始状态来源。
         self.service = service  # 主服务 DisasterWarningService 实例
-        # 运行时查询服务负责把配置层的数据源开关整理成管理端可消费的状态结构。
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 优先复用主服务已装配的运行时查询实例，避免重复创建；
+        # 仅在主服务尚未注入时再本地兜底构造。
+        self._source_runtime_query = getattr(
+            service, "source_runtime_query", None
+        ) or SourceRuntimeQueryService(service.config)
 
     def get_service_status(self) -> dict[str, Any]:
         """获取服务状态。"""
         connection_status = (
             self.service.ws_manager.get_all_connections_status()
         )  # 物理 WebSocket 连接活跃表
-        # 该值反映的是“当前已连上的 WebSocket 连接数量”，
-        # 与配置中声明了多少连接、启动过多少任务并不完全等价。
-        active_websocket_connections = sum(
-            1 for status in connection_status.values() if status["connected"]
-        )
-        # global_quake 连接存在一定特殊性，管理端会单独关心它是否在线，
-        # 这里通过任务名快速整理出一个独立布尔状态。
-        global_quake_connected = any(
-            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
-            for task in self.service.connection_tasks
+        # 活跃连接 / 标记统一由 SourceRuntimeQueryService 计算，
+        # 避免与 RealtimePayloadBuilder 口径漂移。
+        metrics = self._source_runtime_query.resolve_active_connection_metrics(
+            self.service,
+            connection_status,
         )
 
-        return {
-            **self._source_runtime_query.build_runtime_snapshot(
-                actual_connections=connection_status,
-                running=self.service.running,
-                start_time=self.service.start_time.isoformat()
-                if hasattr(self.service, "start_time")
-                else None,
-                uptime=self.get_uptime(),
-                active_websocket_connections=active_websocket_connections,
-                message_logger_enabled=self.service.message_logger.enabled
-                if self.service.message_logger
-                else False,
-                global_quake_connected=global_quake_connected,
+        snapshot = self._source_runtime_query.build_runtime_snapshot(
+            actual_connections=connection_status,
+            running=self.service.running,
+            start_time=self.service.start_time.isoformat()
+            if hasattr(self.service, "start_time")
+            else None,
+            uptime=self.get_uptime(),
+            active_websocket_connections=int(
+                metrics.get("active_websocket_connections", 0) or 0
             ),
+            message_logger_enabled=self.service.message_logger.enabled
+            if self.service.message_logger
+            else False,
+            openquake_connected=bool(metrics.get("openquake_connected")),
+        )
+        # total_connections 已由 runtime snapshot 按 catalog 期望通道统计
+        # （含 EQSC / S-Net / 已停用通道），此处不再二次累加。
+        silence_status = None
+        coordinator = getattr(self.service, "startup_silence", None)
+        if coordinator is not None and hasattr(coordinator, "get_status"):
+            try:
+                silence_status = coordinator.get_status()
+            except Exception:
+                silence_status = None
+
+        # 解析 FAN Studio 连接的活跃服务器信息
+        fan_server_info = self._resolve_fan_server_info(connection_status)
+
+        return {
+            **snapshot,
             # 统计摘要直接挂在顶层，便于管理端一次请求同时拿到运行状态与统计概览。
             "statistics_summary": self.service.statistics_manager.get_summary(),
+            "startup_silence": silence_status,
+            "fan_server_info": fan_server_info,
         }
+
+    def _resolve_fan_server_info(
+        self,
+        connection_status: dict[str, dict[str, Any]],
+    ) -> dict[str, str]:
+        """解析 FAN Studio 连接的活跃服务器信息。"""
+        result: dict[str, str] = {}
+        fan_connections = {
+            "fan_studio_all": "FAN Studio",
+            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        }
+        for conn_name, display_name in fan_connections.items():
+            info = connection_status.get(conn_name, {})
+            if isinstance(info, dict):
+                label = resolve_active_server_label(info)
+                if label != "未知":
+                    result[conn_name] = label
+                else:
+                    # 连接未建立时，根据 connection_info 判断偏好
+                    conn_info = self.service.ws_manager.connection_info.get(
+                        conn_name, {}
+                    )
+                    if isinstance(conn_info, dict):
+                        uri = str(conn_info.get("uri") or "").strip()
+                        # 使用原始地址（未受偏好交换影响）判断
+                        conn_config = conn_info.get("connection_config", {}) or {}
+                        original_backup = str(
+                            conn_config.get("original_backup") or ""
+                        ).strip()
+                        if uri and original_backup and uri == original_backup:
+                            result[conn_name] = "备用服务器"
+                        elif uri:
+                            result[conn_name] = "主服务器"
+        return result
 
     def get_sub_source_status(self) -> dict[str, dict[str, bool]]:
         """获取所有子数据源的启用状态。"""

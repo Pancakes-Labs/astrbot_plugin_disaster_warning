@@ -61,6 +61,43 @@ def get_plugin_version() -> str:
     return "unknown"
 
 
+def get_plugin_name() -> str:
+    """
+    获取插件名（metadata.yaml 的 name 字段）。
+
+    与 get_plugin_version 保持一致，按行扫描 metadata.yaml 提取 name 字段，
+    避免在重载插件等场景硬编码插件名导致与元数据配置漂移。
+    读取失败（metadata.yaml 缺失或未读到 name 字段）时回退到插件目录名，
+    与插件目录实际名称保持一致，避免目录重命名后重载命令找不到当前插件；
+    仅当插件根目录路径解析本身失败时才保留固定默认值兜底。
+    """
+    # 获取当前文件所在目录的父目录作为插件根目录（先解析，供异常路径回退复用）
+    plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        metadata_path = os.path.join(plugin_root, "metadata.yaml")
+
+        if os.path.exists(metadata_path):
+            with open(metadata_path, encoding="utf-8") as f:
+                for line in f:
+                    # 匹配 name 字段，并去除行尾注释。
+                    match = re.match(r"^\s*name:\s*([^#\n]+)", line)
+                    if match:
+                        return match.group(1).strip()
+        else:
+            logger.debug(f"[灾害预警] metadata.yaml 未找到: {metadata_path}")
+    except Exception as e:
+        logger.error(f"[灾害预警] 获取插件名失败: {e}")
+
+    # 回退到插件目录名（AstrBot 插件命名约定），与目录实际名称保持一致。
+    try:
+        if plugin_root and os.path.basename(plugin_root):
+            return os.path.basename(plugin_root)
+    except Exception:
+        pass
+
+    return "astrbot_plugin_disaster_warning"
+
+
 def _build_unknown_version_info(
     default: str = "unknown", error: str = "all_methods_failed"
 ) -> AstrBotVersionInfo:

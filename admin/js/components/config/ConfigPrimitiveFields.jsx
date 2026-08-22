@@ -157,12 +157,70 @@ function ConfigListField({ fieldKey, schema, value, onChange, depth }) {
 }
 
 /**
+ * 下拉框「展示标签 ↔ 内部存储值」别名映射表。
+ *
+ * 部分配置项（如本地强度体系 intensity_system）在前端 Schema 中声明中文标签
+ * （options: 自动判定/中国烈度/日本震度），但后端配置校验器会将其规范化为
+ * 英文内部值（auto/cenc/jma）持久化。若 Select 直接用存储值匹配 options，
+ * 会因「值不在选项中」导致框内空白、默认值无法回显。
+ *
+ * 此处建立字段级别名表，实现双向转换：
+ * - 中文标签 → 内部值：MenuItem value 与 Select 当前值统一使用内部值；
+ * - 内部值 → 中文标签：仅用于下拉项的展示文本；
+ * - 兼容历史遗留的中文配置值：回显时若存储值为中文标签，先映射为内部值。
+ */
+const SELECT_OPTION_VALUE_ALIASES = {
+    intensity_system: {
+        '自动判定': 'auto',
+        '中国烈度': 'cenc',
+        '日本震度': 'jma',
+    },
+};
+
+/**
  * 4. 下拉单选枚举域 (ConfigSelectField)
  * 渲染为带有 Material-UI 下拉弹窗菜单的 Select 输入框，自动绑定 schema.options 的全部选项。
  */
 function ConfigSelectField({ fieldKey, schema, value, onChange, depth }) {
     const { TextField, MenuItem } = MaterialUI;
     const { DescriptionSection, FieldRow, FieldControl, getConfigFieldInputSx } = window.ConfigFieldLayout;
+
+    // 命中别名表的字段启用「内部值」模式：下拉选项 value 用内部值，展示文本用中文标签
+    const aliases = SELECT_OPTION_VALUE_ALIASES[fieldKey] || null;
+
+    /**
+     * 将任意输入值归一化为 Select 可匹配的「内部值」（英文）：
+     * - 命中别名表的字段：
+     *   - 空值/未知值回退 schema.default 映射后的内部值（如 auto）
+     *   - 已是内部值（auto/cenc/jma）直接返回
+     *   - 兼容历史遗留的中文标签（如 自动判定），反查为内部值
+     * - 普通字段直接返回原始值
+     *
+     * 保证 TextField.value 总能匹配某个 MenuItem.value，避免空白选中状态。
+     */
+    const normalizeValue = (raw) => {
+        const fallbackRaw = schema.default !== undefined ? schema.default : (schema.options && schema.options[0] || '');
+        const fallback = (aliases && aliases[fallbackRaw] !== undefined) ? aliases[fallbackRaw] : fallbackRaw;
+        if (raw === undefined || raw === null || raw === '') return fallback;
+        if (aliases) {
+            if (aliases[raw] !== undefined) return aliases[raw]; // 中文标签 → 内部值
+            if (Object.values(aliases).includes(raw)) return raw; // 已是内部值
+            return fallback; // 未知值回退默认内部值
+        }
+        return raw;
+    };
+
+    /**
+     * 将用户选择的选项值提交给父级草稿：
+     * 选项的 value 已是英文内部值（auto/cenc/jma），直接透传，
+     * 与后端校验器持久化的英文内部值保持一致。
+     */
+    const commitValue = (raw) => {
+        onChange(raw);
+    };
+
+    const currentValue = normalizeValue(value);
+
     return (
         <FieldRow depth={depth}>
             <DescriptionSection schema={schema} fieldKey={fieldKey} />
@@ -171,16 +229,20 @@ function ConfigSelectField({ fieldKey, schema, value, onChange, depth }) {
                     select
                     fullWidth
                     size="small"
-                    value={value !== undefined ? value : (schema.default || '')}
-                    onChange={(e) => onChange(e.target.value)}
+                    value={currentValue}
+                    onChange={(e) => commitValue(e.target.value)}
                     variant="outlined"
                     sx={getConfigFieldInputSx({ '& .MuiSelect-select': { textAlign: 'center', pr: '32px !important' } })}
                 >
-                    {schema.options.map((option) => (
-                        <MenuItem key={option} value={option} className="config-field-menu-item">
-                            {option}
-                        </MenuItem>
-                    ))}
+                    {schema.options.map((option) => {
+                        // 选项的 value 用英文内部值以便稳定匹配，展示文本保持中文标签
+                        const optionValue = aliases && aliases[option] !== undefined ? aliases[option] : option;
+                        return (
+                            <MenuItem key={optionValue} value={optionValue} className="config-field-menu-item">
+                                {option}
+                            </MenuItem>
+                        );
+                    })}
                 </TextField>
             </FieldControl>
         </FieldRow>

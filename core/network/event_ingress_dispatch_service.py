@@ -49,8 +49,16 @@ class EventIngressDispatchService:
         if entry is None:
             return False
 
-        # 仅针对具有特定的推送协议族(例如 fan_studio_eew) 的源进行异步判断
-        if (entry.dispatch_family or "").strip() != "fan_studio_eew":
+        dispatch_family = (entry.dispatch_family or "").strip()
+
+        # FAN 台风路径：富化查询可能同步阻塞较久（EQSC 重试链最长约 5 分钟），
+        # 必须转为后台异步分发，避免阻塞 FAN Studio WS 接收线程。
+        # 注意：EQSC 独立轮询路径不经过此分发，直接由轮询协程驱动。
+        if dispatch_family == "fan_studio_typhoon":
+            return True
+
+        # 针对具有特定的推送协议族(例如 fan_studio_eew) 的源进行异步判断
+        if dispatch_family != "fan_studio_eew":
             return False
 
         # 必须是需要参与融合处理的组(fusion_group)才支持异步分发

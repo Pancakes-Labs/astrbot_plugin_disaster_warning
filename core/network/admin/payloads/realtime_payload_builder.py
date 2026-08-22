@@ -11,6 +11,9 @@ from typing import Any
 from .....utils.version import get_plugin_version
 from ....services.display import build_admin_statistics_projection
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
+from ...websocket.fan_studio_connection_policy import (
+    resolve_active_server_label,
+)
 from .connections_payload_builder import ConnectionsPayloadBuilder
 
 
@@ -66,17 +69,12 @@ class RealtimePayloadBuilder:
                 self.disaster_service.ws_manager.get_all_connections_status()
             )
 
-        # 这里统计的是网络接入层的活动连接数，而不是管理端前端页面连接数。
-        active_websocket_connections = sum(
-            1
-            for status in actual_connections.values()
-            if isinstance(status, dict) and status.get("connected")
+        # 活跃连接 / 标记统一由 SourceRuntimeQueryService 计算。
+        metrics = self.source_runtime_query.resolve_active_connection_metrics(
+            self.disaster_service,
+            actual_connections,
         )
-        global_quake_connected = any(
-            "global_quake" in task.get_name() if hasattr(task, "get_name") else False
-            for task in getattr(self.disaster_service, "connection_tasks", [])
-        )
-        return self.source_runtime_query.build_runtime_snapshot(
+        snapshot = self.source_runtime_query.build_runtime_snapshot(
             actual_connections=actual_connections,
             latency_cache=self.latency_cache,
             running=bool(getattr(self.disaster_service, "running", False)),
@@ -86,18 +84,25 @@ class RealtimePayloadBuilder:
             uptime=self.disaster_service.get_uptime()
             if hasattr(self.disaster_service, "get_uptime")
             else "未运行",
-            active_websocket_connections=active_websocket_connections,
+            active_websocket_connections=int(
+                metrics.get("active_websocket_connections", 0) or 0
+            ),
             message_logger_enabled=self.disaster_service.message_logger.enabled
             if getattr(self.disaster_service, "message_logger", None)
             else False,
-            global_quake_connected=global_quake_connected,
+            openquake_connected=bool(metrics.get("openquake_connected")),
         )
+        # total_connections 已在 snapshot 内按期望通道统计，避免 EQSC/S-Net 重复累加。
+        return snapshot
 
     def build_status_payload(self) -> dict[str, Any]:
         """构建管理端状态面板所需的状态数据。"""
         snapshot = self._build_runtime_snapshot()
         if not snapshot:
             return {}
+
+        # 解析 FAN Studio 服务器信息
+        fan_server_info = self._resolve_fan_server_info()
 
         return {
             "running": snapshot.get("running", False),
@@ -112,7 +117,37 @@ class RealtimePayloadBuilder:
             "eew_query_status": self.disaster_service.get_eew_query_status_data(),
             "start_time": snapshot.get("start_time"),
             "version": get_plugin_version(),
+            "fan_server_info": fan_server_info,
         }
+
+    def _resolve_fan_server_info(self) -> dict[str, str]:
+        """解析 FAN Studio 连接的活跃服务器信息。"""
+        result: dict[str, str] = {}
+        if not self.disaster_service or not self.disaster_service.ws_manager:
+            return result
+        ws_manager = self.disaster_service.ws_manager
+        fan_connections = {
+            "fan_studio_all": "FAN Studio",
+            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        }
+        for conn_name, display_name in fan_connections.items():
+            info = ws_manager.connection_info.get(conn_name, {})
+            if isinstance(info, dict):
+                label = resolve_active_server_label(info)
+                if label != "未知":
+                    result[conn_name] = label
+                else:
+                    uri = str(info.get("uri") or "").strip()
+                    # 使用原始地址（未受偏好交换影响）判断
+                    conn_config = info.get("connection_config", {}) or {}
+                    original_backup = str(
+                        conn_config.get("original_backup") or ""
+                    ).strip()
+                    if uri and original_backup and uri == original_backup:
+                        result[conn_name] = "备用服务器"
+                    elif uri:
+                        result[conn_name] = "主服务器"
+        return result
 
     def build_statistics_payload(self) -> dict[str, Any]:
         """构建统计面板所需的数据。"""
@@ -120,7 +155,7 @@ class RealtimePayloadBuilder:
             return {}
 
         statistics_manager = self.disaster_service.statistics_manager
-        return build_admin_statistics_projection(
+        payload = build_admin_statistics_projection(
             statistics_manager.stats,
             log_stats=(
                 self.disaster_service.message_logger.get_log_summary()
@@ -128,6 +163,82 @@ class RealtimePayloadBuilder:
                 else {}
             ),
         )
+        # recent_pushes 已由 build_admin_statistics_projection 逐条附加 weather_emoji
+        # （保留原始记录全部字段，如 real_event_id / unique_id / update_count / history，
+        # 避免替换为 event_summary_views 导致管理端事件分组等消费者丢字段）。
+        # 此处只做裁剪限制，不再整体替换数组。
+        payload["recent_pushes"] = list(payload.get("recent_pushes", []))[:50]
+        return self._enrich_session_stats_for_display(payload)
+
+    def _enrich_session_stats_for_display(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """为会话推送统计补充 session_id 与备注名，便于前端短展示。"""
+        if not isinstance(payload, dict):
+            return payload
+
+        session_stats = payload.get("session_stats")
+        if not isinstance(session_stats, dict):
+            return payload
+
+        top_sessions = session_stats.get("top_sessions")
+        if not isinstance(top_sessions, list) or not top_sessions:
+            return payload
+
+        session_config_manager = getattr(
+            self.disaster_service, "session_config_manager", None
+        )
+        enriched_top_sessions: list[dict[str, Any]] = []
+
+        for item in top_sessions:
+            if not isinstance(item, dict):
+                continue
+
+            session = str(item.get("session") or "").strip()
+            session_id = self._extract_session_id(session)
+            session_name = ""
+            if session and session_config_manager is not None:
+                try:
+                    session_name = str(
+                        session_config_manager.get_session_name(session) or ""
+                    ).strip()
+                except Exception:
+                    session_name = ""
+
+            enriched_item = dict(item)
+            enriched_item["session"] = session
+            enriched_item["session_id"] = session_id
+            enriched_item["session_name"] = session_name
+            enriched_top_sessions.append(enriched_item)
+
+        next_session_stats = dict(session_stats)
+        next_session_stats["top_sessions"] = enriched_top_sessions
+        next_payload = dict(payload)
+        next_payload["session_stats"] = next_session_stats
+        return next_payload
+
+    @staticmethod
+    def _extract_session_id(umo: str) -> str:
+        """从完整 UMO 中提取尾部 session_id。"""
+        if not isinstance(umo, str) or not umo:
+            return ""
+
+        known_types = (
+            "FriendMessage",
+            "GroupMessage",
+            "PrivateMessage",
+            "GuildMessage",
+        )
+        for msg_type in known_types:
+            marker = f":{msg_type}:"
+            idx = umo.find(marker)
+            if idx != -1:
+                return umo[idx + len(marker) :].strip() or umo
+
+        parts = umo.split(":")
+        if len(parts) >= 3:
+            return parts[-1].strip() or umo
+        return umo.strip()
 
     def build_connections_payload(
         self, expected_sources: dict[str, str] | None = None
@@ -143,14 +254,9 @@ class RealtimePayloadBuilder:
 
     def build_statistics_api_payload(self) -> dict[str, Any]:
         """构建 /api/statistics 载荷。"""
+        # recent_pushes 已由 build_statistics_payload 统一裁剪并附加 weather_emoji，
+        # 这里只做浅拷贝并补时间戳，避免两处重复维护裁剪逻辑。
         payload = self.build_statistics_payload().copy()
-        # 裁剪 recent_pushes。管理端统计页面仅需要基础统计及少量近期推送（通常由 event_summary_views 展现）
-        # 避免把近千条原始 recent_pushes 完整数据传给前端，减少序列化及网络传输开销（原本的 recent_pushes 长度可达 500）
-        payload["recent_pushes"] = list(payload.get("event_summary_views", []))[:50]
-        # 同时为了避免在 statsNormalizer.js 中因为 stats.recent_pushes 未传而降级丢失，
-        # 在这里显式清理大块 recent_pushes，并用经过裁剪的列表作为 recent_pushes
-        if "recent_pushes" in payload:
-            payload["recent_pushes"] = list(payload["recent_pushes"])[:50]
         payload["timestamp"] = datetime.now().isoformat()
         return payload
 

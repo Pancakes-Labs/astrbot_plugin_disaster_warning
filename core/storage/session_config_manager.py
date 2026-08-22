@@ -41,12 +41,30 @@ class SessionConfigManager:
         "push_frequency_control",
         "strategies",
         "weather_config",
-        "debug_config",
+        "typhoon_config",
+        # 与 typhoon_config / weather_config 一致：允许会话级阈值过滤覆盖
+        "tsunami_config",
         # 会话级额外控制字段（插件自定义）
         "push_enabled",
         # 会话备注名（仅用于日志与前端展示，不参与业务逻辑）
         "session_name",
     }
+
+    # 仅允许全局配置修改的嵌套路径（会话 override 写入时强制剥离）。
+    GLOBAL_ONLY_NESTED_PATHS: tuple[tuple[str, ...], ...] = (
+        ("data_sources", "snet", "poll_interval_seconds"),
+        ("data_sources", "eqsc", "refresh_token"),
+        # EQSC 统一轮询间隔影响全局运行态，不允许会话级覆写。
+        ("data_sources", "eqsc", "poll_interval_seconds"),
+        # FAN Studio 鉴权影响全局 WebSocket 建连，不允许会话级覆写。
+        ("data_sources", "fan_studio", "api_key"),
+        # FAN Studio 主备服务器偏好影响全局连接策略，不允许会话级覆写。
+        ("data_sources", "fan_studio", "fan_server_preference"),
+        # 浏览器页面池大小影响全局运行态，不允许会话级覆写。
+        ("message_format", "browser_pool_size"),
+        # 是否忽略 HTTPS 证书错误是浏览器启动级配置（context 全局创建），不允许会话级覆写
+        ("message_format", "browser_ignore_https_errors"),
+    )
 
     def __init__(self, default_config_ref: dict[str, Any]):
         """初始化会话差异配置管理器并加载已保存的差异补丁。"""
@@ -225,6 +243,40 @@ class SessionConfigManager:
             return True
         return False
 
+    @classmethod
+    def _strip_global_only_fields(cls, value: Any) -> Any:
+        """从会话 patch / effective 中剥离仅全局可改的嵌套字段。"""
+        if not isinstance(value, dict):
+            return value
+
+        result = copy.deepcopy(value)
+        for path in cls.GLOBAL_ONLY_NESTED_PATHS:
+            cursor: Any = result
+            parents: list[tuple[dict[str, Any], str]] = []
+            valid = True
+            for key in path:
+                if not isinstance(cursor, dict) or key not in cursor:
+                    valid = False
+                    break
+                parents.append((cursor, key))
+                cursor = cursor[key]
+            if not valid or not parents:
+                continue
+
+            # 删除叶子字段
+            leaf_parent, leaf_key = parents[-1]
+            leaf_parent.pop(leaf_key, None)
+
+            # 自底向上清理因剥离产生的空 dict
+            for parent, key in reversed(parents[:-1]):
+                child = parent.get(key)
+                if isinstance(child, dict) and not child:
+                    parent.pop(key, None)
+                else:
+                    break
+
+        return result
+
     def _prune_to_schema(self, value: Any, schema_node: dict[str, Any] | None) -> Any:
         """按 schema 递归裁剪新提交的配置，仅阻止未来污染，不清理已存旧字段。"""
         if schema_node is None or not isinstance(schema_node, dict):
@@ -260,11 +312,15 @@ class SessionConfigManager:
         return copy.deepcopy(value)
 
     def list_target_sessions(self) -> list[str]:
-        """列出全局配置中声明的目标会话。"""
+        """列出全局配置中声明的目标会话。
+
+        在共享配置边界统一去除首尾空白，确保常规推送与模拟推送等所有消费路径复用同一规范化标识，
+        避免 " session-a " 在不同路径产生不同目标会话。
+        """
         sessions = self.default_config_ref.get("target_sessions", [])
         if not isinstance(sessions, list):
             return []
-        return [s for s in sessions if isinstance(s, str) and s]
+        return [s.strip() for s in sessions if isinstance(s, str) and s.strip()]
 
     def list_all_known_sessions(self) -> list[str]:
         """列出当前已知的全部会话标识。"""
@@ -409,7 +465,11 @@ class SessionConfigManager:
     def update_session_from_effective(
         self, umo: str, effective_config: dict[str, Any]
     ) -> None:
-        """根据提交的生效配置反推并保存差异补丁。"""
+        """根据提交的生效配置反推并保存差异补丁。
+
+        effective 全量回写以 compute_diff 结果为权威：与全局默认相同的字段
+        必须从 override 中消失，不能再通过 preserve_legacy 把旧差异补回。
+        """
         if not isinstance(effective_config, dict):
             raise ValueError("effective_config 必须是对象")
 
@@ -417,10 +477,15 @@ class SessionConfigManager:
         session_effective = self._sanitize_patch(copy.deepcopy(effective_config)) or {}
 
         patch = self.compute_diff(default_conf, session_effective)
-        patch = self._sanitize_patch(
-            patch, preserve_legacy=self._overrides.get(umo, {})
-        )
-        self.set_override(umo, patch)
+        if not isinstance(patch, dict):
+            patch = {}
+        # 不传 preserve_legacy：用户把某字段改回全局默认时，应真正清除该 override 键
+        patch = self._sanitize_patch(patch, preserve_legacy=None)
+        if patch:
+            self._overrides[umo] = patch
+        else:
+            self._overrides.pop(umo, None)
+        self._save()
 
     @classmethod
     def deep_merge(cls, base: Any, patch: Any) -> Any:
@@ -472,6 +537,7 @@ class SessionConfigManager:
         - 顶层仅保留会话白名单键
         - 对 schema 内对象块递归裁剪新写入字段
         - 若旧 override 中已存在历史兼容字段，则原样保留，不做清空/重置
+        - 剥离仅全局可改字段（如 S-Net 轮询间隔）
         - 递归移除空 dict
         """
         if patch is None:
@@ -480,7 +546,17 @@ class SessionConfigManager:
         if not isinstance(patch, dict):
             return patch
 
+        if depth == 0:
+            patch = self._strip_global_only_fields(patch)
+            if not isinstance(patch, dict):
+                return patch
+
         legacy_patch = preserve_legacy if isinstance(preserve_legacy, dict) else {}
+        if depth == 0 and isinstance(legacy_patch, dict):
+            legacy_patch = self._strip_global_only_fields(legacy_patch)
+            if not isinstance(legacy_patch, dict):
+                legacy_patch = {}
+
         sanitized: dict[str, Any] = {}
         active_schema = self.schema if isinstance(self.schema, dict) else {}
 
@@ -501,23 +577,52 @@ class SessionConfigManager:
                     merged_child = copy.deepcopy(legacy_child)
                     merged_child.update(child)
                     child = merged_child
+                if isinstance(child, dict):
+                    stripped = self._strip_global_only_fields({key: child})
+                    if isinstance(stripped, dict):
+                        child = stripped.get(key, child)
             else:
                 child = self._sanitize_patch(val, depth + 1, legacy_child)
 
             if isinstance(child, dict) and not child:
                 if isinstance(legacy_child, dict) and legacy_child:
-                    sanitized[key] = copy.deepcopy(legacy_child)
+                    cleaned_legacy = self._strip_global_only_fields({key: legacy_child})
+                    legacy_value = (
+                        cleaned_legacy.get(key)
+                        if isinstance(cleaned_legacy, dict)
+                        else None
+                    )
+                    if isinstance(legacy_value, dict) and legacy_value:
+                        sanitized[key] = legacy_value
                 continue
             if child is not None:
                 sanitized[key] = child
             elif legacy_child is not None:
-                sanitized[key] = copy.deepcopy(legacy_child)
+                cleaned_legacy = self._strip_global_only_fields({key: legacy_child})
+                legacy_value = (
+                    cleaned_legacy.get(key)
+                    if isinstance(cleaned_legacy, dict)
+                    else None
+                )
+                if legacy_value is not None:
+                    sanitized[key] = legacy_value
 
         if depth == 0:
             for key, legacy_value in legacy_patch.items():
                 if key in sanitized:
                     continue
                 if key in self.ALLOWED_ROOT_KEYS:
-                    sanitized[key] = copy.deepcopy(legacy_value)
+                    cleaned_legacy = self._strip_global_only_fields({key: legacy_value})
+                    value = (
+                        cleaned_legacy.get(key)
+                        if isinstance(cleaned_legacy, dict)
+                        else None
+                    )
+                    if value is not None:
+                        sanitized[key] = value
+
+            sanitized = self._strip_global_only_fields(sanitized)
+            if not isinstance(sanitized, dict):
+                return {}
 
         return sanitized

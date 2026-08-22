@@ -13,6 +13,7 @@ from typing import Any
 from .display_models import (
     EarthquakeDisplayModel,
     TsunamiDisplayModel,
+    TyphoonDisplayModel,
     WeatherDisplayModel,
 )
 from .event_payload import SourcePayload
@@ -48,8 +49,10 @@ class EarthquakeDisplayContext:
     province: str = ""
     domestic_tsunami: str = ""
     max_pga: float | None = None
-    # stations 保存测站或分点观测信息，具体结构由上游来源决定。
-    stations: dict[str, Any] = field(default_factory=dict)
+    # stations 保存测站或分点观测信息，具体结构由上游来源决定：
+    # - Global Quake 等：dict 映射
+    # - S-Net：list[dict] 测站列表
+    stations: Any = field(default_factory=dict)
     image_uri: str = ""
     shakemap_uri: str = ""
     # impact_area 与 local_estimation 常用于影响区域与本地预估展示。
@@ -62,6 +65,8 @@ class EarthquakeDisplayContext:
     jma_comment: str | None = None
     jma_warning_areas: list[str] = field(default_factory=list)
     jma_warning_area_ranges: list[str] = field(default_factory=list)
+    # 按震度档汇总的警报区域：[{range_text, scale_from, emoji, areas:[...]}, ...]
+    jma_warning_area_groups: list[dict[str, Any]] = field(default_factory=list)
     # display_model 是已经进一步整理好的展示结果，可供下游直接使用。
     display_model: EarthquakeDisplayModel | None = None
     # metadata 放补充信息，options 放展示阶段的可选控制参数。
@@ -141,9 +146,58 @@ class WeatherDisplayContext:
         return "weather"
 
 
+@dataclass(slots=True)
+class TyphoonDisplayContext:
+    """台风展示上下文。"""
+
+    event_id: str
+    source_id: str
+    title: str
+    # 台风标识与命名
+    typhoon_id: str = ""
+    name: str = ""
+    name_en: str = ""
+    # 当前强度等级（如"超强台风"、"热带风暴"）
+    typhoon_type: str = ""
+    is_active: bool = True
+    # 中心位置与参数
+    latitude: float | None = None
+    longitude: float | None = None
+    pressure: int | None = None
+    wind_speed: float | None = None
+    power: int | None = None
+    # 移动信息
+    move_direction: str = ""
+    move_speed: float | None = None
+    # 风圈半径（单值，FAN Studio 格式）
+    radius7: int | None = None
+    radius10: int | None = None
+    # 四象限风圈（EQSC 富化格式）
+    wind_circle: dict[str, Any] = field(default_factory=dict)
+    # EQSC 富化轨迹数据（供地图渲染使用，文本展示不直接消费）
+    history_track: list[dict[str, Any]] = field(default_factory=list)
+    future_track: list[dict[str, Any]] = field(default_factory=list)
+    # 数据来源标记：fan_studio / eqsc / enriched
+    data_source: str = "fan_studio"
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=dict)
+    display_model: TyphoonDisplayModel | None = None
+    source_descriptor: SourceDescriptor | None = None
+    payload: SourcePayload | None = None
+
+    @property
+    def event_type(self) -> str:
+        """返回该上下文对应的事件类型。"""
+        return "typhoon"
+
+
 # 统一展示上下文联合类型，便于上层以单一入口接收不同灾种的展示数据。
 DisplayContext = (
-    EarthquakeDisplayContext | TsunamiDisplayContext | WeatherDisplayContext
+    EarthquakeDisplayContext
+    | TsunamiDisplayContext
+    | WeatherDisplayContext
+    | TyphoonDisplayContext
 )
 
 
@@ -153,4 +207,5 @@ __all__ = [
     "EarthquakeDisplayContext",
     "TsunamiDisplayContext",
     "WeatherDisplayContext",
+    "TyphoonDisplayContext",
 ]

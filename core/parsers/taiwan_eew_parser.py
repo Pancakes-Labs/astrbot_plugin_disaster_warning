@@ -133,9 +133,6 @@ class CwaEewParser(BaseParser):
 
             # 报次或事件标识至少应命中其一，否则通常不是正式台湾地震预警消息
             if "updates" not in msg_data and "eventId" not in msg_data:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非CWA地震预警数据(缺少updates/eventId)，跳过"
-                )
                 return None
 
             envelope = self._build_envelope(msg_data)
@@ -144,6 +141,8 @@ class CwaEewParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震预警解析成功: {getattr(domain_event, 'place_name', '')} (M {getattr(domain_event, 'magnitude', None)}), 时间: {getattr(domain_event, 'occurred_at', None)}",
                 is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
             return envelope
         except Exception as exc:
@@ -161,11 +160,8 @@ class CwaEewWolfxParser(BaseParser):
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析 Wolfx 台湾地震预警数据。"""
         try:
-            # Wolfx 中只接收台湾地震预警类型，其余类型直接忽略。
+            # Wolfx 中只接收台湾地震预警类型，其余类型直接忽略
             if data.get("type") != "cwa_eew":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 CWA 地震预警数据，跳过"
-                )
                 return None
 
             raw_origin_time = data.get("OriginTime", "")
@@ -302,6 +298,8 @@ class CwaEewWolfxParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震预警解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
 
             return envelope

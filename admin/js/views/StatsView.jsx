@@ -22,6 +22,7 @@ function StatsView() {
     const eqRegions = stats && stats.earthquakeRegions ? stats.earthquakeRegions : [];
     const weatherTypes = stats && stats.weatherTypes ? stats.weatherTypes : [];
     const weatherRegions = stats && stats.weatherRegions ? stats.weatherRegions : [];
+    const topSessions = stats && stats.topSessions ? stats.topSessions : [];
 
     return (
         <Box>
@@ -29,19 +30,27 @@ function StatsView() {
             <div className="dashboard-grid">
                 {/* 第一栏大板块：地震震级历史占比与近期核心指标 */}
                 <div className="stats-overview-grid">
-                    {/* 左侧：占比分布曲线/圆饼图（主卡片） */}
+                    {/* 左侧：震级分布主图 + 下方并排极值卡片 */}
                     <div className="stats-overview-main">
-                        <div className="stats-fill-column">
-                            <MagnitudeChart className="stats-flex-fill" />
+                        <div className="stats-fill-column stats-overview-main-stack">
+                            <MagnitudeChart className="stats-flex-fill" showNote={false} />
+                            <div className="stats-peak-pair">
+                                <div className="stats-peak-pair-item">
+                                    <MaxMagCard />
+                                </div>
+                                <div className="stats-peak-pair-item">
+                                    <SnetMaxCard />
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    {/* 右侧：纵向堆叠的指标小卡片和历史极值归档 */}
+                    {/* 右侧：总览指标 + 统计口径说明（与下方极值卡片等高） */}
                     <div className="stats-overview-side">
                         <div className="stats-fill-column stats-flex-fill">
                             <StatsCard className="stats-flex-fill" />
                         </div>
-                        <div className="stats-fill-column stats-flex-fill">
-                             <MaxMagCard />
+                        <div className="stats-fill-column stats-note-slot">
+                            <StatsNoteCard className="stats-flex-fill" />
                         </div>
                     </div>
                 </div>
@@ -70,7 +79,7 @@ function StatsView() {
                     <TopListCard title="数据源贡献 (TOP 10)" icon="📡" data={sources} tone="source" />
                 </div>
 
-                {/* 排行榜单模块（第三行）：包含气象区域、气象警报级别和底层日志文件磁盘状态 */}
+                {/* 排行榜单模块（第三行）：包含气象区域、气象警报级别和会话推送统计 */}
                 {/* 1. 气象预警频发地理区域统计 */}
                 <div className="span-4">
                     <TopListCard title="气象预警地区分布 (TOP 10)" icon="🗺️" data={weatherRegions} tone="region" />
@@ -78,6 +87,20 @@ function StatsView() {
                 {/* 2. 气象警报按级别（蓝、黄、橙、红）数量占比柱图 */}
                 <div className="span-4">
                     <WeatherLevelCard />
+                </div>
+                {/* 3. 会话推送统计 Top 10 */}
+                <div className="span-4">
+                    <SessionPushCard />
+                </div>
+
+                {/* 排行榜单模块（第四行）：风王榜、台风强度等级分布等 */}
+                {/* 1. 台风风王榜 Top 10 */}
+                <div className="span-4">
+                    <TyphoonWindKingCard />
+                </div>
+                {/* 2. 台风强度等级环形比例图 */}
+                <div className="span-4">
+                    <TyphoonLevelCard />
                 </div>
                 {/* 3. 系统后台运行日志大小、占用空间与存储信息统计 */}
                 <div className="span-4">

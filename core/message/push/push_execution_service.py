@@ -14,6 +14,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
 
+from ....utils.emoji_filter import EMOJI_FILTER_MODE_DEFAULT
 from ...domain.event_models import EventEnvelope
 
 
@@ -23,6 +24,57 @@ class PushExecutionService:
     def __init__(self, manager):
         # 执行服务通过主消息管理器获取会话发送、消息构建与规则评估能力。
         self.manager = manager  # 主消息管理器 MessagePushManager 实例
+
+    @staticmethod
+    def _collect_exception_texts(exc: BaseException) -> list[str]:
+        """收集异常中可用于判定失败语义的文本片段。"""
+        texts: list[str] = [str(exc)]
+        for attr_name in ("message", "wording", "msg", "errMsg", "errmsg"):
+            value = getattr(exc, attr_name, None)
+            if isinstance(value, str) and value.strip():
+                texts.append(value)
+        return texts
+
+    @classmethod
+    def _is_rich_media_transfer_failure(cls, exc: BaseException) -> bool:
+        """判断是否为明确的富媒体传输失败（可安全降级重发）。"""
+        markers = (
+            "rich media transfer failed",
+            "rich media",
+            "transfer failed",
+            "media transfer",
+        )
+        for text in cls._collect_exception_texts(exc):
+            lowered = text.lower()
+            if any(marker in lowered for marker in markers):
+                return True
+        return False
+
+    @classmethod
+    def _is_ambiguous_timeout_failure(cls, exc: BaseException) -> bool:
+        """判断是否为“可能已送达”的超时类失败。
+
+        仅在失败语义明确像超时/事件检查超时时跳过降级重发，
+        避免把 retcode=1200 的富媒体传输失败误判为超时，导致缺失图标等场景无法降级。
+        """
+        # 明确的富媒体失败应优先走降级，而不是按超时吞掉。
+        if cls._is_rich_media_transfer_failure(exc):
+            return False
+
+        error_name = type(exc).__name__.lower()
+        if "timeout" in error_name:
+            return True
+
+        for text in cls._collect_exception_texts(exc):
+            lowered = text.lower()
+            # 仅在文案明确包含超时语义时跳过降级；
+            # EventChecker Failed 本身不等于超时（也可能是 rich media 失败）。
+            if "timeout" in lowered or "timed out" in lowered or "time out" in lowered:
+                return True
+
+        # 不再仅凭 retcode=1200/1400 判定超时：
+        # 平台适配器会把 rich media transfer failed 也包装成 retcode=1200。
+        return False
 
     @staticmethod
     def _build_plaintext_fallback_message(message: MessageChain) -> MessageChain | None:
@@ -132,6 +184,11 @@ class PushExecutionService:
             filter_reason_stats=filter_reason_stats,
             filter_reason_detail_stats=filter_reason_detail_stats,
         )
+        # 会话级展示时区映射：供分离地图渲染时对齐各会话文本时间。
+        session_display_timezone_map: dict[str, str] = {
+            session: str((runtime_config or {}).get("display_timezone") or "UTC+8")
+            for session, runtime_config in push_candidates
+        }
 
         # 同一事件在不同会话下若渲染参数一致，则共享同一个消息构建任务，
         # 避免并发下重复渲染文本/地图/卡片。
@@ -142,6 +199,25 @@ class PushExecutionService:
             # 构建缓存键时纳入所有会影响展示结果的关键配置，避免不同配置误复用。
             message_format_config = runtime_config.get("message_format", {})
             weather_config = runtime_config.get("weather_config", {})
+            typhoon_config = runtime_config.get("typhoon_config", {})
+            if not isinstance(typhoon_config, dict):
+                typhoon_config = {}
+            # 本地监控开关与地点直接影响地震正文的本地预估展示，必须纳入缓存键，
+            # 否则本地监控开启的会话渲染出的含本地预估消息会被未开启的会话误复用。
+            local_monitoring_cfg = runtime_config.get("local_monitoring", {})
+            if not isinstance(local_monitoring_cfg, dict):
+                local_monitoring_cfg = {}
+            data_sources = runtime_config.get("data_sources", {})
+            if not isinstance(data_sources, dict):
+                data_sources = {}
+            eqsc_cfg = data_sources.get("eqsc", {})
+            if not isinstance(eqsc_cfg, dict):
+                eqsc_cfg = {}
+            # 会话级 typhoon 开关影响台风正文是否展示 EQSC 富化字段。
+            if "typhoon" in eqsc_cfg:
+                typhoon_enrichment = bool(eqsc_cfg.get("typhoon"))
+            else:
+                typhoon_enrichment = bool(eqsc_cfg.get("enabled", True))
             cache_key = json.dumps(
                 {
                     "event_id": event.id,
@@ -153,11 +229,21 @@ class PushExecutionService:
                         "map_source": message_format_config.get(
                             "map_source", "PetalMap矢量图亮"
                         ),
+                        "typhoon_map_source": message_format_config.get(
+                            "typhoon_map_source", "PetalMap矢量图暗"
+                        ),
                         "map_zoom_level": message_format_config.get(
                             "map_zoom_level", 5
                         ),
                         "playwright_mode": message_format_config.get(
                             "playwright_mode", "local"
+                        ),
+                        # 是否忽略 HTTPS 证书错误直接影响地图底图能否加载，
+                        # 纳入缓存键避免切换开关后误复用旧渲染结果。
+                        "browser_ignore_https_errors": bool(
+                            message_format_config.get(
+                                "browser_ignore_https_errors", False
+                            )
                         ),
                         "use_global_quake_card": message_format_config.get(
                             "use_global_quake_card", False
@@ -168,6 +254,18 @@ class PushExecutionService:
                         "detailed_jma_intensity": message_format_config.get(
                             "detailed_jma_intensity", False
                         ),
+                        "jma_region_intensity": message_format_config.get(
+                            "jma_region_intensity", True
+                        ),
+                        "cn_district_intensity_estimate": message_format_config.get(
+                            "cn_district_intensity_estimate", False
+                        ),
+                        "jma_shindo_estimate": message_format_config.get(
+                            "jma_shindo_estimate", False
+                        ),
+                        "emoji_filter_mode": message_format_config.get(
+                            "emoji_filter_mode", EMOJI_FILTER_MODE_DEFAULT
+                        ),
                     },
                     "weather": {
                         "enable_weather_icon": weather_config.get(
@@ -175,6 +273,47 @@ class PushExecutionService:
                         ),
                         "max_description_length": weather_config.get(
                             "max_description_length", 384
+                        ),
+                    },
+                    "typhoon": {
+                        "show_local_estimation": typhoon_config.get(
+                            "show_local_estimation", False
+                        ),
+                        # 台风路径图附件开关影响消息是否附加路径图卡片，
+                        # 必须纳入缓存键，否则不同会话会误复用彼此的渲染结果。
+                        "include_track_map": bool(
+                            typhoon_config.get("include_track_map", True)
+                        ),
+                        "typhoon": typhoon_enrichment,
+                    },
+                    # S-Net 测站分布图附件开关同理，纳入缓存键避免跨会话误复用。
+                    "snet": {
+                        "include_station_map": bool(
+                            data_sources.get("snet", {}).get(
+                                "include_station_map", True
+                            )
+                        ),
+                    },
+                    # 本地监控配置差异会导致地震正文附带不同的本地预估，
+                    # 缺失时会使不同会话误共享同一份渲染结果。
+                    "local_monitoring": {
+                        "enabled": bool(local_monitoring_cfg.get("enabled", False)),
+                        "place_name": str(local_monitoring_cfg.get("place_name", "")),
+                        "latitude": local_monitoring_cfg.get("latitude", 0.0),
+                        "longitude": local_monitoring_cfg.get("longitude", 0.0),
+                        "strict_mode": bool(
+                            local_monitoring_cfg.get("strict_mode", False)
+                        ),
+                        "intensity_threshold": local_monitoring_cfg.get(
+                            "intensity_threshold", 2.0
+                        ),
+                        # 震度阈值同样纳入缓存键：日本体系下阈值差异会影响拦截判定
+                        # 与展示文案，缺失时会导致不同会话误复用同一渲染结果。
+                        "shindo_threshold": local_monitoring_cfg.get(
+                            "shindo_threshold", 2.0
+                        ),
+                        "intensity_system": str(
+                            local_monitoring_cfg.get("intensity_system", "auto")
                         ),
                     },
                 },
@@ -223,41 +362,18 @@ class PushExecutionService:
                         )
                     return False, session, None, "发送前复核未通过"
 
-                logger.debug(
-                    f"[灾害预警] 事件 {event.id} 通过 {session_log} 的发送前复核，准备发送消息"
-                )
                 # 获取复用或动态渲染的图片/卡片消息链
                 message = await get_or_build_message(runtime_config)
                 # 调用底座 Session 发送器下发消息
                 await self.manager.session_sender.send(session, message)
-                logger.debug(f"[灾害预警] 事件 {event.id} 已推送到 {session_log}")
                 return True, session, runtime_config.get("message_format", {}), None
             except Exception as e:
                 error_name = type(e).__name__
 
-                # 检测是否为超时相关的异常。当发生超时时，QQ服务端实际上可能已经成功投递了消息。
-                # 为了防止降级重发导致重复发送，如果检测到超时，我们将直接记录日志，不执行 fallback 降级重发。
-                is_timeout = False
-                err_msg = str(e).lower()
-
-                # 检查属性以判定超时 (针对各种 ActionFailed 异常属性)
-                retcode = getattr(e, "retcode", None)
-                wording = getattr(e, "wording", None)
-                message_attr = getattr(e, "message", None)
-
-                if (
-                    "timeout" in error_name.lower()
-                    or "timeout" in err_msg
-                    or retcode in (1200, 1400)
-                    or (isinstance(wording, str) and "timeout" in wording.lower())
-                    or (
-                        isinstance(message_attr, str)
-                        and "timeout" in message_attr.lower()
-                    )
-                ):
-                    is_timeout = True
-
-                if is_timeout:
+                # 仅对“可能已送达”的超时类失败跳过降级，避免重复推送。
+                # 注意：retcode=1200 也会出现在 rich media transfer failed 场景，
+                # 这类失败应继续走纯文本/本地图降级，而不是直接吞掉。
+                if self._is_ambiguous_timeout_failure(e):
                     logger.warning(
                         f"[灾害预警] 推送到 {session_log} 时疑似超时，但实际推送成功却返回失败，为防止重复，跳过降级重发: {e}"
                     )
@@ -276,9 +392,14 @@ class PushExecutionService:
                         await self.manager.session_sender.send(
                             session, fallback_message
                         )
-                        logger.warning(
-                            f"[灾害预警] {session_log} 富媒体发送失败，已自动降级重发: {error_name}"
-                        )
+                        if self._is_rich_media_transfer_failure(e):
+                            logger.warning(
+                                f"[灾害预警] {session_log} 富媒体传输失败，已自动降级重发: {error_name}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[灾害预警] {session_log} 富媒体发送失败，已自动降级重发: {error_name}"
+                            )
                         return (
                             True,
                             session,
@@ -331,6 +452,12 @@ class PushExecutionService:
             "push_success_count": push_success_count,
             "passed_sessions": passed_sessions,
             "session_message_format_config": session_message_format_config,
+            # 成功会话的展示时区映射，供分离地图渲染对齐文本时间。
+            "session_display_timezone_map": {
+                s: tz
+                for s, tz in session_display_timezone_map.items()
+                if s in passed_sessions
+            },
             "filter_reason_stats": filter_reason_stats,
             "filter_reason_detail_stats": filter_reason_detail_stats,
             "send_failure_stats": send_failure_stats,

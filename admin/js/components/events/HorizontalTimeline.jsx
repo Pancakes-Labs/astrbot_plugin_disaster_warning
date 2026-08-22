@@ -26,8 +26,10 @@ function HorizontalTimeline({ style }) {
     // 状态：条数限制下拉菜单是否打开
     const [isLimitMenuOpen, setIsLimitMenuOpen] = useState(false);
     
-    // 自定义 Hook 获取重大事件源，内部响应式侦听 events 列表实时推送
-    const { majorEvents, loading } = useMajorEvents(displayLimit, state.events);
+    // 自定义 Hook 获取重大事件源，内部响应式侦听实时推送。
+    // 刷新信号改用 lastEvent：lastEvent 仅在真正发生新事件（ADD_EVENT）时更新，
+    // 避免 WS 心跳广播刷新 statistics 导致 events 数组引用变化时，时间轴被反复静默重拉。
+    const { majorEvents, loading } = useMajorEvents(displayLimit, state.lastEvent);
 
     // 将拉取到的事件按发生时间正序重排列（旧 -> 新），以符合时间轴从左往右的顺序
     const timelineItems = useMemo(() => {
@@ -384,6 +386,21 @@ function HorizontalTimeline({ style }) {
      * 核心预警等级着色评级：根据地震震级、海啸警报级别或气象级别生成危险配色样式类
      */
     const getEventToneClass = (event) => {
+        // S-Net 测站峰值：按震度阶级着色（>=5弱 才进入重大事件）
+        if (event.type === 'snet_peak') {
+            const shindo = Number(event.shindo);
+            if (Number.isFinite(shindo)) {
+                if (shindo >= 6.5) return 'is-purple';
+                if (shindo >= 6.0) return 'is-red';
+                if (shindo >= 5.5) return 'is-orange';
+                if (shindo >= 4.5) return 'is-yellow';
+            }
+            const level = String(event.level || '');
+            if (level.includes('7') || level.includes('6強') || level.includes('6+')) return 'is-red';
+            if (level.includes('6弱') || level.includes('6-') || level.includes('5強') || level.includes('5+')) return 'is-orange';
+            return 'is-yellow';
+        }
+
         // A. 地震：根据震级进行判色
         if (event.type === 'earthquake' || event.type === 'earthquake_warning') {
             const sourceText = String(event?.source_id || event?.source || '').toLowerCase();
@@ -405,7 +422,15 @@ function HorizontalTimeline({ style }) {
             return 'is-yellow';
         }
 
-        // B. 海啸：按级别或描述关键字判色
+        // B. 台风：强台风使用红色，超强台风使用紫色
+        if (event.type === 'typhoon') {
+            const level = String(event._snapshot_level || event.level || '');
+            if (level.includes('超强台风')) return 'is-purple';
+            if (level.includes('强台风')) return 'is-red';
+            return 'is-primary';
+        }
+
+        // C. 海啸：按级别或描述关键字判色
         if (event.type === 'tsunami') {
             const level = event.level || '';
             const desc = event.description || '';
@@ -415,7 +440,7 @@ function HorizontalTimeline({ style }) {
             return 'is-blue';
         }
 
-        // C. 气象预警：按级别中英文字段判色
+        // D. 气象预警：按级别中英文字段判色
         if (event.level) {
             if (event.level.includes('红')) return 'is-red';
             if (event.level.includes('橙')) return 'is-orange';
@@ -434,9 +459,24 @@ function HorizontalTimeline({ style }) {
 
     /**
      * 获取数据源规范化中文名
+     * 台风会按 info_type 细分为 Fan / Fan+EQSC / EQSC
      */
     const getSourceLabel = (event) => {
-        return formatSourceName(event?.source_id || event?.source || 'unknown');
+        const payload = event && typeof event === 'object'
+            ? {
+                ...event,
+                source: event.source || event.source_id || event._groupSource || '',
+                source_id: event.source_id || event.source || event._groupSource || '',
+            }
+            : event;
+        if (typeof formatEventSourceName === 'function') {
+            return formatEventSourceName(payload || 'unknown');
+        }
+        return formatSourceName(
+            (payload && typeof payload === 'object'
+                ? (payload.source_id || payload.source)
+                : payload) || 'unknown'
+        );
     };
 
     return (
@@ -549,6 +589,15 @@ function HorizontalTimeline({ style }) {
                                             {/* A. 结构化大标题 */}
                                             <Typography variant="body2" className={`horizontal-timeline-node-title ${toneClass}`}>
                                                 {(() => {
+                                                    if (item.type === 'snet_peak') {
+                                                        const level = String(item.level || '').trim();
+                                                        if (level) return `震度${level}`;
+                                                        const shindo = Number(item.shindo);
+                                                        if (Number.isFinite(shindo)) {
+                                                            return `震度${shindo.toFixed(1)}`;
+                                                        }
+                                                        return 'S-Net';
+                                                    }
                                                     if (item.type === 'earthquake') {
                                                         const mag = Number(item.magnitude);
                                                         if (Number.isFinite(mag)) {
@@ -561,7 +610,11 @@ function HorizontalTimeline({ style }) {
                                                         }
                                                         return '地震';
                                                     } else if (item.type === 'tsunami') {
-                                                        return item.title || '海啸预警';
+                                                        const fmt = window.EventFormatters || {};
+                                                        if (typeof fmt.buildTsunamiTimelineTitle === 'function') {
+                                                            return fmt.buildTsunamiTimelineTitle(item);
+                                                        }
+                                                        return item.level || item.title || item.description || '海啸预警';
                                                     } else {
                                                         // 气象预警正则压缩标题：提取“发布...信号”中的具体核心词
                                                         const match = item.description ? item.description.match(/发布(.*?)信号/) : null;
@@ -577,6 +630,10 @@ function HorizontalTimeline({ style }) {
                                             <Typography variant="caption" className="horizontal-timeline-node-subtitle">
                                                 {(() => {
                                                     const desc = String(item.description || '').trim();
+                                                    if (item.type === 'snet_peak') {
+                                                        const station = String(item.place_name || item.place || '').trim();
+                                                        return station || 'S-Net 测站';
+                                                    }
                                                     if (item.type === 'earthquake') {
                                                         const structuredPlace = String(item.place_name || item.place || '').trim();
                                                         if (structuredPlace) {
@@ -584,6 +641,15 @@ function HorizontalTimeline({ style }) {
                                                         }
                                                         const normalizedDesc = desc.replace(/^M\s*[\d.]+\s*/i, '').trim();
                                                         return normalizedDesc || '未知地点';
+                                                    }
+                                                    if (item.type === 'tsunami') {
+                                                        const fmt = window.EventFormatters || {};
+                                                        if (typeof fmt.buildTsunamiTimelineSubtitle === 'function') {
+                                                            return fmt.buildTsunamiTimelineSubtitle(item);
+                                                        }
+                                                        const place = String(item.place_name || item.subtitle || '').trim();
+                                                        if (place) return place;
+                                                        return desc.length > 12 ? `${desc.substring(0, 12)}...` : (desc || '海啸');
                                                     }
                                                     return desc.length > 12 ? desc.substring(0, 12) + '...' : desc;
                                                 })()}

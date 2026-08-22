@@ -13,8 +13,12 @@ import time
 
 from astrbot.api import logger
 
+from ..core.app.disaster_service import stop_disaster_service
 from ..core.services.config.config_validation_service import ConfigValidator
 from ..core.services.telemetry.telemetry_service import TelemetryManager
+from ..core.services.telemetry.telemetry_utils import track_error_safely
+from ..utils.banner import print_stop_summary
+from ..utils.geolocation import close_geoip_session
 from ..utils.version import get_plugin_version
 
 
@@ -136,8 +140,6 @@ class PluginLifecycleService:
             except asyncio.CancelledError:
                 pass
 
-        from ..core.app.disaster_service import stop_disaster_service
-
         await stop_disaster_service()
 
         if (
@@ -172,6 +174,36 @@ class PluginLifecycleService:
                     f"[灾害预警] 统计模块气象 session 关闭时出错（已忽略）: {wfe}"
                 )
 
+        # 气象站查询服务（NMC + FAN 客户端）若已懒加载过，需显式关闭其 aiohttp 会话，
+        # 避免插件重载时残留未关闭连接导致会话泄漏。
+        weather_station_service = getattr(
+            self.plugin, "_weather_station_query_service", None
+        )
+        if weather_station_service is not None:
+            try:
+                await weather_station_service.close()
+            except Exception as wse:
+                logger.debug(
+                    f"[灾害预警] 气象站查询服务会话关闭时出错（已忽略）: {wse}"
+                )
+            finally:
+                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的服务实例
+                self.plugin._weather_station_query_service = None
+
+        # 降水量预报客户端若已懒加载过，需显式关闭其 aiohttp 会话，
+        # 避免插件重载时残留未关闭连接导致会话泄漏。
+        precipitation_client = getattr(self.plugin, "_precipitation_client", None)
+        if precipitation_client is not None:
+            try:
+                await precipitation_client.close()
+            except Exception as pce:
+                logger.debug(
+                    f"[灾害预警] 降水量预报客户端会话关闭时出错（已忽略）: {pce}"
+                )
+            finally:
+                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的客户端实例
+                self.plugin._precipitation_client = None
+
         if self.plugin.telemetry:
             try:
                 await self.plugin.telemetry.close()
@@ -181,6 +213,22 @@ class PluginLifecycleService:
         if self.plugin.web_server:
             # 最后停止管理端 Web 服务器，避免外部仍尝试进行网络交互
             await self.plugin.web_server.stop()
+
+        # 兜底关闭 GeoIP 共享会话：close_geoip_session() 目前由 web_server.stop() 触发，
+        # 但为避免 web_admin 未启用或未来其他路径使用 GeoIP 时残留模块级会话，此处再兜底一次。
+        try:
+            await close_geoip_session()
+        except Exception as geoip_err:
+            logger.debug(f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}")
+
+        # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
+        # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。
+        # 该大屏原先在 DisasterServiceLifecycle.stop() 内打印，彼时浏览器与
+        # Web 管理端尚未回收（由本方法在 stop() 之后执行），会显示 ⚠️ 未完成。
+        try:
+            print_stop_summary(self.plugin.disaster_service)
+        except Exception as banner_err:
+            logger.debug(f"[灾害预警] 停止汇总大屏打印失败（已忽略）: {banner_err}")
 
     def handle_asyncio_exception(self, loop, context) -> None:
         """事件循环未处理异步异常拦截入口，判断来源若为本插件则执行遥测收集上报。"""
@@ -212,34 +260,29 @@ class PluginLifecycleService:
         else:
             logger.error(f"[灾害预警] 捕获未处理的异步错误: {message}")
 
-        if self.plugin.telemetry and self.plugin.telemetry.enabled:
+        if exception:
             # 仅在遥测启用时补充异常上报，避免在禁用状态下继续创建额外任务。
-            if exception:
-                task = context.get("future")
-                # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
-                task_name = "unknown"
-                if task:
-                    task_name = getattr(task, "get_name", lambda: str(task))()
-                    if not task_name or task_name == str(task):
-                        task_repr = repr(task)
-                        if "name=" in task_repr:
-                            match = re.search(r"name='([^']+)'", task_repr)
-                            if match:
-                                task_name = match.group(1)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        exception,
-                        module=f"main.unhandled_async.{task_name}",
-                    )
+            task = context.get("future")
+            # 尽量提取任务名称，便于后续在遥测中定位是哪一类后台任务出了问题。
+            task_name = "unknown"
+            if task:
+                task_name = getattr(task, "get_name", lambda: str(task))()
+                if not task_name or task_name == str(task):
+                    task_repr = repr(task)
+                    if "name=" in task_repr:
+                        match = re.search(r"name='([^']+)'", task_repr)
+                        if match:
+                            task_name = match.group(1)
+            # 统一 best-effort 封装上报未处理异步异常（内部自带启用检查与异常吞噬），
+            # 以独立任务方式调度，避免阻塞异常处理回调。
+            error_task = asyncio.create_task(
+                track_error_safely(
+                    self.plugin.telemetry,
+                    exception,
+                    module=f"main.unhandled_async.{task_name}",
+                    log_context="未处理异步异常遥测",
                 )
-            else:
-                runtime_error = RuntimeError(message)
-                error_task = asyncio.create_task(
-                    self.plugin.telemetry.track_error(
-                        runtime_error,
-                        module="main.unhandled_async",
-                    )
-                )
+            )
             self.plugin._telemetry_tasks.add(error_task)
             error_task.add_done_callback(self.plugin._telemetry_tasks.discard)
 

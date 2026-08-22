@@ -52,11 +52,12 @@ class ReportRule(BaseRule):
         # 策略 1：日本气象厅，日本预警更新迅速且测定频繁，适合多间隔推送
         if report_policy == "jma":
             push_every_n = int(push_config.get("jma_report_n", 3) or 3)
-        # 策略 2：Global Quake，由于网络波动更新极大，默认每 5 报推一次，不设最终报标志
+        # 策略 2：Global Quake，更新频繁，默认每 5 报推一次；
+        # 新版 GQ 协议已提供 ARCHIVED 归档动作，应作为最终报参与最终报总是推送
         elif report_policy == "global_quake":
             push_every_n = int(push_config.get("gq_report_n", 5) or 5)
-            supports_final = False
-        # 策略 3：中国与台湾预警，不区分最终报
+            supports_final = True
+        # 策略 3：中国与台湾预警，当前策略仍不把 is_final 用于报数放行
         elif report_policy == "cea_cwa":
             supports_final = False
 

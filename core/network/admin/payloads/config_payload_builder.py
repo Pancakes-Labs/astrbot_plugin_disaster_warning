@@ -47,6 +47,7 @@ class ConfigPayloadBuilder:
                     "place_name", ""
                 ),
             },
+            "typhoon_config": self.config_accessor.typhoon_config(),
             "display_timezone": self.config.get("display_timezone", "UTC+8"),
             "web_admin": {
                 # password 明确从摘要中剔除，避免任何管理端展示接口泄露敏感字段。

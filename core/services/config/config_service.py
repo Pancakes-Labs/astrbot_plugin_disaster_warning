@@ -46,6 +46,11 @@ class ConfigAccessor:
         value = self.config.get("weather_config", {})
         return value if isinstance(value, dict) else {}
 
+    def typhoon_config(self) -> dict[str, Any]:
+        """获取台风相关配置。"""
+        value = self.config.get("typhoon_config", {})
+        return value if isinstance(value, dict) else {}
+
     def debug_config(self) -> dict[str, Any]:
         """获取调试相关配置。"""
         value = self.config.get("debug_config", {})

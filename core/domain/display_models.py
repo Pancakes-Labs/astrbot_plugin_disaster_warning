@@ -46,3 +46,15 @@ class WeatherDisplayModel:
     lines: list[str] = field(default_factory=list)
     # 模板和特定气象渠道所需的其他自定义数据
     extras: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class TyphoonDisplayModel:
+    """台风展示模型。"""
+
+    # 台风展示的主标题文案
+    title: str
+    # 格式化后的通知行级内容
+    lines: list[str] = field(default_factory=list)
+    # 附加的渲染定制化参数（如轨迹数据供地图渲染使用）
+    extras: dict[str, Any] = field(default_factory=dict)

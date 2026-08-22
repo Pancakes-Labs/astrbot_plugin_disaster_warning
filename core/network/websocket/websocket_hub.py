@@ -111,9 +111,6 @@ class WebSocketHub:
         for websocket in disconnected:
             self.remove(websocket)
 
-        if event_data:
-            logger.debug(f"[灾害预警] 已推送新事件到 {self.count()} 个客户端")
-
     async def close_all(self) -> None:
         """关闭并清空所有连接。"""
         # 遍历所有客户端进行握手关闭

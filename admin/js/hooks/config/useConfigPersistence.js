@@ -34,9 +34,14 @@ function useConfigPersistence({
     const buildSavePayload = React.useCallback(() => {
         const visibleSchema = getVisibleSchema(mode);
         // 会话模式下仅截取并过滤出差异覆写表单子元素，全局模式透传所有
-        const configToSave = mode === 'session'
+        let configToSave = mode === 'session'
             ? pickConfigBySchema(config, visibleSchema)
             : config;
+
+        // 会话保存时强制剥离仅全局可改字段（如 S-Net 轮询间隔）
+        if (mode === 'session' && window.ConfigSchemaUtils && window.ConfigSchemaUtils.stripGlobalOnlyFields) {
+            configToSave = window.ConfigSchemaUtils.stripGlobalOnlyFields(configToSave);
+        }
 
         return {
             visibleSchema,
@@ -92,10 +97,11 @@ function useConfigPersistence({
                     return;
                 }
 
-                // 提交会话级 override 覆写结构
+                // 会话表单展示的是生效配置；以 effective 模式提交，
+                // 由后端 compute_diff 生成最小 override（可显式写入 false）。
                 await api.updateSessionConfig(selectedSession, {
-                    mode: 'override',
-                    override: cleanedConfig,
+                    mode: 'effective',
+                    effective: cleanedConfig,
                 });
                 showToast('会话差异配置已保存', 'success');
                 setDirty(false);

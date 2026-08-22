@@ -1,0 +1,2137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台风路径图</title>
+<!-- leaflet_css / leaflet_js / helper 由渲染器在注入阶段替换占位符 -->
+<link rel="stylesheet" href="__LEAFLET_CSS_URL__" />
+<script src="__LEAFLET_JS_URL__"></script>
+<script>__MAP_RENDER_HELPER_JS__</script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+    width: 1400px; height: 1000px;
+    background: #060606;
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    overflow: hidden;
+}
+#card-wrapper {
+    width: 1400px; height: 1000px;
+    display: flex;
+    background: #0e0e12;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* ── 左侧：路径历史 + 路径预报 ── */
+#panel-left {
+    width: 386px;
+    flex-shrink: 0;
+    background: #0e0e12;
+    /* 上/左/底 6px 与舞台对齐；右侧 6px 作为与地图的分隔 */
+    padding: 6px 6px 6px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    box-sizing: border-box;
+}
+#card-history,
+#card-forecast {
+    padding: 8px 6px 8px 8px;
+    border-radius: 12px;
+}
+#card-history {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#card-forecast {
+    flex: 0 0 188px;
+    /* 与底部信息坞同高，贴齐底部 */
+    height: 188px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin-bottom: 0;
+}
+#history-scroll,
+#forecast-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* ── 右侧舞台：地图全高，信息坞/图例叠在地图上 ── */
+#right-stage {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    /* 左侧贴齐路径卡片（0），仅保留上/右/下 6px */
+    padding: 6px 6px 6px 0;
+}
+#map-area {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+}
+#map { width: 100%; height: 100%; background: #060606; }
+#overlay-canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 1000;
+}
+.watermark {
+    position: absolute; top: 10px; right: 14px;
+    color: rgba(180,185,195,0.45);
+    font-size: 12px; font-weight: bold;
+    pointer-events: none;
+    z-index: 1001;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+}
+
+/* 地图图例：右上角，避开水印（水印 top:10 right:14） */
+#map-legend {
+    position: absolute;
+    right: 12px;
+    top: 34px;
+    bottom: auto;
+    z-index: 1003;
+    background: rgba(14, 14, 20, 0.90);
+    border: 1px solid rgba(80, 90, 110, 0.55);
+    border-radius: 10px;
+    padding: 8px 10px;
+    min-width: 148px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    pointer-events: none;
+}
+#map-legend .lg-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #9aa3b5;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+}
+#map-legend .lg-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 3px 0;
+    font-size: 11px;
+    color: #d5dae6;
+    font-weight: bold;
+}
+/* 强度图例：与地图圆点一致 */
+#map-legend .lg-swatch {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+}
+#map-legend .lg-line {
+    width: 18px; height: 0;
+    flex-shrink: 0;
+}
+#map-legend .lg-line.solid {
+    border-top: 2.5px solid #64b9ff;
+}
+#map-legend .lg-line.dashed {
+    border-top: 2px dashed #c8cdd8;
+}
+#map-legend .lg-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+#map-legend .lg-dot.hollow {
+    background: transparent;
+    border: 2px solid #c8cdd8;
+    box-sizing: border-box;
+}
+#map-legend .lg-sep {
+    height: 1px;
+    background: rgba(80,90,110,0.45);
+    margin: 6px 0;
+}
+#map-legend .lg-wind {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: #b8c0d0;
+    margin-top: 2px;
+}
+#map-legend .lg-ring {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+/* 底部信息坞：贴底铺满，卡片间距紧凑 */
+#bottom-dock {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    height: 188px;
+    display: grid;
+    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
+    gap: 4px;
+    z-index: 1002;
+    pointer-events: none;
+    min-height: 0;
+}
+.dock-card {
+    background: rgba(18, 18, 28, 0.94);
+    border: 1px solid rgba(55, 60, 78, 0.85);
+    border-radius: 10px;
+    padding: 6px 8px;
+    overflow: hidden;
+    position: relative;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.22);
+    pointer-events: none;
+}
+.dock-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 14px;
+    background: linear-gradient(to bottom, rgba(34,34,48,0.85), transparent);
+    border-radius: 10px 10px 0 0;
+    pointer-events: none;
+}
+.card {
+    background: #181822;
+    border: 1px solid #2a2a37;
+    border-radius: 16px;
+    padding: 10px 12px;
+    overflow: hidden;
+    position: relative;
+}
+.card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 24px;
+    background: linear-gradient(to bottom, rgba(34,34,48,0.9), transparent);
+    border-radius: 16px 16px 0 0;
+    pointer-events: none;
+}
+.card-header {
+    font-size: 12px; font-weight: bold;
+    color: #3787e1;
+    margin-bottom: 4px;
+    position: relative; z-index: 1;
+    flex-shrink: 0;
+}
+.dock-card .card-header {
+    font-size: 11.5px;
+    margin-bottom: 3px;
+}
+.dock-card .metric-row {
+    min-height: 16px;
+    margin: 1px 0;
+}
+.dock-card .metric-label { font-size: 11px; }
+.dock-card .metric-main { font-size: 12px; }
+.dock-card .muted { font-size: 11px; }
+.row-title {
+    font-size: 12px; color: #697080;
+    display: inline;
+}
+.row-value {
+    font-size: 13px; font-weight: bold; color: #e1e4eb;
+    float: right;
+}
+.metric-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    margin: 2px 0;
+    min-height: 18px;
+}
+.metric-label {
+    font-size: 12px;
+    color: #697080;
+    flex-shrink: 0;
+}
+.metric-main {
+    font-size: 13px;
+    font-weight: bold;
+    color: #e1e4eb;
+    text-align: right;
+    min-width: 0;
+}
+.metric-delta {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: bold;
+    vertical-align: middle;
+    line-height: 16px;
+}
+/* 风速变化：升=增强倾向(暖色)，降=减弱倾向(冷绿) */
+.delta-up {
+    color: #ff8e8e;
+    background: rgba(240, 70, 70, 0.14);
+}
+.delta-down {
+    color: #6ddea0;
+    background: rgba(70, 195, 110, 0.14);
+}
+/* 气压变化：仅表示数值升降，统一中性蓝灰，避免被误读为“危险红色” */
+.delta-pr-up,
+.delta-pr-down {
+    color: #8ec5ff;
+    background: rgba(100, 160, 230, 0.14);
+}
+.delta-flat {
+    color: #9aa3b5;
+    background: rgba(120, 130, 150, 0.12);
+}
+.intensity-badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: bold;
+}
+.intensity-up {
+    color: #ffb4b4;
+    background: rgba(240, 70, 70, 0.16);
+    border: 1px solid rgba(240, 70, 70, 0.28);
+}
+.intensity-down {
+    color: #8ee0b0;
+    background: rgba(70, 195, 110, 0.14);
+    border: 1px solid rgba(70, 195, 110, 0.25);
+}
+.intensity-flat {
+    color: #a8b0c0;
+    background: rgba(120, 130, 150, 0.12);
+    border: 1px solid rgba(120, 130, 150, 0.22);
+}
+
+/* 类别标签 */
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: bold;
+    color: #fff;
+    margin-right: 5px;
+}
+.badge-src {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: bold;
+    color: #fff;
+}
+.badge-src-eqsc { background: #3787d7; }
+.badge-src-fan { background: #5a7fd7; }
+.badge-src-local { background: #6a6a7a; }
+.badge-src-cma { background: #3787d7; }
+.badge-src-jma { background: #d75037; }
+.badge-row { margin-top: 4px; }
+
+/* 风圈 */
+.radii-label { font-size: 11px; font-weight: bold; }
+.radii-line {
+    font-size: 11px;
+    font-weight: bold;
+    margin-left: 4px;
+    line-height: 1.4;
+}
+.muted { font-size: 12px; color: #697080; }
+.pos-value { font-size: 12px; }
+.clearfix { clear: both; }
+.clearfix-sm { clear: both; height: 2px; }
+
+/* 表格：固定列宽，列内容居中，间距更均匀 */
+.table-wrap {
+    font-size: 11.5px;
+    font-weight: bold;
+    width: 100%;
+}
+.table-header {
+    color: #697080;
+    font-size: 10.5px;
+    margin-bottom: 3px;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+.table-row {
+    line-height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2px;
+    gap: 2px;
+}
+.table-row-alt { background: rgba(30,30,42,0.6); border-radius: 4px; }
+.table-row-latest {
+    /* 仅底色高亮，不加左边色条，避免与居中列错位 */
+    background: rgba(55, 135, 225, 0.16);
+    border-radius: 4px;
+}
+.table-cell {
+    flex: 0 0 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    text-align: center;
+    padding: 0 1px;
+}
+.col-time { width: 76px; }
+.col-pos { width: 96px; }
+.col-ws { width: 38px; }
+.col-pr { width: 40px; }
+.col-cat { flex: 1 1 auto; min-width: 70px; max-width: 96px; }
+.table-compact { font-size: 11px; }
+.table-compact .table-row { line-height: 16px; }
+.table-compact .col-time { width: 74px; }
+.table-compact .col-pos { width: 94px; }
+.table-compact .col-ws { width: 36px; }
+.table-compact .col-pr { width: 38px; }
+
+/* 迷你曲线图 */
+.chart-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#mini-chart { width: 100%; height: 100%; display: block; }
+.chart-legend {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 9.5px;
+    color: #8b93a5;
+    margin-top: 2px;
+    flex-shrink: 0;
+    line-height: 1.2;
+    min-width: 0;
+    overflow: hidden;
+}
+.chart-legend-items {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+}
+.chart-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 2.5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+.chart-legend .lw::before { background: #ff9614; }
+.chart-legend .lp::before { background: #64b9ff; }
+.chart-meta {
+    font-size: 9px;
+    color: #7a8498;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+</style>
+</head>
+<body>
+<div id="card-wrapper">
+    <!-- 左侧：路径历史（上）+ 路径预报（下，高度对齐信息坞） -->
+    <div id="panel-left">
+        <div class="card" id="card-history"></div>
+        <div class="card" id="card-forecast"></div>
+    </div>
+
+    <!-- 右侧：地图全高；信息坞/图例叠在地图上，不挤压地图 -->
+    <div id="right-stage">
+        <div id="map-area">
+            <div id="map"></div>
+            <canvas id="overlay-canvas"></canvas>
+            <div class="watermark" id="watermark"></div>
+            <div id="map-legend"></div>
+            <div id="bottom-dock">
+                <div class="dock-card" id="card-identity"></div>
+                <div class="dock-card" id="card-live"></div>
+                <div class="dock-card" id="card-radii"></div>
+                <div class="dock-card" id="card-chart-wrap">
+                    <div class="card-header">风速/气压变化</div>
+                    <div class="chart-wrap">
+                        <canvas id="mini-chart"></canvas>
+                    </div>
+                    <div class="chart-legend">
+                        <div class="chart-legend-items">
+                            <span class="lw">风速</span>
+                            <span class="lp">气压</span>
+                        </div>
+                        <div class="chart-meta" id="chart-meta"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+  渲染器会把下方占位符替换为完整 bootstrap JSON。
+  模板本身保持合法 JS/CSS，避免 VSCode 对 Jinja 语法爆红。
+-->
+<script type="application/json" id="typhoon-bootstrap">__TYPHOON_BOOTSTRAP_JSON__</script>
+
+<script>
+(function() {
+'use strict';
+
+/**
+ * 读取 Python 注入的 bootstrap 数据。
+ * 字段约定见 TyphoonMapRenderer._build_bootstrap()。
+ */
+function loadBootstrap() {
+    var el = document.getElementById('typhoon-bootstrap');
+    if (!el) return {};
+    try {
+        return JSON.parse(el.textContent || '{}');
+    } catch (e) {
+        console.error('[台风] bootstrap JSON 解析失败:', e);
+        return {};
+    }
+}
+
+var BOOT = loadBootstrap();
+var HISTORY_RAW = Array.isArray(BOOT.history) ? BOOT.history : [];
+var FORECAST_RAW = Array.isArray(BOOT.forecast) ? BOOT.forecast : [];
+var VIEW = BOOT.view || { lo: 100, hi: 170, la: 5, ha: 45 };
+var CHART_WINDS = Array.isArray(BOOT.chart_winds) ? BOOT.chart_winds : [];
+var CHART_PRESS = Array.isArray(BOOT.chart_pressures) ? BOOT.chart_pressures : [];
+var CHART_TIMES = Array.isArray(BOOT.chart_times) ? BOOT.chart_times : [];
+var TILE_URL = BOOT.tile_url || '';
+var PANEL = BOOT.panel || {};
+var FORECAST_ROWS = Array.isArray(BOOT.forecast_rows) ? BOOT.forecast_rows : [];
+var HISTORY_ROWS = Array.isArray(BOOT.history_rows) ? BOOT.history_rows : [];
+var WIND_RADII = Array.isArray(BOOT.wind_radii) ? BOOT.wind_radii : [];
+
+var CAT_COLORS = {
+    0: '#787882',
+    1: '#32afff',
+    2: '#32d773',
+    3: '#ffd728',
+    4: '#ffa00a',
+    5: '#f55f0a',
+    6: '#e12828'
+};
+var CAT_NAMES = {
+    0: '未知',
+    1: '热带低压',
+    2: '热带风暴',
+    3: '强热带风暴',
+    4: '台风',
+    5: '强台风',
+    6: '超强台风'
+};
+var CAT_SHORT = {
+    0: '—',
+    1: 'TD',
+    2: 'TS',
+    3: 'STS',
+    4: 'TY',
+    5: 'STY',
+    6: 'SuperTY'
+};
+
+// 等级中文 → 0-6（长词优先，避免“强台风”命中“台风”）
+var LEVEL_WEIGHTS = [
+    ['超强台风', 6],
+    ['强台风', 5],
+    ['强热带风暴', 3],
+    ['热带风暴', 2],
+    ['热带低压', 1],
+    ['台风', 4]
+];
+
+function levelWeight(text) {
+    var s = String(text || '').trim();
+    if (!s) return 0;
+    for (var i = 0; i < LEVEL_WEIGHTS.length; i++) {
+        if (s === LEVEL_WEIGHTS[i][0] || s.indexOf(LEVEL_WEIGHTS[i][0]) >= 0) {
+            return LEVEL_WEIGHTS[i][1];
+        }
+    }
+    return 0;
+}
+
+function toNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+}
+
+function escapeHtml(text) {
+    // 用 fromCharCode 拼 HTML 实体，避免源文件里的 &...; 被二次解码弄坏
+    return String(text == null ? '' : text).replace(/[&<>"']/g, function (ch) {
+        if (ch === '&') return String.fromCharCode(38) + 'amp;';
+        if (ch === '<') return String.fromCharCode(38) + 'lt;';
+        if (ch === '>') return String.fromCharCode(38) + 'gt;';
+        if (ch === '"') return String.fromCharCode(38) + 'quot;';
+        return String.fromCharCode(38) + '#39;';
+    });
+}
+
+function cleanCircle(circle) {
+    if (!circle || typeof circle !== 'object') return null;
+    var out = {};
+    var has = false;
+    ['NE', 'SE', 'SW', 'NW'].forEach(function(k) {
+        var n = toNum(circle[k]);
+        if (n !== null && n > 0) {
+            out[k] = n;
+            has = true;
+        }
+    });
+    return has ? out : null;
+}
+
+function extractWindCircle(node) {
+    var raw = (node && (node.windCircle || node.wind_circle)) || null;
+    if (!raw || typeof raw !== 'object') {
+        return { r7: null, r10: null, r12: null };
+    }
+    return {
+        r7: cleanCircle(raw['30KTS'] || raw['30kts']),
+        r10: cleanCircle(raw['50KTS'] || raw['50kts']),
+        r12: cleanCircle(raw['64KTS'] || raw['64kts'])
+    };
+}
+
+function formatTs(timeText) {
+    var s = String(timeText || '').trim();
+    if (!s) return '';
+    var m = s.match(/(\d{1,2}):(\d{2})/);
+    if (m) return (m[1].length === 1 ? '0' + m[1] : m[1]) + ':' + m[2];
+    return '';
+}
+
+/**
+ * 解析轨迹时间字符串，返回 {year, month, day, hour, minute} 或 null。
+ * 优先完整 ISO / 四位年，避免把年份前两位误当成“日”。
+ *
+ * 例：
+ * - "2020-09-06 17:00:00" → day=6, hour=17
+ * - "2026/07/06 17:00"     → day=6, hour=17
+ * - "07/06 17:00"          → day=6, hour=17
+ * - "7月6日17时"           → day=6, hour=17
+ */
+function parseTrackDateParts(timeText) {
+    var s = String(timeText || '').trim();
+    if (!s) return null;
+
+    // 1) 完整四位年：YYYY-MM-DD[ T]HH:mm[:ss]
+    var m = s.match(
+        /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})[日T\s]+(\d{1,2}):(\d{2})/
+    );
+    if (m) {
+        return {
+            year: parseInt(m[1], 10),
+            month: parseInt(m[2], 10),
+            day: parseInt(m[3], 10),
+            hour: parseInt(m[4], 10),
+            minute: parseInt(m[5], 10)
+        };
+    }
+
+    // 2) 仅日期四位年：YYYY-MM-DD
+    m = s.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+    if (m) {
+        var hm = s.match(/(\d{1,2}):(\d{2})/);
+        return {
+            year: parseInt(m[1], 10),
+            month: parseInt(m[2], 10),
+            day: parseInt(m[3], 10),
+            hour: hm ? parseInt(hm[1], 10) : 0,
+            minute: hm ? parseInt(hm[2], 10) : 0
+        };
+    }
+
+    // 3) 中文：M月D日H时
+    m = s.match(/(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时/);
+    if (m) {
+        return {
+            year: null,
+            month: parseInt(m[1], 10),
+            day: parseInt(m[2], 10),
+            hour: parseInt(m[3], 10),
+            minute: 0
+        };
+    }
+
+    // 4) 短格式 MM/DD HH:mm 或 MM-DD HH:mm（月必须 1-12，日 1-31）
+    m = s.match(/(^|[^\d])(\d{1,2})[\/\-](\d{1,2})(?:[^\d]+(\d{1,2}):(\d{2}))?/);
+    if (m) {
+        var month = parseInt(m[2], 10);
+        var day = parseInt(m[3], 10);
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return {
+                year: null,
+                month: month,
+                day: day,
+                hour: m[4] != null ? parseInt(m[4], 10) : 0,
+                minute: m[5] != null ? parseInt(m[5], 10) : 0
+            };
+        }
+    }
+
+    // 5) 原生 Date 兜底（注意：部分环境对 "YYYY-MM-DD HH:mm" 解析不稳，已优先正则）
+    var d = new Date(s.replace(/-/g, '/'));
+    if (!isNaN(d.getTime())) {
+        return {
+            year: d.getFullYear(),
+            month: d.getMonth() + 1,
+            day: d.getDate(),
+            hour: d.getHours(),
+            minute: d.getMinutes()
+        };
+    }
+    return null;
+}
+
+function formatHourLabel(timeText) {
+    var parts = parseTrackDateParts(timeText);
+    if (!parts) return formatTs(timeText);
+    var mm = parts.month < 10 ? '0' + parts.month : String(parts.month);
+    var dd = parts.day < 10 ? '0' + parts.day : String(parts.day);
+    var hh = parts.hour < 10 ? '0' + parts.hour : String(parts.hour);
+    return mm + '/' + dd + ' ' + hh + '时';
+}
+
+/**
+ * 把 EQSC 原生轨迹节点规范化为画布点。
+ * 保留 lat/lon/cat/ws/pr/ts 与 r7/r10/r12（来自 30/50/64KTS）。
+ */
+function normalizeNode(node) {
+    if (!node || typeof node !== 'object') return null;
+    var lat = toNum(node.latitude != null ? node.latitude : node.lat);
+    var lon = toNum(node.longitude != null ? node.longitude : node.lon);
+    if (lat === null || lon === null) return null;
+    var levelText = String(
+        node.typeNameCN || node.type || node.level || node.typhoon_type || ''
+    ).trim();
+    var cat = levelWeight(levelText);
+    var winds = extractWindCircle(node);
+    var hour = null;
+    var rawTime = String(node.time || '').trim();
+    var hm = rawTime.match(/(\d{1,2}):(\d{2})/);
+    if (hm) hour = parseInt(hm[1], 10);
+    return {
+        lat: lat,
+        lon: lon,
+        cat: cat,
+        level: levelText || CAT_NAMES[cat] || '',
+        ws: toNum(node.windSpeed != null ? node.windSpeed : node.wind_speed),
+        pr: toNum(node.pressure),
+        ts: formatTs(node.time),
+        hour: hour,
+        timeRaw: rawTime,
+        r7: winds.r7,
+        r10: winds.r10,
+        r12: winds.r12
+    };
+}
+
+var PAST = HISTORY_RAW.map(normalizeNode).filter(Boolean);
+var FCST = FORECAST_RAW.map(normalizeNode).filter(Boolean);
+
+function hexWithAlpha(hex, alpha) {
+    var h = String(hex || '#969696').replace('#', '');
+    if (h.length === 3) {
+        h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    var a = Math.max(0, Math.min(1, alpha));
+    var ah = Math.round(a * 255).toString(16).padStart(2, '0');
+    return '#' + h + ah;
+}
+
+function formatDelta(value, unit, digits) {
+    if (value === null || value === undefined || !isFinite(value)) return '';
+    var d = typeof digits === 'number' ? digits : 0;
+    var abs = Math.abs(value).toFixed(d).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+    var sign = value > 0 ? '+' : (value < 0 ? '−' : '');
+    // 使用 Unicode minus，避免 HTML 实体问题；显示层再 escape
+    if (value < 0) sign = '-';
+    if (value > 0) sign = '+';
+    return sign + abs + (unit || '');
+}
+
+/** 渲染左侧历史表 + 底部信息坞 + 图例 */
+function renderPanel() {
+    var catName = PANEL.category_name || '';
+    var catColor = PANEL.cat_color_rgb || '150,150,150';
+
+    var identity = document.getElementById('card-identity');
+    if (identity) {
+        identity.innerHTML =
+            '<div class="card-header">&#9733; 台风</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">名称</span>' +
+                '<span class="metric-main">' + escapeHtml(PANEL.event_name || '--') + '</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">编号</span>' +
+                '<span class="metric-main">' + escapeHtml(PANEL.event_code || '--') + '</span>' +
+            '</div>' +
+            '<div class="badge-row">' +
+                (catName
+                    ? '<span class="badge" style="background:rgba(' + catColor + ',1)">' +
+                      escapeHtml(catName) + '</span>'
+                    : '') +
+            '</div>' +
+            (PANEL.update_time
+                ? '<div class="muted" style="margin-top:6px">更新 ' +
+                  escapeHtml(PANEL.update_time) + '</div>'
+                : '');
+    }
+
+    var live = document.getElementById('card-live');
+    if (live) {
+        // 趋势：数值保持中性色；变化量用小标签；综合强度单独说明
+        var wsDelta = PANEL.ws_delta_text || '';
+        var prDelta = PANEL.pr_delta_text || '';
+        var wsDeltaCls = PANEL.ws_delta_class || 'delta-flat';
+        var prDeltaCls = PANEL.pr_delta_class || 'delta-flat';
+        var intensityText = PANEL.intensity_trend_text || '强度稳定';
+        var intensityCls = PANEL.intensity_trend_class || 'intensity-flat';
+        var moveText = ((PANEL.move_dir || '') + ' ' + (PANEL.move_speed || '')).trim() || '--';
+
+        live.innerHTML =
+            '<div class="card-header">实况</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">风速</span>' +
+                '<span class="metric-main">' +
+                    escapeHtml(PANEL.wind_speed || '--') +
+                    (wsDelta
+                        ? '<span class="metric-delta ' + wsDeltaCls + '">' +
+                          escapeHtml(wsDelta) + '</span>'
+                        : '') +
+                '</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">气压</span>' +
+                '<span class="metric-main">' +
+                    escapeHtml(PANEL.pressure || '--') +
+                    (prDelta
+                        ? '<span class="metric-delta ' + prDeltaCls + '">' +
+                          escapeHtml(prDelta) + '</span>'
+                        : '') +
+                '</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">移动</span>' +
+                '<span class="metric-main">' + escapeHtml(moveText) + '</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">位置</span>' +
+                '<span class="metric-main pos-value">' +
+                    escapeHtml(PANEL.position || '--') +
+                '</span>' +
+            '</div>' +
+            '<div><span class="intensity-badge ' + intensityCls + '">' +
+                escapeHtml(intensityText) +
+            '</span></div>';
+    }
+
+    var radii = document.getElementById('card-radii');
+    if (radii) {
+        var html = '<div class="card-header">风圈半径</div>';
+        if (!WIND_RADII.length) {
+            html +=
+                '<div class="muted" style="margin-top:8px;line-height:1.5">' +
+                '当前报文未提供风圈数据' +
+                '</div>';
+        } else {
+            WIND_RADII.forEach(function(r) {
+                var color = r.color_rgb || '150,150,150';
+                html += '<div class="radii-label" style="color:rgba(' + color + ',1)">' +
+                    escapeHtml(r.label || '') + '</div>';
+                (r.lines || []).forEach(function(line) {
+                    html += '<div class="radii-line" style="color:rgba(' + color + ',0.95)">' +
+                        escapeHtml(line) + '</div>';
+                });
+            });
+        }
+        radii.innerHTML = html;
+    }
+
+    function tableHeaderHtml() {
+        return '<div class="table-header table-row">' +
+            '<span class="table-cell col-time">时间</span>' +
+            '<span class="table-cell col-pos">位置</span>' +
+            '<span class="table-cell col-ws">风速</span>' +
+            '<span class="table-cell col-pr">气压</span>' +
+            '<span class="table-cell col-cat">等级</span>' +
+            '</div>';
+    }
+
+    function tableRowHtml(r, rowCls) {
+        var color = r.cat_color || '#969696';
+        return '<div class="' + rowCls + '">' +
+            '<span class="table-cell col-time" style="color:#e1e4eb">' +
+                escapeHtml(r.time || '') + '</span>' +
+            '<span class="table-cell col-pos" style="color:#e1e4eb">' +
+                escapeHtml(r.pos || '') + '</span>' +
+            '<span class="table-cell col-ws" style="color:' + color + '">' +
+                escapeHtml(r.ws || '') + '</span>' +
+            '<span class="table-cell col-pr" style="color:' + color + '">' +
+                escapeHtml(r.pr || '') + '</span>' +
+            '<span class="table-cell col-cat" style="color:' + color + '">' +
+                escapeHtml(r.cat || '') + '</span>' +
+            '</div>';
+    }
+
+    // 左侧路径历史（上）
+    var historyEl = document.getElementById('card-history');
+    if (historyEl) {
+        var hhtml = '<div class="card-header">路径历史</div>';
+        if (!HISTORY_ROWS.length) {
+            hhtml += '<div class="muted">暂无历史数据</div>';
+        } else {
+            hhtml += '<div id="history-scroll"><div class="table-wrap">';
+            hhtml += tableHeaderHtml();
+            HISTORY_ROWS.forEach(function(r, idx) {
+                var rowCls = 'table-row';
+                if (idx === 0) rowCls += ' table-row-latest';
+                else if (idx % 2 === 1) rowCls += ' table-row-alt';
+                hhtml += tableRowHtml(r, rowCls);
+            });
+            hhtml += '</div></div>';
+        }
+        historyEl.innerHTML = hhtml;
+    }
+
+    // 左侧路径预报（下，高度对齐信息坞）
+    var forecastEl = document.getElementById('card-forecast');
+    if (forecastEl) {
+        var fhtml = '<div class="card-header">路径预报</div>';
+        if (!FORECAST_ROWS.length) {
+            fhtml += '<div class="muted">暂无预报数据</div>';
+        } else {
+            fhtml += '<div id="forecast-scroll"><div class="table-wrap table-compact">';
+            fhtml += tableHeaderHtml();
+            FORECAST_ROWS.forEach(function(r, idx) {
+                var alt = (idx % 2 === 1) ? ' table-row-alt' : '';
+                fhtml += tableRowHtml(r, 'table-row' + alt);
+            });
+            fhtml += '</div></div>';
+        }
+        forecastEl.innerHTML = fhtml;
+    }
+
+    // 地图图例（强度用圆点，与路径点一致）
+    var legend = document.getElementById('map-legend');
+    if (legend) {
+        var lhtml = '<div class="lg-title">图例</div>';
+        [1, 2, 3, 4, 5, 6].forEach(function(cat) {
+            lhtml +=
+                '<div class="lg-row">' +
+                    '<span class="lg-swatch" style="background:' + CAT_COLORS[cat] + '"></span>' +
+                    '<span>' + escapeHtml(CAT_NAMES[cat]) + '</span>' +
+                '</div>';
+        });
+        lhtml += '<div class="lg-sep"></div>';
+        lhtml +=
+            '<div class="lg-row">' +
+                '<span class="lg-line solid"></span><span>历史路径</span>' +
+            '</div>' +
+            '<div class="lg-row">' +
+                '<span class="lg-line dashed"></span><span>预报路径</span>' +
+            '</div>' +
+            '<div class="lg-row">' +
+                '<span class="lg-dot" style="background:#32afff"></span><span>历史定位</span>' +
+            '</div>' +
+            '<div class="lg-row">' +
+                '<span class="lg-dot hollow"></span><span>预报定位</span>' +
+            '</div>';
+        lhtml += '<div class="lg-sep"></div>';
+        lhtml +=
+            '<div class="lg-wind">' +
+                '<span class="lg-ring" style="border-color:#64b4ff"></span>7级风圈' +
+            '</div>' +
+            '<div class="lg-wind">' +
+                '<span class="lg-ring" style="border-color:#ffc832"></span>10级风圈' +
+            '</div>' +
+            '<div class="lg-wind">' +
+                '<span class="lg-ring" style="border-color:#ff5000"></span>12级风圈' +
+            '</div>';
+        legend.innerHTML = lhtml;
+    }
+
+    var wm = document.getElementById('watermark');
+    if (wm) wm.textContent = PANEL.watermark_text || '';
+
+    var chartMeta = document.getElementById('chart-meta');
+    if (chartMeta) {
+        if (CHART_TIMES.length >= 2) {
+            chartMeta.textContent =
+                (CHART_TIMES[0] || '') + ' → ' + (CHART_TIMES[CHART_TIMES.length - 1] || '');
+        } else {
+            chartMeta.textContent = '';
+        }
+    }
+}
+
+// ── 地图 ──
+var map = null;
+try {
+    // 先给一个临时中心，确保 Leaflet 完成 _loaded，后续 getSize/setView 才可靠
+    map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false,
+        zoomAnimation: false,
+        fadeAnimation: false,
+        markerZoomAnimation: false,
+        zoomSnap: 0.25,
+        zoomDelta: 0.5,
+        center: [22, 112],
+        zoom: 6
+    });
+} catch (e) {
+    console.error('[台风] L.map 初始化失败:', e, e.stack);
+}
+
+var tileLayer = null;
+try {
+    if (map && TILE_URL) {
+        tileLayer = L.tileLayer(TILE_URL, {
+            maxZoom: 18,
+            minZoom: 0,
+            keepBuffer: 2,
+            updateWhenIdle: true,
+            updateWhenZooming: false
+        }).addTo(map);
+    }
+} catch (e) {
+    console.error('[台风] tileLayer 创建失败:', e, e.stack);
+}
+
+if (tileLayer) {
+    tileLayer.on('tileerror', function(e) {
+        var img = e.tile;
+        if (!img || !img.src) return;
+        var retries = parseInt(img.dataset.retryCount || '0', 10);
+        if (retries >= 3) return;
+        img.dataset.retryCount = String(retries + 1);
+        var delay = (retries + 1) * 1000;
+        var coords = img._coords || {};
+        this.fire('tileloadstart', { tile: img, coords: coords, url: img.src });
+        setTimeout(function() {
+            var sep = img.src.indexOf('?') > -1 ? '&' : '?';
+            img.src = img.src.split('?')[0] + sep + '_retry=' + Date.now() + '_' + retries;
+        }, delay);
+    });
+}
+
+var canvas = document.getElementById('overlay-canvas');
+var ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    if (!map) return false;
+    var rect = map.getContainer().getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    return true;
+}
+
+function toPt(lat, lon) {
+    if (!map) return null;
+    var p = map.latLngToContainerPoint([lat, lon]);
+    return (isFinite(p.x) && isFinite(p.y)) ? p : null;
+}
+
+function kmToPx(lat, lon, km) {
+    var center = toPt(lat, lon);
+    if (!center) return 0;
+    var dLon = km / (111.32 * Math.cos(lat * Math.PI / 180));
+    var east = toPt(lat, lon + dLon);
+    if (!east) return 0;
+    return Math.abs(east.x - center.x);
+}
+
+function strokeSegment(x0, y0, x1, y1, color, width, glowColor, glowWidth) {
+    if (glowColor && glowWidth) {
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.strokeStyle = glowColor;
+        ctx.lineWidth = glowWidth;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+}
+
+function drawLabel(text, x, y, options) {
+    if (!text) return;
+    var opt = options || {};
+    var font = opt.font || 'bold 10px "Microsoft YaHei"';
+    var color = opt.color || '#e8ecf4';
+    var align = opt.align || 'center';
+    var baseline = opt.baseline || 'bottom';
+    var bg = opt.bg || 'rgba(8,10,16,0.78)';
+    var border = opt.border || 'rgba(255,255,255,0.12)';
+    var padX = opt.padX != null ? opt.padX : 5;
+    var padY = opt.padY != null ? opt.padY : 3;
+    var radius = opt.radius != null ? opt.radius : 3;
+    ctx.save();
+    ctx.font = font;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    var metrics = ctx.measureText(text);
+    var tw = metrics.width;
+    var th = opt.th || 13;
+    var bx = x - (align === 'center' ? tw / 2 : (align === 'right' ? tw : 0)) - padX;
+    var by = y - th - padY;
+    if (baseline === 'top') by = y - padY;
+    if (baseline === 'middle') by = y - th / 2 - padY;
+    ctx.fillStyle = bg;
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    roundRect(ctx, bx, by, tw + padX * 2, th + padY * 2, radius);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = color;
+    var ty = y;
+    if (baseline === 'bottom') ty = y - 3;
+    if (baseline === 'middle') ty = y + 0.5;
+    ctx.fillText(text, x, ty);
+    ctx.restore();
+}
+
+/**
+ * 参考专业台风图：等级色块 + 名称/时间白底黑字，贴在当前点右侧。
+ * 例： [强台风] 巴威 11日6时
+ */
+function drawCurrentPointBadge(cx, cy, parts) {
+    if (!parts || !parts.length) return;
+    var gap = 6;
+    var x = cx + 12;
+    var y = cy;
+    var h = 18;
+    var padX = 6;
+    var totalW = 0;
+    var measured = [];
+    ctx.save();
+    ctx.font = 'bold 11px "Microsoft YaHei"';
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        var tw = ctx.measureText(p.text || '').width;
+        var w = tw + padX * 2;
+        measured.push({ text: p.text || '', color: p.color || '#111', bg: p.bg || '#fff', w: w });
+        totalW += w;
+    }
+    // 整体描边底，保证清晰
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    roundRect(ctx, x - 1, y - h / 2 - 1, totalW + 2, h + 2, 4);
+    ctx.fill();
+
+    var ox = x;
+    for (i = 0; i < measured.length; i++) {
+        var m = measured[i];
+        var isFirst = i === 0;
+        var isLast = i === measured.length - 1;
+        ctx.beginPath();
+        if (isFirst && isLast) {
+            roundRect(ctx, ox, y - h / 2, m.w, h, 4);
+        } else if (isFirst) {
+            // 左圆角
+            var r = 4;
+            ctx.moveTo(ox + r, y - h / 2);
+            ctx.lineTo(ox + m.w, y - h / 2);
+            ctx.lineTo(ox + m.w, y + h / 2);
+            ctx.lineTo(ox + r, y + h / 2);
+            ctx.quadraticCurveTo(ox, y + h / 2, ox, y + h / 2 - r);
+            ctx.lineTo(ox, y - h / 2 + r);
+            ctx.quadraticCurveTo(ox, y - h / 2, ox + r, y - h / 2);
+            ctx.closePath();
+        } else if (isLast) {
+            r = 4;
+            ctx.moveTo(ox, y - h / 2);
+            ctx.lineTo(ox + m.w - r, y - h / 2);
+            ctx.quadraticCurveTo(ox + m.w, y - h / 2, ox + m.w, y - h / 2 + r);
+            ctx.lineTo(ox + m.w, y + h / 2 - r);
+            ctx.quadraticCurveTo(ox + m.w, y + h / 2, ox + m.w - r, y + h / 2);
+            ctx.lineTo(ox, y + h / 2);
+            ctx.closePath();
+        } else {
+            ctx.rect(ox, y - h / 2, m.w, h);
+        }
+        ctx.fillStyle = m.bg;
+        ctx.fill();
+        ctx.fillStyle = m.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(m.text, ox + m.w / 2, y + 0.5);
+        ox += m.w;
+    }
+    ctx.restore();
+}
+
+function roundRect(c, x, y, w, h, r) {
+    var rr = Math.min(r, w / 2, h / 2);
+    c.beginPath();
+    c.moveTo(x + rr, y);
+    c.arcTo(x + w, y, x + w, y + h, rr);
+    c.arcTo(x + w, y + h, x, y + h, rr);
+    c.arcTo(x, y + h, x, y, rr);
+    c.arcTo(x, y, x + w, y, rr);
+    c.closePath();
+}
+
+/**
+ * 绘制四象限风圈。
+ *
+ * 屏幕坐标约定（与 canvas 一致）：
+ *   x = cx + r * cos(θ),  y = cy - r * sin(θ)
+ *   θ=0° 东, 90° 北, 180° 西, 270° 南（逆时针）
+ *
+ * 因此象限角度区间必须是：
+ *   NE: 0°–90°（东→北）
+ *   NW: 90°–180°（北→西）
+ *   SW: 180°–270°（西→南）
+ *   SE: 270°–360°（南→东）
+ *
+ * 历史 bug：曾把 SE/NW 对调，导致最大半径画到东南而非西北。
+ * 缺象限时以半径 0 处理，路径经中心闭合，避免跨象限“挖空”。
+ */
+function drawRadiiPoly(cx, cy, lat, lon, radii, fillColor, edgeColor, dashed, lineWidth) {
+    if (!radii) return;
+    // 逆时针：东→北→西→南→东；键名必须与角度区间一致
+    var quads = [
+        [0, 90, 'NE'],
+        [90, 180, 'NW'],
+        [180, 270, 'SW'],
+        [270, 360, 'SE']
+    ];
+    var hasAny = quads.some(function(q) {
+        var n = radii[q[2]];
+        return n != null && n > 0;
+    });
+    if (!hasAny) return;
+
+    var polyPts = [];
+    var step = 6;
+    quads.forEach(function(q) {
+        var rk = radii[q[2]];
+        var rp = (rk != null && rk > 0) ? kmToPx(lat, lon, rk) : 0;
+        // 半径过小视为 0，仍推进角度，保证四象限连续闭合
+        if (rp < 3) rp = 0;
+        for (var deg = q[0]; deg <= q[1]; deg += step) {
+            if (rp <= 0) {
+                // 缺/零半径：落到中心，形成扇形缺口而不是跨象限连线
+                if (!polyPts.length ||
+                    polyPts[polyPts.length - 1][0] !== cx ||
+                    polyPts[polyPts.length - 1][1] !== cy) {
+                    polyPts.push([cx, cy]);
+                }
+            } else {
+                var rad = deg * Math.PI / 180;
+                polyPts.push([cx + rp * Math.cos(rad), cy - rp * Math.sin(rad)]);
+            }
+        }
+    });
+    if (polyPts.length < 3) return;
+
+    ctx.beginPath();
+    ctx.moveTo(polyPts[0][0], polyPts[0][1]);
+    for (var i = 1; i < polyPts.length; i++) {
+        ctx.lineTo(polyPts[i][0], polyPts[i][1]);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+    if (dashed) ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = edgeColor;
+    ctx.lineWidth = lineWidth != null ? lineWidth : 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    if (dashed) ctx.setLineDash([]);
+}
+
+/**
+ * 解析节点时间戳（秒）。无法解析返回 null。
+ * 支持 ISO / "YYYY-MM-DD HH:mm" / "MM/DD HH:mm" 等常见格式。
+ */
+function parseNodeEpoch(node) {
+    if (!node) return null;
+    var raw = String(node.timeRaw || '').trim();
+    if (!raw) return null;
+    var d = new Date(raw.replace(/-/g, '/'));
+    if (!isNaN(d.getTime())) return d.getTime() / 1000;
+    var m = raw.match(/(?:(\d{4})[\/\-年])?(\d{1,2})[\/\-月](\d{1,2}).*?(\d{1,2}):(\d{2})/);
+    if (m) {
+        var y = m[1] ? parseInt(m[1], 10) : (new Date()).getFullYear();
+        var mo = parseInt(m[2], 10) - 1;
+        var da = parseInt(m[3], 10);
+        var hh = parseInt(m[4], 10);
+        var mi = parseInt(m[5], 10);
+        var dd = new Date(y, mo, da, hh, mi, 0);
+        if (!isNaN(dd.getTime())) return dd.getTime() / 1000;
+    }
+    return null;
+}
+
+function nodeHasRadii(node) {
+    return !!(node && (node.r7 || node.r10 || node.r12));
+}
+
+/**
+ * 历史风圈采样：约每 24h 一个，含当前点。
+ * 缺数据时在 ±18h 窗口内向前/向后回退找最近有风圈的点；
+ * 仍无则跳过该槽位，保证不乱画。
+ */
+function selectHistoryRadiiIndices(nodes) {
+    if (!nodes || !nodes.length) return [];
+    var n = nodes.length;
+    var last = n - 1;
+    var epochs = nodes.map(parseNodeEpoch);
+    var selected = [];
+    var used = {};
+
+    function pushIdx(idx) {
+        if (idx == null || idx < 0 || idx >= n) return;
+        if (used[idx]) return;
+        if (!nodeHasRadii(nodes[idx])) return;
+        used[idx] = true;
+        selected.push(idx);
+    }
+
+    if (nodeHasRadii(nodes[last])) {
+        pushIdx(last);
+    } else {
+        for (var back = 1; back <= 6; back++) {
+            if (last - back >= 0 && nodeHasRadii(nodes[last - back])) {
+                pushIdx(last - back);
+                break;
+            }
+        }
+    }
+
+    var lastEpoch = epochs[last];
+    if (lastEpoch == null) {
+        var step = 8;
+        for (var i = last - step; i >= 0; i -= step) {
+            var found = -1;
+            if (nodeHasRadii(nodes[i])) found = i;
+            else {
+                for (var d = 1; d <= 3; d++) {
+                    if (i - d >= 0 && nodeHasRadii(nodes[i - d])) { found = i - d; break; }
+                    if (i + d < n && nodeHasRadii(nodes[i + d])) { found = i + d; break; }
+                }
+            }
+            if (found >= 0) pushIdx(found);
+        }
+        return selected.sort(function(a, b) { return a - b; });
+    }
+
+    var DAY = 24 * 3600;
+    var WINDOW = 18 * 3600;
+    var target = lastEpoch - DAY;
+    var minEpoch = null;
+    for (i = 0; i < n; i++) {
+        if (epochs[i] != null) {
+            minEpoch = (minEpoch == null) ? epochs[i] : Math.min(minEpoch, epochs[i]);
+        }
+    }
+    if (minEpoch == null) minEpoch = lastEpoch - DAY * 10;
+
+    while (target >= minEpoch - WINDOW) {
+        var best = -1;
+        var bestDist = Infinity;
+        for (i = 0; i < n; i++) {
+            if (epochs[i] == null) continue;
+            var dist = Math.abs(epochs[i] - target);
+            if (dist <= WINDOW && dist < bestDist && nodeHasRadii(nodes[i])) {
+                var tooClose = false;
+                for (var s = 0; s < selected.length; s++) {
+                    var se = epochs[selected[s]];
+                    if (se != null && Math.abs(se - epochs[i]) < 12 * 3600) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (tooClose) continue;
+                bestDist = dist;
+                best = i;
+            }
+        }
+        if (best >= 0) pushIdx(best);
+        target -= DAY;
+    }
+    return selected.sort(function(a, b) { return a - b; });
+}
+
+function drawRadiiAt(node, pt, isCurrent) {
+    if (!node || !pt || !nodeHasRadii(node)) return;
+    // 历史风圈提高对比度，避免“看不见”；当前点更实
+    var a7 = isCurrent ? 0.18 : 0.12;
+    var a10 = isCurrent ? 0.20 : 0.14;
+    var a12 = isCurrent ? 0.20 : 0.14;
+    var e7 = isCurrent ? 0.82 : 0.68;
+    var e10 = isCurrent ? 0.88 : 0.74;
+    var e12 = isCurrent ? 0.92 : 0.78;
+    var lw = isCurrent ? 1.8 : 1.6;
+    drawRadiiPoly(
+        pt.x, pt.y, node.lat, node.lon, node.r7,
+        'rgba(100,180,255,' + a7 + ')', 'rgba(100,180,255,' + e7 + ')', !isCurrent, lw
+    );
+    drawRadiiPoly(
+        pt.x, pt.y, node.lat, node.lon, node.r10,
+        'rgba(255,200,50,' + a10 + ')', 'rgba(255,200,50,' + e10 + ')', !isCurrent, lw
+    );
+    drawRadiiPoly(
+        pt.x, pt.y, node.lat, node.lon, node.r12,
+        'rgba(255,80,0,' + a12 + ')', 'rgba(255,80,0,' + e12 + ')', !isCurrent, lw
+    );
+}
+
+function formatBadgeTime(node) {
+    if (!node) return '';
+    // 优先 timeRaw（EQSC 原始时间），避免把年份前两位误读成“日”
+    // 例：2020-09-06 17:00 → 6日17时（旧正则会错成 20日17时）
+    var parts = parseTrackDateParts(node.timeRaw || '');
+    if (parts && parts.day >= 1) {
+        return parts.day + '日' + parts.hour + '时';
+    }
+    // 回退：仅有 HH:mm
+    if (node.ts) {
+        var hm = String(node.ts).split(':');
+        if (hm.length >= 1) return parseInt(hm[0], 10) + '时';
+    }
+    return '';
+}
+
+function drawTrack() {
+    if (map) map.invalidateSize({ pan: false, debounceMoveend: true });
+    if (!map) return;
+    var dpr = Math.max(window.devicePixelRatio || 1, 1.5);
+    var rect = map.getContainer().getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.imageSmoothingEnabled = true;
+    if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
+
+    var DOT_R = 3.6;
+    var LINE_W = 2.4;
+    var FCST_LINE_W = 2.1;
+    var pts = [];
+
+    if (PAST.length > 0) {
+        pts = PAST.map(function(p) { return toPt(p.lat, p.lon); }).filter(Boolean);
+        if (pts.length < 1) return;
+
+        var lastIdx = pts.length - 1;
+
+        // 1) 历史风圈：约每 24h 一个（含当前），先画以免盖住路径
+        var radiiIdx = selectHistoryRadiiIndices(PAST);
+        for (var ri = 0; ri < radiiIdx.length; ri++) {
+            var rIdx = radiiIdx[ri];
+            if (rIdx < 0 || rIdx >= pts.length) continue;
+            drawRadiiAt(PAST[rIdx], pts[rIdx], rIdx === lastIdx);
+        }
+
+        // 2) 历史路径：分段强度色，实线 + 轻描边
+        if (pts.length >= 2) {
+            for (var i = 1; i < pts.length; i++) {
+                var segCat = PAST[i].cat || PAST[i - 1].cat || 0;
+                var segColor = CAT_COLORS[segCat] || '#969696';
+                strokeSegment(
+                    pts[i - 1].x, pts[i - 1].y,
+                    pts[i].x, pts[i].y,
+                    segColor,
+                    LINE_W,
+                    'rgba(0,0,0,0.18)',
+                    LINE_W + 1.6
+                );
+            }
+        }
+
+        // 3) 历史定位点：统一小圆点 + 深色描边
+        for (i = 0; i < pts.length; i++) {
+            if (i === lastIdx) continue;
+            var p = PAST[i];
+            var cp = pts[i];
+            var c = CAT_COLORS[p.cat] || '#969696';
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R + 0.9, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R, 0, Math.PI * 2);
+            ctx.fillStyle = c;
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+        }
+    }
+
+    // 4) 预报路径：虚线 + 小圆点
+    if (FCST.length > 0 && map) {
+        var fpts = FCST.map(function(p) {
+            return map.latLngToContainerPoint([p.lat, p.lon]);
+        }).filter(Boolean);
+
+        if (PAST.length > 0 && fpts.length > 0) {
+            var joinPt = map.latLngToContainerPoint([
+                PAST[PAST.length - 1].lat,
+                PAST[PAST.length - 1].lon
+            ]);
+            var joinColor = CAT_COLORS[FCST[0].cat || PAST[PAST.length - 1].cat] || '#969696';
+            ctx.setLineDash([5, 4]);
+            strokeSegment(
+                joinPt.x, joinPt.y,
+                fpts[0].x, fpts[0].y,
+                joinColor,
+                FCST_LINE_W,
+                'rgba(0,0,0,0.14)',
+                FCST_LINE_W + 1.4
+            );
+            ctx.setLineDash([]);
+        }
+
+        if (fpts.length >= 2) {
+            for (i = 1; i < fpts.length; i++) {
+                var fc = CAT_COLORS[FCST[i].cat || FCST[i - 1].cat] || '#969696';
+                ctx.setLineDash([5, 4]);
+                strokeSegment(
+                    fpts[i - 1].x, fpts[i - 1].y,
+                    fpts[i].x, fpts[i].y,
+                    fc,
+                    FCST_LINE_W,
+                    'rgba(0,0,0,0.14)',
+                    FCST_LINE_W + 1.4
+                );
+                ctx.setLineDash([]);
+            }
+        }
+
+        for (i = 0; i < fpts.length; i++) {
+            p = FCST[i];
+            cp = fpts[i];
+            c = CAT_COLORS[p.cat] || '#969696';
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R - 0.1, 0, Math.PI * 2);
+            ctx.fillStyle = c;
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R + 0.7, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = 1.1;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cp.x, cp.y, DOT_R + 0.7, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+        }
+    }
+
+    // 5) 当前中心：白环 + 色芯（无中心白点）+ 轻光晕 + 参考图风格标签
+    if (PAST.length > 0 && pts.length > 0) {
+        var last = PAST[pts.length - 1];
+        var lp = pts[pts.length - 1];
+        var mc = CAT_COLORS[last.cat] || '#969696';
+
+        for (var gr = 12; gr > 7; gr--) {
+            var alpha = Math.max(0, 0.12 - (12 - gr) * 0.02);
+            ctx.beginPath();
+            ctx.arc(lp.x, lp.y, gr, 0, Math.PI * 2);
+            ctx.fillStyle = hexWithAlpha(mc, alpha);
+            ctx.fill();
+        }
+
+        // 外白环
+        ctx.beginPath();
+        ctx.arc(lp.x, lp.y, 7.2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.98)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(lp.x, lp.y, 7.2, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // 色芯（实心，不再叠中心白点）
+        ctx.beginPath();
+        ctx.arc(lp.x, lp.y, 5.0, 0, Math.PI * 2);
+        ctx.fillStyle = mc;
+        ctx.fill();
+
+        var levelText = last.level || PANEL.category_name || '';
+        var nameText = String(PANEL.event_name || '').trim();
+        nameText = nameText.replace(/\s*[（(][^）)]*[）)]\s*/g, '').trim();
+        var timeText = formatBadgeTime(last);
+        var badgeParts = [];
+        if (levelText) {
+            badgeParts.push({ text: levelText, color: '#ffffff', bg: mc });
+        }
+        var rightBits = [];
+        if (nameText) rightBits.push(nameText);
+        if (timeText) rightBits.push(timeText);
+        if (rightBits.length) {
+            badgeParts.push({ text: rightBits.join(' '), color: '#111111', bg: '#ffffff' });
+        }
+        if (badgeParts.length) {
+            drawCurrentPointBadge(lp.x, lp.y, badgeParts);
+        }
+    }
+}
+
+/**
+ * 迷你曲线图：风速/气压双轴独立缩放 + 单调三次 Hermite 平滑曲线。
+ * 避免折线生硬与标签重叠，便于观察相对变化。
+ */
+function drawMiniChart() {
+    var cvs = document.getElementById('mini-chart');
+    if (!cvs || !cvs.parentElement) return;
+    var rect = cvs.parentElement.getBoundingClientRect();
+    var W = Math.max(rect.width - 2, 40);
+    var H = Math.max(rect.height - 2, 40);
+    var dpr = Math.max(window.devicePixelRatio || 1, 2);
+    cvs.width = Math.round(W * dpr);
+    cvs.height = Math.round(H * dpr);
+    cvs.style.width = W + 'px';
+    cvs.style.height = H + 'px';
+    var cx = cvs.getContext('2d');
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, W, H);
+    cx.imageSmoothingEnabled = true;
+    if (cx.imageSmoothingQuality) cx.imageSmoothingQuality = 'high';
+
+    if (!CHART_WINDS.length && !CHART_PRESS.length) return;
+
+    // 左右内边距：右侧给端点数值标签，避免溢出卡片
+    var padL = 4;
+    var padR = 44;
+    var padT = 12;
+    var padB = 15;
+    var plotW = Math.max(W - padL - padR, 10);
+    var plotH = Math.max(H - padT - padB, 10);
+
+    function validValues(values) {
+        if (!values || !values.length) return [];
+        return values.filter(function(v) {
+            return v !== null && v !== undefined && isFinite(v) && v > 0;
+        });
+    }
+
+    function rangeOf(values, padRatio) {
+        var vals = validValues(values);
+        if (!vals.length) return { mn: 0, mx: 1 };
+        var mn = Math.min.apply(null, vals);
+        var mx = Math.max.apply(null, vals);
+        if (mx - mn < 1e-6) {
+            var mid = mn || 1;
+            return { mn: mid * 0.92, mx: mid * 1.08 };
+        }
+        var pad = (mx - mn) * (padRatio != null ? padRatio : 0.12);
+        return { mn: mn - pad, mx: mx + pad };
+    }
+
+    function pointsOf(values, rng, invertY) {
+        if (!values || values.length < 1) return [];
+        var step = plotW / Math.max(values.length - 1, 1);
+        var span = (rng.mx - rng.mn) || 1;
+        return values.map(function(v, idx) {
+            var vv = (v !== null && v !== undefined && isFinite(v)) ? v : rng.mn;
+            var norm = (vv - rng.mn) / span;
+            norm = Math.max(0, Math.min(1, norm));
+            return {
+                x: padL + idx * step,
+                y: invertY
+                    ? padT + norm * plotH
+                    : padT + (1 - norm) * plotH,
+                v: vv
+            };
+        });
+    }
+
+    // 单调三次 Hermite（Fritsch–Carlson）控制点，避免过冲。
+    // 假定当前路径点已在 pts[0]，不再 moveTo，避免打断面积填充。
+    function smoothPath(pts) {
+        if (!pts || pts.length < 2) return;
+        if (pts.length === 2) {
+            cx.lineTo(pts[1].x, pts[1].y);
+            return;
+        }
+        var nPts = pts.length;
+        var dx = [];
+        var dy = [];
+        var m = [];
+        var i;
+        for (i = 0; i < nPts - 1; i++) {
+            dx[i] = pts[i + 1].x - pts[i].x;
+            dy[i] = pts[i + 1].y - pts[i].y;
+            m[i] = dx[i] !== 0 ? dy[i] / dx[i] : 0;
+        }
+        var tang = [];
+        tang[0] = m[0];
+        tang[nPts - 1] = m[nPts - 2];
+        for (i = 1; i < nPts - 1; i++) {
+            if (m[i - 1] * m[i] <= 0) tang[i] = 0;
+            else tang[i] = (m[i - 1] + m[i]) / 2;
+        }
+        // 限制过冲
+        for (i = 0; i < nPts - 1; i++) {
+            if (Math.abs(m[i]) < 1e-8) {
+                tang[i] = 0;
+                tang[i + 1] = 0;
+            } else {
+                var a = tang[i] / m[i];
+                var b = tang[i + 1] / m[i];
+                var s = a * a + b * b;
+                if (s > 9) {
+                    var t = 3 / Math.sqrt(s);
+                    tang[i] = t * a * m[i];
+                    tang[i + 1] = t * b * m[i];
+                }
+            }
+        }
+        for (i = 0; i < nPts - 1; i++) {
+            var p0 = pts[i];
+            var p1 = pts[i + 1];
+            var h = dx[i];
+            var c1x = p0.x + h / 3;
+            var c1y = p0.y + tang[i] * h / 3;
+            var c2x = p1.x - h / 3;
+            var c2y = p1.y - tang[i + 1] * h / 3;
+            cx.bezierCurveTo(c1x, c1y, c2x, c2y, p1.x, p1.y);
+        }
+    }
+
+    function drawSmoothSeries(values, color, invertY, unit, labelSide) {
+        var rng = rangeOf(values, 0.14);
+        var pts = pointsOf(values, rng, invertY);
+        if (pts.length < 2) return pts;
+
+        // 面积填充（淡）
+        cx.beginPath();
+        cx.moveTo(pts[0].x, padT + plotH);
+        cx.lineTo(pts[0].x, pts[0].y);
+        smoothPath(pts);
+        cx.lineTo(pts[pts.length - 1].x, padT + plotH);
+        cx.closePath();
+        cx.fillStyle = color.replace('0.95)', '0.10)').replace('0.9)', '0.10)');
+        cx.fill();
+
+        // 平滑曲线
+        cx.beginPath();
+        cx.moveTo(pts[0].x, pts[0].y);
+        smoothPath(pts);
+        cx.strokeStyle = color;
+        cx.lineWidth = 2.0;
+        cx.lineJoin = 'round';
+        cx.lineCap = 'round';
+        cx.stroke();
+
+        // 端点
+        [pts[0], pts[pts.length - 1]].forEach(function(pt, idx) {
+            cx.beginPath();
+            cx.arc(pt.x, pt.y, idx === 1 ? 2.6 : 2.0, 0, Math.PI * 2);
+            cx.fillStyle = color;
+            cx.fill();
+            cx.beginPath();
+            cx.arc(pt.x, pt.y, idx === 1 ? 2.6 : 2.0, 0, Math.PI * 2);
+            cx.strokeStyle = 'rgba(0,0,0,0.25)';
+            cx.lineWidth = 0.7;
+            cx.stroke();
+        });
+
+        // 最新值标签：画在曲线末端右侧留白区内，带底避免溢出裁切
+        var last = pts[pts.length - 1];
+        var label = Math.round(last.v) + unit;
+        cx.font = 'bold 9px "Microsoft YaHei"';
+        var tw = cx.measureText(label).width;
+        var lx = Math.min(last.x + 5, W - tw - 3);
+        // 若贴右边，改画在点左侧
+        if (lx + tw > W - 2) lx = Math.max(2, last.x - tw - 5);
+        var ly = last.y;
+        if (labelSide === 'top') {
+            ly = Math.max(padT + 8, last.y - 6);
+        } else {
+            ly = Math.min(padT + plotH - 4, last.y + 8);
+        }
+        // 半透明底
+        var bh = 12;
+        var bw = tw + 6;
+        cx.fillStyle = 'rgba(8,10,16,0.62)';
+        roundRect(cx, lx - 3, ly - bh / 2, bw, bh, 3);
+        cx.fill();
+        cx.fillStyle = color;
+        cx.textAlign = 'left';
+        cx.textBaseline = 'middle';
+        cx.fillText(label, lx, ly + 0.5);
+        return pts;
+    }
+
+    // 风速：上高下低；气压：上低下高（invertY），双轴独立
+    drawSmoothSeries(CHART_WINDS, 'rgba(255,150,20,0.95)', false, 'm/s', 'top');
+    drawSmoothSeries(CHART_PRESS, 'rgba(100,185,255,0.95)', true, 'hPa', 'bottom');
+
+    // 时间刻度（仅首/中/尾，避免拥挤）
+    if (CHART_TIMES.length >= 2) {
+        cx.fillStyle = '#6f788a';
+        cx.font = '9px "Microsoft YaHei"';
+        cx.textBaseline = 'top';
+        var labels = [
+            { idx: 0, align: 'left' },
+            { idx: Math.floor((CHART_TIMES.length - 1) / 2), align: 'center' },
+            { idx: CHART_TIMES.length - 1, align: 'right' }
+        ];
+        labels.forEach(function(item) {
+            var t = CHART_TIMES[item.idx] || '';
+            if (!t) return;
+            var x = padL + (plotW * item.idx) / Math.max(CHART_TIMES.length - 1, 1);
+            cx.textAlign = item.align;
+            cx.fillText(t, x, padT + plotH + 3);
+        });
+    }
+}
+
+/**
+ * 从路径点取四至（最西/最东/最南/最北）。
+ * 只吃 PAST/FCST 实际点，不吃 bootstrap 默认大区。
+ */
+function computeTrackBoundsRaw() {
+    var lats = [];
+    var lons = [];
+    function collect(nodes) {
+        if (!nodes) return;
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            if (!n) continue;
+            var lat = Number(n.lat);
+            var lon = Number(n.lon);
+            if (!isFinite(lat) || !isFinite(lon)) continue;
+            if (lat < -80 || lat > 80 || lon < -180 || lon > 180) continue;
+            lats.push(lat);
+            lons.push(lon);
+        }
+    }
+    collect(PAST);
+    collect(FCST);
+
+    if (!lats.length || !lons.length) {
+        return {
+            la: Number(VIEW.la) || 5,
+            ha: Number(VIEW.ha) || 45,
+            lo: Number(VIEW.lo) || 100,
+            hi: Number(VIEW.hi) || 170,
+            fromTrack: false
+        };
+    }
+    return {
+        la: Math.min.apply(null, lats),
+        ha: Math.max.apply(null, lats),
+        lo: Math.min.apply(null, lons),
+        hi: Math.max.apply(null, lons),
+        fromTrack: true
+    };
+}
+
+/**
+ * 用风圈半径扩展路径四至，保证风圈（含最大半径方向）完整可见。
+ *
+ * 策略：对每个含风圈数据的节点，取 r7/r10/r12 四象限中的最大半径（km），
+ * 换算成经纬度扩展量（纬度 1°≈111.32km；经度按该纬度余弦折算），
+ * 与该节点的经纬度合成一个“风圈包围盒”，再与路径四至取并集。
+ *
+ * 这样当预报点很少或台风几乎不动时，视图由风圈范围兜底，
+ * 不会出现“风圈比视图还大、看不全”的情况。
+ */
+function expandBoundsForRadii(bounds) {
+    if (!bounds || !bounds.fromTrack) return bounds;
+    var la = bounds.la;
+    var ha = bounds.ha;
+    var lo = bounds.lo;
+    var hi = bounds.hi;
+    var changed = false;
+
+    function expandFor(node) {
+        if (!node) return;
+        var maxR = 0;
+        [node.r7, node.r10, node.r12].forEach(function(c) {
+            if (!c) return;
+            ['NE', 'SE', 'SW', 'NW'].forEach(function(k) {
+                var v = c[k];
+                if (v != null && v > maxR) maxR = v;
+            });
+        });
+        if (!(maxR > 0)) return;
+
+        var latPad = maxR / 111.32;
+        var cosLat = Math.cos(node.lat * Math.PI / 180);
+        // 高纬地区 cos 趋 0 时给一个兜底上限，避免扩展量爆炸
+        var lonPad = cosLat > 0.05
+            ? maxR / (111.32 * cosLat)
+            : Math.min(maxR / (111.32 * 0.05), 20);
+
+        var nLa = node.lat - latPad;
+        var nHa = node.lat + latPad;
+        var nLo = node.lon - lonPad;
+        var nHi = node.lon + lonPad;
+        if (nLa < la) { la = nLa; changed = true; }
+        if (nHa > ha) { ha = nHa; changed = true; }
+        if (nLo < lo) { lo = nLo; changed = true; }
+        if (nHi > hi) { hi = nHi; changed = true; }
+    }
+
+    PAST.forEach(expandFor);
+    FCST.forEach(expandFor);
+    if (!changed) return bounds;
+    return { la: la, ha: ha, lo: lo, hi: hi, fromTrack: true };
+}
+
+/** Web Mercator Y（0~1，北小南大的补：这里用标准 0 北→南 递增） */
+function mercatorY(lat) {
+    var rad = lat * Math.PI / 180;
+    var s = Math.sin(rad);
+    // 限制避免极区 inf
+    s = Math.max(-0.9999, Math.min(0.9999, s));
+    return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+}
+
+/**
+ * 按路径四至 + 可用像素，手动计算 zoom，再按像素位置精确对齐。
+ *
+ * 对齐策略（适配新 zoom 算法）：
+ * 1) 先用世界像素公式算 zoom，使路径落入“坞上方可视区”；
+ * 2) setView 到路径中心；
+ * 3) 用 latLngToContainerPoint 实测路径四至像素，
+ *    把路径块居中到可视区，并保证南端不低于坞顶、北端不低于顶边。
+ *
+ * 注意 Leaflet panBy：正 y 让内容上移（中心南移），负 y 让内容下移。
+ */
+function applyMapView() {
+    if (!map) return;
+
+    // 强制用 DOM 实测尺寸，避免 Leaflet 内部 size 未更新
+    var rect = map.getContainer().getBoundingClientRect();
+    var mapW = rect.width || 1000;
+    var mapH = rect.height || 980;
+    if (mapW < 80 || mapH < 80) return;
+
+    try {
+        map.invalidateSize({ pan: false, debounceMoveend: false });
+    } catch (_e) {}
+
+    var raw = computeTrackBoundsRaw();
+    // 没有真实轨迹时不要用默认大区硬 fit，给一个温和中心
+    if (!raw.fromTrack) {
+        map.setView([(raw.la + raw.ha) / 2, (raw.lo + raw.hi) / 2], 5, { animate: false });
+        return;
+    }
+
+    // 风圈半径参与视图取值：路径四至与各节点风圈包围盒取并集，
+    // 保证有风圈时（尤其预报点少/台风近乎静止）风圈也能完整显示
+    var ext = expandBoundsForRadii(raw);
+    var la = ext.la;
+    var ha = ext.ha;
+    var lo = ext.lo;
+    var hi = ext.hi;
+
+    var lonSpan0 = Math.max(hi - lo, 0.05);
+    var latSpan0 = Math.max(ha - la, 0.05);
+
+    // 紧凑 padding：只留少量呼吸边
+    var padLon = Math.min(Math.max(lonSpan0 * 0.04, 0.15), 0.5);
+    var padLat = Math.min(Math.max(latSpan0 * 0.04, 0.15), 0.5);
+    lo -= padLon; hi += padLon;
+    la -= padLat; ha += padLat;
+    var lonSpan = hi - lo;
+    var latSpan = ha - la;
+
+    // 信息坞：路径只放在坞上方可视区
+    var dockEl = document.getElementById('bottom-dock');
+    var dockH = 188;
+    if (dockEl) {
+        var dr = dockEl.getBoundingClientRect();
+        if (dr.height > 0) dockH = Math.ceil(dr.height + 4);
+    }
+    var padTop = 14;
+    var padSide = Math.max(12, Math.round(mapW * 0.012));
+    var padGap = 10; // 路径南端与信息坞顶的空隙
+    var usableW = Math.max(mapW - padSide * 2, 160);
+    var usableH = Math.max(mapH - dockH - padTop - padGap, 200);
+
+    // 世界边长 = 256 * 2^z
+    var zLon = Math.log(usableW * 360 / (lonSpan * 256)) / Math.LN2;
+    var mercSpan = Math.abs(mercatorY(ha) - mercatorY(la));
+    if (!(mercSpan > 1e-8)) mercSpan = Math.max(latSpan / 360, 1e-6);
+    var zLat = Math.log(usableH / (mercSpan * 256)) / Math.LN2;
+
+    var zoom = Math.min(zLon, zLat);
+    if (!isFinite(zoom)) zoom = 7;
+    // 不再额外 +0.15：避免路径高度超过 usableH 导致南端被坞挡住
+    zoom = Math.max(5, Math.min(zoom, 11));
+    zoom = Math.round(zoom * 4) / 4;
+
+    var centerLat = (la + ha) / 2;
+    var centerLon = (lo + hi) / 2;
+    map.setView([centerLat, centerLon], zoom, { animate: false });
+
+    // ── 像素级精确对齐 ──
+    // 目标可视区：[topY, bottomY] × [leftX, rightX]
+    var topY = padTop;
+    var bottomY = mapH - dockH - padGap;
+    var leftX = padSide;
+    var rightX = mapW - padSide;
+    var usableMidY = (topY + bottomY) / 2;
+    var usableMidX = (leftX + rightX) / 2;
+
+    function trackPixelBox() {
+        // 用四角取包围盒，比只取中线更稳
+        var pts = [
+            map.latLngToContainerPoint([ha, lo]),
+            map.latLngToContainerPoint([ha, hi]),
+            map.latLngToContainerPoint([la, lo]),
+            map.latLngToContainerPoint([la, hi])
+        ];
+        var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (var i = 0; i < pts.length; i++) {
+            if (!pts[i]) continue;
+            if (pts[i].x < minX) minX = pts[i].x;
+            if (pts[i].x > maxX) maxX = pts[i].x;
+            if (pts[i].y < minY) minY = pts[i].y;
+            if (pts[i].y > maxY) maxY = pts[i].y;
+        }
+        return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+    }
+
+    try {
+        var box = trackPixelBox();
+        if (!isFinite(box.minY) || !isFinite(box.maxY)) return;
+
+        // 1) 先把路径块中心对齐到可视区中心
+        var trackMidY = (box.minY + box.maxY) / 2;
+        var trackMidX = (box.minX + box.maxX) / 2;
+        // panBy 正 y = 内容上移；路径中心偏下时 dy>0，需要上移
+        var dy = trackMidY - usableMidY;
+        var dx = trackMidX - usableMidX;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+            map.panBy([dx, dy], { animate: false });
+        }
+
+        // 2) 硬约束：南端不得进入信息坞，北端不得超出顶边
+        box = trackPixelBox();
+        var fixY = 0;
+        if (box.maxY > bottomY) {
+            // 南端太低 → 内容再上移
+            fixY = box.maxY - bottomY;
+        } else if (box.minY < topY) {
+            // 北端太高 → 内容下移
+            fixY = box.minY - topY;
+        }
+        if (Math.abs(fixY) > 0.5) {
+            map.panBy([0, fixY], { animate: false });
+        }
+
+        // 3) 硬约束：左右不越界（通常 lon 受限时已居中，这里兜底）
+        box = trackPixelBox();
+        var fixX = 0;
+        if (box.minX < leftX) {
+            fixX = box.minX - leftX;
+        } else if (box.maxX > rightX) {
+            fixX = box.maxX - rightX;
+        }
+        if (Math.abs(fixX) > 0.5) {
+            map.panBy([fixX, 0], { animate: false });
+        }
+    } catch (_e2) {}
+}
+
+function init() {
+    renderPanel();
+    requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+            try {
+                applyMapView();
+
+                if (map && tileLayer && typeof setupStableTileRender === 'function') {
+                    setupStableTileRender(map, tileLayer, {
+                        readyDebounceMs: 500,
+                        readyFallbackMs: 6000,
+                        readyClass: 'map-ready',
+                        debug: false,
+                        onReady: function() {
+                            // 尺寸稳定后强制再算一次 zoom（这是关键）
+                            applyMapView();
+                            drawTrack();
+                            drawMiniChart();
+                        }
+                    });
+                } else {
+                    applyMapView();
+                    drawTrack();
+                    drawMiniChart();
+                    document.body.classList.add('map-ready');
+                }
+            } catch (e) {
+                try {
+                    applyMapView();
+                    drawTrack();
+                    drawMiniChart();
+                } catch (_e) {}
+                document.body.classList.add('map-ready');
+            }
+        });
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    setTimeout(init, 0);
+}
+
+})();
+</script>
+</body>
+</html>

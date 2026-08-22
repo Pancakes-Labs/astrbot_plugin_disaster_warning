@@ -1,121 +1,554 @@
 <!-- markdownlint-disable MD024 -->
+<!-- markdownlint-disable MD036 -->
 <!-- markdownlint-disable MD051 -->
 # FAN Studio WebSocket 数据服务 API 文档
 
-WebSocket API 将在服务端收到新消息后自动向所有客户端推送相关信息  
-**正式服务版本:** 2.1.0  
-**正式服务器地址:**`wss://ws.fanstudio.tech/[路径]`  
-**备用服务器地址:**`wss://ws.fanstudio.hk/[路径]`  
-**心跳间隔:** 服务端将在每分钟和建立连接后发送一个heartbeat心跳包以保持连接，客户端可选回复ping包
+## WebSocket 实时推送 API
 
-## 可用路径
+正式服务版本：2.5.2
 
-| 路径 (Path) | 说明 |
-| --- | --- |
-| `/all` | `接收全部源推送` |
-| `/weatheralarm` | [`中国气象局气象预警`](#weatheralarm) |
-| `/tsunami` | [`自然资源部海啸预警中心海啸预警信息`](#tsunami) |
-| `/cenc` | [`中国地震台网地震信息`](#cenc) |
-| `/cenc-ir` | [`中国地震台网烈度速报`](#cenc-ir) |
-| `/cea` | [`中国地震预警网地震预警`](#cea) |
-| `/cea-pr` | [`中国地震预警网各省级网地震预警`](#cea-pr) |
-| `/ningxia` | [`宁夏自治区地震局地震信息`](#ningxia) |
-| `/guangxi` | [`广西壮族自治区地震局地震信息`](#guangxi) |
-| `/shanxi` | [`山西省地震局地震信息`](#shanxi) |
-| `/beijing` | [`北京市地震局地震信息`](#beijing) |
-| `/yunnan` | [`云南省地震局地震信息`](#yunnan) |
-| `/cwa` | [`台湾省气象署地震报告`](#cwa) |
-| `/cwa-eew` | [`台湾省气象署地震预警`](#cwa-eew) |
-| `/jma` | [`日本气象厅地震预警`](#jma) |
-| `/hko` | [`香港天文台地震信息`](#hko) |
-| `/usgs` | [`美国地质调查局地震信息`](#usgs) |
-| `/sa` | [`美国ShakeAlert地震预警`](#sa) |
-| `/emsc` | [`欧洲地中海地震中心地震信息`](#emsc) |
-| `/bcsf` | [`法国中央地震研究所地震信息`](#bcsf) |
-| `/gfz` | [`德国地学研究中心地震信息`](#gfz) |
-| `/usp` | [`巴西圣保罗大学地震信息`](#usp) |
-| `/kma` | [`韩国气象厅地震信息`](#kma) |
-| `/kma-eew` | [`韩国气象厅地震预警`](#kma-eew) |
-| `/kma-station` | [`韩国气象厅PEWS测站实时数据`](#kma-station) |
-| `/fssn` | [`FSSN 地震信息`](#fssn) |
-| `/fssn-cmt` | [`FSSN 地震矩心矩张量解`](#fssn-cmt) |
+FAN Studio WebSocket API 面向需要低延迟灾害、地震与气象数据的客户端。连接建立后，服务端会先发送当前快照，随后持续推送增量更新。
 
-## 消息协议
+**正式服务器：** `wss://ws.fanstudio.tech/{path}`
 
-### 服务器推送消息
+**备用服务器：** `wss://ws.fanstudio.hk/{path}`
 
-**初始数据 (initial)**:
+> 新接入项目建议先阅读 [五分钟接入指南](#/ws-api/quickstart) ，再使用 [连接调试器](https://api.fanstudio.tech/dev-platform/wstool/index.php) 验证 App ID、API Key 与目标路径。
+
+## 接入概览
+
+1. 从控制台获取 App ID 与 `sk-` 开头的 API Key。
+2. 根据业务选择路径，例如 `/cenc` 或 `/all` 。
+3. 建立 `wss://` 连接；需要鉴权的路径必须在 5 秒内发送鉴权消息。
+4. 处理 `initial` 、 `update` 、 `heartbeat` 及鉴权状态消息。
+5. 在客户端实现带退避时间的断线重连与状态恢复。
+
+## 服务地址
+
+| 环境 | 基础地址 | 建议用途 |
+| --- | --- | --- |
+| 正式服务 | `wss://ws.fanstudio.tech` | 默认生产连接 |
+| 备用服务 | `wss://ws.fanstudio.hk` | 正式服务不可用时切换 |
+
+最终连接地址由“基础地址 + 路径”组成，例如：
+
+```bash
+wss://ws.fanstudio.tech/cenc
+```
+
+## 鉴权范围
+
+| 路径类型 | 路径 | 行为 |
+| --- | --- | --- |
+| 公开路径 | `/fssn` 、 `/fssn-cmt` | 连接后直接接收数据 |
+| 部分公开 | `/all` | 未鉴权时仅推送 FSSN 数据；鉴权后升级为完整数据流 |
+| 必须鉴权 | 其他全部路径 | 连接后须在 5 秒内完成鉴权 |
+
+鉴权请求：
+
+```json
+{
+  "type": "auth",
+  "appId": "your-app-id",
+  "key": "sk-your-api-key"
+}
+```
+
+成功响应：
+
+```json
+{
+  "type": "auth_success",
+  "message": "鉴权成功，已接入数据流。"
+}
+```
+
+API Key 只应通过 WebSocket 消息发送给上述官方 `wss://` 域名。不要写入前端仓库、日志、错误上报或公开截图。
+
+## 通用消息协议
+
+### 初始快照
 
 ```json
 {
   "type": "initial",
-  "data": { ... }
+  "data": {}
 }
 ```
 
-**数据更新 (update)**:
+### 增量更新
 
 ```json
 {
   "type": "update",
-  "data": { ... }
+  "data": {}
 }
 ```
 
-**心跳包 (heartbeat)**:
+不同路径的业务字段请以对应路径文档为准。
+
+### 服务端心跳
+
+服务端在连接建立后及运行期间定期发送心跳：
 
 ```json
 {
   "type": "heartbeat",
-  "ver": "1.1.0",
-  "id": "uuid",
-  "timestamp": 1630000000000
+  "ver": "2.5.2",
+  "id": "connection-uuid",
+  "timestamp": 1710835200000
 }
 ```
 
-### 客户端请求
-
-**查询数据 (query)**:
+客户端可以回复文本 `ping` 或 JSON 消息：
 
 ```json
-"query" 或 { "type": "query" }
+{
+  "type": "ping"
+}
 ```
 
-响应示例：
+服务端响应：
+
+```json
+{
+  "type": "pong",
+  "timestamp": 1710835200000
+}
+```
+
+### 主动查询快照
+
+发送文本 `query` 或以下 JSON：
+
+```json
+{
+  "type": "query"
+}
+```
+
+服务端返回 `query_response` 。客户端完成重连后可以主动查询一次，避免断线期间遗漏状态变化。
+
+## 可用路径
+
+| 路径 | 数据源 | 鉴权 |
+| --- | --- | --- |
+| [`/all`](#/ws-api/all) | 全部常规数据源聚合 | 可选，完整数据需鉴权 |
+| [`/weatheralarm`](#/ws-api/weatheralarm) | 中国气象局气象预警 | 必须 |
+| [`/tsunami`](#/ws-api/tsunami) | 自然资源部海啸预警中心 | 必须 |
+| [`/typhoon`](#/ws-api/typhoon) | 实时活跃台风 | 必须 |
+| [`/cenc`](#/ws-api/cenc) | 中国地震台网地震信息 | 必须 |
+| [`/cenc-ir`](#/ws-api/cenc-ir) | 中国地震台网烈度速报 | 必须 |
+| [`/cea`](#/ws-api/cea) | 中国地震预警网 | 必须 |
+| [`/cea-pr`](#/ws-api/cea-pr) | 中国地震预警网省级网 | 必须 |
+| [`/ningxia`](#/ws-api/ningxia) | 宁夏自治区地震局 | 必须 |
+| [`/guangxi`](#/ws-api/guangxi) | 广西壮族自治区地震局 | 必须 |
+| [`/shanxi`](#/ws-api/shanxi) | 山西省地震局 | 必须 |
+| [`/beijing`](#/ws-api/beijing) | 北京市地震局 | 必须 |
+| [`/yunnan`](#/ws-api/yunnan) | 云南省地震局 | 必须 |
+| [`/cwa`](#/ws-api/cwa) | 台湾省气象署地震报告 | 必须 |
+| [`/cwa-eew`](#/ws-api/cwa-eew) | 台湾省气象署地震预警 | 必须 |
+| [`/jma`](#/ws-api/jma) | 日本气象厅地震预警 | 必须 |
+| [`/hko`](#/ws-api/hko) | 香港天文台地震信息 | 必须 |
+| [`/usgs`](#/ws-api/usgs) | 美国地质调查局 | 必须 |
+| [`/sa`](#/ws-api/sa) | 美国 ShakeAlert | 必须 |
+| [`/emsc`](#/ws-api/emsc) | 欧洲地中海地震中心 | 必须 |
+| [`/bcsf`](#/ws-api/bcsf) | 法国中央地震研究所 | 必须 |
+| [`/gfz`](#/ws-api/gfz) | 德国地学研究中心 | 必须 |
+| [`/usp`](#/ws-api/usp) | 巴西圣保罗大学 | 必须 |
+| [`/geonet`](#/ws-api/geonet) | 新西兰 GeoNet | 必须 |
+| [`/kma`](#/ws-api/kma) | 韩国气象厅地震信息 | 必须 |
+| [`/kma-eew`](#/ws-api/kma-eew) | 韩国气象厅地震预警 | 必须 |
+| [`/kma-station`](#/ws-api/kma-station) | 韩国气象厅 PEWS 测站 | 必须 |
+| [`/fssn`](#/ws-api/fssn) | FSSN 地震信息 | 公开 |
+| [`/fssn-cmt`](#/ws-api/fssn-cmt) | FSSN 矩心矩张量解 | 公开 |
+
+`/cenc-ir` 与 `/kma-station` 不包含在 `/all` 中，需要建立独立连接。
+
+## 配额与连接限制
+
+- 每个密钥默认最多同时建立 **3 个连接** 。
+- 每个密钥默认最多允许 **5 个不同 IP** 使用。
+- 管理员可以为单个密钥调整配额，实际限制以审批结果和服务端配置为准。
+- 客户端不应通过高频重连绕过限制；建议使用指数退避，并设置最大退避时间。
+
+## 关闭码与恢复策略
+
+| 关闭码 | 常见原因 | 客户端建议 |
+| --- | --- | --- |
+| `1000` | 正常关闭 | 不自动重连，除非用户主动恢复 |
+| `1006` | 网络中断或服务异常 | 指数退避重连 |
+| `1008` | 鉴权超时、无权限或策略限制 | 检查凭据和配额后再重连 |
+| `1009` | 消息过大 | 检查客户端与代理限制 |
+| `1011` | 服务端内部错误 | 延迟后重试，并保留时间与路径信息 |
+| `1012` | 服务重启 | 短暂延迟后重连 |
+| `1013` | 服务暂时繁忙 | 增大退避时间 |
+
+---
+
+## 五分钟接入指南
+
+本页给出从验证凭据到生产重连的最短接入路径。示例使用 `/cenc` ；替换路径即可连接其他数据源。
+
+**适用接口：** WebSocket 实时推送
+
+**推荐调试方式：** [打开 FAN Studio 连接调试器](https://api.fanstudio.tech/dev-platform/wstool/index.php?path=cenc)
+
+## 第一步：准备凭据
+
+你需要两项信息：
+
+| 字段 | 示例 | 说明 |
+| --- | --- | --- |
+| App ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` | 应用唯一标识 |
+| API Key | `sk-xxxxxxxx...` | 与 App ID 绑定的密钥 |
+
+请勿把 API Key 提交到 Git 仓库或写入可公开访问的前端代码。浏览器端产品应通过自己的后端获取短期授权，或由受信任用户在本地输入凭据。
+
+## 第二步：建立连接并鉴权
+
+```javascript
+const socket = new WebSocket('wss://ws.fanstudio.tech/cenc');
+
+socket.addEventListener('open', () => {
+  socket.send(JSON.stringify({
+    type: 'auth',
+    appId: 'YOUR_APP_ID',
+    key: 'YOUR_API_KEY'
+  }));
+});
+
+socket.addEventListener('message', event => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === 'heartbeat') {
+    socket.send(JSON.stringify({ type: 'ping' }));
+    return;
+  }
+
+  if (message.type === 'auth_success') {
+    console.info('鉴权成功');
+    return;
+  }
+
+  if (message.type === 'initial' || message.type === 'update') {
+    console.log('业务数据', message.data);
+  }
+});
+
+socket.addEventListener('close', event => {
+  console.warn('连接关闭', event.code, event.reason);
+});
+```
+
+必须鉴权的路径会先发送 `auth_required` 。客户端既可以在 `open` 后立即鉴权，也可以收到 `auth_required` 后再发送；无论哪种方式，都必须在 5 秒内完成。
+
+## 第三步：加入生产级重连
+
+下面的轻量封装包含指数退避、心跳响应和重连后的快照查询：
+
+```javascript
+class FanStudioSocket {
+  constructor({ path, appId, key }) {
+    this.path = path.replace(/^\//, '');
+    this.appId = appId;
+    this.key = key;
+    this.attempt = 0;
+    this.manualClose = false;
+  }
+
+  connect() {
+    this.manualClose = false;
+    this.socket = new WebSocket(\`wss://ws.fanstudio.tech/${this.path}\`);
+
+    this.socket.addEventListener('open', () => {
+      this.attempt = 0;
+      this.send({ type: 'auth', appId: this.appId, key: this.key });
+    });
+
+    this.socket.addEventListener('message', event => {
+      const message = JSON.parse(event.data);
+
+      if (message.type === 'heartbeat') {
+        this.send({ type: 'ping' });
+      } else if (message.type === 'auth_success') {
+        this.send({ type: 'query' });
+      } else {
+        this.onMessage?.(message);
+      }
+    });
+
+    this.socket.addEventListener('close', event => {
+      this.onState?.({ state: 'closed', code: event.code });
+      if (!this.manualClose && event.code !== 1000 && event.code !== 1008) {
+        this.scheduleReconnect();
+      }
+    });
+
+    this.socket.addEventListener('error', () => {
+      this.onState?.({ state: 'error' });
+    });
+  }
+
+  send(payload) {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(payload));
+    }
+  }
+
+  scheduleReconnect() {
+    const delay = Math.min(1000 * 2 ** this.attempt, 30000);
+    const jitter = Math.round(Math.random() * 500);
+    this.attempt += 1;
+    setTimeout(() => this.connect(), delay + jitter);
+  }
+
+  close() {
+    this.manualClose = true;
+    this.socket?.close(1000, 'Client closed');
+  }
+}
+
+const client = new FanStudioSocket({
+  path: 'cenc',
+  appId: 'YOUR_APP_ID',
+  key: 'YOUR_API_KEY'
+});
+
+client.onMessage = message => console.log(message);
+client.onState = state => console.log(state);
+client.connect();
+```
+
+## 第四步：验证接入
+
+完成以下检查即可进入业务开发：
+
+- 连接地址使用 `wss://` ，路径拼写正确。
+- 收到 `auth_success` ，随后收到 `initial` 或 `initial_all` 。
+- 收到 `heartbeat` 时客户端保持在线。
+- 临时断网后能够退避重连，而不是立即无限重试。
+- 重连成功后发送 `query` ，本地状态能被完整覆盖。
+- 日志和错误上报中没有完整 API Key。
+
+## 常用测试消息
+
+查询当前快照：
+
+```json
+{
+  "type": "query"
+}
+```
+
+测试往返延迟：
+
+```json
+{
+  "type": "ping"
+}
+```
+
+遇到 `1008` 、反复断开或收不到完整数据时，继续阅读 [连接与鉴权排障](#/ws-api/troubleshooting) 。
+
+---
+
+## 连接与鉴权排障
+
+按照“地址 → 网络 → 鉴权 → 配额 → 消息处理”的顺序排查，通常可以快速定位问题。
+
+## 快速诊断表
+
+| 现象 | 最可能原因 | 处理方式 |
+| --- | --- | --- |
+| 构造 WebSocket 时立即报错 | 地址不是 `ws://` / `wss://` ，或路径包含非法字符 | 检查完整 URL |
+| 浏览器提示 Mixed Content | HTTPS 页面连接了 `ws://` | 改用 `wss://` |
+| 连接后约 5 秒关闭 | 未鉴权、App ID/Key 不匹配 | 在 5 秒内发送 `auth` |
+| 收到 `auth_fail` | Key 无效、停用或配额超限 | 检查凭据状态与配额 |
+| `/all` 只有 FSSN 数据 | 当前连接未鉴权 | 完成鉴权升级 |
+| 关闭码 `1006` | 网络、代理或服务异常断开 | 指数退避重连 |
+| 关闭码 `1008` | 鉴权或访问策略失败 | 不要立即循环重连，先修复配置 |
+| 反复收到初始快照 | 客户端重复连接或重复鉴权 | 检查连接生命周期 |
+| JSON 解析失败 | 收到文本控制消息或非 JSON 数据 | 解析前检测内容，保留原始文本 |
+
+## 地址检查
+
+正式服务的地址格式：
+
+```bash
+wss://ws.fanstudio.tech/{path}
+```
+
+路径应来自文档清单，例如 `/cenc` 、 `/all` 。不要在路径结尾重复添加 `/` ，也不要把 GET API 地址当作 WebSocket 地址。
+
+## 浏览器环境限制
+
+- HTTPS 页面只能连接安全的 `wss://` 服务。
+- 浏览器原生 WebSocket API 不允许设置自定义 `Authorization` 请求头。
+- FAN Studio 使用连接后的 JSON 消息鉴权，不需要自定义请求头。
+- 企业代理、防火墙或浏览器扩展可能阻止 WebSocket Upgrade。
+
+## 鉴权检查
+
+必须同时使用匹配的 App ID 和 API Key：
+
+```json
+{
+  "type": "auth",
+  "appId": "your-app-id",
+  "key": "sk-your-api-key"
+}
+```
+
+检查重点：
+
+1. 字段名严格为 `type` 、 `appId` 、 `key` 。
+2. `type` 的值为小写 `auth` 。
+3. 不要把 Key 前后的空格一并复制。
+4. 不要使用其他应用的 App ID 与当前 Key 组合。
+5. 必须在连接建立后的 5 秒内发送。
+
+## 配额检查
+
+默认情况下，一个 Key 最多建立 3 个并发连接、最多由 5 个不同 IP 使用。开发时常见的隐藏连接包括：
+
+- 同一页面被打开多个标签页。
+- 热更新导致旧连接未关闭。
+- 重连定时器叠加，创建了多个并发连接。
+- 后台进程退出前没有正常关闭连接。
+
+确保应用中任何时刻只有一个重连定时器，并在页面卸载或进程退出时关闭连接。
+
+## 安全地收集诊断信息
+
+向支持人员反馈时，请提供：
+
+- 发生时间与时区。
+- 完整连接路径，但不要提供 API Key。
+- 关闭码、关闭原因和最近一条服务端消息类型。
+- 浏览器或运行时版本。
+- 是否能通过备用服务器复现。
+
+API Key 只显示前 3 位和后 4 位，例如 `sk-••••••••a1b2` 。不要粘贴完整鉴权消息。
+
+## 使用专用调试器
+
+[打开连接调试器](https://api.fanstudio.tech/dev-platform/wstool/index.php) 后选择服务与路径。调试器会自动使用当前登录身份完成鉴权，并在界面中隐藏敏感 Key，可用于区分“服务或凭据问题”和“业务客户端实现问题”。
+
+---
+
+## 全部数据源聚合 /all
+
+**功能：** 聚合所有可用数据源的实时推送，一次连接接收全部数据。
+
+**更新频率：** 随各数据源实时推送，无固定间隔。
+
+**说明：** `/all` 本身不轮询外部 API，而是在连接时发送全部数据源的最新快照，之后实时推送各数据源的增量更新。默认排除 `/cenc-ir` 和 `/kma-station` ，需单独连接。
+
+## 消息格式
+
+### 1\. 初始全量数据 (initial\_all)
+
+连接建立后立即发送，包含所有数据源的最新快照。
+
+```json
+{
+  "type": "initial_all",
+  "weatheralarm": { "Data": { ... }, "md5": "..." },
+  "tsunami":      { "Data": { ... }, "md5": "..." },
+  "typhoon":      { "Data": { ... }, "md5": "..." },
+  "cenc":         { "Data": { ... }, "md5": "..." },
+  "cea":          { "Data": { ... }, "md5": "..." },
+  "cea-pr":       { "Data": { ... }, "md5": "..." },
+  "ningxia":      { "Data": { ... }, "md5": "..." },
+  "guangxi":      { "Data": { ... }, "md5": "..." },
+  "shanxi":       { "Data": { ... }, "md5": "..." },
+  "beijing":      { "Data": { ... }, "md5": "..." },
+  "yunnan":       { "Data": { ... }, "md5": "..." },
+  "cwa":          { "Data": { ... }, "md5": "..." },
+  "cwa-eew":      { "Data": { ... }, "md5": "..." },
+  "jma":          { "Data": { ... }, "md5": "..." },
+  "hko":          { "Data": { ... }, "md5": "..." },
+  "usgs":         { "Data": { ... }, "md5": "..." },
+  "sa":           { "Data": { ... }, "md5": "..." },
+  "emsc":         { "Data": { ... }, "md5": "..." },
+  "bcsf":         { "Data": { ... }, "md5": "..." },
+  "gfz":          { "Data": { ... }, "md5": "..." },
+  "usp":          { "Data": { ... }, "md5": "..." },
+  "kma":          { "Data": { ... }, "md5": "..." },
+  "kma-eew":      { "Data": { ... }, "md5": "..." },
+  "fssn":         { "Data": { ... }, "md5": "..." },
+  "fssn-cmt":     { "Data": { ... }, "md5": "..." }
+}
+```
+
+每个 key 为去掉 `/` 前缀的路径名，值为 `{ Data, md5 }` 格式的快照数据。
+
+### 2\. 增量更新 (update)
+
+当某个数据源检测到变化时，服务端广播增量消息。包含 `source` 字段标识来源。
+
+```json
+{
+  "type": "update",
+  "source": "cenc",
+  "Data": {
+    "id": 2024031901,
+    "eventId": "CEIC.2024031901",
+    "shockTime": "2024-03-19 08:15:32",
+    "createTime": "2024-03-19 08:20:00",
+    "latitude": 39.5,
+    "longitude": 116.7,
+    "depth": 10.0,
+    "magnitude": 4.5,
+    "placeName": "河北廊坊市",
+    "infoTypeName": "[正式测定]"
+  },
+  "md5": "a1b2c3d4e5f6..."
+}
+```
+
+### 3\. 查询响应 (query\_response)
+
+客户端发送 `{"type": "query"}` 后，服务端返回与 `initial_all` 相同结构的全量快照。
 
 ```json
 {
   "type": "query_response",
-  "data": { ... }
+  "cenc": { "Data": { ... }, "md5": "..." },
+  "cea":  { "Data": { ... }, "md5": "..." }
+  // ... 所有可用数据源
 }
 ```
 
-**心跳检测 (ping)**:
+### 4\. 心跳包 (heartbeat)
+
+服务端定期发送心跳以保持连接，客户端可选回复 `ping` 。
 
 ```json
-"ping" 或 { "type": "ping" }
+{
+  "type": "heartbeat",
+  "ver": "2.5.0",
+  "id": "uuid-client-id",
+  "timestamp": 1710835200000
+}
 ```
 
-**服务器响应**：
+## 排除的数据源
 
-```json
-{ "type": "pong", "timestamp": 1630000000000 }
-```
+以下数据源不会通过 `/all` 推送，需要单独连接对应路径：
+
+| 路径 | 说明 |
+| --- | --- |
+| `/cenc-ir` | 中国地震台网烈度速报 |
+| `/kma-station` | 韩国气象厅 PEWS 测站实时数据 |
 
 ## 注意事项
 
-- 无效路径会立即关闭连接
-- 客户端需自行实现断线重连逻辑
-- 数据格式与对应业务接口一致
-- 长时间无操作建议主动发送心跳
-
----
-
-## 全部源推送 /all
-
-连接到此路径将接收下方所有可用路径的实时数据推送。
-
-适用于需要监控全局动态的场景。
+- 增量更新只包含发生变化的数据源，未变化的数据源不会出现在 `update` 消息中。
+- `query` 请求会返回完整的全量快照，与 `initial_all` 结构一致，可用于客户端重新同步状态。
+- 如需获取 `/cenc-ir` 或 `/kma-station` 数据，请另外建立独立 WebSocket 连接。
+- 各数据源的 `Data` 结构详见对应路径的独立文档页面。
 
 ---
 
@@ -315,6 +748,93 @@ WebSocket API 将在服务端收到新消息后自动向所有客户端推送相
 
 - **空数据处理** ：当级别为“信息”时，此时 `forecasts` 和 `waterLevelMonitoring` 固定返回空数组 `[]` 。
 - **图表地址** ： `maps` 内的 URL 仅在官方详情页提供相应图片时才会有值，否则为空字符串。
+
+---
+
+## 实时活跃台风 /typhoon
+
+**数据来源：** 中国气象局
+
+**更新频率：** 有状态更新时推送
+
+**说明：** 返回当前西太平洋及南海海域所有活跃的台风实时参数。由于可能存在“多台风共舞”的情况，数据部分固定为数组格式。
+
+## 示例返回
+
+包含多个活跃台风（如双台风）时的标准返回格式。
+
+```json
+{
+  "Data": [
+    {
+      "id": "202609",
+      "name": "巴威",
+      "name_en": "BAVI",
+      "latitude": 13.7,
+      "longitude": 147.1,
+      "moveDirection": "西北西",
+      "moveSpeed": 18,
+      "power": 18,
+      "pressure": 915,
+      "windSpeed": 62,
+      "type": "超强台风",
+      "radius7": 380,
+      "radius10": 160,
+      "updateTime": "2026-07-05 20:00:00"
+    },
+    {
+      "id": "202610",
+      "name": "美莎克",
+      "name_en": "MAYSAK",
+      "latitude": 24.3,
+      "longitude": 108.8,
+      "moveDirection": "北北东",
+      "moveSpeed": 21,
+      "power": 8,
+      "pressure": 995,
+      "windSpeed": 20,
+      "type": "热带风暴",
+      "radius7": null,
+      "radius10": null,
+      "updateTime": "2026-07-05 22:00:00"
+    }
+  ],
+  "md5": "a901afa30b4bbefcc9dbd527f82d591b"
+}
+```
+
+## 字段说明
+
+### 主事件对象结构
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `Data` | array | 活跃台风对象数组。包含当前正在编报的一个或多个台风。 |
+| `md5` | string | 数据校验值。任意一个活跃台风的坐标或数据发生改变都会生成新的 MD5。 |
+
+### Data 数组内台风对象
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 台风国际编号（如 `202609` 代表 2026 年第 9 号台风）。 |
+| `name` | string | 台风中文命名（如 "巴威"）。 |
+| `name_en` | string | 台风英文命名（如 "BAVI"）。 |
+| `latitude` | number | 台风中心当前所处的纬度。 |
+| `longitude` | number | 台风中心当前所处的经度。 |
+| `moveDirection` | string | 台风未来的移动方向（如 "西北西"、"北北东"）。 |
+| `moveSpeed` | number | 台风中心移动速度，单位：千米/小时 (km/h)。 |
+| `power` | int | 中心附近最大风力级别（如 8、18）。 |
+| `pressure` | int | 中心最低气压，单位：百帕 (hPa)。 |
+| `windSpeed` | number | 中心附近最大风速，单位：米/秒 (m/s)。 |
+| `type` | string | 台风当前强度等级（如 "热带低压"、"热带风暴"、"强台风"、"超强台风"）。 |
+| `radius7` | int | 七级风圈半径，单位：千米 (km)。若未达到该级别则为 `null` 。 |
+| `radius10` | int | 十级风圈半径，单位：千米 (km)。若未达到该级别则为 `null` 。 |
+| `updateTime` | string | 该数据的实际观测时间（北京时间，格式 YYYY-MM-DD HH:mm:ss）。 |
+
+## 注意事项
+
+- **空数据处理：** 对于强度较弱的气旋（如热带低压或刚生成的热带风暴），七级风圈 `radius7` 和十级风圈 `radius10` 的数据可能不存在，此时接口将返回 `null` ，前端需做好容错。
+- **无台风状态：** 当西太平洋及南海无活跃台风时，接口可能不推送更新，或直接返回空数组 `[]` 。
 
 ---
 
@@ -735,6 +1255,52 @@ WebSocket API 将在服务端收到新消息后自动向所有客户端推送相
 ## 注意事项
 
 - 所有时间（ `shockTime` ）均为 **UTC+8 (北京时间)** 。
+
+---
+
+## FSSN 地震信息 /fssn
+
+**数据来源：** FAN Studio Seismic Network
+
+**更新规则：** 收到新信息后立即推送
+
+**示例返回：**
+
+```json
+{
+  "Data": {
+    "id": "FSSN2025waoy",
+    "shockTime": "2025-11-10 17:20:47",
+    "createTime": "2025-11-10 17:34:00",
+    "latitude": 29.3528,
+    "longitude": 101.9758,
+    "depth": 10,
+    "magnitude": 3.26,
+    "placeName": "Sichuan,China",
+    "placeName_zh": "中国四川",
+    "infoTypeName": "正式(已核实)"
+  },
+  "md5": "8ad45f73a99fe1113ca16fc186e33f53"
+}
+```
+
+## 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 地震事件唯一标识符。 |
+| `shockTime` | string | 地震发生时间（UTC+8，格式：YYYY-MM-DD HH:mm:ss）。 |
+| `latitude` | number | 震中纬度。 |
+| `longitude` | number | 震中经度。 |
+| `depth` | integer | 震源深度（单位：千米）。 |
+| `magnitude` | number | 地震震级。 |
+| `placeName` | string | 地震发生地地名。 |
+| `infoTypeName` | string | 速报类型，例如："已确认、正式(已核实)"。 |
+
+## 注意事项
+
+- 该数据源由 FSSN 测报部报告，仅供学术研究。
+- 该数据源包含全球范围内的地震信息。
 
 ---
 

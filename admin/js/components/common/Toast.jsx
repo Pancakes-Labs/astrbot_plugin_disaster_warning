@@ -73,7 +73,7 @@ function ToastProvider({ children }) {
             {children}
             
             {/* 顶部悬浮的 Toast 容器栈 */}
-            <div className="toast-stack">
+            <div className="toast-stack" role="region" aria-label="通知提示">
                 {toasts.map(toast => (
                     <Snackbar
                         key={toast.id}
@@ -86,6 +86,7 @@ function ToastProvider({ children }) {
                             onClose={() => closeToast(toast.id)}
                             variant="filled"
                             className="toast-alert"
+                            role="alert"
                         >
                             {toast.message}
                         </Alert>

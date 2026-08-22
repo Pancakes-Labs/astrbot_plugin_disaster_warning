@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import mimetypes
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import ClientSession
@@ -85,9 +86,71 @@ class MessageRemoteMediaService:
         return mime.startswith("image/")
 
     @staticmethod
+    def looks_like_image_bytes(data: bytes | bytearray | memoryview | None) -> bool:
+        """根据文件头判断二进制内容是否像真实图片。
+
+        部分上游图标接口会在资源缺失时返回 Content-Type=image/png 的 HTML 错误页，
+        仅校验 MIME 会误判成功，导致后续 QQ 富媒体传输失败。
+        """
+        if not data:
+            return False
+
+        sample = bytes(data[:64])
+        if not sample:
+            return False
+
+        # 常见图片魔数
+        if sample.startswith(b"\x89PNG\r\n\x1a\n"):
+            return True
+        if sample.startswith(b"\xff\xd8\xff"):
+            return True
+        if sample.startswith((b"GIF87a", b"GIF89a")):
+            return True
+        if sample.startswith(b"BM"):
+            return True
+        if len(sample) >= 12 and sample.startswith(b"RIFF") and sample[8:12] == b"WEBP":
+            return True
+
+        # SVG：仅接受明确 SVG 内容，避免把 SOAP/RSS/Atom 等 XML 错误页当成图片。
+        stripped = sample.lstrip().lower()
+        if stripped.startswith(b"<svg"):
+            return True
+        if stripped.startswith(b"<?xml") and b"svg" in sample.lower():
+            return True
+
+        # 明确拒绝 HTML/文本伪图
+        if stripped.startswith(
+            (b"<!doctype", b"<html", b"<head", b"<body", b"{", b"[")
+        ):
+            return False
+
+        return False
+
+    @staticmethod
     def guess_image_content_type(url: str) -> str | None:
         """根据 URL 后缀猜测图片 MIME。"""
         guessed_type, _ = mimetypes.guess_type(url)
         if isinstance(guessed_type, str) and guessed_type.startswith("image/"):
             return guessed_type
         return None
+
+    @staticmethod
+    def guess_referer(url: str) -> str | None:
+        """按目标 URL 推导防盗链 Referer。
+
+        部分图片服务（如台湾中央气象署 scweb.cwa.gov.tw）对无 Referer 或
+        非浏览器 Referer 的请求会返回 403，这里按域名推导同源站点根路径
+        作为 Referer，模拟浏览器行为以提升抓取成功率；非 http(s) 返回 None。
+        """
+        try:
+            parsed = urlparse(str(url or "").strip())
+            host = (parsed.hostname or "").lower()
+        except Exception:
+            return None
+        if parsed.scheme not in ("http", "https") or not host:
+            return None
+        # 已知存在防盗链检查的域名：显式使用站点根路径（与浏览器行为一致）。
+        if host.endswith("cwa.gov.tw"):
+            return "https://scweb.cwa.gov.tw/"
+        # 通用兜底：其余站点使用同源根路径，通常无害且贴近浏览器请求。
+        return f"{parsed.scheme}://{host}/"

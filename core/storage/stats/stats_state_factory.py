@@ -47,6 +47,26 @@ class StatsStateFactory:
                 "by_type": defaultdict(int),
                 "by_region": defaultdict(int),
             },
+            # 台风统计块：按强度等级和台风 ID 维护聚合结果。
+            # by_level 统计每次推送时各强度等级出现的频次（含同一台风多次推送）。
+            # by_max_level 统计每个台风个体历史最高强度等级的去重分布。
+            # max_wind_typhoons 记录每个台风名称出现过的最大风速（及对应气压），用于风王榜。
+            # min_pressure_typhoons 记录每个台风名称出现过的最低中心气压，用于气压榜。
+            "typhoon_stats": {
+                "by_level": defaultdict(int),
+                "by_max_level": defaultdict(int),
+                "max_wind_typhoons": {},
+                "min_pressure_typhoons": {},
+            },
+            # S-Net 观测峰值统计：不计入 total_events / by_type 事件流。
+            "snet_stats": {
+                "station_count": 0,
+                "stations_with_peak": 0,
+                "global_max": None,
+                "top_peaks": [],
+                "recent_peak_updates": [],
+                "last_observation_at": None,
+            },
             # 近期事件摘要与去重辅助字段。
             "recent_pushes": [],
             "major_events": [],

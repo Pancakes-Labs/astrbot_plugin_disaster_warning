@@ -26,8 +26,11 @@ function ConfigField({
     // 拼接得到当前字段在配置树中的绝对路径路径标识
     const currentPath = path ? `${path}.${fieldKey}` : fieldKey;
 
-    // 特殊安全防护设计：允许 'web_admin.password' 密码字段即使标记为 hidden 也照常在页面上渲染，但会被强制转换为 password 输入框
-    const allowHiddenPasswordField = currentPath === 'web_admin.password';
+    // 特殊安全防护设计：允许 'web_admin.password' 与 'data_sources.eqsc.refresh_token' 敏感字段
+    // 即使标记为 hidden 也照常在页面上渲染，但会被强制转换为 password 输入框（掩码显示，防泄露）
+    const allowHiddenPasswordField =
+        currentPath === 'web_admin.password' ||
+        currentPath === 'data_sources.eqsc.refresh_token';
     
     // 如果 Schema 不存在，或者是隐藏字段且非受信任的密码字段，则返回 null 不渲染
     if (!schema || (schema.hidden && !allowHiddenPasswordField)) return null;

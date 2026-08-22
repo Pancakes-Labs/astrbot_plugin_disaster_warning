@@ -32,14 +32,8 @@ class JmaEarthquakeP2PParser(BaseParser):
 
             # P2P 中 551 表示日本地震情报，其余业务码直接忽略。
             if code == 551:
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 收到地震情报(code:551)"
-                )
                 return self._parse_earthquake_data(data)
 
-            plugin_logger.debug(
-                f"[灾害预警] {self.source_id} 非地震情报数据，code: {code}"
-            )
             return None
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")
@@ -83,7 +77,7 @@ class JmaEarthquakeP2PParser(BaseParser):
 
             if (lat is None or lon is None) and issue_type != "ScalePrompt":
                 plugin_logger.error(
-                    f"[灾害预警] {self.source_id} 经纬度解析失败: lat={latitude}, lon={longitude}"
+                    f"[灾害预警] {self.source_id} 经纬度解析失败：纬度 {latitude}，经度 {longitude}"
                 )
                 return None
 
@@ -203,6 +197,8 @@ class JmaEarthquakeP2PParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
 
             return envelope
@@ -223,9 +219,6 @@ class JmaEarthquakeWolfxParser(BaseParser):
         try:
             # Wolfx 中只对日本地震列表消息做处理，其余类型直接跳过
             if data.get("type") != "jma_eqlist":
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 非 JMA 地震列表数据，跳过"
-                )
                 return None
 
             eq_info = None
@@ -353,6 +346,8 @@ class JmaEarthquakeWolfxParser(BaseParser):
             plugin_logger.info(
                 f"[灾害预警] 地震数据解析成功: {domain_event.place_name} (M {domain_event.magnitude}), 时间: {domain_event.occurred_at}",
                 is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
             )
 
             return envelope

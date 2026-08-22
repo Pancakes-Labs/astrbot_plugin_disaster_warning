@@ -14,13 +14,17 @@ function useStatusUptimeEffect({
     startTime, // Date 实例，服务端返回的插件加载首帧绝对时间
     dispatch,  // 全局 Action 发射器
 }) {
+    // 使用毫秒时间戳作为 effect 依赖，避免每次 WS/API 推送 new Date() 造成引用变化、计时器反复重启
+    const startTimeMs = startTime instanceof Date && !Number.isNaN(startTime.getTime())
+        ? startTime.getTime()
+        : null;
+
     React.useEffect(() => {
         // 如果服务器尚未返回启动时间戳，或者防灾主线程已经停止运行，则不激活计时器
-        if (!startTime || !running) return;
+        if (!startTimeMs || !running) return;
 
-        const timer = setInterval(() => {
-            const now = new Date();
-            const diff = Math.floor((now - startTime) / 1000); // 换算为秒级差值
+        const tick = () => {
+            const diff = Math.floor((Date.now() - startTimeMs) / 1000); // 换算为秒级差值
 
             // 时差负数溢出拦截
             if (diff < 0) {
@@ -42,9 +46,13 @@ function useStatusUptimeEffect({
 
             // 动态注入至状态树，触发头部等 UI 组件的高流畅度无抖动跑秒
             dispatch({ type: window.AppActionTypes.UPDATE_STATUS, payload: { uptime: str } });
-        }, 1000);
+        };
+
+        // 立即执行一次，避免 setInterval 首秒空白或依赖服务端 uptime 回填导致跳变
+        tick();
+        const timer = setInterval(tick, 1000);
 
         // 卸载或状态解绑时，注销 CPU 定时轮询器
         return () => clearInterval(timer);
-    }, [dispatch, running, startTime]);
+    }, [dispatch, running, startTimeMs]);
 }

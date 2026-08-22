@@ -13,6 +13,8 @@ from aiohttp import ClientWebSocketResponse, WSMsgType
 
 from astrbot.api import logger
 
+from ...services.telemetry.telemetry_utils import track_error_safely
+
 
 class WebSocketDispatchService:
     """WebSocket 消息循环分发服务。"""
@@ -23,12 +25,13 @@ class WebSocketDispatchService:
         1001,
     }
 
-    # 协议级严重错误且通常不可恢复的代码集合，这类情况重试意义不大，需要抛出异常
+    # 协议级严重错误且通常不可恢复的代码集合，这类情况短时重试意义不大
+    # 注意：1008（Policy Violation）不在此列。
+    # FAN Studio 等上游会用 1008 表达限流/策略拒绝，连接配额释放后仍可恢复。
     _NO_RECONNECT_CODES = {
         1002,
         1003,
         1007,
-        1008,
         1009,
         1010,
         1011,
@@ -70,9 +73,11 @@ class WebSocketDispatchService:
                     # 抛出 socket 传输错误
                     raise msg.data
                 elif msg.type == WSMsgType.CLOSED:
-                    logger.debug(
-                        f"[灾害预警] WebSocket {name} 的连接已收到关闭帧，关闭码为 {websocket.close_code}"
-                    )
+                    # 正常关闭码由 handle_close_code 的 INFO 汇总承担，此处仅保留非正常关闭码明细
+                    if websocket.close_code not in self._NORMAL_CLOSE_CODES:
+                        logger.debug(
+                            f"[灾害预警] WebSocket {name} 的连接已收到关闭帧，关闭码为 {websocket.close_code}"
+                        )
                     break
                 elif msg.type in {WSMsgType.PING, WSMsgType.PONG}:
                     # 保活心跳帧，只需刷新该连接的活跃时间即可
@@ -202,6 +207,26 @@ class WebSocketDispatchService:
             )
             return
 
+        # 策略违规（1008）：常见于上游限流、连接数配额或策略拒绝，释放后通常可恢复
+        if close_code == 1008:
+            logger.warning(
+                f"[灾害预警] WebSocket {name} 因策略违规关闭，关闭码为 {close_code}，"
+                "将释放本地连接后尝试重连"
+            )
+            policy_error = RuntimeError(f"WebSocket策略违规关闭，代码 {close_code}")
+            apply_policy = getattr(
+                self.manager, "_apply_fan_quota_policy_on_error", None
+            )
+            if callable(apply_policy):
+                await apply_policy(name, policy_error)
+            self.manager._handle_connection_error(
+                name,
+                uri,
+                headers,
+                policy_error,
+            )
+            return
+
         # 兜底：其他未被标记为不可重连的意外关闭码，也尝试进行重连，防止由于其它关闭码导致监控永久失效
         logger.warning(
             f"[灾害预警] WebSocket {name} 意外关闭，关闭码为 {close_code}，准备尝试重连"
@@ -245,6 +270,16 @@ class WebSocketDispatchService:
         except Exception as e:
             logger.error(f"[灾害预警] {error_label} {name}: {e}")
             logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            # 消息在分发到处理器之前的解码/路由异常，只有日志没有遥测，这里补上报。
+            # 统一 best-effort 封装上报分发错误（内部自带启用检查与异常吞噬，
+            # 且不会中断消息循环继续运行）。
+            telemetry = getattr(self.manager, "_telemetry", None)
+            await track_error_safely(
+                telemetry,
+                e,
+                module="core.websocket_dispatch_service._handle_payload_message",
+                log_context="分发错误遥测",
+            )
 
     def _touch_connection(self, name: str) -> None:
         """刷新连接最近活跃时间。"""

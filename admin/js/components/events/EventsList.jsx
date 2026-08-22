@@ -45,6 +45,15 @@ function EventsList() {
         magnitudeFilter, setMagnitudeFilter,
         magnitudeOrder, setMagnitudeOrder,
         keyword, setKeyword,
+        windSpeedFilter, setWindSpeedFilter,
+        timePreset, setTimePreset,
+        timeFrom, setTimeFrom,
+        timeTo, setTimeTo,
+        depthFilter, setDepthFilter,
+        intensityFilter, setIntensityFilter,
+        maxPressureFilter, setMaxPressureFilter,
+        activeOnly, setActiveOnly,
+        resetFilters,
         goToPage,
     } = query;
 
@@ -165,6 +174,22 @@ function EventsList() {
                 setMagnitudeOrder={setMagnitudeOrder}
                 keyword={keyword}
                 setKeyword={setKeyword}
+                windSpeedFilter={windSpeedFilter}
+                setWindSpeedFilter={setWindSpeedFilter}
+                timePreset={timePreset}
+                setTimePreset={setTimePreset}
+                timeFrom={timeFrom}
+                setTimeFrom={setTimeFrom}
+                timeTo={timeTo}
+                setTimeTo={setTimeTo}
+                depthFilter={depthFilter}
+                setDepthFilter={setDepthFilter}
+                intensityFilter={intensityFilter}
+                setIntensityFilter={setIntensityFilter}
+                maxPressureFilter={maxPressureFilter}
+                setMaxPressureFilter={setMaxPressureFilter}
+                activeOnly={activeOnly}
+                setActiveOnly={setActiveOnly}
                 availableSources={availableSources}
                 sourceFilterMode={sourceFilterMode}
                 onSourceFilterModeChange={handleSourceFilterModeChange}
@@ -173,6 +198,7 @@ function EventsList() {
                 onSourceCheckboxToggle={handleSourceCheckboxToggle}
                 setSelectedSources={setSelectedSources}
                 selectedSourceSummary={selectedSourceSummary}
+                onResetFilters={resetFilters}
             />
 
             {/* 加载、空列表与实际列表多态渲染 */}
@@ -198,32 +224,93 @@ function EventsList() {
                         <div className="events-list">
                             {groupedEvents.map((group) => {
                                 const isExpanded = expandedEvents.has(group.id);
+                                const latestType = String(group.latestEvent?.type || '').toLowerCase();
+                                const weatherDetail = String(group.latestEvent?.weather_detail || '').trim();
+                                // 与 EventCard 对齐：earthquake / earthquake_warning 均可展开情报正文
+                                const isEarthquakeType = latestType === 'earthquake'
+                                    || latestType === 'earthquake_warning';
+                                // 气象可回退 description；地震仅认 weather_detail，避免标题误当正文
+                                const detailBody = latestType === 'weather_alarm'
+                                    ? (weatherDetail || String(group.latestEvent?.description || '').trim())
+                                    : (isEarthquakeType ? weatherDetail : '');
+                                // 多报更新：真正的同源折叠
+                                // 气象预警 / 地震情报补充正文：额外提供正文展开语义
+                                const hasMultiReport = group.updateCount > 1;
+                                const canExpandDetail = (
+                                    (latestType === 'weather_alarm' || isEarthquakeType)
+                                    && !!detailBody
+                                    && !hasMultiReport
+                                );
+                                const isExpandable = hasMultiReport || canExpandDetail;
+                                const cardEvent = {
+                                    ...group.latestEvent,
+                                    updateCount: group.updateCount,
+                                    _groupType: group.latestEvent.type,
+                                    _groupMagnitude: group.latestEvent.magnitude,
+                                };
+                                const toggleGroup = () => toggleEventGroup(group.id);
+                                const onExpandKeyDown = (e) => {
+                                    if (!isExpandable) return;
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        toggleGroup();
+                                    }
+                                };
+
                                 return (
                                     <div key={group.id} className="event-group">
-                                        {/* 折叠收起形态：展示带有多报更新数量的事件概要卡片 */}
+                                        {/* 折叠收起形态：展示带有多报更新数量 / 正文入口的事件概要卡片 */}
                                         <Collapse in={!isExpanded} timeout={220} unmountOnExit>
-                                            <div onClick={() => group.updateCount > 1 && toggleEventGroup(group.id)}>
+                                            <div
+                                                role={isExpandable ? 'button' : undefined}
+                                                tabIndex={isExpandable ? 0 : undefined}
+                                                aria-expanded={isExpandable ? false : undefined}
+                                                aria-label={isExpandable ? '展开事件详情' : undefined}
+                                                onClick={() => isExpandable && toggleGroup()}
+                                                onKeyDown={onExpandKeyDown}
+                                            >
                                                 <EventCard
-                                                    event={{
-                                                        ...group.latestEvent,
-                                                        updateCount: group.updateCount,
-                                                        _groupType: group.latestEvent.type,
-                                                        _groupMagnitude: group.latestEvent.magnitude,
-                                                    }}
+                                                    event={cardEvent}
                                                     displayTimezone={displayTimezone}
-                                                    isExpandable={group.updateCount > 1}
+                                                    isExpandable={hasMultiReport}
                                                     isExpanded={false}
                                                 />
                                             </div>
                                         </Collapse>
 
-                                        {/* 展开形态：展示垂直时间线历史追踪面板 */}
+                                        {/* 展开形态：单一连续卡片壳 = 顶部事件摘要 + 下方时间线 / 正文 */}
                                         <Collapse in={isExpanded} timeout={260} unmountOnExit>
-                                            <EventGroupTimeline
-                                                group={group}
-                                                displayTimezone={displayTimezone}
-                                                onCollapse={() => toggleEventGroup(group.id)}
-                                            />
+                                            <div className={`event-group-expanded-shell ${hasMultiReport ? 'has-timeline' : 'is-detail-only'}`}>
+                                                <div
+                                                    className="event-group-sticky-card"
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-expanded={true}
+                                                    onClick={toggleGroup}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' || e.key === ' ') {
+                                                            e.preventDefault();
+                                                            toggleGroup();
+                                                        }
+                                                    }}
+                                                >
+                                                    <EventCard
+                                                        event={cardEvent}
+                                                        displayTimezone={displayTimezone}
+                                                        isExpandable={hasMultiReport}
+                                                        isExpanded={true}
+                                                        hideExpandBadge={false}
+                                                    />
+                                                </div>
+                                                {hasMultiReport && (
+                                                    <div className="event-group-timeline-section">
+                                                        <EventGroupTimeline
+                                                            group={group}
+                                                            displayTimezone={displayTimezone}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
                                         </Collapse>
                                     </div>
                                 );

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ....domain.display_models import EarthquakeDisplayModel
 from ....domain.event_context import EarthquakeDisplayContext
 from .common import (
@@ -61,7 +63,7 @@ def _extract_earthquake_domain_details(
             projection_view.get("domestic_tsunami")
         )
         or "",
-        # 提取受影响的具体地震监测站及震度映射字典
+        # 测站数据：Global Quake 等为 dict，S-Net 为 list[dict]
         "stations": first_non_empty(projection_view.get("stations"), {}),
         "is_final": is_final,
         # 是否为作废/取消警报
@@ -101,6 +103,11 @@ def _extract_earthquake_projection_details(
         for area_range in list(metadata.get("jma_warning_area_ranges") or [])
         if str(area_range).strip()
     ]
+    jma_warning_area_groups = [
+        dict(group)
+        for group in list(metadata.get("jma_warning_area_groups") or [])
+        if isinstance(group, dict) and str(group.get("range_text") or "").strip()
+    ]
 
     return {
         "impact_area": impact_area,
@@ -110,6 +117,7 @@ def _extract_earthquake_projection_details(
         "jma_comment": jma_comment,
         "jma_warning_areas": jma_warning_areas,
         "jma_warning_area_ranges": jma_warning_area_ranges,
+        "jma_warning_area_groups": jma_warning_area_groups,
         # 预存的本地/网络 URI 地址
         "image_uri": str(metadata.get("image_uri") or "").strip(),
         "shakemap_uri": str(metadata.get("shakemap_uri") or "").strip(),
@@ -158,6 +166,18 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
     jma_points = list(payload_details["jma_points"])
     jma_comment = payload_details["jma_comment"]
     # 汇总整理好的中间字段表，防止结构化复制时丢失信息
+    raw_stations = domain_details["stations"]
+    if isinstance(raw_stations, dict):
+        normalized_stations: Any = dict(raw_stations)
+    elif isinstance(raw_stations, list):
+        # S-Net 等来源使用测站对象列表，不可强转 dict（会触发
+        # "dictionary update sequence element #0 has length N"）。
+        normalized_stations = [
+            dict(item) if isinstance(item, dict) else item for item in raw_stations
+        ]
+    else:
+        normalized_stations = {}
+
     earthquake_kwargs = {
         "report_num": int(domain_details["report_num"] or 1),
         "is_final": bool(domain_details["is_final"]),
@@ -165,7 +185,7 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
         "is_training": bool(domain_details["is_training"]),
         "is_assumption": bool(domain_details["is_assumption"]),
         "max_pga": domain_details["max_pga"],
-        "stations": dict(domain_details["stations"] or {}),
+        "stations": normalized_stations,
         "image_uri": str(payload_details["image_uri"] or ""),
         "shakemap_uri": str(payload_details["shakemap_uri"] or ""),
     }
@@ -182,6 +202,9 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
         "jma_comment": jma_comment,
         "jma_warning_areas": list(payload_details["jma_warning_areas"]),
         "jma_warning_area_ranges": list(payload_details["jma_warning_area_ranges"]),
+        "jma_warning_area_groups": list(
+            payload_details.get("jma_warning_area_groups") or []
+        ),
     }
     if local_estimation is not None:
         # 本地烈度估算仅在存在时写入，避免污染不相关事件的展示元数据。
@@ -222,6 +245,9 @@ def build_earthquake_display_context(projection: dict, options: dict | None = No
         jma_comment=jma_comment,
         jma_warning_areas=list(payload_details["jma_warning_areas"]),
         jma_warning_area_ranges=list(payload_details["jma_warning_area_ranges"]),
+        jma_warning_area_groups=list(
+            payload_details.get("jma_warning_area_groups") or []
+        ),
         display_model=EarthquakeDisplayModel(
             title=title,
             extras=dict(display_metadata),

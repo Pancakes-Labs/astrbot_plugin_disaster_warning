@@ -52,26 +52,46 @@ class WebSocketRuntimeService:
 
     async def disconnect(self, name: str) -> None:
         """断开连接。"""
-        # 断开指定命名的物理连接并释放资源
-        if name in self.manager.connections:
-            try:
-                await self.manager.connections[name].close()
-                logger.debug(f"[灾害预警] WebSocket {name} 的连接句柄已关闭")
-            except Exception as e:
-                logger.error(f"[灾害预警] WebSocket {name} 断开连接时出错，错误为 {e}")
-            finally:
-                # 无论 close 最终是否成功，都必须彻底清理管理器持有的状态，避免脏数据挂载
-                self.manager.connections.pop(name, None)
-                self.manager.connection_info.pop(name, None)
-                # 取消该连接对应的主动心跳保活循环任务
-                if name in self.manager.heartbeat_tasks:
-                    self.manager.heartbeat_tasks[name].cancel()
-                    self.manager.heartbeat_tasks.pop(name, None)
+        # 断开指定命名的物理连接并释放资源（包含半开/仅元数据残留场景）
+        try:
+            await self.manager._release_existing_connection(
+                name,
+                reason="主动断开连接",
+                keep_connection_info=False,
+            )
+            logger.debug(f"[灾害预警] WebSocket {name} 的连接句柄已关闭")
+        except Exception as e:
+            logger.error(f"[灾害预警] WebSocket {name} 断开连接时出错，错误为 {e}")
+            self.manager.connections.pop(name, None)
+            self.manager.connection_info.pop(name, None)
+            self.manager.last_heartbeat_time.pop(name, None)
 
-        # 清除处于等待队列中的重连任务
-        if name in self.manager.reconnect_tasks:
-            self.manager.reconnect_tasks[name].cancel()
-            self.manager.reconnect_tasks.pop(name, None)
+        # 统一回收该连接名下所有挂起的后台任务：
+        # - reconnect_tasks：等待重试调度的重连任务
+        # - _fan_secondary_wait_tasks / _fan_secondary_cleanup_tasks：
+        #   FAN 次要通道静默等待/超时清理任务，若残留会在服务器切换后
+        #   仍用捕获的旧 URI 建连，覆盖切换效果
+        # 先从任务映射中移除，再取消并等待任务真正结束，
+        # 避免旧任务在响应取消前继续执行建连或发送回调。
+        pending: list[asyncio.Task] = []
+
+        reconnect_task = self.manager.reconnect_tasks.pop(name, None)
+        if reconnect_task is not None and not reconnect_task.done():
+            pending.append(reconnect_task)
+
+        wait_tasks = getattr(self.manager, "_fan_secondary_wait_tasks", {})
+        if hasattr(self.manager, "_fan_secondary_wait_tasks"):
+            wait_task = wait_tasks.pop(name, None)
+            if wait_task is not None and not wait_task.done():
+                pending.append(wait_task)
+
+        cleanup_tasks = getattr(self.manager, "_fan_secondary_cleanup_tasks", {})
+        if hasattr(self.manager, "_fan_secondary_cleanup_tasks"):
+            cleanup_task = cleanup_tasks.pop(name, None)
+            if cleanup_task is not None and not cleanup_task.done():
+                pending.append(cleanup_task)
+
+        await self.cancel_and_wait(pending)
 
     async def cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""
@@ -92,7 +112,7 @@ class WebSocketRuntimeService:
                 total=self.manager.config.get("http_timeout", 30)
             )
             self.manager.session = aiohttp.ClientSession(timeout=timeout)
-            logger.info("[灾害预警] WebSocket管理器已启动")
+            logger.debug("[灾害预警] WebSocket 管理器已启动")
 
         if not self.manager.message_handlers:
             logger.warning("[灾害预警] 没有注册任何消息处理器")
@@ -102,11 +122,11 @@ class WebSocketRuntimeService:
         async with self.manager._stop_lock:
             # 引入防止重复停止的并发锁保护
             if self.manager._stopping:
-                logger.debug("[灾害预警] WebSocket管理器已在停止流程中，跳过重复调用")
+                logger.debug("[灾害预警] WebSocket 管理器已在停止流程中，跳过重复调用")
                 return
             self.manager._stopping = True
             try:
-                logger.info("[灾害预警] WebSocket管理器正在停止...")
+                logger.debug("[灾害预警] WebSocket 管理器正在停止...")
                 self.manager.running = False
 
                 # 1. 优先关闭所有重连等待任务，防止在停止期间因为连接关闭而触发重连，陷入恶性循环
@@ -114,7 +134,20 @@ class WebSocketRuntimeService:
                 await self.cancel_and_wait(reconnect_tasks)
                 self.manager.reconnect_tasks.clear()
 
-                # 2. 取消所有还在运行的心跳保活任务
+                # 2 取消 FAN 次要通道静默等待/超时清理任务，避免停机后仍尝试建连
+                wait_tasks = list(
+                    getattr(self.manager, "_fan_secondary_wait_tasks", {}).values()
+                )
+                cleanup_tasks = list(
+                    getattr(self.manager, "_fan_secondary_cleanup_tasks", {}).values()
+                )
+                await self.cancel_and_wait(wait_tasks + cleanup_tasks)
+                if hasattr(self.manager, "_fan_secondary_wait_tasks"):
+                    self.manager._fan_secondary_wait_tasks.clear()
+                if hasattr(self.manager, "_fan_secondary_cleanup_tasks"):
+                    self.manager._fan_secondary_cleanup_tasks.clear()
+
+                # 3. 取消所有还在运行的心跳保活任务
                 heartbeat_tasks = [
                     task
                     for task in self.manager.heartbeat_tasks.values()
@@ -123,22 +156,22 @@ class WebSocketRuntimeService:
                 await self.cancel_and_wait(heartbeat_tasks)
                 self.manager.heartbeat_tasks.clear()
 
-                # 3. 物理切断所有现存的 WebSocket 连接句柄
+                # 4. 物理切断所有现存的 WebSocket 连接句柄
                 for name in list(self.manager.connections.keys()):
                     await self.disconnect(name)
 
-                # 4. 彻底释放并关闭共享的 ClientSession
+                # 5. 彻底释放并关闭共享的 ClientSession
                 if self.manager.session:
                     await self.manager.session.close()
                     self.manager.session = None
 
-                # 5. 彻底清空所有状态缓存
+                # 6. 彻底清空所有状态缓存
                 self.manager.connections.clear()
                 self.manager.connection_info.clear()
                 self.manager.connection_retry_counts.clear()
                 self.manager.fallback_retry_counts.clear()
                 self.manager.last_heartbeat_time.clear()
 
-                logger.info("[灾害预警] WebSocket管理器已停止")
+                logger.debug("[灾害预警] WebSocket 管理器已停止")
             finally:
                 self.manager._stopping = False

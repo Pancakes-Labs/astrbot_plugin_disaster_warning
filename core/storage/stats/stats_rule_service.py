@@ -14,13 +14,17 @@ from ...domain.event_models import (
     EarthquakeEvent,
     EventEnvelope,
     TsunamiEvent,
+    TyphoonEvent,
     WeatherEvent,
 )
+from ...domain.typhoon import format_display_name, normalize_typhoon_id
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
 )
 from ...services.identity.event_classifier import is_major_event
+from ..source_compat import is_earthquake_supplement_product
+from .typhoon_stats_accumulator import record_typhoon_observation
 
 
 class StatsRuleService:
@@ -40,6 +44,24 @@ class StatsRuleService:
         envelope = event
         data = envelope.event
         if not isinstance(data, EarthquakeEvent):
+            return
+
+        event_metadata = getattr(data, "metadata", None)
+        if not isinstance(event_metadata, dict):
+            event_metadata = {}
+        envelope_metadata = (
+            envelope.metadata if isinstance(envelope.metadata, dict) else {}
+        )
+        info_type = str(
+            getattr(data, "info_type", "")
+            or event_metadata.get("info_type")
+            or envelope_metadata.get("info_type")
+            or ""
+        )
+        # 补充产品（烈度速报 / CMT 等）不参与震级分布 / 最大震级 / 地区统计。
+        if is_earthquake_supplement_product(
+            envelope.source_id or "", info_type=info_type
+        ):
             return
 
         mag = data.magnitude
@@ -62,12 +84,6 @@ class StatsRuleService:
 
             is_reliable = False
             is_cenc_official = False
-            event_metadata = getattr(data, "metadata", None)
-            if not isinstance(event_metadata, dict):
-                event_metadata = {}
-            info_type = str(
-                getattr(data, "info_type", "") or event_metadata.get("info_type") or ""
-            )
             if info_type:
                 # 只有较可靠的正式报、审定报或完整参数报，才参与最大地震等派生统计。
                 info_lower = info_type.lower()
@@ -84,6 +100,10 @@ class StatsRuleService:
                     is_reliable = True
                 elif "震源" in info_type or "各地" in info_type:
                     is_reliable = True
+                elif envelope.source_id == "fssn_cmt_fanstudio" and info_type == "CMT":
+                    # CMT 虽是补充产品，但在 record_earthquake_stats 外层已被 is_earthquake_supplement_product 过滤掉。
+                    # 这里保持逻辑一致即可。
+                    is_reliable = False
 
             if is_reliable:
                 # 最大地震摘要只接受可信事件，避免临时报文把峰值统计刷乱。
@@ -166,8 +186,13 @@ class StatsRuleService:
         self.manager.stats["earthquake_stats"]["by_region"][region] += 1
         return True
 
-    async def record_weather_stats(self, data) -> bool:
-        """记录气象预警详细统计。"""
+    async def record_weather_stats(self, data) -> bool | dict[str, str]:
+        """记录气象预警详细统计。
+
+        成功返回 True；失败返回 context 字典（无可用上下文时返回 None），
+        context 携带提取地名、标题、头条等上下文，供 log_weather_stats_skip 输出可排障日志。
+        调用方通过返回值是否非 True 判断失败，不再依赖布尔值身份比较。
+        """
         # 气象统计依赖地区解析成功，否则只保留总量，不把不可靠地区写入分布统计。
         title_text = getattr(data, "title", "") or getattr(data, "headline", "") or ""
         headline_text = getattr(data, "headline", "") or ""
@@ -182,7 +207,20 @@ class StatsRuleService:
                 title_text, headline_text
             )
             if not region:
-                return False
+                # 提取到的地名（可能为空）：供日志区分
+                # “headline 中根本提不出地名”与“地名存在但外部查询失败”两种场景。
+                place_name = (
+                    self.manager._weather_region_resolver._extract_place_from_headline(
+                        headline_text
+                    )
+                )
+                # 返回 context 字典（而非 (False, context) 元组）：
+                # 调用方通过“返回值非 True”判断失败，避免对 True/False 做身份比较。
+                return {
+                    "place_name": place_name or "",
+                    "title_text": title_text,
+                    "headline_text": headline_text,
+                }
 
         level = "未知"
         # 颜色级别通过标题关键词匹配，统一映射成带符号的展示文本。
@@ -206,8 +244,6 @@ class StatsRuleService:
 
     def record_time_series(self, event: EventEnvelope) -> None:
         """记录时间序列统计。"""
-        from ...domain.event_models import EarthquakeEvent
-
         envelope = event
         domain_event = envelope.event
         source_id = envelope.source_id or ""
@@ -219,6 +255,8 @@ class StatsRuleService:
             event_time = domain_event.issued_at
         elif isinstance(domain_event, WeatherEvent):
             event_time = domain_event.effective_at
+        elif isinstance(domain_event, TyphoonEvent):
+            event_time = domain_event.updated_at
 
         # 各类事件时间字段名称不同，这里统一归一为 UTC 时间后再写入时间序列桶。
         event_time = self.manager.normalize_utc_datetime(
@@ -230,6 +268,52 @@ class StatsRuleService:
         day_key = event_time.strftime("%Y-%m-%d")
         self.manager.stats["daily_counts"][day_key] += 1
 
-    def log_weather_stats_skip(self) -> None:
-        """记录气象统计被跳过的日志。"""
-        logger.warning("[灾害预警] 气象预警地区信息无效或缺失，已跳过该次气象详细统计")
+    def record_typhoon_stats(self, event: EventEnvelope) -> None:
+        """记录一次实时台风观测，聚合公式由共享累加器统一维护。"""
+        data = event.event
+        if not isinstance(data, TyphoonEvent):
+            return
+        display_name = format_display_name(
+            str(data.name or "").strip(),
+            str(data.name_en or "").strip(),
+            str(data.typhoon_id or "").strip(),
+            fallback="",
+        )
+        # 以归一化台风编号作为统计身份键（跨来源/无名低压阶段稳定），
+        # 条目内保留展示名供榜单展示，避免同一台风展示名变化导致统计分裂。
+        identity_key = normalize_typhoon_id(str(data.typhoon_id or "").strip())
+        record_typhoon_observation(
+            self.manager.stats["typhoon_stats"],
+            display_name=display_name,
+            identity_key=identity_key,
+            level=str(data.typhoon_type or "未知").strip(),
+            wind_speed=data.wind_speed,
+            pressure=data.pressure,
+        )
+
+    def log_weather_stats_skip(
+        self,
+        *,
+        event_id: str = "",
+        source_id: str = "",
+        place_name: str = "",
+        title_text: str = "",
+        headline_text: str = "",
+    ) -> None:
+        """记录气象统计被跳过的日志，附带地区解析失败上下文以便排障。"""
+        detail_parts = [
+            f"事件编号为 {event_id or '未知'}",
+            f"来源：{source_id or '未知来源'}",
+        ]
+        if place_name:
+            detail_parts.append(f"提取地名为 {place_name}")
+        else:
+            detail_parts.append("未提取出可查询地名")
+        if title_text:
+            detail_parts.append(f"标题为{title_text[:60]}")
+        if headline_text:
+            detail_parts.append(f"副标题为 {headline_text[:80]}")
+        logger.warning(
+            "[灾害预警] 气象预警地区信息无效或缺失，已跳过该次气象详细统计"
+            f"（{'; '.join(detail_parts)}）"
+        )

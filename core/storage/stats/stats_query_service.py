@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -40,6 +41,7 @@ class StatsQueryService:
             "earthquake_warning": "地震预警",
             "tsunami": "海啸",
             "weather_alarm": "气象",
+            "typhoon": "台风",
         }
         for type_key, count in s["by_type"].items():
             # 未在映射表中的类型保持原值，避免新增事件类型时被直接丢失显示。
@@ -90,12 +92,50 @@ class StatsQueryService:
                 [
                     "",
                     f"🔥 最大地震: M{max_mag['value']} {max_mag['place_name']}{source_info}",
-                    "",
                 ]
             )
 
-        text.append("☁️ 气象预警分布:")
-        text.append("")
+        # S-Net 观测峰值紧跟历史最大地震，阅读顺序与管理端卡片一致。
+        snet_stats = (
+            s.get("snet_stats", {}) if isinstance(s.get("snet_stats"), dict) else {}
+        )
+        global_max = (
+            snet_stats.get("global_max") if isinstance(snet_stats, dict) else None
+        )
+        if isinstance(global_max, dict) and global_max.get("shindo") is not None:
+            try:
+                shindo_val = float(global_max.get("shindo"))
+            except (TypeError, ValueError):
+                shindo_val = None
+            if shindo_val is not None:
+                station_name = str(
+                    global_max.get("station_name")
+                    or global_max.get("station_id")
+                    or "未知测站"
+                )
+                label = str(global_max.get("shindo_label") or "").strip()
+                if label:
+                    label_part = label if label.startswith("震度") else f"震度{label}"
+                else:
+                    label_part = f"{shindo_val:.3f}"
+                at_text = str(global_max.get("at") or "").strip()
+                time_part = at_text[:19].replace("T", " ") if at_text else "未知时间"
+                text.extend(
+                    [
+                        "",
+                        "🌊 S-Net 海底震度峰值:",
+                        f"最大震度: {station_name} {label_part} ({shindo_val:.3f})",
+                        f"⏰ 时间: {time_part}",
+                    ]
+                )
+                try:
+                    station_count = int(snet_stats.get("station_count") or 0)
+                except (TypeError, ValueError):
+                    station_count = 0
+                if station_count > 0:
+                    text.append(f"已归档测站: {station_count}")
+
+        text.extend(["", "☁️ 气象预警分布:", ""])
         weather_level = s["weather_stats"]["by_level"]
         level_order = ["🔴红色", "🟠橙色", "🟡黄色", "🔵蓝色", "⚪白色", "未知"]
         has_weather = False
@@ -129,6 +169,133 @@ class StatsQueryService:
         if not has_weather and not sorted_types:
             text.append("(暂无数据)")
 
+        # 台风统计块：展示强度等级分布、风王榜与最低气压榜。
+        typhoon_stats = s.get("typhoon_stats", {})
+        typhoon_by_level = typhoon_stats.get("by_level", {})
+        typhoon_by_max_level = typhoon_stats.get("by_max_level", {})
+        max_wind_typhoons = typhoon_stats.get("max_wind_typhoons", {})
+        min_pressure_typhoons = typhoon_stats.get("min_pressure_typhoons", {})
+        if (
+            typhoon_by_level
+            or typhoon_by_max_level
+            or max_wind_typhoons
+            or min_pressure_typhoons
+        ):
+            text.extend(["", "🌀 台风统计:"])
+            if typhoon_by_max_level:
+                text.append("强度等级分布 (按台风个体最高等级):")
+                # 按数量倒序输出等级分布。
+                sorted_max_levels = sorted(
+                    typhoon_by_max_level.items(), key=lambda x: x[1], reverse=True
+                )
+                for level_name, count in sorted_max_levels:
+                    text.append(f"{level_name}: {count}")
+            if typhoon_by_level:
+                text.append("")
+                text.append("强度等级推送频次:")
+                # 按数量倒序输出推送频次。
+                sorted_typhoon_levels = sorted(
+                    typhoon_by_level.items(), key=lambda x: x[1], reverse=True
+                )
+                for level_name, count in sorted_typhoon_levels:
+                    text.append(f"{level_name}: {count}")
+            if max_wind_typhoons:
+                text.append("")
+                text.append("🏆 风王榜Top10 (按最大风速):")
+
+                def _wind_entry_speed(item: Any) -> float:
+                    if isinstance(item, dict):
+                        try:
+                            return float(item.get("wind_speed") or 0.0)
+                        except (TypeError, ValueError):
+                            return 0.0
+                    try:
+                        return float(item or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                def _wind_entry_pressure(item: Any) -> float | None:
+                    if not isinstance(item, dict):
+                        return None
+                    try:
+                        value = item.get("pressure")
+                        return float(value) if value is not None else None
+                    except (TypeError, ValueError):
+                        return None
+
+                def _typhoon_display_name(key: str, entry: Any) -> str:
+                    """优先取条目内展示名，兼容旧结构（key 即展示名）。"""
+                    if isinstance(entry, dict):
+                        name = str(entry.get("display_name") or "").strip()
+                        if name:
+                            return name
+                    return key
+
+                sorted_wind = sorted(
+                    max_wind_typhoons.items(),
+                    key=lambda x: _wind_entry_speed(x[1]),
+                    reverse=True,
+                )
+                for typhoon_key, entry in sorted_wind[:10]:
+                    typhoon_name = _typhoon_display_name(typhoon_key, entry)
+                    wind_speed = _wind_entry_speed(entry)
+                    pressure = _wind_entry_pressure(entry)
+                    if pressure is not None and pressure > 0:
+                        pressure_text = (
+                            str(int(pressure))
+                            if float(pressure).is_integer()
+                            else f"{pressure:.1f}"
+                        )
+                        text.append(
+                            f"{typhoon_name}: {wind_speed:.1f} m/s（{pressure_text} hPa）"
+                        )
+                    else:
+                        text.append(f"{typhoon_name}: {wind_speed:.1f} m/s")
+            if min_pressure_typhoons:
+                text.append("")
+                text.append("🎈 最低气压榜Top10 (数值越低越强):")
+
+                def _pressure_entry_value(entry: Any) -> float | None:
+                    """兼容旧结构 float 与新结构 {"pressure": .., "display_name": ..}。
+
+                    仅返回有限且大于零的气压值；零、负数、NaN、无穷及非法文本
+                    均视为无效（返回 None），避免脏数据进入最低气压榜。
+                    """
+                    if isinstance(entry, dict):
+                        try:
+                            value = entry.get("pressure")
+                            number = float(value) if value is not None else None
+                        except (TypeError, ValueError, OverflowError):
+                            return None
+                    else:
+                        try:
+                            number = float(entry)
+                        except (TypeError, ValueError, OverflowError):
+                            return None
+                    if number is None or not math.isfinite(number) or number <= 0:
+                        return None
+                    return number
+
+                pressure_items = []
+                for key, entry in min_pressure_typhoons.items():
+                    value = _pressure_entry_value(entry)
+                    if value is None:
+                        continue
+                    display = key
+                    if isinstance(entry, dict):
+                        name = str(entry.get("display_name") or "").strip()
+                        if name:
+                            display = name
+                    pressure_items.append((display, value))
+                sorted_pressure = sorted(pressure_items, key=lambda x: x[1])
+                for typhoon_name, pressure in sorted_pressure[:10]:
+                    pressure_text = (
+                        str(int(pressure))
+                        if float(pressure).is_integer()
+                        else f"{pressure:.1f}"
+                    )
+                    text.append(f"{typhoon_name}: {pressure_text} hPa")
+
         text.extend(["", "📡 数据源事件统计:"])
         sorted_sources = sorted(
             s["by_source"].items(), key=lambda x: x[1], reverse=True
@@ -144,10 +311,11 @@ class StatsQueryService:
             else []
         )
         if top_sessions:
-            text.extend(["", "👥 会话推送统计 Top10:"])
+            text.extend(["", "👥 会话推送统计 Top10："])
             for item in top_sessions[:10]:
                 text.append(
-                    f"{item.get('session')}: pushed={item.get('pushed', 0)}, received={item.get('received', 0)}"
+                    f"{item.get('session')}：推送 {item.get('pushed', 0)} 条，"
+                    f"接收 {item.get('received', 0)} 条"
                 )
 
         return "\n".join(text)

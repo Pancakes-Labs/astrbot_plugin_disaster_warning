@@ -8,6 +8,25 @@
     // 定义会话覆写专属的局部参数 Key（如单群推送开关、会话备注名）
     const CONFIG_SESSION_ONLY_KEYS = new Set(['push_enabled', 'session_name']);
 
+    // 仅允许全局配置修改的嵌套路径（会话模式隐藏且保存时剥离）
+    // S-Net 轮询间隔、EQSC 通道鉴权参数影响全局运行态；
+    // eqsc.typhoon 允许会话差异（部分会话只要 Fan，部分要 EQSC 富化）。
+    // 允许会话级覆盖，会话级关闭仅屏蔽该会话内全部子源，不影响全局通道建连。
+    const CONFIG_SESSION_GLOBAL_ONLY_PATHS = [
+        ['data_sources', 'snet', 'poll_interval_seconds'],
+        ['data_sources', 'eqsc', 'refresh_token'],
+        // EQSC 统一轮询间隔影响全局运行态，会话模式隐藏且保存时剥离
+        ['data_sources', 'eqsc', 'poll_interval_seconds'],
+        // FAN Studio 鉴权影响全局 WebSocket 建连，会话模式隐藏且保存时剥离
+        ['data_sources', 'fan_studio', 'api_key'],
+        // FAN Studio 主备服务器偏好影响全局连接策略，会话模式隐藏且保存时剥离
+        ['data_sources', 'fan_studio', 'fan_server_preference'],
+        // 浏览器页面池大小影响全局运行态，会话模式隐藏且保存时剥离
+        ['message_format', 'browser_pool_size'],
+        // 是否忽略 HTTPS 证书错误是浏览器启动级配置，会话模式隐藏且保存时剥离
+        ['message_format', 'browser_ignore_https_errors'],
+    ];
+
     /**
      * 递归获取 Schema 下所有可折叠对象节点的分支路径列表
      */
@@ -84,11 +103,76 @@
     }
 
     /**
+     * 从对象中剥离仅全局可改的嵌套字段。
+     */
+    function stripGlobalOnlyFields(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+        const next = JSON.parse(JSON.stringify(value));
+        CONFIG_SESSION_GLOBAL_ONLY_PATHS.forEach((path) => {
+            let cursor = next;
+            const stack = [];
+            for (let i = 0; i < path.length; i += 1) {
+                const key = path[i];
+                if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor) || !(key in cursor)) {
+                    return;
+                }
+                stack.push([cursor, key]);
+                cursor = cursor[key];
+            }
+            if (!stack.length) return;
+            const [leafParent, leafKey] = stack[stack.length - 1];
+            delete leafParent[leafKey];
+            for (let i = stack.length - 2; i >= 0; i -= 1) {
+                const [parent, key] = stack[i];
+                const child = parent[key];
+                if (child && typeof child === 'object' && !Array.isArray(child) && Object.keys(child).length === 0) {
+                    delete parent[key];
+                } else {
+                    break;
+                }
+            }
+        });
+        return next;
+    }
+
+    /**
+     * 从 Schema 中移除仅全局可改的嵌套字段定义。
+     */
+    function stripGlobalOnlyFromSchema(schemaObject) {
+        if (!schemaObject || typeof schemaObject !== 'object' || Array.isArray(schemaObject)) {
+            return schemaObject;
+        }
+        const next = JSON.parse(JSON.stringify(schemaObject));
+        CONFIG_SESSION_GLOBAL_ONLY_PATHS.forEach((path) => {
+            let cursor = next;
+            for (let i = 0; i < path.length; i += 1) {
+                const key = path[i];
+                if (!cursor || typeof cursor !== 'object') return;
+                // schema 对象节点的子项在 items 下
+                if (cursor.type === 'object' && cursor.items && typeof cursor.items === 'object') {
+                    cursor = cursor.items;
+                }
+                if (i === path.length - 1) {
+                    if (cursor && typeof cursor === 'object') {
+                        delete cursor[key];
+                    }
+                    return;
+                }
+                const child = cursor[key];
+                if (!child || typeof child !== 'object') return;
+                cursor = child;
+            }
+        });
+        return next;
+    }
+
+    /**
      * 根据当前的配置编辑模式获取过滤后的可见 Schema
      * 
      * 过滤策略：
      * - 全局模式下直接返回完整 Schema。
      * - 会话差异覆写模式下，剔除敏感及不适用于单群的字段，并动态塞入局部单会话推送开关的表单描述定义。
+     * - 同时剥离仅全局可改的嵌套字段（如 S-Net 轮询间隔）。
      */
     function getVisibleSchema(schemaArg, currentMode = 'global') {
         if (!schemaArg || currentMode !== 'session') return schemaArg;
@@ -105,18 +189,22 @@
                 default: true,
             };
         }
-        return visible;
+        // 会话模式隐藏全局-only 嵌套字段
+        return stripGlobalOnlyFromSchema(visible);
     }
 
     // 绑定至全局
     window.ConfigSchemaUtils = {
         CONFIG_SESSION_DIFF_HIDDEN_KEYS,
         CONFIG_SESSION_ONLY_KEYS,
+        CONFIG_SESSION_GLOBAL_ONLY_PATHS,
         getAllExpandablePaths,
         isValidSchemaObject,
         cleanConfig,
         generateDefaults,
         pickConfigBySchema,
+        stripGlobalOnlyFields,
+        stripGlobalOnlyFromSchema,
         getVisibleSchema,
     };
 })();

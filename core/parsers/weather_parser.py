@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections import deque
+import time
 from datetime import datetime
 from typing import Any
 
@@ -18,21 +18,38 @@ from .base_parser import BaseParser
 
 
 class WeatherAlarmParser(BaseParser):
-    """中国气象局气象预警解析器。"""
+    """中国气象局气象预警解析器。
 
-    def __init__(self, message_logger=None):
+    支持 FAN Studio 扁平载荷与 OpenQuakeAPI RealtimeEvent 包装格式。
+    构造时按 source_id 区分数据源，各源维护独立的短窗去重队列，
+    跨源不去重。
+    """
+
+    def __init__(self, source_id: str = "china_weather_fanstudio", message_logger=None):
         """初始化气象预警解析器与短期重复记录缓存。"""
-        super().__init__("china_weather_fanstudio", message_logger)
-        # 用双端队列在内存中缓存最近 10 条已处理过气象预警标识，用于快速防重过滤
-        self._processed_weather_ids = deque(maxlen=10)
+        super().__init__(source_id, message_logger)
+        # 短窗去重缓存：{预警 id: 最近处理时间戳}。
+        # 带时间窗 + 容量上限，避免高频重推旧预警在重载后被反复放行。
+        self._processed_weather_ids: dict[str, float] = {}
+        self._WEATHER_DEDUPE_WINDOW_SECONDS = 600  # 10 分钟短窗
+        self._WEATHER_DEDUPE_MAX_ENTRIES = 512
 
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析中国气象局气象预警数据。"""
         try:
-            # 提取数据负载中的实际业务字段
-            msg_data = self._extract_data(data)
+            # OpenQuakeAPI RealtimeEvent 解包：外层有 source/type/action/payload
+            # 返回 (payload, is_realtime)；is_realtime=True 表示已确认是 RealtimeEvent
+            # 但被丢弃（如 action=remove / 非 weather 类型），此时不再回退到
+            # FAN Studio 扁平载荷提取，避免把 RealtimeEvent 外层当扁平预警误处理。
+            realtime_result = self._extract_realtime_payload(data)
+            if realtime_result is not None:
+                msg_data, is_realtime = realtime_result
+                if not is_realtime:
+                    return None
+            else:
+                # 非 RealtimeEvent 结构：回退到 FAN Studio 扁平/嵌套载荷提取
+                msg_data = self._extract_data(data)
             if not msg_data:
-                plugin_logger.debug(f"[灾害预警] {self.source_id} 消息中没有有效数据")
                 return None
 
             # 过滤心跳包
@@ -42,10 +59,11 @@ class WeatherAlarmParser(BaseParser):
             # 内存中判定当前事件ID是否已被处理过，避免同一预警短时多次派发
             # 这里也属于去重阶段的日志，如果提示检测到重复，应由 plugin_logger 输出
             weather_id = msg_data.get("id")
-            if weather_id and weather_id in self._processed_weather_ids:
+            if weather_id and self._is_weather_duplicate(str(weather_id)):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
                     is_event_linked=True,
+                    event_stream="weather_alarm",
                 )
                 return None
 
@@ -122,7 +140,9 @@ class WeatherAlarmParser(BaseParser):
                 "title": title,
                 "headline": headline,
                 "description": description,
-                "source_family": "fan_studio",
+                "source_family": source_entry.provider_family.value
+                if source_entry
+                else "fan_studio",
                 "source_enum": source_entry.source_enum if source_entry else "",
                 "source_type": source_entry.source_type.value
                 if source_entry
@@ -174,11 +194,13 @@ class WeatherAlarmParser(BaseParser):
 
             # 加入防重去噪队列中
             if envelope.id:
-                self._processed_weather_ids.append(envelope.id)
+                self._remember_weather_id(str(envelope.id))
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 生效时间: {issue_time}",
                 is_event_linked=True,
+                event_stream="weather_alarm",
+                is_silent_window=True,
             )
 
             return envelope
@@ -187,3 +209,63 @@ class WeatherAlarmParser(BaseParser):
                 f"[灾害预警] {self.source_id} 解析气象预警数据失败: {exc}, 数据内容: {data}"
             )
             return None
+
+    def _is_weather_duplicate(self, weather_id: str) -> bool:
+        """判断预警 id 是否处于短窗去重窗口内。"""
+        if not weather_id:
+            return False
+        last_ts = self._processed_weather_ids.get(weather_id)
+        if last_ts is None:
+            return False
+        return (time.monotonic() - last_ts) <= self._WEATHER_DEDUPE_WINDOW_SECONDS
+
+    def _remember_weather_id(self, weather_id: str) -> None:
+        """登记预警 id 的处理时间，并控制缓存容量。"""
+        if not weather_id:
+            return
+        self._processed_weather_ids[weather_id] = time.monotonic()
+        if len(self._processed_weather_ids) > self._WEATHER_DEDUPE_MAX_ENTRIES:
+            # 超出容量上限时清理最旧的记录，避免内存无限增长。
+            oldest_key = min(
+                self._processed_weather_ids,
+                key=self._processed_weather_ids.get,
+            )
+            self._processed_weather_ids.pop(oldest_key, None)
+
+    def _extract_realtime_payload(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, bool] | None:
+        """解包 OpenQuakeAPI RealtimeEvent 外层结构。
+
+        RealtimeEvent 格式：
+            {source, type, action, timestampMs, payload: {...}}
+
+        返回 (payload, is_realtime)：
+        - 返回 None：非 RealtimeEvent 结构（无 payload 字段），
+          由调用方回退到 FAN Studio 扁平载荷提取。
+        - 返回 (None, True)：已确认是 RealtimeEvent 但被丢弃
+          （action=remove / 非 weather 类型 / payload 非 dict），
+          调用方不应回退到扁平载荷解析。
+        - 返回 (payload, True)：成功解包的气象预警载荷。
+        """
+        if not isinstance(data, dict):
+            return None
+        # 必须同时具备 payload 和 source/type/action 才视为 RealtimeEvent
+        if "payload" not in data:
+            return None
+        if not any(key in data for key in ("source", "type", "action")):
+            return None
+
+        msg_type = str(data.get("type") or "").strip().lower()
+        action = str(data.get("action") or "").strip().lower()
+
+        # 仅处理气象预警新增事件；其余情况确认是 RealtimeEvent 但直接丢弃
+        if msg_type and msg_type != "weather":
+            return None, True
+        if action and action not in ("new", ""):
+            return None, True
+
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            return None, True
+        return payload, True

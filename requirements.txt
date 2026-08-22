@@ -3,6 +3,7 @@ pydantic>=2.0.0
 python-dateutil>=2.8.0
 jinja2>=3.0.0
 playwright>=1.30.0
+Pillow>=10.0.0
 tzdata>=2023.3
 tomli>=2.0.1; python_version < "3.11"
 fastapi>=0.134.0

@@ -106,6 +106,12 @@ function useConfigLoader({
             }
             setSessionLoading(true);
             const sessionData = await api.getSessionConfig(currentSession);
+            // 会话模式必须编辑“生效配置”(global + override)，
+            // 否则未写入 override 的字段会显示成 schema 默认关，
+            // 但运行时仍继承全局开启，导致“界面关了却仍推送”。
+            if (sessionData?.effective && typeof sessionData.effective === 'object') {
+                return sessionData.effective;
+            }
             return sessionData?.override || {};
         }
         return await api.getFullConfig();

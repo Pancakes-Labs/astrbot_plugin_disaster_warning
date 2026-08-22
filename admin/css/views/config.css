@@ -13,16 +13,16 @@
 
 /* 配置卡片主体 */
 .config-card {
-    height: calc(100vh - var(--top-bar-height) - 24px); /* 高度自适应视口并避开顶部栏 */
+    height: calc(100vh - var(--top-bar-height) - 16px); /* 高度自适应视口并避开顶部栏 */
     display: flex;
     flex-direction: column;
     padding: 0 !important;
-    overflow: hidden;
+    overflow: hidden; /* 约束内部滚动视窗，避免整卡高度溢出 */
 }
 
 /* 配置项头部悬浮块 */
 .config-header {
-    padding: 20px 24px;
+    padding: 12px 24px;
     flex-shrink: 0;
     border-bottom: 1px solid var(--glass-border);
     background: rgba(255, 255, 255, 0.5);
@@ -30,9 +30,98 @@
     z-index: 10;
 }
 
+/* 紧凑型顶栏：模式切换替代静态标题后进一步压低高度 */
+.config-header--compact {
+    padding: 10px 24px;
+}
+
+/* 侧栏内顶栏：融入左栏，无独立圆角/悬浮背景，让右栏推文预览顶到卡片顶部 */
+.config-header--sidebar {
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--glass-border);
+    background: transparent;
+    backdrop-filter: none;
+    padding: 12px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 会话差异模式下的会话选择行：与模式切换按钮垂直排列 */
+.config-header-session-row {
+    flex-wrap: wrap;
+}
+
+/* 顶栏模式切换按钮组：圆角胶囊质感，与顶栏玻璃底融为一体 */
+.config-header-mode-switch,
+.config-header-mode-switch.MuiToggleButtonGroup-root {
+    border-radius: 10px !important;
+    padding: 2px;
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 5%, transparent);
+}
+
+.config-header-mode-switch .MuiToggleButton-root,
+.config-header-mode-switch.MuiToggleButtonGroup-root .MuiToggleButton-root {
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 4px 14px !important;
+    font-size: 0.8125rem !important;
+    font-weight: 600 !important;
+    text-transform: none !important;
+    color: var(--md-sys-color-on-surface-variant);
+    transition: background-color 0.18s ease-out, color 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+
+.config-header-mode-switch .MuiToggleButton-root:hover,
+.config-header-mode-switch.MuiToggleButtonGroup-root .MuiToggleButton-root:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+    color: var(--md-sys-color-on-surface);
+}
+
+.config-header-mode-switch .MuiToggleButton-root.Mui-selected,
+.config-header-mode-switch.MuiToggleButtonGroup-root .MuiToggleButton-root.Mui-selected {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary, #fff);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);
+}
+
+.config-header-mode-switch .MuiToggleButton-root.Mui-selected:hover,
+.config-header-mode-switch.MuiToggleButtonGroup-root .MuiToggleButton-root.Mui-selected:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary, #fff);
+}
+
 body.dark-theme .config-header {
     background: rgba(20, 18, 24, 0.8);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 暗色主题：配置页表单字段行、动作底栏与备份面板补强。
+   原样式使用浅色 rgba 底与固定阴影，暗色下底色发白/阴影生硬 */
+body.dark-theme .config-action-bar {
+    background-color: var(--md-sys-color-surface);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.32);
+}
+
+body.dark-theme .config-backup-panel {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, var(--md-sys-color-surface)) !important;
+    border-color: rgba(208, 188, 255, 0.14) !important;
+}
+
+body.dark-theme .config-backup-card {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+body.dark-theme .config-object-details,
+body.dark-theme .config-object-details.MuiAccordionDetails-root {
+    background: var(--md-sys-color-background);
+}
+
+/* 配置页输入控件跟随暗色渲染（下拉弹层/日期选择器不发白） */
+body.dark-theme .config-view-main input,
+body.dark-theme .config-view-main select,
+body.dark-theme .config-view-main textarea {
+    color-scheme: dark;
 }
 
 /* 标题行排布 */
@@ -61,6 +150,7 @@ body.dark-theme .config-header {
 /* 配置项表单滚动视窗 */
 .config-renderer-scroll-area {
     flex: 1;
+    min-height: 0; /* 双栏布局下允许收缩，保证内部滚动生效 */
     overflow-y: auto;
     padding: 18px 24px 22px;
     overscroll-behavior: contain; /* 阻止滚动穿透 */
@@ -90,7 +180,7 @@ body.dark-theme .config-header {
 .config-renderer-field-list {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 8px;
 }
 
 /* 单个配置输入项包裹层 */
@@ -150,45 +240,52 @@ body.dark-theme .config-header {
     border-radius: 8px !important;
 }
 
-/* 配置保存/动作底栏 */
+/* 配置保存/动作底栏（双栏下宽度减半，紧凑排版避免按钮换行） */
 .config-action-bar {
     flex-shrink: 0;
     background-color: var(--md-sys-color-surface);
     backdrop-filter: blur(8px);
     border-top: 1px solid var(--md-sys-color-outline-variant);
-    padding: 18px 24px 20px;
+    padding: 12px 16px 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
     z-index: 10;
-    gap: 16px;
+    gap: 10px;
+    flex-wrap: nowrap;
 }
 
 /* 保存底栏元数据（如"有更改待保存"） */
 .config-action-bar__meta {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .config-action-bar__count {
     font-weight: 500 !important;
+    white-space: nowrap;
 }
 
 /* 动作条展开收起按钮 */
 .config-action-bar__toggle-btn {
     min-width: auto !important;
-    padding-left: 8px !important;
-    padding-right: 8px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    white-space: nowrap;
 }
 
 /* 动作条常规按钮 */
 .config-action-bar__btn {
-    min-width: 100px !important;
-    border-radius: 16px !important;
+    min-width: 0 !important;
+    border-radius: 12px !important;
     border-width: 1.5px !important;
-    font-size: 0.875rem !important;
+    font-size: 0.8125rem !important;
+    padding: 6px 12px !important;
+    white-space: nowrap;
 }
 
 .config-action-bar__btn:hover {
@@ -197,25 +294,29 @@ body.dark-theme .config-header {
 
 /* 动作条宽型按钮 */
 .config-action-bar__btn--wide {
-    min-width: 130px !important;
+    min-width: 0 !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
 }
 
 /* 动作按钮组容器 */
 .config-action-bar__actions {
     display: flex;
-    gap: 16px;
+    gap: 8px;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 /* 核心保存更改高亮按钮 */
 .config-action-bar__save-btn {
-    min-width: 120px !important;
-    min-height: 52px !important;
-    padding: 0 24px !important;
-    border-radius: 16px !important;
-    font-size: 0.875rem !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    padding: 0 16px !important;
+    border-radius: 12px !important;
+    font-size: 0.8125rem !important;
     font-weight: 700 !important;
+    white-space: nowrap;
     box-shadow: 0 2px 8px rgba(0, 90, 193, 0.3) !important;
 }
 
@@ -236,6 +337,7 @@ body.dark-theme .config-header {
 
 .config-renderer-field-item + .config-renderer-field-item .config-object-group,
 .config-renderer-field-item + .config-renderer-field-item .config-object-group.MuiPaper-root {
+    /* 手风琴配置组之间放宽间距，与顶部紧凑的普通配置键形成层次差异 */
     margin-top: 2px;
 }
 
@@ -263,8 +365,8 @@ body.dark-theme .config-header {
 /* 分组标题摘要栏 */
 .config-object-summary,
 .config-object-summary.MuiAccordionSummary-root {
-    padding: 12px 20px !important;
-    min-height: 60px !important;
+    padding: 10px 20px !important;
+    min-height: 52px !important;
     transition: background-color 0.2s ease;
 }
 
@@ -273,7 +375,7 @@ body.dark-theme .config-header {
 }
 
 .config-object-summary.MuiAccordionSummary-root.Mui-expanded {
-    min-height: 60px !important;
+    min-height: 52px !important;
 }
 
 .config-object-summary.MuiAccordionSummary-root.Mui-expanded .MuiAccordionSummary-content {
@@ -360,7 +462,7 @@ body.dark-theme .config-header {
 /* 分组折叠内部主体面板 */
 .config-object-details,
 .config-object-details.MuiAccordionDetails-root {
-    padding: 0 28px !important;
+    padding: 0 24px !important;
     background: var(--md-sys-color-background);
 }
 
@@ -368,8 +470,8 @@ body.dark-theme .config-header {
 .config-object-children {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 10px 0 12px;
+    gap: 10px;
+    padding: 8px 0 10px;
 }
 
 /* 对象的辅助元数据容器 */
@@ -386,7 +488,7 @@ body.dark-theme .config-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--md-sys-color-outline-variant);
     gap: 20px;
 }
@@ -406,30 +508,21 @@ body.dark-theme .config-header {
     min-width: 0;
 }
 
-/* 配置模式操作工具条 */
-.config-mode-toolbar {
-    padding: 18px 24px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.config-mode-toolbar__row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-/* 模拟/切换测试会话的输入控件 */
-.config-mode-toolbar__session-field {
-    min-width: 420px;
+/* 顶栏会话选择输入控件（会话差异配置模式，原工具栏迁移至顶栏） */
+.config-header-session-field {
+    min-width: 280px;
     max-width: 100%;
 }
 
-.config-mode-toolbar__loading,
-.config-mode-toolbar__meta {
+/* 顶栏会话加载提示 */
+.config-header-session-loading {
     display: block !important;
+    white-space: nowrap;
+}
+
+/* 顶栏会话覆写状态摘要行（位于标题行下方） */
+.config-header-meta {
+    padding: 6px 0 0 28px;
 }
 
 /* 配置项名字 */
@@ -467,7 +560,7 @@ body.dark-theme .config-header {
 
 /* 配置块级排布（多行混合结构表单） */
 .config-field-block {
-    padding: 14px 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
@@ -520,34 +613,47 @@ body.dark-theme .config-header {
     margin: 16px 0 !important;
 }
 
+/* 备份面板（双栏 2/3 宽度下紧凑排版，避免卡片堆叠/按钮换行） */
 .config-backup-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
 }
 
 .config-backup-card {
-    flex: 1 1 300px;
-    padding: 16px;
+    min-width: 0;
+    padding: 14px;
     background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 4%, transparent);
     border-radius: 12px;
 }
 
 .config-backup-card-title {
     font-weight: 700 !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 6px !important;
     color: var(--md-sys-color-on-surface) !important;
+    font-size: 0.95rem !important;
 }
 
 .config-backup-card-desc {
-    margin-bottom: 16px !important;
-    min-height: 36px;
+    margin-bottom: 12px !important;
+    min-height: 32px;
+    font-size: 0.8125rem !important;
     color: var(--md-sys-color-on-surface-variant) !important;
 }
 
 .config-backup-btn-group {
     display: flex;
-    gap: 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+
+.config-backup-btn-group .MuiButton-root {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    font-size: 0.75rem !important;
+    white-space: nowrap;
 }
 
 .config-backup-btn-zip-export {
@@ -561,7 +667,12 @@ body.dark-theme .config-header {
 }
 
 .config-backup-switch-wrap {
-    margin-bottom: 12px !important;
+    margin-bottom: 10px !important;
+}
+
+.config-backup-switch-wrap .MuiFormControlLabel-label {
+    font-size: 0.75rem !important;
+    line-height: 1.4 !important;
 }
 
 .config-backup-btn-json-export {
@@ -572,4 +683,375 @@ body.dark-theme .config-header {
 .config-backup-btn-json-import {
     border-color: #4caf50 !important;
     color: #4caf50 !important;
+}
+
+/* ============================================================
+   配置页双栏布局：左侧 2/3 配置表单 + 右侧 1/3 实时推文预览
+   （ConfigView 顶层并列，非 ConfigRenderer 内部）
+   ============================================================ */
+.config-view-main {
+    flex: 1;
+    display: flex;
+    min-height: 0; /* 允许子元素收缩，配合各自内部滚动 */
+    overflow: hidden;
+}
+
+/* 左栏：配置编辑器 */
+.config-view-main-left {
+    flex: 0 0 66.6667%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid var(--glass-border, rgba(0, 0, 0, 0.08));
+}
+
+/* 右栏：实时推文预览 */
+.config-view-main-right {
+    flex: 1 1 33.3333%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--md-sys-color-primary) 3%, transparent);
+}
+
+/* 窄屏（平板/小桌面）：配置页双栏改为纵向堆叠，保证右侧预览列可读性 */
+@media (max-width: 1024px) {
+    .config-view-main {
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .config-view-main-left {
+        flex: 0 0 auto;
+        min-height: 60vh;
+        border-right: none;
+        border-bottom: 1px solid var(--glass-border, rgba(0, 0, 0, 0.08));
+    }
+
+    .config-view-main-right {
+        flex: 1 1 auto;
+        min-height: 420px;
+    }
+}
+
+/* 移动端：进一步降低左栏编辑器最小高度，右栏预览占满剩余空间 */
+@media (max-width: 768px) {
+    .config-view-main-left {
+        min-height: 50vh;
+    }
+
+    .config-view-main-right {
+        min-height: 360px;
+    }
+}
+
+/* ============================================================
+   实时推文预览面板（PushPreviewPanel）
+   ============================================================ */
+.pp-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+
+.pp-header {
+    padding: 10px 16px 4px; /* 标题与下方灾种栏间距调小 */
+    flex-shrink: 0;
+}
+
+.pp-title {
+    font-weight: 700 !important;
+    letter-spacing: -0.3px !important;
+}
+
+.pp-subtitle {
+    display: block;
+    margin-top: 1px !important;
+    font-size: 11px !important;
+    opacity: 0.8;
+}
+
+/* 数据源两级导航：顶部灾种 Tab + 下方横向数据源滑条 */
+.pp-source-slider {
+    padding: 8px 16px 10px; /* 收紧底部间距，保持整体紧凑 */
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-bottom: 1px solid var(--glass-border, rgba(0, 0, 0, 0.06));
+    background: color-mix(in srgb, var(--md-sys-color-primary) 2%, transparent);
+}
+
+/* 顶层：灾种 Tab 胶囊导航 */
+.pp-type-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 2px;
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 5%, transparent);
+    border-radius: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.pp-type-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.pp-type-tab {
+    appearance: none;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border: none;
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+}
+
+.pp-type-tab:hover {
+    color: var(--md-sys-color-on-surface);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 6%, transparent);
+}
+
+.pp-type-tab.is-active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary, #fff);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);
+}
+
+.pp-type-tab-icon {
+    font-size: 15px;
+    line-height: 1;
+}
+
+/* 下层：当前灾种的数据源横向滑条 */
+.pp-source-row {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* 横向滚动容器：nowrap + overflow-x:auto，杜绝换行堆叠；支持滚轮横滚 */
+.pp-source-strip {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px; /* 滑块间隙稍加大 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 4px 2px 8px; /* box 更大 */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--md-sys-color-primary) 45%, transparent) transparent;
+    min-width: 0;
+    /* 不使用 scroll-snap，避免滚轮横滚后吸附回弹导致"滑不动" */
+}
+
+.pp-source-strip::-webkit-scrollbar {
+    height: 5px;
+}
+
+.pp-source-strip::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.pp-source-strip::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--md-sys-color-primary) 45%, transparent);
+    border-radius: 4px;
+}
+
+/* 数据源长方块按钮：小圆角小间隙，文字完整展示，质感提升 */
+.pp-source-btn {
+    appearance: none;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--glass-border, rgba(0, 0, 0, 0.12));
+    background: var(--md-sys-color-surface, #fff);
+    color: var(--md-sys-color-on-surface);
+    border-radius: 6px; /* 小圆角 */
+    padding: 8px 14px; /* box 更大 */
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+    max-width: none;
+    overflow: visible;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.pp-source-btn-label {
+    font-weight: 600;
+}
+
+.pp-source-btn-family {
+    font-size: 10px;
+    opacity: 0.65;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+    font-weight: 400;
+}
+
+.pp-source-btn:hover {
+    border-color: var(--md-sys-color-primary);
+    background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
+    transform: translateY(-2px);
+    box-shadow: 0 3px 8px color-mix(in srgb, var(--md-sys-color-primary) 15%, transparent);
+}
+
+.pp-source-btn.is-active {
+    background: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary, #fff);
+    font-weight: 600;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent);
+}
+
+.pp-source-btn.is-active .pp-source-btn-family {
+    background: color-mix(in srgb, var(--md-sys-color-on-primary) 18%, transparent);
+    color: inherit;
+}
+
+/* 预览内容区 */
+.pp-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0; /* 允许内部 flex 子项正常拉伸占满全高 */
+}
+
+.pp-loading,
+.pp-empty,
+.pp-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px 0;
+    text-align: center;
+}
+
+.pp-loading {
+    min-height: 140px;
+}
+
+/* 加载动画图标：呼吸脉冲 */
+.pp-loading .MuiCircularProgress-root {
+    animation: pp-loading-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pp-loading-pulse {
+    0%, 100% {
+        opacity: 0.55;
+        transform: scale(0.92);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.05);
+    }
+}
+
+/* 预览推文入场动画：淡入 + 轻微上移 */
+.pp-animate-in {
+    animation: pp-fade-in 0.35s ease-out both;
+}
+
+@keyframes pp-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 过滤判定徽章 */
+.pp-decision {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.pp-decision--ok {
+    background: color-mix(in srgb, #4caf50 12%, transparent);
+    color: #2e7d32;
+    border: 1px solid color-mix(in srgb, #4caf50 30%, transparent);
+}
+
+body.dark-theme .pp-decision--ok {
+    color: #a5d6a7;
+}
+
+.pp-decision--blocked {
+    background: color-mix(in srgb, #f44336 12%, transparent);
+    color: #c62828;
+    border: 1px solid color-mix(in srgb, #f44336 30%, transparent);
+}
+
+body.dark-theme .pp-decision--blocked {
+    color: #ef9a9a;
+}
+
+.pp-decision-icon {
+    flex-shrink: 0;
+    font-size: 15px;
+}
+
+.pp-decision-text {
+    flex: 1;
+    word-break: break-all;
+}
+
+/* 推文内容区：flex:1 让推文卡片拉伸占满预览区剩余全高 */
+.pp-tweet {
+    flex: 1;
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 4%, transparent);
+    border: 1px solid var(--glass-border, rgba(0, 0, 0, 0.08));
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.pp-tweet-text {
+    margin: 0;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--md-sys-color-on-surface);
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+/* 图片降级提示 */
+.pp-media-notice {
+    display: flex;
+    align-items: center;
 }

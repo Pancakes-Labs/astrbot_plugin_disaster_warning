@@ -3,16 +3,15 @@
  * 文件路径：admin/js/views/StatusView.jsx
  * 功能描述：作为插件管理端进入的首页面板，提供全局数据监听器的运行状态汇报。
  *           包含：跑马灯滚动通知、系统健康卡片、简明数据量卡片、全局网络连接拓扑图、
- *           地震速报模块，以及快捷维护面板（模拟仿真预警、重连数据源、刷新及重置统计等）。
+ *           地震速报模块，以及快捷维护面板（重连数据源、刷新及重置统计等）。
  */
 
 const { Box, Button, Typography } = MaterialUI;
 
 /**
  * 系统健康与运行状态视图主组件
- * @param {object} props 接收父级状态，包括开启模拟预警模态框的控制函数
  */
-function StatusView({ onOpenSimulation }) {
+function StatusView() {
     // 从应用的状态总线订阅全局运行状态
     const { state, refreshData, fetchConnections, fetchConfig } = useAppContext();
     const { status, wsConnected } = state; 
@@ -147,16 +146,7 @@ function StatusView({ onOpenSimulation }) {
                         </Box>
                         
                         <Box className="status-quick-actions-list">
-                            {/* 1. 点击启动仿真测试，生成虚拟的强震或气象警报来调试前端或推送机器人 */}
-                            <button
-                                className="btn btn-action status-action-button"
-                                onClick={onOpenSimulation}
-                            >
-                                <span className="status-action-icon">🧪</span>
-                                模拟预警仿真
-                            </button>
-                            
-                            {/* 2. 强制重启并重新拉取各个数据接收端口 */}
+                            {/* 1. 强制重启并重新拉取各个数据接收端口 */}
                             <button
                                 className={`btn btn-action status-action-button ${!status.running ? 'is-disabled' : ''}`}
                                 onClick={handleReconnect}
@@ -176,7 +166,7 @@ function StatusView({ onOpenSimulation }) {
                                 )}
                             </button>
 
-                            {/* 3. 主动同步服务端的所有当前缓存与时区设置 */}
+                            {/* 2. 主动同步服务端的所有当前缓存与时区设置 */}
                             <button
                                 className="btn btn-action status-action-button"
                                 onClick={refreshAll}
@@ -195,7 +185,7 @@ function StatusView({ onOpenSimulation }) {
                                 )}
                             </button>
 
-                            {/* 4. 清除底层历史统计，重归初始白卷 */}
+                            {/* 3. 清除底层历史统计，重归初始白卷 */}
                             <button
                                 className={`btn btn-action status-action-button ${!status.running ? 'is-disabled' : ''}`}
                                 onClick={handleResetStatistics}
@@ -221,6 +211,11 @@ function StatusView({ onOpenSimulation }) {
                 {/* 数据源长连接状态网络监控图表 */}
                 <div className="span-12">
                     <ConnectionsGrid />
+                </div>
+
+                {/* 通道健康：90 天条带 + 历史事故 */}
+                <div className="span-12">
+                    <ConnectionHealthPanel />
                 </div>
 
                 {/* 地震预警（EEW）状态卡片 */}

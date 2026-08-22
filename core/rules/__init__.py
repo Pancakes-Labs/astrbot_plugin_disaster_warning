@@ -12,6 +12,8 @@ from .rule_chain import RuleChain, build_default_rule_chain
 from .rule_result import RuleDecision
 from .source_rule import SourceEnabledRule
 from .time_rule import EventTimeRule
+from .tsunami_rule import TsunamiRule
+from .typhoon_rule import TyphoonRule
 from .weather_rule import WeatherRule
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "ReportRule",
     "LocalIntensityRule",
     "WeatherRule",
+    "TsunamiRule",
+    "TyphoonRule",
 ]

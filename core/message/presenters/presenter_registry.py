@@ -13,15 +13,20 @@ from .base_presenter import BasePresenter
 from .earthquake_presenter import (
     CeaEewPresenter,
     CencEarthquakePresenter,
+    CencIntensityReportPresenter,
     CwaEewPresenter,
     CwaReportPresenter,
+    FssnCmtPresenter,
     GlobalQuakeTextPresenter,
     JmaEarthquakeInfoPresenter,
     JmaEewPresenter,
+    ShakeAlertEewPresenter,
+    SnetPresenter,
     UsgsEarthquakePresenter,
 )
 from .text_presenter import TextPresenter, get_text_presenter_keys
 from .tsunami_presenter import JmaTsunamiPresenter, TsunamiAlertPresenter
+from .typhoon_presenter import TyphoonPresenter
 from .weather_presenter import WeatherAlertPresenter
 
 # 按展示类型分发的主注册表，适合从来源目录中的展示类型直接解析展示器。
@@ -29,8 +34,10 @@ _PRESENTATION_PRESENTER_REGISTRY: dict[str, type[BasePresenter]] = {
     "earthquake_eew": TextPresenter,
     "earthquake_report": TextPresenter,
     "global_quake": GlobalQuakeTextPresenter,
+    "snet": SnetPresenter,
     "tsunami": TextPresenter,
     "weather": WeatherAlertPresenter,
+    "typhoon": TyphoonPresenter,
 }
 
 # 按文本展示键分发的细粒度注册表，用于来源级别的精确匹配。
@@ -41,11 +48,16 @@ _TEXT_KEY_PRESENTER_REGISTRY: dict[str, type[BasePresenter]] = {
     "jma_eew": JmaEewPresenter,
     "global_quake": GlobalQuakeTextPresenter,
     "cenc_report": CencEarthquakePresenter,
+    "cenc_ir_report": CencIntensityReportPresenter,
     "jma_report": JmaEarthquakeInfoPresenter,
     "usgs_report": UsgsEarthquakePresenter,
+    "shakealert_eew": ShakeAlertEewPresenter,
+    "fssn_cmt": FssnCmtPresenter,
+    "snet": SnetPresenter,
     "tsunami_cn": TsunamiAlertPresenter,
     "tsunami_jma": JmaTsunamiPresenter,
     "weather_cn": WeatherAlertPresenter,
+    "typhoon": TyphoonPresenter,
 }
 
 # 当前两类注册都无法命中时，按灾种选择默认展示器兜底。
@@ -53,6 +65,7 @@ _DEFAULT_PRESENTERS_BY_EVENT_TYPE: dict[str, type[BasePresenter]] = {
     "earthquake": TextPresenter,
     "tsunami": TextPresenter,
     "weather": WeatherAlertPresenter,
+    "typhoon": TyphoonPresenter,
 }
 
 

@@ -13,6 +13,8 @@ from .report_rule import ReportRule
 from .rule_result import RuleDecision
 from .source_rule import SourceEnabledRule
 from .time_rule import EventTimeRule
+from .tsunami_rule import TsunamiRule
+from .typhoon_rule import TyphoonRule
 from .weather_rule import WeatherRule
 
 
@@ -41,14 +43,17 @@ class RuleChain:
 def build_default_rule_chain() -> RuleChain:
     """构建默认推送规则链。
 
-    默认顺序从基础有效性校验开始，再逐步进入来源、气象、关键词、震动强度、报次与本地烈度判断。
+    默认顺序从基础有效性校验开始，再逐步进入来源、气象、台风、海啸、关键词、
+    震动强度、报次与本地烈度判断。
     """
-    # 顺次装配 7 个核心的过滤逻辑规则实例
+    # 顺次装配核心过滤逻辑规则实例
     return RuleChain(
         [
             EventTimeRule(),
             SourceEnabledRule(),
             WeatherRule(),
+            TyphoonRule(),
+            TsunamiRule(),
             KeywordRule(),
             EarthquakeThresholdRule(),
             ReportRule(),

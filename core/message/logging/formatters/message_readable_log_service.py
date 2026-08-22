@@ -95,10 +95,21 @@ class MessageReadableLogService:
     def _format_connection_info(self, connection_info: dict[str, Any]) -> str:
         """格式化连接信息展示文本。"""
         result = "🔗 连接: "
+        parts: list[str] = []
         if "url" in connection_info:
-            result += f"URL: {connection_info['url']}"
+            parts.append(f"URL: {connection_info['url']}")
         elif "server" in connection_info and "port" in connection_info:
-            result += f"服务器: {connection_info['server']}:{connection_info['port']}"
+            parts.append(
+                f"服务器: {connection_info['server']}:{connection_info['port']}"
+            )
+        if connection_info.get("status_code") is not None:
+            parts.append(f"状态码: {connection_info['status_code']}")
+        if connection_info.get("connection_type"):
+            parts.append(f"类型: {connection_info['connection_type']}")
+        if connection_info.get("provider"):
+            parts.append(f"服务商: {connection_info['provider']}")
+        if parts:
+            result += " | ".join(parts)
         return result + "\n"
 
     def _format_payload_data(

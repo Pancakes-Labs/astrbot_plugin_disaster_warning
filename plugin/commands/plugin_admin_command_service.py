@@ -6,14 +6,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections import OrderedDict
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
+from astrbot.api.event import MessageChain
+from astrbot.core import DEMO_MODE
+from astrbot.core.desktop_runtime import is_desktop_managed_backend
+from astrbot.core.updator import AstrBotUpdator
 
 from ...core.app.services import quoted_plain_result
-from ...utils.version import get_plugin_version
+from ...core.app.services.eqsc_channel_service import EqscChannelService
+from ...utils.version import get_plugin_name, get_plugin_version
+from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 
 
@@ -40,8 +48,237 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             return mgr.get_session_log_str(session_umo)
         return session_umo
 
+    async def handle_disaster_restart(self, event):
+        """处理插件重载命令，等价于 AstrBot WebUI 中的重载插件操作。
+
+        重载时会依次触发：
+        1. 终止旧插件实例（调用 terminate()，回收服务/WebServer/浏览器资源）
+        2. 解绑旧插件注册表
+        3. 重新导入模块并创建新实例（调用 initialize()）
+        4. 新实例自动完成数据源装配与 WebAdmin 启动
+
+        重载成功后旧实例被销毁，因此最终结果通过 context.send_message 直接发送，
+        不再通过 yield 返回。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 向用户发送"正在重载"提示（此时旧实例尚未销毁，yield 安全可用）
+        yield event.plain_result("🔄 正在重载灾害预警插件，请稍候…")
+
+        try:
+            # 通过 Context._star_manager 获取 PluginManager 实例
+            plugin_manager = getattr(self.plugin.context, "_star_manager", None)
+            if plugin_manager is None:
+                # 上报失败（管理器不可用，命令未真正执行）
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "no_plugin_manager",
+                    },
+                )
+                yield event.plain_result("❌ 无法获取 AstrBot 插件管理器")
+                return
+
+            # 插件名取自 metadata.yaml 的 name 字段，避免硬编码与元数据配置漂移；
+            # 读取失败时回退到插件目录名，保证兼容旧逻辑。
+            plugin_name = get_plugin_name()
+            # 触发前上报请求状态（重载成功会销毁当前实例，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（reload_plugin_requested）避免与失败事件
+            # （reload_plugin/success=False）共享节流键，防止 10 秒节流吞掉紧随其后的失败事件。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin_requested",
+                    "success": True,
+                    "plugin": plugin_name,
+                },
+            )
+            success, message = await plugin_manager.reload(plugin_name)
+
+            # 重载后旧实例已销毁，改用 context.send_message 直接发送结果
+            if success:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain("✅ 灾害预警插件重载完成，正在重新启动")]),
+                )
+            else:
+                # 上报失败（reload 返回失败结果）。
+                # reason 仅用固定失败码，不上报原始 message 文本，避免插件管理器
+                # 返回的 URL 凭据/令牌/内部路径等敏感信息随遥测外泄。
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "reload_failed",
+                    },
+                )
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {message}")]),
+                )
+        except Exception as e:
+            logger.error(f"[灾害预警] 插件重载失败: {e}")
+            # 上报失败（异常路径）。reason 仅用固定失败码 + 异常类型名，
+            # 不上报原始异常消息文本，避免敏感信息随遥测外泄。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
+                },
+            )
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 插件重载失败: {e}")]),
+                )
+            except Exception:
+                pass
+
+    async def handle_restart_astrbot(self, event):
+        """处理重启 AstrBot 命令，等价于 AstrBot WebUI 中「设置 → 维护 → 重启 AstrBot」。
+
+        重启是进程级的 os.exec* 替换，不依赖插件实例存活，因此：
+        1. 先通过 yield 发送「即将重启」提示（此时管道仍可用）
+        2. 检查桌面版托管 / DEMO 模式守卫，拒绝时直接提示
+        3. 通过 context.send_message 发送最终提示（进程即将替换，yield 管道已不可靠）
+        4. 起 daemon 线程调用 AstrBotUpdator()._reboot()，内部 sleep 3 秒后
+           终止全部子进程并 os.exec* 替换当前进程完成重启
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 桌面版 Launcher 托管后端时不允许核心直接重启，_reboot() 内部也会抛错，
+        # 这里提前拦截并给出更友好的提示。
+        if is_desktop_managed_backend():
+            yield event.plain_result(
+                "❌ 当前由 AstrBot Desktop 托管运行，无法通过核心命令重启。\n"
+                "请从桌面客户端执行重启或更新。"
+            )
+            return
+
+        if DEMO_MODE:
+            yield event.plain_result("❌ 演示模式（DEMO_MODE）下不允许执行此操作。")
+            return
+
+        # 告知用户即将重启（此时事件管道仍可用，yield 安全）
+        yield event.plain_result("🔄 即将重启 AstrBot，约 3 秒后进程将重新启动…")
+
+        try:
+            # 触发前上报请求状态（成功路径进程将被替换，无法在完成后上报，故先记录 requested）。
+            # 注意：使用独立 action（restart_astrbot_requested）避免与失败事件共享节流键，
+            # 防止 10 秒节流吞掉线程内随后上报的失败事件。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot_requested",
+                    "success": True,
+                },
+            )
+            # 重启前先通过 context.send_message 发送最终提示：
+            # 进程级替换不销毁任何插件对象，但事件总线管道可能在进程退出瞬间被中断，
+            # 因此最终提示不依赖 yield，直接用 send_message 发送，_reboot 内部会
+            # sleep 3 秒，足以让消息送达平台。
+            await self.plugin.context.send_message(
+                event.unified_msg_origin,
+                MessageChain(
+                    [
+                        Comp.Plain(
+                            "✅ 已触发 AstrBot 重启，进程将在数秒内重新启动，请稍候…"
+                        )
+                    ]
+                ),
+            )
+
+            # _reboot 是同步阻塞函数（内部 sleep 3s + 杀子进程 + os.exec*），
+            # 必须放入 daemon 线程执行，避免阻塞事件循环。
+            # 线程内用包装函数捕获异常，防止 _reboot 抛错时用户收到成功提示却无失败反馈。
+            loop = asyncio.get_running_loop()
+            unified_msg_origin = event.unified_msg_origin
+
+            def _reboot_wrapper() -> None:
+                try:
+                    AstrBotUpdator()._reboot()
+                except Exception as reboot_err:
+                    logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {reboot_err}")
+                    # 线程内无法直接 await，用 run_coroutine_threadsafe 将失败通知
+                    # 与失败遥测调度回事件循环执行（线程安全）。
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            self._notify_restart_astrbot_failure(
+                                unified_msg_origin, reboot_err
+                            ),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+
+            threading.Thread(
+                target=_reboot_wrapper,
+                name="astrbot-core-restart",
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
+            # 上报失败（启动线程前的异常路径）。
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
+                },
+            )
+            try:
+                await self.plugin.context.send_message(
+                    event.unified_msg_origin,
+                    MessageChain([Comp.Plain(f"❌ 触发 AstrBot 重启失败: {e}")]),
+                )
+            except Exception:
+                pass
+
+    async def _notify_restart_astrbot_failure(
+        self, unified_msg_origin: str, error: Exception
+    ) -> None:
+        """AstrBot 重启线程失败时，向原会话推送失败通知并上报失败遥测。"""
+        try:
+            await self.plugin.context.send_message(
+                unified_msg_origin,
+                MessageChain([Comp.Plain(f"❌ AstrBot 重启失败: {error}")]),
+            )
+        except Exception:
+            pass
+        try:
+            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(error).__name__,
+                },
+            )
+        except Exception:
+            pass
+
     async def handle_disaster_reconnect(self, event):
-        """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。"""
+        """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
+
+        触发后立即返回"已触发"概览，并注册底层手动重连结果回执回调，
+        待各连接的真实建连结果（成功/失败/超时）到达后，异步推送到当前会话，
+        避免指令只反馈"已触发"却没有后续真实结果。
+        """
         # 管理类命令统一在入口先做管理员校验，避免内部逻辑重复散落权限判断。
         if not await self.plugin.is_plugin_admin(event):
             yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
@@ -54,13 +291,27 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         yield event.plain_result("🔄 正在尝试重连所有离线数据源...")
 
         try:
-            results = await self.plugin.disaster_service.reconnect_all_sources()
+            reconnect_service = self.plugin.disaster_service.reconnect_service
+            # 记录触发指令的会话，作为异步回执的推送目标。
+            target_session = getattr(event, "unified_msg_origin", None)
+
+            # 注册本批次回执回调，并拿到请求批次标识；
+            # 重连服务会在本轮结果全部消费完后自动清理该批次。
+            request_id, _unregister = reconnect_service.register_reconnect_callback(
+                self._build_reconnect_receipt_sender(target_session)
+            )
+            results = await reconnect_service.reconnect_all_sources(
+                request_id=request_id
+            )
+
             lines = ["🔄 重连操作结果："]
             success_count = 0
             fail_count = 0
             skip_count = 0
 
             for name, status in results.items():
+                # 展示名统一由重连服务按连接配置解析，避免向用户暴露内部字段名。
+                display_name = reconnect_service.resolve_display_name(name)
                 if "已触发" in status:
                     success_count += 1
                     icon = "✅"
@@ -70,16 +321,19 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 else:
                     skip_count += 1
                     icon = "⏩"
-                lines.append(f"  {icon} {name}: {status}")
+                lines.append(f"  {icon} {display_name}: {status}")
 
             lines.append("")
             lines.append(
                 f"📊 统计: 触发 {success_count}, 跳过 {skip_count}, 失败 {fail_count}"
             )
-            # 匿名上报功能执行遥测
+            if success_count > 0:
+                lines.append("⏳ 重连结果将稍后推送，请留意后续消息。")
+            # 匿名上报功能执行遥测（管理类命令统一归并到 command_admin_action）
             await self._track_command_feature(
-                "command_force_reconnect",
+                "command_admin_action",
                 {
+                    "action": "force_reconnect",
                     "success": True,
                     "triggered_count": success_count,
                     "failed_count": fail_count,
@@ -89,11 +343,59 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             await self._track_command_feature(
-                "command_force_reconnect",
-                {"success": False},
+                "command_admin_action",
+                {"action": "force_reconnect", "success": False},
             )
             logger.error(f"[灾害预警] 重连操作失败: {e}")
             yield event.plain_result(f"❌ 重连操作失败: {str(e)}")
+
+    def _build_reconnect_receipt_sender(self, target_session: str | None):
+        """构造重连结果回执的异步发送器。
+
+        回执载荷包含展示名与结果描述，由重连服务在真实建连结果到达后调用。
+        订阅者的清理由重连服务在"本轮所有等待结果消费完毕"时统一完成。
+        """
+        if not target_session:
+            # 无有效目标会话时直接返回异步空操作，避免回调链断裂。
+            # _noop_reconnect_receipt 已具备正确异步签名，无需额外 lambda 包裹。
+            return self._noop_reconnect_receipt
+
+        async def _send(payload: dict) -> None:
+            display_name = str(payload.get("display_name") or "未知连接")
+            success = bool(payload.get("success"))
+            stage = str(payload.get("stage") or "result")
+            message = str(payload.get("message") or "")
+
+            if stage == "timeout":
+                line = f"⏳ {display_name}：{message}"
+            elif success:
+                line = f"✅ {display_name}：重连成功"
+            else:
+                line = f"❌ {display_name}：{message}"
+            await self._send_plain_to_session(target_session, line)
+
+        return _send
+
+    async def _noop_reconnect_receipt(self, payload: dict) -> None:
+        """无目标会话时的空回执处理（仅保留接口一致性）。"""
+        pass
+
+    async def _send_plain_to_session(self, session: str, text: str) -> None:
+        """向指定会话发送纯文本消息（复用消息管理器的会话发送能力）。"""
+        try:
+            message_manager = getattr(
+                self.plugin.disaster_service, "message_manager", None
+            )
+            if message_manager is None:
+                logger.warning("[灾害预警] 消息管理器不可用，无法发送重连回执")
+                return
+            session_sender = getattr(message_manager, "session_sender", None)
+            if session_sender is None:
+                logger.warning("[灾害预警] 会话发送器不可用，无法发送重连回执")
+                return
+            await session_sender.send(session, MessageChain([Comp.Plain(text)]))
+        except Exception as e:
+            logger.error(f"[灾害预警] 重连回执发送到 {session} 失败: {e}")
 
     async def handle_disaster_status(self, event):
         """处理运行状态查询命令，以合并转发多节点消息形式展示各个连接状态与子数据源情况。"""
@@ -107,16 +409,22 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             uptime = status.get("uptime", "未知")
             plugin_version = get_plugin_version()
 
-            bot_id = event.get_self_id() or "0"
+            # bot_id 由公共 forward_helper 内部从 event 获取；此处仅需显示名。
             bot_name = "灾害预警"
 
-            # 对应展示名称映射
+            # 对应展示名称映射（命令文本场景投影）。
+            # connection_label_map / source_group_label_map 的多数值与
+            # display_registry.CONNECTION_DISPLAY_NAMES 一致，但命令文本保留了两处
+            # 有意差异：fan_studio_cenc_ir 用空格（"FAN Studio 烈度速报"）而非括号；
+            # snet_msil 用"日本海沟 S-Net 海底震度计"。
+            # 修改展示名时请同时核对 display_registry.py 与下方各投影表。
             connection_label_map = OrderedDict(
                 [
                     ("fan_studio_all", "FAN Studio"),
+                    ("fan_studio_cenc_ir", "FAN Studio 烈度速报"),
                     ("p2p_main", "P2P地震情報"),
                     ("wolfx_all", "Wolfx"),
-                    ("global_quake", "Global Quake"),
+                    ("openquake_api", "OpenQuakeAPI"),
                 ]
             )
             source_group_label_map = OrderedDict(
@@ -124,7 +432,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     ("fan_studio", "FAN Studio"),
                     ("p2p_earthquake", "P2P地震情報"),
                     ("wolfx", "Wolfx"),
-                    ("global_quake", "Global Quake"),
+                    ("openquake_api", "OpenQuakeAPI"),
+                    ("eqsc", "EQSC API"),
+                    ("snet", "NIED S-Net"),
                 ]
             )
             source_label_map = {
@@ -138,6 +448,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 "eew": "紧急地震速报",
                 "earthquake_info": "地震情报",
                 "global_quake": "Global Quake",
+                "china_typhoon": "中国气象局：实时活跃台风",
+                "snet_msil": "日本海沟 S-Net 海底震度计",
             }
             scoped_sub_source_label_map = {
                 "FAN Studio": {
@@ -146,9 +458,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "taiwan_cwa_earthquake": "台湾中央气象署: 强震即时警报",
                     "taiwan_cwa_report": "台湾中央气象署: 地震报告",
                     "china_cenc_earthquake": "中国地震台网 (CENC)",
+                    "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
                     "usgs_earthquake": "美国地质调查局 (USGS)",
+                    "fssn_cmt": "FSSN 矩心矩张量解 (CMT)",
+                    "usa_shakealert": "美国 ShakeAlert 地震预警",
                     "china_weather_alarm": "中国气象局: 气象预警",
                     "china_tsunami": "自然资源部海啸预警中心",
+                    "china_typhoon": "中国气象局：实时活跃台风",
                     "japan_jma_eew": "日本气象厅: 紧急地震速报",
                 },
                 "P2P地震情報": {
@@ -163,24 +479,29 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "japan_jma_earthquake": "日本气象厅地震情报",
                     "china_cenc_earthquake": "中国地震台网地震测定",
                 },
-                "Global Quake": {
-                    "enabled": "实时数据流",
+                "OpenQuakeAPI": {
+                    "global_quake": "Global Quake",
+                    "china_weather_alarm": "中国气象局: 气象预警",
+                },
+                "EQSC API": {
+                    "typhoon": "中国气象局：实时活跃台风",
+                    "jma_tsunami": "日本气象厅: 海啸予报",
+                    "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
+                },
+                "NIED S-Net": {
+                    "enabled": "日本海沟 S-Net 海底震度计",
                 },
             }
 
             def _build_forward_nodes(blocks: list[str]) -> Comp.Nodes | None:
-                """生成便于客户端折叠阅读的合并转发节点。"""
-                if not blocks:
-                    return None
-                nodes = Comp.Nodes([])
-                for idx, block in enumerate(blocks):
-                    content = [Comp.Plain(block)]
-                    if idx == 0:
-                        content = self.plugin._with_quote_reply(event, content)
-                    nodes.nodes.append(
-                        Comp.Node(uin=bot_id, name=bot_name, content=content)
-                    )
-                return nodes
+                """生成便于客户端折叠阅读的合并转发节点（复用公共实现）。"""
+                return build_forward_nodes(
+                    blocks,
+                    event=event,
+                    quote_first=True,
+                    plugin=self.plugin,
+                    name=bot_name,
+                )
 
             def _map_sub_source_name(group_display_name: str, raw_key: str) -> str:
                 """将原始的子源键名映射为好看的展示名称。"""
@@ -193,7 +514,97 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     source_label_map.get(normalized_key, normalized_key),
                 )
 
-            # 1. 总体概览行
+            # EQSC / S-Net 为 HTTP 通道，不在 ws_manager 连接表中，单独补充
+            # 注意：get_service_status() 已把 EQSC、S-Net 计入 active/total，这里只负责展示详情
+            eqsc_health: dict = {}
+            eqsc_channel = getattr(
+                self.plugin.disaster_service, "eqsc_channel_service", None
+            )
+            if eqsc_channel is not None:
+                getter = getattr(eqsc_channel, "get_health_status", None)
+                if callable(getter):
+                    try:
+                        maybe_health = getter()
+                        if isinstance(maybe_health, dict):
+                            eqsc_health = maybe_health
+                    except Exception:
+                        eqsc_health = {}
+
+            if not eqsc_health:
+                # 通道服务不可用时，回退到配置层判定
+                eqsc_cfg = (
+                    (self.plugin.config.get("data_sources", {}) or {}).get("eqsc", {})
+                    if isinstance(self.plugin.config, dict)
+                    else {}
+                )
+                if not isinstance(eqsc_cfg, dict):
+                    eqsc_cfg = {}
+                config_enabled, typhoon_enrichment = (
+                    EqscChannelService.resolve_eqsc_flags(eqsc_cfg)
+                )
+                token_configured = bool(
+                    str(eqsc_cfg.get("refresh_token", "") or "").strip()
+                )
+                eqsc_health = {
+                    "enabled": config_enabled and token_configured,
+                    "config_enabled": config_enabled,
+                    "typhoon": typhoon_enrichment,
+                    "token_configured": token_configured,
+                    "access_token_valid": False,
+                    "circuit_open": False,
+                    # 子数据源展示只看子开关本身
+                    "sub_sources": {
+                        "china_typhoon": typhoon_enrichment,
+                    },
+                }
+
+            eqsc_enabled = bool(eqsc_health.get("enabled"))
+            eqsc_circuit_open = bool(eqsc_health.get("circuit_open", False))
+            eqsc_token_valid = bool(eqsc_health.get("access_token_valid", False))
+            if not eqsc_enabled:
+                eqsc_state_text = "⚪ 未启用"
+            elif eqsc_circuit_open:
+                eqsc_state_text = "🟠 熔断中"
+            elif eqsc_token_valid:
+                # AccessToken 有效 = 活跃连接
+                eqsc_state_text = "🟢 可用"
+            else:
+                eqsc_state_text = "🔴 鉴权失效"
+
+            # S-Net 轮询状态
+            snet_poll = getattr(self.plugin.disaster_service, "snet_poll_service", None)
+            snet_cfg = (
+                (self.plugin.config.get("data_sources", {}) or {}).get("snet", {})
+                if isinstance(self.plugin.config, dict)
+                else {}
+            )
+            if not isinstance(snet_cfg, dict):
+                snet_cfg = {}
+            snet_config_enabled = bool(snet_cfg.get("enabled", False))
+            try:
+                runtime_query = getattr(
+                    self.plugin.disaster_service, "source_runtime_query", None
+                )
+                if runtime_query is not None:
+                    snet_enabled = bool(runtime_query.is_source_enabled("snet_msil"))
+                else:
+                    snet_enabled = snet_config_enabled
+            except Exception:
+                snet_enabled = snet_config_enabled
+            snet_poll_running = bool(
+                snet_poll is not None and getattr(snet_poll, "running", False)
+            )
+            if not snet_enabled:
+                snet_state_text = "⚪ 未启用"
+            elif snet_poll_running:
+                snet_state_text = "🟢 轮询中"
+            else:
+                snet_state_text = "🔴 未启动"
+
+            # 解析 FAN Studio 服务器信息
+            fan_server_info = status.get("fan_server_info", {})
+
+            # 1. 总体概览行（active/total 已由 status 服务计入 EQSC + S-Net）
             overview_lines = [
                 "📊 灾害预警服务状态",
                 "",
@@ -205,11 +616,35 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             # 2. 连接状态详情行
             connection_lines = ["📡 连接详情"]
             conn_details = status.get("connection_details", {})
+            # 从 connections 视图提取各连接分组的配置启用状态，
+            # 用于区分"未启用 / 异常 / 正常"三种状态，避免将未启用的
+            # 连接（如 FAN Studio 烈度速报）误显示为"异常"。
+            connections_view = status.get("connections", {})
+            group_enabled_map: dict[str, bool] = {}
+            for conn_info in connections_view.values():
+                if isinstance(conn_info, dict):
+                    gk = str(conn_info.get("group_key") or "")
+                    if gk:
+                        group_enabled_map[gk] = bool(conn_info.get("enabled", False))
+
             for conn_name, display_name in connection_label_map.items():
                 detail = conn_details.get(conn_name, {})
                 connected = bool(detail.get("connected", False))
-                state_text = "🟢 正常" if connected else "🔴 异常"
+                is_enabled = group_enabled_map.get(conn_name, False)
+                if not is_enabled:
+                    state_text = "⚪ 未启用"
+                elif connected:
+                    state_text = "🟢 正常"
+                else:
+                    state_text = "🔴 异常"
+                # FAN Studio 连接附加主备服务器信息
+                server_label = fan_server_info.get(conn_name)
+                if server_label:
+                    state_text += f"（{server_label}）"
                 connection_lines.append(f"• {display_name}：{state_text}")
+
+            connection_lines.append(f"• EQSC API：{eqsc_state_text}")
+            connection_lines.append(f"• NIED S-Net：{snet_state_text}")
 
             # 3. 各子数据源的细化开关状况行
             data_source_lines = ["📚 子数据源启用状况"]
@@ -221,7 +656,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 if source_name:
                     grouped_sources[service_name].append(source_name)
 
-            sub_source_status = status.get("sub_source_status", {})
+            sub_source_status = dict(status.get("sub_source_status", {}) or {})
+            # EQSC / S-Net 为 HTTP 通道，SOURCE_CATALOG 已注册其子源，
+            # build_sub_source_status() 会按 config_key 正确归组，
+            # 无需再硬编码注入，避免 key 名与 grouped_sources 漂移导致计数错误。
+
             for service_name, display_name in source_group_label_map.items():
                 if (
                     service_name not in grouped_sources
@@ -229,11 +668,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 ):
                     continue
 
+                # 分组之间增加空行，提升可读性
+                if len(data_source_lines) > 1:
+                    data_source_lines.append("")
+
                 raw_sources = grouped_sources.get(service_name, [])
+                group_status = sub_source_status.get(service_name, {})
                 if raw_sources:
                     enabled_count = len(raw_sources)
                     total_count = 0
-                    group_status = sub_source_status.get(service_name, {})
                     if isinstance(group_status, dict) and group_status:
                         total_count = len(group_status)
                     suffix = (
@@ -242,10 +685,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                         else f"（已启用 {enabled_count} 项）"
                     )
                     data_source_lines.append(f"• {display_name}{suffix}")
+                elif isinstance(group_status, dict) and group_status:
+                    # 组未计入 active_sources 时，仍按子源开关汇总（避免未启用却显示「已启用」）
+                    enabled_count = sum(1 for v in group_status.values() if bool(v))
+                    total_count = len(group_status)
+                    data_source_lines.append(
+                        f"• {display_name}（已启用 {enabled_count}/{total_count}）"
+                    )
                 else:
                     data_source_lines.append(f"• {display_name}：已启用")
-
-                group_status = sub_source_status.get(service_name, {})
                 if isinstance(group_status, dict) and group_status:
                     sorted_items = sorted(
                         group_status.items(),
@@ -268,15 +716,23 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             if nodes:
                 await self._track_command_feature(
-                    "command_status_query",
-                    {"success": True, "running": bool(status.get("running"))},
+                    "command_admin_action",
+                    {
+                        "action": "status_query",
+                        "success": True,
+                        "running": bool(status.get("running")),
+                    },
                 )
                 yield event.chain_result([nodes])
                 return
 
             await self._track_command_feature(
-                "command_status_query",
-                {"success": True, "running": bool(status.get("running"))},
+                "command_admin_action",
+                {
+                    "action": "status_query",
+                    "success": True,
+                    "running": bool(status.get("running")),
+                },
             )
             yield quoted_plain_result(self.plugin, event, "\n".join(overview_lines))
         except Exception as e:
@@ -317,10 +773,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                         f"📊 总计拦截: {filter_stats.get('total_filtered', 0)}"
                     )
             await self._track_command_feature(
-                "command_stats_query",
-                {"success": True},
+                "command_admin_action",
+                {"action": "stats_query", "success": True},
             )
-            yield _quoted_plain_result(stats_summary)
+            # 统计报告显式走合并转发，失败则回退普通引用回复
+            ok = await send_forward_blocks(
+                self.plugin, event, [stats_summary], name="灾害预警"
+            )
+            if not ok:
+                yield _quoted_plain_result(stats_summary)
         except Exception as e:
             logger.error(f"[灾害预警] 获取统计信息失败: {e}")
             yield _quoted_plain_result(f"❌ 获取统计信息失败: {str(e)}")
@@ -407,8 +868,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             status = "启用" if new_state else "禁用"
             action = "开始" if new_state else "停止"
             await self._track_command_feature(
-                "command_toggle_raw_logging",
-                {"enabled": bool(new_state)},
+                "command_admin_action",
+                {
+                    "action": "toggle_raw_logging",
+                    "success": True,
+                    "enabled": bool(new_state),
+                },
             )
             yield event.plain_result(
                 f"✅ 原始消息日志记录已{status}\n\n插件将{action}记录所有数据源的原始消息格式。"
@@ -455,8 +920,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         try:
             await self.plugin.disaster_service.statistics_manager.reset_stats()
             await self._track_command_feature(
-                "command_clear_statistics",
-                {"success": True},
+                "command_admin_action",
+                {"action": "clear_statistics", "success": True},
             )
             yield event.plain_result(
                 "✅ 统计数据已重置\n\n所有历史统计记录已被清除，新的统计将重新开始。"
@@ -489,8 +954,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": False, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": False,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已关闭\n\n{session_log_str} 已从推送列表中移除。"
@@ -501,8 +971,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 self.plugin.config["target_sessions"] = target_sessions
                 self.plugin.config.save_config()
                 await self._track_command_feature(
-                    "command_toggle_push",
-                    {"enabled": True, "target_session_count": len(target_sessions)},
+                    "command_admin_action",
+                    {
+                        "action": "toggle_push",
+                        "success": True,
+                        "enabled": True,
+                        "target_session_count": len(target_sessions),
+                    },
                 )
                 yield event.plain_result(
                     f"✅ 推送已开启\n\n{session_log_str} 已添加到推送列表。"
@@ -544,7 +1019,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     )
                 )
                 config_str = json.dumps(translated_config, indent=2, ensure_ascii=False)
-                yield event.plain_result(f"🔧 当前全局配置详情：{config_str}")
+                await send_forward_blocks(
+                    self.plugin, event, [config_str], name="灾害预警"
+                )
                 return
 
             session_umo = (
@@ -581,11 +1058,111 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             effective_str = json.dumps(
                 translated_effective, indent=2, ensure_ascii=False
             )
-            yield event.plain_result(
-                f"🔧 会话配置详情 ({session_log_str})\n"
-                f"\n📌 差异覆写 (override)：\n{override_str}"
-                f"\n\n📘 合并后配置 (effective)：\n{effective_str}"
+            await send_forward_blocks(
+                self.plugin,
+                event,
+                [
+                    f"📌 差异覆写 (override)：\n{override_str}",
+                    f"📘 合并后配置 (effective)：\n{effective_str}",
+                ],
+                header=f"🔧 会话配置详情 ({session_log_str})",
+                name="灾害预警",
             )
         except Exception as e:
             logger.error(f"[灾害预警] 获取配置详情失败: {e}")
             yield event.plain_result(f"❌ 获取配置详情失败: {str(e)}")
+
+    async def handle_server_switch(
+        self, event, data_source: str = None, preference: str = None
+    ):
+        """处理 /服务器切换 指令。"""
+        # 管理类命令统一在入口先做管理员校验（与同文件其余管理命令保持一致）
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        if not self.plugin.disaster_service:
+            yield event.plain_result("❌ 灾害预警服务未启动")
+            return
+
+        # 无参数时展示当前服务器状态
+        if not data_source:
+            status = self.plugin.disaster_service.get_service_status()
+            fan_info = status.get("fan_server_info", {})
+            lines = [
+                "🖥️ 数据源服务器状态",
+                "",
+            ]
+            for conn_name, display_name in [
+                ("fan_studio_all", "FAN Studio"),
+                ("fan_studio_cenc_ir", "FAN Studio（烈度速报）"),
+            ]:
+                label = fan_info.get(conn_name, "未知")
+                lines.append(f"  • {display_name}：{label}")
+            lines.append("")
+            lines.append("📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>")
+            lines.append("💡 示例：/服务器切换 FAN 主服务器")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        # 如果 data_source 实际上是 preference（兼容单参数用法）
+        data_source_lower = str(data_source or "").strip().lower()
+        pref_candidates = ("主服务器", "备用服务器", "主", "备")
+        if data_source_lower in {c.lower() for c in pref_candidates}:
+            source = "FAN"
+            raw_pref = str(data_source).strip()
+        else:
+            source = str(data_source).strip()
+            raw_pref = str(preference or "").strip()
+
+        # 规范化偏好值
+        raw_pref_lower = raw_pref.lower()
+        if raw_pref_lower in ("主服务器", "主"):
+            preference_full = "主服务器优先"
+            preference_short = "主服务器"
+        elif raw_pref_lower in ("备用服务器", "备"):
+            preference_full = "备用服务器优先"
+            preference_short = "备用服务器"
+        else:
+            yield event.plain_result(
+                "❌ 无效参数。\n\n"
+                "📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>\n"
+                "💡 示例：/服务器切换 FAN 主服务器\n"
+                "  或：/服务器切换 FAN 备用服务器"
+            )
+            return
+
+        # 判断数据源
+        source_lower = source.lower()
+        if source_lower not in ("fan", "fan studio", "fan_studio", "fanstudio"):
+            yield event.plain_result(f"❌ 暂不支持数据源「{source}」的服务器切换。")
+            return
+
+        yield event.plain_result(f"🔄 正在切换 FAN Studio 至 {preference_short}...")
+
+        try:
+            results = await self.plugin.disaster_service.switch_fan_server_preference(
+                preference_full
+            )
+            lines = ["🖥️ FAN Studio 服务器切换结果："]
+            for conn_name, status in results.items():
+                display_name = self._resolve_fan_conn_display(conn_name)
+                if "失败" in status:
+                    lines.append(f"  ❌ {display_name}：{status}")
+                else:
+                    # 只保留首个 ✅，去掉结果中的重复 emoji
+                    clean_status = status.replace("✅ ", "")
+                    lines.append(f"  ✅ {display_name}：{clean_status}")
+            yield event.plain_result("\n".join(lines))
+        except Exception as e:
+            logger.error(f"[灾害预警] 切换 FAN Studio 服务器失败: {e}")
+            yield event.plain_result(f"❌ 切换失败: {str(e)}")
+
+    @staticmethod
+    def _resolve_fan_conn_display(conn_name: str) -> str:
+        """解析 FAN 连接展示名。"""
+        names = {
+            "fan_studio_all": "FAN Studio",
+            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        }
+        return names.get(conn_name, conn_name)

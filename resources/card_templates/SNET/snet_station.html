@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S-Net 海底震度分布</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+    width: 1400px; height: 1000px;
+    background: #060606;
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    overflow: hidden;
+}
+#card-wrapper {
+    width: 1400px; height: 1000px;
+    /* 地图固定宽度；状态卡/列表浮层盖上，不挤文档流 */
+    display: block;
+    background: #0e0e12;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+}
+
+/*
+ * 地图宽度 = 卡片宽 − 原侧栏 380px（拓宽 30% 之前）。
+ * 全宽 1400 会把投影横向拉扁；锁在 1020 保持原比例。
+ * 右侧列表仍绝对定位浮在整卡上，可部分叠在地图右缘。
+ */
+#map-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1020px; /* 1400 - 380 */
+    margin: 0;
+    border-radius: 12px 0 0 12px;
+    overflow: hidden;
+    z-index: 1;
+}
+/* canvas 绝对铺满 */
+#map-canvas {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+/* 脚注：地图左下；地图区已固定 1020px，不再按 520 侧栏裁切省略 */
+.watermark {
+    position: absolute;
+    left: 14px;
+    bottom: 12px;
+    top: auto;
+    right: auto;
+    color: #9aa3b5;
+    font-size: 13px;
+    font-weight: bold;
+    pointer-events: none;
+    z-index: 12;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    max-width: calc(100% - 28px);
+    white-space: normal;
+    overflow: visible;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+/*
+ * 状态卡：浮在整卡左上角，不参与文档流。
+ * 背景用不透明色：omit_background 截图会把半透明抠没。
+ */
+.card.card-status.status-overlay {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 100;
+    width: 340px;
+    max-width: 36%;
+    margin: 0;
+    pointer-events: none;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65);
+    background: #181822;
+    border: 1px solid #3a3a52;
+}
+
+/*
+ * 右侧列表：浮层盖在地图上（不挤地图宽度）。
+ * 原 380×1.3 ≈ 494；实心背景同样规避 omit_background。
+ */
+#panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: 494px;
+    z-index: 90;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
+    pointer-events: none;
+}
+#panel .card-list {
+    pointer-events: auto;
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
+    background: #181822;
+}
+
+/* 卡片基础 */
+.card {
+    background: #181822;
+    border: 1px solid #323246;
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+/* ── 顶部状态卡片（内容样式；定位只由 .status-overlay 决定） ── */
+.card-status {
+    padding: 14px 16px;
+}
+.card-status::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #3787e1, #5ba0ff);
+}
+.card-status-main {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 6px;
+}
+.card-status-title1 {
+    font-size: 22px; font-weight: bold;
+    color: #f0f3f8;
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+.card-status-time {
+    font-size: 13px; color: #9aa3b5;
+    margin-top: 2px; margin-bottom: 4px;
+}
+.card-status-stats {
+    display: flex; gap: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #2e2e42;
+}
+.stat-item {
+    flex: 1;
+    min-width: 0;
+}
+.stat-label {
+    font-size: 12px; color: #9aa3b5;
+    margin-bottom: 2px;
+}
+.stat-value {
+    font-size: 16px; font-weight: bold;
+    color: #e8ecf2;
+}
+.stat-value.triggered { color: #6cbcff; }
+/* 最大震度：默认中性色，具体颜色由 shindo-* / 内联色覆盖 */
+.stat-value.max-shindo {
+    color: #c5cddc;
+    font-size: 18px;
+}
+.stat-value.inactive { color: #8b93a7; }
+.stat-value.top-station {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #c5cddc;
+    font-size: 15px;
+}
+
+/* ── 测站列表卡片（占满整列高度） ── */
+.card-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+.card-list-header {
+    display: flex; align-items: center;
+    padding: 12px 16px 6px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.card-list-header-icon {
+    width: 4px; height: 18px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, #3787e1, #5ba0ff);
+    flex-shrink: 0;
+}
+.card-list-header-text {
+    font-size: 17px; font-weight: bold;
+    color: #c5cddc;
+}
+.card-list-header-count {
+    font-size: 14px; color: #9aa3b5;
+    margin-left: auto;
+}
+
+/* 列表表头 */
+.list-col-header {
+    display: flex; align-items: center;
+    padding: 0 16px 6px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.list-col-header span {
+    font-size: 13px; color: #9aa3b5;
+    font-weight: 600;
+}
+
+/*
+ * 列表区：行用 flex:1 均分剩余高度，尽量填满面板。
+ * 固定 Top-N 时不再依赖滚动条吃高度。
+ */
+.list-scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0 10px 8px;
+    min-height: 0;
+    gap: 2px;
+}
+.list-row {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    border-radius: 8px;
+    gap: 10px;
+    flex: 1 1 0;
+    min-height: 0;
+}
+.list-row-odd { background: transparent; }
+/* 斑马纹用不透明近似色，避免 omit_background 截图发虚 */
+.list-row-even { background: #232333; }
+/* 未触发：只降字色，不用整行 opacity，保证对比度 */
+.list-row-inactive .station-name { color: #a8b0c0; }
+.list-row-inactive .station-shindo { color: #8fa0c0; }
+.list-row-inactive .station-label { color: #a8b0c0; }
+
+.station-dot {
+    width: 13px; height: 13px; border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+}
+.station-name {
+    flex: 1;
+    font-size: 18px; font-weight: bold;
+    color: #f0f3f8;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    letter-spacing: 0.2px;
+}
+.station-shindo {
+    width: 76px; text-align: center;
+    font-size: 17px; font-weight: bold;
+    font-variant-numeric: tabular-nums;
+}
+.station-label {
+    width: 52px; text-align: right;
+    font-size: 17px; font-weight: bold;
+    color: #f0f3f8;
+    flex-shrink: 0;
+}
+
+/* 列表震度文字 + 圆点：原霓虹色（避免喧宾夺主） */
+.shindo-s7 { color: #ff5050; }
+.shindo-s6p { color: #ff6a5a; }
+.shindo-s6m { color: #ff8a68; }
+.shindo-s5p { color: #ffaa48; }
+.shindo-s5m { color: #ffc060; }
+.shindo-s4  { color: #f0d040; }
+.shindo-s3  { color: #b0e058; }
+.shindo-s2  { color: #68d0b0; }
+.shindo-s1  { color: #70b0f0; }
+.shindo-s0  { color: #80a8e0; }
+.dot-s7 { background: #ff5050; }
+.dot-s6p { background: #ff6a5a; }
+.dot-s6m { background: #ff8a68; }
+.dot-s5p { background: #ffaa48; }
+.dot-s5m { background: #ffc060; }
+.dot-s4  { background: #f0d040; }
+.dot-s3  { background: #b0e058; }
+.dot-s2  { background: #68d0b0; }
+.dot-s1  { background: #70b0f0; }
+.dot-s0  { background: #80a8e0; }
+.dot-none { background: #6a748c; }
+
+/*
+ * 左上角「最大震度」专用：对齐 Base/earthquake_list 的 int-* 色相（文字略提亮）。
+ * 选择器压过上方 .shindo-*，不影响列表文字/圆点。
+ */
+.stat-value.max-shindo.shindo-s7 { color: #b040ff; }
+.stat-value.max-shindo.shindo-s6p { color: #d02020; }
+.stat-value.max-shindo.shindo-s6m { color: #ff2020; }
+.stat-value.max-shindo.shindo-s5p { color: #ff7a18; }
+.stat-value.max-shindo.shindo-s5m { color: #ffaa13; }
+.stat-value.max-shindo.shindo-s4  { color: #ffe05d; }
+.stat-value.max-shindo.shindo-s3  { color: #32b464; }
+.stat-value.max-shindo.shindo-s2  { color: #3d8aff; }
+.stat-value.max-shindo.shindo-s1  { color: #8a9696; }
+.stat-value.max-shindo.shindo-s0  { color: #7a8686; }
+
+/* 空状态 */
+.empty-state {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%;
+    font-size: 16px; color: #7a849c;
+}
+
+/* 滚动条美化 */
+.list-scroll::-webkit-scrollbar { width: 6px; }
+.list-scroll::-webkit-scrollbar-track { background: transparent; }
+.list-scroll::-webkit-scrollbar-thumb { background: #3a3a4c; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="card-wrapper">
+
+<!-- 状态卡挂在 card-wrapper 上，避免被 map canvas / overflow 盖住 -->
+<div class="card card-status status-overlay">
+    <div class="card-status-main">
+        <span class="card-status-title1">S-Net 海底震度</span>
+    </div>
+    <div class="card-status-time">{{ display_time }}</div>
+    <div class="card-status-stats">
+        <div class="stat-item">
+            <div class="stat-label">触发测站</div>
+            <div class="stat-value {{ 'triggered' if triggered_count > 0 else 'inactive' }}">{{ triggered_count }}<span style="font-size:12px;color:#8b93a7">/{{ total_stations }}</span></div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">最大震度</div>
+            <div id="max-shindo-value" class="stat-value max-shindo {{ max_shindo_class | default('', true) }}" data-color="{{ max_shindo_color | default('', true) }}">{{ max_shindo_text }}</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">最大测站</div>
+            <div class="stat-value top-station">{{ top_station_name }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ 地图 ═══ -->
+<div id="map-area">
+    <div id="map" style="display:none"></div>
+    <canvas id="map-canvas"></canvas>
+    <div class="watermark">{{ watermark_text | default('@DBJD-CR/astrbot_plugin_disaster_warning (灾害预警) · NIED S-Net 海底震度分布', true) }}</div>
+</div>
+
+<!-- ═══ 右侧列表（全高 + 加宽） ═══ -->
+<div id="panel">
+    <div class="card card-list">
+        <div class="card-list-header">
+            <span class="card-list-header-icon"></span>
+            <span class="card-list-header-text">震度降序</span>
+            <span class="card-list-header-count">前 {{ list_stations|length }} / 共 {{ total_stations }}</span>
+        </div>
+        {% if list_stations %}
+        <div class="list-col-header">
+            <span style="width:22px"></span>
+            <span style="flex:1">测站</span>
+            <span style="width:72px;text-align:center">震度</span>
+            <span style="width:48px;text-align:right">等级</span>
+        </div>
+        <div class="list-scroll">
+            {% for s in list_stations %}
+            {# 触发高亮与计数一致：由 Python 注入 s.triggered（震度0起点对应計測震度 -0.5） #}
+            <div class="list-row {% if loop.index is even %}list-row-even{% else %}list-row-odd{% endif %} {% if s.triggered %}list-row-triggered{% else %}list-row-inactive{% endif %}">
+                <span class="station-dot {{ s.dot_class }}" data-bg="{{ s.dot_bg | default('', true) }}"></span>
+                <span class="station-name">{{ s.name }}</span>
+                <span class="station-shindo {{ s.shindo_class }}">{{ '%.3f'|format(s.shindo) }}</span>
+                <span class="station-label">{{ s.label }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">暂无测站数据</div>
+        {% endif %}
+    </div>
+</div>
+
+</div><!-- /card-wrapper -->
+
+<!-- 数据载荷：type=application/json 不会被当 JS 解析，避免 IDE 对 Jinja 误报 -->
+<script type="application/json" id="snet-japan-rings">{{ rings_json }}</script>
+<script type="application/json" id="snet-stations">{{ stations_json }}</script>
+<script type="application/json" id="snet-icon-svgs">{{ icon_svgs_json }}</script>
+<script type="application/json" id="snet-gradient-config">{{ gradient_config_json }}</script>
+
+<script>
+(function() {
+'use strict';
+
+/* ════════════════════════════════════════════
+   常量
+   ════════════════════════════════════════════ */
+var MAP_LON_MIN = 135.0, MAP_LON_MAX = 149.0;
+var MAP_LAT_MIN = 32.0,  MAP_LAT_MAX = 44.0;
+var MARGIN = 60;
+
+/* 渐变参数默认值；实际值由下方 snet-gradient-config 覆盖（Python 单源） */
+var COLOR_NEG3 = [0, 0, 205];
+var COLOR_BELOW_ZERO = [31, 228, 96];  // #1FE460
+var GRADIENT_END_SHINDO = -0.5;
+
+var ICON_KEYS = [
+    [6.5, 52], [6.0, 48], [5.5, 44], [5.0, 40],
+    [4.5, 36], [3.5, 32], [2.5, 28], [1.5, 24], [0.5, 20],
+    [-0.5, 16],
+];
+
+function clamp01(t) {
+    return Math.max(0, Math.min(1, t));
+}
+
+function lerpChannel(a, b, t) {
+    return Math.round(a + (b - a) * t);
+}
+
+/** 計測震度 -3～-0.5 → 蓝到绿渐变；低于 -3 钳制到 -3 色 */
+function shindoToNegGradientRgb(sh) {
+    var span = 3.0 + GRADIENT_END_SHINDO; // 2.5
+    var t = clamp01((sh + 3.0) / span);
+    return [
+        lerpChannel(COLOR_NEG3[0], COLOR_BELOW_ZERO[0], t),
+        lerpChannel(COLOR_NEG3[1], COLOR_BELOW_ZERO[1], t),
+        lerpChannel(COLOR_NEG3[2], COLOR_BELOW_ZERO[2], t)
+    ];
+}
+
+function rgbCss(rgb, alpha) {
+    if (typeof alpha === 'number') {
+        return 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha + ')';
+    }
+    return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+}
+
+function shindoToIconSize(sh) {
+    // >= -0.5 使用彩色震度图标（含震度0）；< -0.5 用 -3~-0.5 渐变色点
+    if (sh >= GRADIENT_END_SHINDO) return 24;
+    return 0;
+}
+
+function shindoToThreshold(sh) {
+    if (sh < GRADIENT_END_SHINDO) return null;
+    for (var i = 0; i < ICON_KEYS.length; i++) {
+        if (sh >= ICON_KEYS[i][0]) return ICON_KEYS[i][0];
+    }
+    return null;
+}
+
+/* ════════════════════════════════════════════
+   数据：从 JSON script 节点读取
+   ════════════════════════════════════════════ */
+function _readJsonPayload(id) {
+    var el = document.getElementById(id);
+    if (!el) return null;
+    try {
+        return JSON.parse(el.textContent || 'null');
+    } catch (e) {
+        console.error('[S-Net] JSON payload parse failed:', id, e);
+        return null;
+    }
+}
+var JAPAN_RINGS = _readJsonPayload('snet-japan-rings') || [];
+var STATIONS = _readJsonPayload('snet-stations') || [];
+var ICON_SVGS = _readJsonPayload('snet-icon-svgs') || {};
+/* 覆盖渐变参数：与 snet_map_renderer._SNET_* 保持单源一致 */
+(function applyGradientConfig() {
+    var cfg = _readJsonPayload('snet-gradient-config');
+    if (!cfg || typeof cfg !== 'object') return;
+    if (Array.isArray(cfg.color_neg3) && cfg.color_neg3.length >= 3) {
+        COLOR_NEG3 = cfg.color_neg3;
+    }
+    if (Array.isArray(cfg.color_below_zero) && cfg.color_below_zero.length >= 3) {
+        COLOR_BELOW_ZERO = cfg.color_below_zero;
+    }
+    if (typeof cfg.gradient_end_shindo === 'number') {
+        GRADIENT_END_SHINDO = cfg.gradient_end_shindo;
+        // 同步 ICON_KEYS 末项阈值（震度0 起点）
+        if (ICON_KEYS.length) {
+            ICON_KEYS[ICON_KEYS.length - 1][0] = GRADIENT_END_SHINDO;
+        }
+    }
+})();
+
+/* ════════════════════════════════════════════
+   坐标转换
+   ════════════════════════════════════════════ */
+function lonlatToXY(lon, lat, mw, mh) {
+    return [
+        MARGIN + (lon - MAP_LON_MIN) / (MAP_LON_MAX - MAP_LON_MIN) * mw,
+        MARGIN + (MAP_LAT_MAX - lat) / (MAP_LAT_MAX - MAP_LAT_MIN) * mh
+    ];
+}
+
+/* ════════════════════════════════════════════
+   图标预加载
+   ════════════════════════════════════════════ */
+var loadedIcons = {};
+
+function preloadIcons(callback) {
+    var keys = Object.keys(ICON_SVGS);
+    var loaded = 0, total = keys.length;
+    if (total === 0) { callback(); return; }
+    keys.forEach(function(k) {
+        var img = new Image();
+        img.onload = function() {
+            loadedIcons[k] = img;
+            loaded++;
+            if (loaded >= total) callback();
+        };
+        img.onerror = function() {
+            loaded++;
+            if (loaded >= total) callback();
+        };
+        img.src = 'data:image/svg+xml;base64,' + ICON_SVGS[k];
+    });
+}
+
+/* ════════════════════════════════════════════
+   绘制震度0以下（計測震度 < -0.5）渐变色点
+   ════════════════════════════════════════════ */
+function drawGradientDot(ctx, x, y, sh) {
+    var rgb = shindoToNegGradientRgb(sh);
+    var radius = 6.5;
+    // 外圈描边，避免贴在深色陆地上发糊
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = rgbCss(rgb, 0.92);
+    ctx.fill();
+    ctx.strokeStyle = rgbCss(rgb, 1);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+/* ════════════════════════════════════════════
+   主绘制
+   ════════════════════════════════════════════ */
+function renderMap() {
+    var canvas = document.getElementById('map-canvas');
+    var rect = document.getElementById('map-area').getBoundingClientRect();
+    var W = rect.width, H = rect.height;
+    if (W < 10 || H < 10) return;
+
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    var mapW = W - 2 * MARGIN;
+    var mapH = H - 2 * MARGIN;
+    if (mapW < 10 || mapH < 10) return;
+
+    // 背景
+    ctx.fillStyle = 'rgb(6,6,6)';
+    ctx.fillRect(0, 0, W, H);
+
+    // TopoJSON 日本轮廓
+    for (var ri = 0; ri < JAPAN_RINGS.length; ri++) {
+        var ring = JAPAN_RINGS[ri];
+        if (ring.length < 3) continue;
+        var poly = ring.map(function(p) { return lonlatToXY(p[0], p[1], mapW, mapH); });
+        ctx.beginPath();
+        ctx.moveTo(poly[0][0], poly[0][1]);
+        for (var pi = 1; pi < poly.length; pi++) ctx.lineTo(poly[pi][0], poly[pi][1]);
+        ctx.closePath();
+        ctx.fillStyle = 'rgb(30,33,42)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgb(80,86,100)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    // 测站：先画 < -0.5 渐变点，再画 >= -0.5 图标，保证触发站在上层
+    var positive = [];
+    for (var si = 0; si < STATIONS.length; si++) {
+        var s = STATIONS[si];
+        var xy = lonlatToXY(s.lon, s.lat, mapW, mapH);
+        var sh = s.shindo;
+        if (sh >= GRADIENT_END_SHINDO) {
+            positive.push({ s: s, xy: xy, sh: sh });
+        } else {
+            drawGradientDot(ctx, xy[0], xy[1], sh);
+        }
+    }
+
+    for (var pi2 = 0; pi2 < positive.length; pi2++) {
+        var item = positive[pi2];
+        var th = shindoToThreshold(item.sh);
+        var thKey = th !== null ? th.toFixed(1) : null;
+        if (thKey && loadedIcons[thKey]) {
+            var icon = loadedIcons[thKey];
+            var iconSize = 24;
+            var hs = iconSize / 2;
+            ctx.drawImage(icon, item.xy[0] - hs, item.xy[1] - hs, iconSize, iconSize);
+        } else {
+            // 图标缺失时回退到渐变终点绿色（-0.5），避免再次变灰
+            drawGradientDot(ctx, item.xy[0], item.xy[1], GRADIENT_END_SHINDO);
+        }
+    }
+}
+
+/* ════════════════════════════════════════════
+   列表圆点 / 最大震度：data-* 上色（避免 style=Jinja 触发 IDE CSS 误报）
+   ════════════════════════════════════════════ */
+function applyListDotColors() {
+    var nodes = document.querySelectorAll('.station-dot[data-bg]');
+    for (var i = 0; i < nodes.length; i++) {
+        var bg = nodes[i].getAttribute('data-bg');
+        if (bg) {
+            nodes[i].style.background = bg;
+        }
+    }
+}
+
+function applyMaxShindoColor() {
+    var el = document.getElementById('max-shindo-value');
+    if (!el) return;
+    var color = el.getAttribute('data-color');
+    if (color) {
+        el.style.color = color;
+    }
+}
+
+/* ════════════════════════════════════════════
+   初始化
+   ════════════════════════════════════════════ */
+function init() {
+    applyListDotColors();
+    applyMaxShindoColor();
+    preloadIcons(function() {
+        renderMap();
+        document.body.classList.add('map-ready');
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    setTimeout(init, 0);
+}
+
+})();
+</script>
+</body>
+</html>

@@ -122,6 +122,29 @@ class MessagePushManager:
             cwa_eew_fusion_service=self._cwa_eew_fusion_service,
         )
 
+    def set_silence_callbacks(self, checker, handler) -> None:
+        """注入启动静默回调到推送编排器与各融合服务。
+
+        Args:
+            checker: 无参回调，返回是否处于启动静默期（复用主服务 is_silencing）。
+            handler: 吸收回调，接收事件并完成播种/计数等吸收动作。
+        """
+        if self._push_orchestrator is not None:
+            self._push_orchestrator.set_silence_checker(checker)
+            self._push_orchestrator.set_silence_handler(handler)
+        for fusion_service in (
+            self._cenc_fusion_service,
+            self._cwa_eew_fusion_service,
+        ):
+            if fusion_service is None:
+                continue
+            set_checker = getattr(fusion_service, "set_silence_checker", None)
+            if callable(set_checker):
+                set_checker(checker)
+            set_handler = getattr(fusion_service, "set_silence_absorb_handler", None)
+            if callable(set_handler):
+                set_handler(handler)
+
     def set_telemetry(self, telemetry) -> None:
         """同步更新消息子系统遥测引用。"""
         # 浏览器管理器属于消息层中最容易出现外部依赖异常的组件之一，
@@ -180,6 +203,16 @@ class MessagePushManager:
         return self._bootstrap_service.global_quake_card_builder
 
     @property
+    def snet_map_renderer(self):
+        """S-Net 测站分布图渲染器。"""
+        return self._bootstrap_service.snet_map_renderer
+
+    @property
+    def typhoon_map_renderer(self):
+        """台风路径图渲染器。"""
+        return self._bootstrap_service.typhoon_map_renderer
+
+    @property
     def browser_manager(self):
         """浏览器管理器。"""
         return self.__dict__.get("_browser_manager")
@@ -188,6 +221,15 @@ class MessagePushManager:
     def browser_manager(self, value) -> None:
         """设置浏览器管理器。"""
         self.__dict__["_browser_manager"] = value
+
+    def warmup_browser(self, register_task=None) -> None:
+        """在合适的时机后台预热浏览器渲染底座（由上层在静默武装后触发）。
+
+        Args:
+            register_task: 可选回调，透传给 BootstrapService 登记预热任务，
+                便于停机时统一回收。
+        """
+        self._bootstrap_service.warmup_browser(register_task=register_task)
 
     @property
     def system_notification_service(self):
@@ -212,10 +254,17 @@ class MessagePushManager:
         """基于运行时配置构建推送规则决策所需状态上下文。"""
         # 规则状态对象按会话维度按需构建，
         # 这样既能复用公共规则组件，又能保留会话级差异化配置。
-        return self._runtime_component_factory.build(
+        policy_state = self._runtime_component_factory.build(
             runtime_config,
             session_id=session_id,
         )
+        # 注入全局 data_sources，供 SourceEnabledRule 做“全局总闸 AND 会话开关”
+        global_config = self.config if isinstance(self.config, dict) else {}
+        global_data_sources = global_config.get("data_sources", {})
+        policy_state["global_data_sources"] = (
+            global_data_sources if isinstance(global_data_sources, dict) else {}
+        )
+        return policy_state
 
     async def _render_with_cache(
         self,
@@ -258,6 +307,7 @@ class MessagePushManager:
         skip_dedup: bool = False,
         bypass_fusion: bool = False,
         return_details: bool = False,
+        aggregated_session_count: int = 0,
     ) -> bool | dict[str, Any]:
         """推送事件入口，由推送编排器统一调度。"""
         return await self._push_orchestrator.push_event(
@@ -268,6 +318,7 @@ class MessagePushManager:
             skip_dedup=skip_dedup,
             bypass_fusion=bypass_fusion,
             return_details=return_details,
+            aggregated_session_count=aggregated_session_count,
         )
 
     async def render_earthquake_list_card(

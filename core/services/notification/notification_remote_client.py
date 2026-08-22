@@ -15,9 +15,9 @@ class NotificationRemoteClient:
     """负责构造远端通知接口请求并拉取原始通知数据。"""
 
     # 插件统一系统推送的接口服务主域名
-    NOTIFICATION_BASE_URL = "https://pluginpush.aloys23.link"
+    NOTIFICATION_BASE_URL = "https://plugincenter.aloys23.link"
     # 应用的身份识别码 GUID
-    NOTIFICATION_APP_SLUG = "17bdeac6-bd59-461d-a436-2072f862b031"
+    NOTIFICATION_APP_SLUG = "f059581e-fca6-4fba-a3be-1b16642ca923"
 
     def __init__(self, plugin_version_getter=None):
         self._plugin_version_getter = plugin_version_getter

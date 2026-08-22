@@ -1,0 +1,1104 @@
+{
+  "version": 1,
+  "puzzles": {
+    "全国": {
+      "path": "/publish/radar/chinaall.html",
+      "code": "ACHN"
+    },
+    "东北": {
+      "path": "/publish/radar/dongbei.html",
+      "code": "ANEC"
+    },
+    "华中": {
+      "path": "/publish/radar/huazhong.html",
+      "code": "ACCN"
+    },
+    "华东": {
+      "path": "/publish/radar/huadong.html",
+      "code": "AECN"
+    },
+    "西北": {
+      "path": "/publish/radar/xibei.html",
+      "code": "ANWC"
+    },
+    "华南": {
+      "path": "/publish/radar/huanan.html",
+      "code": "ASCN"
+    },
+    "华北": {
+      "path": "/publish/radar/huabei.html",
+      "code": "ANCN"
+    },
+    "西南": {
+      "path": "/publish/radar/xinan.html",
+      "code": "ASWC"
+    }
+  },
+  "stations": {
+    "大兴": {
+      "province": "北京",
+      "path": "/publish/radar/bei-jing/da-xing.htm",
+      "code": "AZ9010"
+    },
+    "塘沽": {
+      "province": "天津",
+      "path": "/publish/radar/tian-jin/tian-jin.htm",
+      "code": "AZ9220"
+    },
+    "石家庄": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/shi-jia-zhuang.htm",
+      "code": "AZ9311"
+    },
+    "太原": {
+      "province": "山西",
+      "path": "/publish/radar/shan-xi/tai-yuan.htm",
+      "code": "AZ9351"
+    },
+    "鄂尔多斯": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/e-er-duo-si.htm",
+      "code": "AZ9477"
+    },
+    "沈阳": {
+      "province": "辽宁",
+      "path": "/publish/radar/liao-ning/shen-yang.htm",
+      "code": "AZ9240"
+    },
+    "长春": {
+      "province": "吉林",
+      "path": "/publish/radar/ji-lin/chang-chun.htm",
+      "code": "AZ9431"
+    },
+    "哈尔滨": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/ha-er-bin.htm",
+      "code": "AZ9451"
+    },
+    "青浦": {
+      "province": "上海",
+      "path": "/publish/radar/shang-hai/qing-pu.htm",
+      "code": "AZ9002"
+    },
+    "南京": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/nan-jing.htm",
+      "code": "AZ9250"
+    },
+    "杭州": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/hang-zhou.htm",
+      "code": "AZ9571"
+    },
+    "合肥": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/he-fei.htm",
+      "code": "AZ9551"
+    },
+    "福州": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/fu-zhou.htm",
+      "code": "AZ9591"
+    },
+    "南昌": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/nan-chang.htm",
+      "code": "AZ9791"
+    },
+    "济南": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/ji-nan.htm",
+      "code": "AZ9531"
+    },
+    "商丘": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/shang-qiu.htm",
+      "code": "AZ9370"
+    },
+    "武汉": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/wu-han.htm",
+      "code": "AZ9270"
+    },
+    "长沙": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/chang-sha.htm",
+      "code": "AZ9731"
+    },
+    "桂林": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/gui-lin.htm",
+      "code": "AZ9773"
+    },
+    "海口": {
+      "province": "海南",
+      "path": "/publish/radar/hai-nan/hai-kou.htm",
+      "code": "AZ9898"
+    },
+    "重庆": {
+      "province": "重庆",
+      "path": "/publish/radar/chong-qing/chong-qing.htm",
+      "code": "AZ9230"
+    },
+    "成都": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/cheng-du.htm",
+      "code": "AZ9280"
+    },
+    "贵阳": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/gui-yang.htm",
+      "code": "AZ9851"
+    },
+    "拉萨": {
+      "province": "西藏",
+      "path": "/publish/radar/xi-cang/la-sa.htm",
+      "code": "AZ9891"
+    },
+    "西安": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/xi-an.htm",
+      "code": "AZ9290"
+    },
+    "兰州": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/lan-zhou.htm",
+      "code": "AZ9931"
+    },
+    "西宁": {
+      "province": "青海",
+      "path": "/publish/radar/qing-hai/xi-ning.htm",
+      "code": "AZ9971"
+    },
+    "银川": {
+      "province": "宁夏",
+      "path": "/publish/radar/ning-xia/yin-chuan.htm",
+      "code": "AZ9951"
+    },
+    "三明": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/san-ming.htm",
+      "code": "AZ9598"
+    },
+    "齐齐哈尔": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/qi-qi-ha-er.htm",
+      "code": "AZ9452"
+    },
+    "郴州": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/chen-zhou.htm",
+      "code": "AZ9735"
+    },
+    "黔江": {
+      "province": "重庆",
+      "path": "/publish/radar/chong-qing/qian-jiang.htm",
+      "code": "AZ9091"
+    },
+    "滨州": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/bin-zhou.htm",
+      "code": "AZ9543"
+    },
+    "丽水": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/li-shui.htm",
+      "code": "AZ9578"
+    },
+    "建阳": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/jian-yang.htm",
+      "code": "AZ9599"
+    },
+    "九江": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/jiu-jiang.htm",
+      "code": "AZ9792"
+    },
+    "邯郸": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/han-dan.htm",
+      "code": "AZ9310"
+    },
+    "阿尔山": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/aershan.html",
+      "code": "AZ9023"
+    },
+    "临汾": {
+      "province": "山西",
+      "path": "/publish/radar/shan-xi/lin-fen.htm",
+      "code": "AZ9357"
+    },
+    "佳木斯": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/jia-mu-si.htm",
+      "code": "AZ9454"
+    },
+    "泉州": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/quan-zhou.htm",
+      "code": "AZ9595"
+    },
+    "常德": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/chang-de.htm",
+      "code": "AZ9736"
+    },
+    "万州": {
+      "province": "重庆",
+      "path": "/publish/radar/chong-qing/wan-zhou.htm",
+      "code": "AZ9090"
+    },
+    "漳州": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/zhang-zhou.htm",
+      "code": "AZ9596"
+    },
+    "崇左": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/chong-zuo.html",
+      "code": "AZ9075"
+    },
+    "锡林浩特": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/xilinhaote.html",
+      "code": "AZ9479"
+    },
+    "黔东南": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/qian-dong-nan.htm",
+      "code": "AZ9855"
+    },
+    "营口": {
+      "province": "辽宁",
+      "path": "/publish/radar/liao-ning/ying-kou.htm",
+      "code": "AZ9417"
+    },
+    "平顶山": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/ping-ding-shan.htm",
+      "code": "AZ9375"
+    },
+    "盐城": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/yan-cheng.htm",
+      "code": "AZ9515"
+    },
+    "黑河": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/hei-he.htm",
+      "code": "AZ9456"
+    },
+    "徐州": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/xu-zhou.htm",
+      "code": "AZ9516"
+    },
+    "建三江": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/jian-san-jiang.htm",
+      "code": "AZ9085"
+    },
+    "黑瞎子岛": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/hei-xia-zi-dao.htm",
+      "code": "AZ9012"
+    },
+    "南充": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/nan-chong.htm",
+      "code": "AZ9817"
+    },
+    "厦门": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/xia-men.htm",
+      "code": "AZ9592"
+    },
+    "潍坊": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/wei-fang.htm",
+      "code": "AZ9536"
+    },
+    "恩施": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/en-shi.htm",
+      "code": "AZ9718"
+    },
+    "长治": {
+      "province": "山西",
+      "path": "/publish/radar/shan-xi/chang-zhi.htm",
+      "code": "AZ9355"
+    },
+    "吕梁": {
+      "province": "山西",
+      "path": "/publish/radar/shan-xi/lv-liang.htm",
+      "code": "AZ9358"
+    },
+    "南阳": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/nan-yang.htm",
+      "code": "AZ9377"
+    },
+    "吴忠": {
+      "province": "宁夏",
+      "path": "/publish/radar/ning-xia/wu-zhong.htm",
+      "code": "AZ9953"
+    },
+    "铜陵": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/tong-ling.htm",
+      "code": "AZ9562"
+    },
+    "荆州": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/jing-zhou.htm",
+      "code": "AZ9716"
+    },
+    "湘潭": {
+      "province": "湖南",
+      "path": "/publish/radar/hunan/xiangtan.html",
+      "code": "AZ9732"
+    },
+    "张掖": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/zhang-ye.htm",
+      "code": "AZ9936"
+    },
+    "濮阳": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/pu-yang.htm",
+      "code": "AZ9393"
+    },
+    "景德镇": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/jing-de-zhen.htm",
+      "code": "AZ9798"
+    },
+    "商洛": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/shang-luo.htm",
+      "code": "AZ9914"
+    },
+    "辽源": {
+      "province": "吉林",
+      "path": "/publish/radar/ji-lin/liao-yuan.htm",
+      "code": "AZ9437"
+    },
+    "舟山": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/zhou-shan.htm",
+      "code": "AZ9580"
+    },
+    "白山": {
+      "province": "吉林",
+      "path": "/publish/radar/ji-lin/bai-shan.htm",
+      "code": "AZ9439"
+    },
+    "沧州": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/cang-zhou.htm",
+      "code": "AZ9317"
+    },
+    "大连": {
+      "province": "辽宁",
+      "path": "/publish/radar/liao-ning/da-lian.htm",
+      "code": "AZ9411"
+    },
+    "临河": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/lin-he.htm",
+      "code": "AZ9478"
+    },
+    "衢州": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/qu-zhou.htm",
+      "code": "AZ9570"
+    },
+    "抚州": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/fu-zhou.htm",
+      "code": "AZ9794"
+    },
+    "宁德": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/ning-de.htm",
+      "code": "AZ9593"
+    },
+    "永州": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/yong-zhou.htm",
+      "code": "AZ9746"
+    },
+    "西峰": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/xi-feng.htm",
+      "code": "AZ9934"
+    },
+    "宜宾": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/yi-bin.htm",
+      "code": "AZ9831"
+    },
+    "驻马店": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/zhu-ma-dian.htm",
+      "code": "AZ9396"
+    },
+    "烟台": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/yan-tai.htm",
+      "code": "AZ9535"
+    },
+    "河池": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/he-chi.htm",
+      "code": "AZ9778"
+    },
+    "日喀则": {
+      "province": "西藏",
+      "path": "/publish/radar/xi-cang/ri-ka-ze.htm",
+      "code": "AZ9892"
+    },
+    "都匀": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/dou-yun.htm",
+      "code": "AZ9854"
+    },
+    "六盘水": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/liu-pan-shui.htm",
+      "code": "AZ9858"
+    },
+    "信阳": {
+      "province": "河南",
+      "path": "/publish/radar/henan/xinyang.html",
+      "code": "AZ9376"
+    },
+    "金华": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/jin-hua.htm",
+      "code": "AZ9579"
+    },
+    "涪陵": {
+      "province": "重庆",
+      "path": "/publish/radar/chong-qing/pei-ling.htm",
+      "code": "AZ9093"
+    },
+    "嵊泗": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/cheng-si.htm",
+      "code": "AZ9041"
+    },
+    "永川": {
+      "province": "重庆",
+      "path": "/publish/radar/chong-qing/yong-chuan.htm",
+      "code": "AZ9092"
+    },
+    "天水": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/tian-shui.htm",
+      "code": "AZ9938"
+    },
+    "朝阳": {
+      "province": "辽宁",
+      "path": "/publish/radar/liao-ning/chao-yang.htm",
+      "code": "AZ9421"
+    },
+    "宝鸡": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/bao-ji.htm",
+      "code": "AZ9917"
+    },
+    "衡阳": {
+      "province": "湖南",
+      "path": "/publish/radar/hunan/hengyang.html",
+      "code": "AZ9734"
+    },
+    "那曲": {
+      "province": "西藏",
+      "path": "/publish/radar/xi-cang/na-qu.htm",
+      "code": "AZ9896"
+    },
+    "岳阳": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/yue-yang.htm",
+      "code": "AZ9730"
+    },
+    "马鞍山": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/ma-an-shan.htm",
+      "code": "AZ9555"
+    },
+    "遵义": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/zun-yi.htm",
+      "code": "AZ9852"
+    },
+    "兴义": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/xing-yi.htm",
+      "code": "AZ9859"
+    },
+    "毕节": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/bi-jie.htm",
+      "code": "AZ9857"
+    },
+    "汉中": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/han-zhong.htm",
+      "code": "AZ9916"
+    },
+    "三沙": {
+      "province": "海南",
+      "path": "/publish/radar/hai-nan/san-sha.htm",
+      "code": "AZ9071"
+    },
+    "铜仁": {
+      "province": "贵州",
+      "path": "/publish/radar/gui-zhou/tong-ren.htm",
+      "code": "AZ9856"
+    },
+    "南汇": {
+      "province": "上海",
+      "path": "/publish/radar/shang-hai/nan-hui.htm",
+      "code": "AZ9210"
+    },
+    "呼和浩特": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/hu-he-hao-te.htm",
+      "code": "AZ9471"
+    },
+    "临沂": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/lin-yi.htm",
+      "code": "AZ9539"
+    },
+    "雅安": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/ya-an.htm",
+      "code": "AZ9835"
+    },
+    "西昌": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/xi-chang.htm",
+      "code": "AZ9834"
+    },
+    "上饶": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/shang-rao.htm",
+      "code": "AZ9793"
+    },
+    "麻城": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/ma-cheng.htm",
+      "code": "AZ9713"
+    },
+    "赣州": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/gan-zhou.htm",
+      "code": "AZ9797"
+    },
+    "十堰": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/shi-yan.htm",
+      "code": "AZ9719"
+    },
+    "柳州": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/liu-zhou.htm",
+      "code": "AZ9772"
+    },
+    "南宁": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/nan-ning.htm",
+      "code": "AZ9771"
+    },
+    "安庆": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/an-qing.htm",
+      "code": "AZ9556"
+    },
+    "林芝": {
+      "province": "西藏",
+      "path": "/publish/radar/xi-cang/lin-zhi.htm",
+      "code": "AZ9894"
+    },
+    "宜昌": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/yi-chang.htm",
+      "code": "AZ9717"
+    },
+    "随州": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/sui-zhou.htm",
+      "code": "AZ9722"
+    },
+    "青岛": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/qing-dao.htm",
+      "code": "AZ9532"
+    },
+    "达州": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/da-zhou.htm",
+      "code": "AZ9818"
+    },
+    "通辽": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/tong-liao.htm",
+      "code": "AZ9475"
+    },
+    "邵阳": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/shao-yang.htm",
+      "code": "AZ9739"
+    },
+    "北海": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/bei-hai.htm",
+      "code": "AZ9779"
+    },
+    "湖州": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/hu-zhou.htm",
+      "code": "AZ9572"
+    },
+    "广元": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/guang-yuan.htm",
+      "code": "AZ9839"
+    },
+    "宁波": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/ning-bo.htm",
+      "code": "AZ9574"
+    },
+    "泰山": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/tai-shan.htm",
+      "code": "AZ9538"
+    },
+    "满洲里": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/man-zhou-li.htm",
+      "code": "AZ9021"
+    },
+    "固原": {
+      "province": "宁夏",
+      "path": "/publish/radar/ning-xia/gu-yuan.htm",
+      "code": "AZ9954"
+    },
+    "嘉峪关": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/jia-yu-guan.htm",
+      "code": "AZ9937"
+    },
+    "连云港": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/lian-yun-gang.htm",
+      "code": "AZ9518"
+    },
+    "常州": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/chang-zhou.htm",
+      "code": "AZ9519"
+    },
+    "襄阳": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/xiang-yang.htm",
+      "code": "AZ9710"
+    },
+    "张家口": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/zhang-jia-kou.htm",
+      "code": "AZ9313"
+    },
+    "怀化": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/huai-hua.htm",
+      "code": "AZ9745"
+    },
+    "洛阳": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/luo-yang.htm",
+      "code": "AZ9379"
+    },
+    "龙岩": {
+      "province": "福建",
+      "path": "/publish/radar/fu-jian/long-yan.htm",
+      "code": "AZ9597"
+    },
+    "安康": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/an-kang.htm",
+      "code": "AZ9915"
+    },
+    "乐山": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/le-shan.htm",
+      "code": "AZ9833"
+    },
+    "百色": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/bai-se.htm",
+      "code": "AZ9776"
+    },
+    "阜阳": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/fu-yang.htm",
+      "code": "AZ9558"
+    },
+    "承德": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/cheng-de.htm",
+      "code": "AZ9314"
+    },
+    "防城港": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/fang-cheng-gang.htm",
+      "code": "AZ9770"
+    },
+    "郑州": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/zheng-zhou.htm",
+      "code": "AZ9371"
+    },
+    "济宁": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/ji-ning.html",
+      "code": "AZ9537"
+    },
+    "牡丹江": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/mu-dan-jiang.htm",
+      "code": "AZ9453"
+    },
+    "三门峡": {
+      "province": "河南",
+      "path": "/publish/radar/he-nan/san-men-xia.htm",
+      "code": "AZ9398"
+    },
+    "荣成": {
+      "province": "山东",
+      "path": "/publish/radar/shan-dong/rong-cheng.htm",
+      "code": "AZ9631"
+    },
+    "玉林": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/yu-lin.htm",
+      "code": "AZ9775"
+    },
+    "神农架": {
+      "province": "湖北",
+      "path": "/publish/radar/hu-bei/shen-nong-jia.htm",
+      "code": "AZ9060"
+    },
+    "吉安": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/ji-an.htm",
+      "code": "AZ9796"
+    },
+    "泰州": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/tai-zhou.htm",
+      "code": "AZ9523"
+    },
+    "温州": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/wen-zhou.htm",
+      "code": "AZ9577"
+    },
+    "延吉": {
+      "province": "吉林",
+      "path": "/publish/radar/ji-lin/yan-ji.htm",
+      "code": "AZ9433"
+    },
+    "蚌埠": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/beng-bu.htm",
+      "code": "AZ9552"
+    },
+    "南通": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/nan-tong.htm",
+      "code": "AZ9513"
+    },
+    "张家界": {
+      "province": "湖南",
+      "path": "/publish/radar/hu-nan/zhang-jia-jie.htm",
+      "code": "AZ9744"
+    },
+    "伊春": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/yi-chun.htm",
+      "code": "AZ9458"
+    },
+    "淮安": {
+      "province": "江苏",
+      "path": "/publish/radar/jiang-su/huai-an.htm",
+      "code": "AZ9517"
+    },
+    "秦皇岛": {
+      "province": "河北",
+      "path": "/publish/radar/he-bei/qin-huang-dao.htm",
+      "code": "AZ9335"
+    },
+    "白城": {
+      "province": "吉林",
+      "path": "/publish/radar/ji-lin/bai-cheng.htm",
+      "code": "AZ9436"
+    },
+    "大同": {
+      "province": "山西",
+      "path": "/publish/radar/shan-xi/da-tong.htm",
+      "code": "AZ9352"
+    },
+    "加格达奇": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/jia-ge-da-qi.htm",
+      "code": "AZ9457"
+    },
+    "宜春": {
+      "province": "江西",
+      "path": "/publish/radar/jiang-xi/yi-chun.htm",
+      "code": "AZ9795"
+    },
+    "梧州": {
+      "province": "广西",
+      "path": "/publish/radar/guang-xi/wu-zhou.htm",
+      "code": "AZ9774"
+    },
+    "绵阳": {
+      "province": "四川",
+      "path": "/publish/radar/si-chuan/mian-yang.htm",
+      "code": "AZ9816"
+    },
+    "甘南": {
+      "province": "甘肃",
+      "path": "/publish/radar/gan-su/gan-nan.htm",
+      "code": "AZ9941"
+    },
+    "延安": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/yan-an.htm",
+      "code": "AZ9911"
+    },
+    "海北": {
+      "province": "青海",
+      "path": "/publish/radar/qing-hai/hai-bei.htm",
+      "code": "AZ9970"
+    },
+    "赤峰": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/chi-feng.htm",
+      "code": "AZ9476"
+    },
+    "集宁": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/jining.html",
+      "code": "AZ9474"
+    },
+    "九三": {
+      "province": "黑龙江",
+      "path": "/publish/radar/hei-long-jiang/jiu-san.htm",
+      "code": "AZ9084"
+    },
+    "黄山": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/huang-shan.htm",
+      "code": "AZ9559"
+    },
+    "海拉尔": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/hai-la-er.htm",
+      "code": "AZ9470"
+    },
+    "霍林郭勒": {
+      "province": "内蒙古",
+      "path": "/publish/radar/nei-meng/huo-lin-guo-le.htm",
+      "code": "AZ9020"
+    },
+    "三亚": {
+      "province": "海南",
+      "path": "/publish/radar/hai-nan/san-ya.htm",
+      "code": "AZ9070"
+    },
+    "榆林": {
+      "province": "陕西",
+      "path": "/publish/radar/shan-xi/yu-lin.htm",
+      "code": "AZ9912"
+    },
+    "宣城": {
+      "province": "安徽",
+      "path": "/publish/radar/an-hui/xuancheng.html",
+      "code": "AZ9563"
+    },
+    "台州": {
+      "province": "浙江",
+      "path": "/publish/radar/zhe-jiang/tai-zhou.htm",
+      "code": "AZ9576"
+    },
+    "广州": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/guang-zhou.htm",
+      "code": "AZ9200"
+    },
+    "梅州": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/mei-zhou.htm",
+      "code": "AZ9753"
+    },
+    "汕头": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/shan-tou.htm",
+      "code": "AZ9754"
+    },
+    "汕尾": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/shan-wei.htm",
+      "code": "AZ9660"
+    },
+    "河源": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/he-yuan.htm",
+      "code": "AZ9762"
+    },
+    "深圳": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/shen-zhen.htm",
+      "code": "AZ9755"
+    },
+    "湛江": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/zhan-jiang.htm",
+      "code": "AZ9759"
+    },
+    "肇庆": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/zhao-qing.htm",
+      "code": "AZ9758"
+    },
+    "茂名": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/mao-ming.htm",
+      "code": ""
+    },
+    "连州": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/lian-zhou.htm",
+      "code": "AZ9763"
+    },
+    "阳江": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/yang-jiang.htm",
+      "code": "AZ9662"
+    },
+    "韶关": {
+      "province": "广东",
+      "path": "/publish/radar/guang-dong/shao-guan.htm",
+      "code": "AZ9751"
+    },
+    "丽江": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/li-jiang.htm",
+      "code": "AZ9888"
+    },
+    "大理": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/da-li.htm",
+      "code": "AZ9872"
+    },
+    "德宏": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/de-hong.htm",
+      "code": "AZ9692"
+    },
+    "思茅": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/si-mao.htm",
+      "code": "AZ9879"
+    },
+    "文山": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/wen-shan.htm",
+      "code": "AZ9876"
+    },
+    "昆明": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/kun-ming.htm",
+      "code": "AZ9871"
+    },
+    "昭通": {
+      "province": "云南",
+      "path": "/publish/radar/yun-nan/zhao-tong.htm",
+      "code": "AZ9870"
+    },
+    "乌鲁木齐": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/wu-lu-mu-qi.htm",
+      "code": "AZ9991"
+    },
+    "五家渠": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/wu-jia-qu.htm",
+      "code": "AZ9081"
+    },
+    "伊宁": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/yi-ning.htm",
+      "code": "AZ9999"
+    },
+    "克拉玛依": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/ke-la-ma-yi.htm",
+      "code": "AZ9990"
+    },
+    "和田": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/he-tian.htm",
+      "code": "AZ9903"
+    },
+    "喀什": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/ka-shen.htm",
+      "code": "AZ9998"
+    },
+    "图木舒克": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/tu-mu-shu-ke.htm",
+      "code": "AZ9082"
+    },
+    "塔斯尔海": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/si-ta-er-hai.htm",
+      "code": "AZ9083"
+    },
+    "奎屯": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/kui-tun.htm",
+      "code": "AZ9080"
+    },
+    "库尔勒": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/ku-er-le.htm",
+      "code": "AZ9996"
+    },
+    "石河子": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/shi-he-zi.htm",
+      "code": "AZ9993"
+    },
+    "阿克苏": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/a-ke-su.htm",
+      "code": "AZ9997"
+    },
+    "阿拉尔": {
+      "province": "新疆",
+      "path": "/publish/radar/xin-jiang/a-la-er.htm",
+      "code": "AZ9086"
+    }
+  }
+}

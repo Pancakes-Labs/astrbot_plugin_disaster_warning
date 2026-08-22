@@ -20,6 +20,7 @@ function StatsCard({ className = '', style }) {
         warningCount: 0,
         weatherCount: 0,
         tsunamiCount: 0,
+        typhoonCount: 0,
         ...(stats || {})
     };
 
@@ -34,6 +35,7 @@ function StatsCard({ className = '', style }) {
                 <div className="stats-card-main">
                     <div className="skeleton stats-card-total-skeleton"></div>
                     <div className="stats-card-breakdown-grid">
+                        <div className="skeleton stats-card-breakdown-skeleton"></div>
                         <div className="skeleton stats-card-breakdown-skeleton"></div>
                         <div className="skeleton stats-card-breakdown-skeleton"></div>
                         <div className="skeleton stats-card-breakdown-skeleton"></div>
@@ -94,6 +96,14 @@ function StatsCard({ className = '', style }) {
                         {safeStats.tsunamiCount}
                     </Typography>
                     <Typography variant="caption" className="stats-card-breakdown-label">海啸预警</Typography>
+                </Box>
+
+                {/* 5. 台风事件按台风 ID 去重后的累计数量 */}
+                <Box className="stats-card-breakdown-item">
+                    <Typography variant="h6" className="stats-card-breakdown-value">
+                        {safeStats.typhoonCount}
+                    </Typography>
+                    <Typography variant="caption" className="stats-card-breakdown-label">台风信息</Typography>
                 </Box>
             </Box>
         </div>

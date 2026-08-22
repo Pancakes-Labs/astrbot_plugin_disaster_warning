@@ -7,6 +7,8 @@ import math
 import re
 from typing import Any
 
+from .severity_emoji import INTENSITY_CIRCLE_EMOJIS
+
 
 def safe_float_convert(value: Any) -> float | None:
     """安全地将输入值转换为浮点数。"""
@@ -45,16 +47,18 @@ class ScaleConverter:
     def parse_jma_cwa_scale(scale_str: str | int | float) -> float | None:
         """
         解析日本或台湾震度字符串。
-        支持格式：'5-'、'5+'、'5弱'、'5強'、'5'、'6.5' 等。
+        支持格式：'5-'、'5+'、'5弱'、'5強'、'5强'、'5' 等。
 
-        映射规则如下：
+        映射规则与项目内 P2P/展示层规范值对齐：
         X弱 / X- -> X - 0.5
-        X強 / X+ -> X + 0.5
+        X強 / X强 / X+ -> X
         X        -> X.0
 
         例如：
         5弱 -> 4.5
-        5強 -> 5.5
+        5強 -> 5.0
+        6弱 -> 5.5
+        6強 -> 6.0
         """
         if scale_str is None:
             return None
@@ -67,18 +71,39 @@ class ScaleConverter:
         if not scale_str:
             return None
 
-        # 支持 5+、5-、5弱、5強 等多种格式。
-        match = re.search(r"(\d+)(弱|強|\+|\-)?", scale_str)
+        # 先走显式字典，避免简繁体与符号写法产生歧义。
+        normalized = scale_str.replace("強", "强").replace("＋", "+").replace("－", "-")
+        explicit_mapping = {
+            "5-": 4.5,
+            "5弱": 4.5,
+            "5+": 5.0,
+            "5强": 5.0,
+            "6-": 5.5,
+            "6弱": 5.5,
+            "6+": 6.0,
+            "6强": 6.0,
+            "7": 7.0,
+            "4": 4.0,
+            "3": 3.0,
+            "2": 2.0,
+            "1": 1.0,
+            "0": 0.0,
+        }
+        if normalized in explicit_mapping:
+            return explicit_mapping[normalized]
+
+        # 支持 5+、5-、5弱、5強/5强 等多种格式。
+        # 「強/强/+」映射为整数档（5.0/6.0），与 convert_p2p_scale 及展示层一致。
+        match = re.search(r"(\d+)(弱|強|强|\+|\-)?", normalized)
         if match:
             base = int(match.group(1))
             suffix = match.group(2)
 
             if suffix in ["弱", "-"]:
                 return base - 0.5
-            elif suffix in ["強", "+"]:
-                return base + 0.5
-            else:
+            if suffix in ["強", "强", "+"]:
                 return float(base)
+            return float(base)
 
         return None
 
@@ -161,7 +186,7 @@ class ScaleConverter:
 
     @staticmethod
     def get_p2p_scale_emoji(scale_from: Any, scale_to: Any) -> str:
-        """根据 P2P 震度业务值选择展示 emoji。"""
+        """根据 P2P 震度业务值选择展示 emoji（色板复用统一震度色序）。"""
         candidates: list[float] = []
         for value in (scale_from, scale_to):
             raw_value = ScaleConverter.normalize_p2p_scale_value(value)
@@ -171,21 +196,85 @@ class ScaleConverter:
             if converted is not None:
                 candidates.append(converted)
         if not candidates:
-            return "⚪"
+            return INTENSITY_CIRCLE_EMOJIS[0]
         max_scale = max(candidates)
+        # 档位索引 → 统一圆形色序（白→蓝→绿→黄→橙→红→紫）
         if max_scale >= 6.5:
-            return "🟣"
-        if max_scale >= 5.5:
-            return "🔴"
-        if max_scale >= 4.5:
-            return "🟠"
-        if max_scale >= 3.5:
-            return "🟡"
-        if max_scale >= 2.5:
-            return "🟢"
-        if max_scale >= 1.5:
-            return "🔵"
-        return "⚪"
+            idx = 6
+        elif max_scale >= 5.5:
+            idx = 5
+        elif max_scale >= 4.5:
+            idx = 4
+        elif max_scale >= 3.5:
+            idx = 3
+        elif max_scale >= 2.5:
+            idx = 2
+        elif max_scale >= 1.5:
+            idx = 1
+        else:
+            idx = 0
+        return INTENSITY_CIRCLE_EMOJIS[idx]
+
+    # 計測震度中“0以下”的阈值：与 S-Net/C0 图标区间（shindo < -0.5）对齐。
+    MEASURED_INTENSITY_BELOW_ZERO = -0.5
+
+    @staticmethod
+    def classify_measured_intensity(value: float | int | None) -> float | None:
+        """把连续計測震度归类为日本震度阶级对应的规范浮点值。
+
+        阈值与项目内既有展示逻辑一致：
+        ≥6.5→7, ≥6.0→6.0(6强), ≥5.5→5.5(6弱), ≥5.0→5.0(5强),
+        ≥4.5→4.5(5弱), ≥3.5→4, ≥2.5→3, ≥1.5→2, ≥0.5→1,
+        ≥-0.5→0, < -0.5→None（表示“0以下”）。
+        """
+        if value is None:
+            return None
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return None
+        if num >= 6.5:
+            return 7.0
+        if num >= 6.0:
+            return 6.0
+        if num >= 5.5:
+            return 5.5
+        if num >= 5.0:
+            return 5.0
+        if num >= 4.5:
+            return 4.5
+        if num >= 3.5:
+            return 4.0
+        if num >= 2.5:
+            return 3.0
+        if num >= 1.5:
+            return 2.0
+        if num >= 0.5:
+            return 1.0
+        # 0 与轻微负值（MSIL 色阶）统一按震度 0 展示
+        if num >= ScaleConverter.MEASURED_INTENSITY_BELOW_ZERO:
+            return 0.0
+        # 更低的负值不映射到 0，交由 format_measured_intensity_display 显示“0以下”
+        return None
+
+    @staticmethod
+    def format_measured_intensity_display(value: float | int | None) -> str:
+        """连续計測震度 → 震度阶级展示文本。
+
+        复用 format_jma_cwa_scale_display；低于 -0.5 时返回“0以下”。
+        """
+        if value is None:
+            return ""
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return ""
+        if num < ScaleConverter.MEASURED_INTENSITY_BELOW_ZERO:
+            return "0以下"
+        classified = ScaleConverter.classify_measured_intensity(num)
+        if classified is None:
+            return "0以下"
+        return ScaleConverter.format_jma_cwa_scale_display(classified)
 
     @staticmethod
     def format_jma_cwa_scale_display(scale_value: str | int | float | None) -> str:

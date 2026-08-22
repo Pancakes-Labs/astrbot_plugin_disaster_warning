@@ -6,7 +6,6 @@
      * - getStatus: 心跳检测，获取硬件负载、软件版本及子源检测情况。
      * - getStatistics: 载入全量灾害分析指标。
      * - getConnections: 获取 WebSocket 底层网络拓扑的延迟延迟状态。
-     * - sendSimulation: 向后端发送自定义模拟发震或警报测试参数。
      * - getTrend: 拉取指定小时数内发生警报的波动趋势数据。
      * - getHeatmap: 载入指定天数内每日活动频次，用以绘制贡献热力图。
      * - reconnect: 强制后端对发生断线的外部数据源发起断线重连。
@@ -19,12 +18,15 @@
         getStatus: () => client.request('/status'),
         getStatistics: () => client.request('/statistics'),
         getConnections: () => client.request('/connections'),
-        getConfig: () => client.request('/config'),
-        sendSimulation: (data) => client.request('/simulate', {
-            method: 'POST',
-            body: data,
+        /**
+         * 连接健康 Statuspage
+         * @param {number} days 历史窗口天数
+         * @param {'full'|'live'} mode full=条带+事故；live=仅实时态
+         */
+        getConnectionHealth: (days = 90, mode = 'full') => client.request('/connection-health', {
+            query: { days, mode },
         }),
-        getSimulationParams: () => client.request('/simulation-params'),
+        getConfig: () => client.request('/config'),
         getGeoLocation: () => client.request('/geolocate'),
         getTrend: (hours = 24) => client.request('/trend', { query: { hours } }),
         getHeatmap: (days = 180, year = null) => client.request('/heatmap', { query: { days, year } }),

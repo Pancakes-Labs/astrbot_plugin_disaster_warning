@@ -11,7 +11,7 @@ const { useMemo } = React;
  * @param {Object} [props.style] 外部样式
  * @param {string} [props.className=''] 额外类名
  */
-function MagnitudeChart({ style, className = '' }) {
+function MagnitudeChart({ style, className = '', showNote = true }) {
     const { state } = useAppContext();
     
     // 获取后台统计并推送到 state 中的震级分布指标 map
@@ -97,15 +97,17 @@ function MagnitudeChart({ style, className = '' }) {
                 ))}
             </div>
             
-            {/* 底部备注提示区域 */}
-            <div className="magnitude-chart-note-wrap">
-                <div className="magnitude-chart-note">
-                    <span className="magnitude-chart-note-icon">ℹ️</span>
-                    <Typography variant="body2" className="magnitude-chart-note-text">
-                        地震震级分布与最大地震的统计可能会不一致，这是由于对数据源的筛选逻辑不一样导致的，前者比较宽松，后者比较严格。
-                    </Typography>
+            {/* 底部备注提示区域（可外置到布局层） */}
+            {showNote && (
+                <div className="magnitude-chart-note-wrap">
+                    <div className="magnitude-chart-note">
+                        <span className="magnitude-chart-note-icon">ℹ️</span>
+                        <Typography variant="body2" className="magnitude-chart-note-text">
+                            地震震级分布与最大地震的统计可能会不一致，这是由于对数据源的筛选逻辑不一样导致的，前者比较宽松，后者比较严格。
+                        </Typography>
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 }

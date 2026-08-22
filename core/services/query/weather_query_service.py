@@ -10,9 +10,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
+from ...message.presenters.weather_alarm_code_map import (
+    build_weather_icon_url,
+    resolve_weather_icon_code,
+)
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
+    extract_final_weather_color,
+)
+
+# 全日期检索关键词：出现在任意可选参数位置都会被识别并关闭 72 小时过滤。
+_TIME_RANGE_TOKENS = frozenset(
+    {"全部", "全日期", "不限", "全部时间", "all", "all_date", "历史"}
 )
 
 
@@ -104,6 +114,14 @@ def extract_weather_org(title_text: str, headline_text: str) -> str:
     if match:
         return match.group(1)
 
+    # 提取以气象台/气象局/气象站/气象中心结尾的机构名（如"康县气象台"）
+    # 覆盖"升级/降级"类预警 headline 无"发布"关键词的场景
+    org_match = re.search(
+        r"^(.+?(?:气象台|气象局|气象站|气象中心|气象分局))", candidate
+    )
+    if org_match:
+        return org_match.group(1)
+
     time_match = re.search(
         r"^(.*?)(?:\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分(?:\d{1,2}秒)?)$",
         candidate,
@@ -131,12 +149,13 @@ def detect_weather_type(title_text: str, weather_type_code: str | None) -> str:
 
 
 def detect_weather_color(level_text: str, title_text: str) -> str:
-    """识别预警颜色。"""
-    candidate = f"{level_text or ''} {title_text or ''}"
-    for color in COLOR_LEVEL_EMOJI:
-        if color in candidate:
-            return color
-    return "未知颜色"
+    """识别预警颜色。
+
+    对于"升级为/降级为"类预警，优先取变更后的最终颜色，
+    避免因红色优先匹配而返回变更前的旧颜色。
+    """
+    final_color = extract_final_weather_color(level_text, title_text)
+    return final_color if final_color else "未知颜色"
 
 
 def extract_weather_warning_core(title_text: str) -> str | None:
@@ -233,10 +252,22 @@ async def query_weather_alarm_data(
     keyword: str,
     optional_a: str | None = None,
     optional_b: str | None = None,
+    filter_by_time: bool = True,
+    optional_c: str | None = None,
 ) -> dict[str, Any]:
     """查询气象预警。
 
     同时支持按预警标识精确查询，以及按地区、类型、颜色组合筛选近时段记录。
+
+    Args:
+        db: 数据库管理器实例。
+        keyword: 主查询关键字（地区名 / “全国” / 预警 ID）。
+        optional_a: 可选过滤参数一（预警类型 / 时间范围关键词）。
+        optional_b: 可选过滤参数二（预警颜色 / 时间范围关键词）。
+        filter_by_time: 是否按时间窗口过滤（默认 True，仅保留近 72 小时）。
+            精确预警 ID 查询固定不做时间过滤。
+        optional_c: 可选过滤参数三。时间范围关键词（如“全部”/“全日期”/“不限”）
+            可以在任意可选参数位置出现，识别后关闭 72 小时窗口过滤。
     """
     normalized_keyword = (keyword or "").strip()
     if not normalized_keyword:
@@ -244,13 +275,14 @@ async def query_weather_alarm_data(
             "success": False,
             "error": "参数不足",
             "usage": [
-                "/气象预警查询 <省份/地名> [<预警类型>] [<预警颜色>]",
-                "/气象预警查询 全国 [<预警类型>] [<预警颜色>]",
+                "/气象预警查询 <省份/地名> [<预警类型>] [<预警颜色>] [全部|全日期]",
+                "/气象预警查询 全国 [<预警类型>] [<预警颜色>] [全部|全日期]",
                 "/气象预警查询 <预警ID>",
             ],
         }
 
     # 先识别是否为预警标识查询，命中后直接走精确查找分支。
+    # 精确 ID 查询始终不进行日期过滤，保证任意历史预警都能按主键直接取回。
     id_query = bool(re.match(r"^\d+_\d{12,14}$", normalized_keyword))
     if id_query:
         target_id = normalized_keyword
@@ -281,6 +313,18 @@ async def query_weather_alarm_data(
             guideline_idx = body_text.find("防御指南")
             guideline_text = body_text[guideline_idx:].strip()
 
+        # CMA p 编码需先经统一映射转为 Fan Studio 图标接口兼容的 11B 码，
+        # 直接拼接原始 p 编码会导致图标接口返回“伪图片”错误页。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
+        # 图标 URL 弹性构建：本地精确图标 → 本地颜色 fallback → 远程兜底。
+        # 即使 icon_code 无法解析，也会用原始 weather_type_code 尝试颜色回退。
+        icon_url = build_weather_icon_url(icon_code or weather_type_code)
         return {
             "success": True,
             "query_mode": "id",
@@ -295,16 +339,36 @@ async def query_weather_alarm_data(
                 "detected_color": detected_color,
                 "color_emoji": color_emoji,
                 "guideline_text": guideline_text,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": icon_url,
             },
         }
 
-    # 模糊条件搜索分支，最大加载 5000 条事件以限制开销
-    weather_events = await db.get_recent_weather_events(limit=5000)
+    # 解析可选参数：从所有可选参数中统一提取“全部/全日期/不限”等时间范围关键词，
+    # 这些关键词可以出现在任意可选参数位置（不必固定在第四位），识别后关闭 72 小时过滤；
+    # 剩余参数再按内容划分“类型 + 颜色”。
+    raw_optional_tokens = [
+        token.strip()
+        for token in (optional_a, optional_b, optional_c)
+        if token and token.strip()
+    ]
+    all_date_mode = any(token in _TIME_RANGE_TOKENS for token in raw_optional_tokens)
+    # 过滤掉时间范围关键词后，剩余 token 参与类型/颜色解析
+    filter_tokens = [t for t in raw_optional_tokens if t not in _TIME_RANGE_TOKENS]
+    filter_tokens = (filter_tokens + [None, None])[:2]
+    query_type, query_color = parse_weather_query_filters(
+        filter_tokens[0], filter_tokens[1]
+    )
+    # 普通检索在显式要求“全部日期”时放开时间窗口；精确 ID 查询固定不过滤时间。
+    apply_time_filter = filter_by_time and not all_date_mode
+
+    # 模糊条件搜索分支
+    # 普通检索仅保留近 72 小时数据，避免结果过旧且数量过大；
+    # 关闭时间过滤（filter_by_time=False 或全日期模式）时读取全量数据（limit<=0 表示不限制）。
+    # 注意：加载范围与 apply_time_filter 语义保持一致，避免 API 仅传 filter_by_time=false
+    # 时仍只读取 16384 条而静默遗漏更早的历史记录。
+    weather_events = await db.get_recent_weather_events(
+        limit=0 if not apply_time_filter else 16384
+    )
     if not weather_events:
         return {
             "success": False,
@@ -313,21 +377,28 @@ async def query_weather_alarm_data(
         }
 
     location_keyword = normalized_keyword
-    query_type, query_color = parse_weather_query_filters(optional_a, optional_b)
     is_nationwide = normalized_keyword in {"全国", "全國"}
     if is_nationwide:
         location_keyword = None
 
     now_utc = datetime.now(timezone.utc)
-    # 普通检索仅保留近 72 小时数据，避免结果过旧且数量过大。
+    # 普通检索默认仅保留近 72 小时数据，避免结果过旧且数量过大；
+    # 全日期模式（apply_time_filter=False）跳过该过滤，展示所有历史记录。
     threshold_utc = now_utc - timedelta(hours=72)
 
     matched_items = []
     for item in weather_events:
         event_time_utc = parse_event_time_to_utc(item.get("time"))
-        # 过滤掉 72 小时前的预警
-        if event_time_utc is None or event_time_utc < threshold_utc:
+        # 默认过滤掉 72 小时前的预警；全日期模式不做时间过滤。
+        if apply_time_filter and (
+            event_time_utc is None or event_time_utc < threshold_utc
+        ):
             continue
+
+        # 全日期模式下保留缺失时间的记录：为排序提供稳定值（epoch 起始），
+        # 避免 sorted 比较 datetime 与 None 抛出 TypeError。
+        if event_time_utc is None:
+            event_time_utc = datetime.min.replace(tzinfo=timezone.utc)
 
         title_text = str(item.get("description") or "").strip()
         headline_text = str(item.get("subtitle") or "").strip()
@@ -342,8 +413,11 @@ async def query_weather_alarm_data(
         detected_type = detect_weather_type(title_text, weather_type_code)
         detected_color = detect_weather_color(level_text, title_text)
 
-        # 气象警报种类过滤
-        if query_type and query_type not in haystack and query_type != detected_type:
+        # 气象警报种类过滤：按识别出的精确类型匹配，避免子串误伤。
+        # 例如用户查"大风"时，"雷暴大风/雷雨大风/海上大风"等复合类型
+        # 的标题同样包含"大风"子串，宽松的子串匹配会把它们误当结果返回；
+        # 这里只保留 detected_type 与查询类型完全一致的记录（查什么回什么）。
+        if query_type and query_type != detected_type:
             continue
 
         # 警报色彩级别过滤
@@ -369,14 +443,20 @@ async def query_weather_alarm_data(
     matched_items.sort(key=lambda entry: entry["event_time_utc"], reverse=True)
 
     if not matched_items:
+        time_window_hint = "全部日期" if not apply_time_filter else "近72小时"
         return {
             "success": False,
             "query_mode": "search",
-            "error": "未在本地数据库中查询到符合条件的气象预警（仅检索近72小时内数据）。可尝试通过其他官方渠道进行查询",
+            "error": (
+                f"未在本地数据库中查询到符合条件的气象预警（检索范围：{time_window_hint}）。"
+                "可尝试通过其他官方渠道进行查询"
+            ),
             "filters": {
                 "location": location_keyword or "全国",
                 "type": query_type,
                 "color": query_color,
+                "time_window_hours": None if not apply_time_filter else 72,
+                "all_date_mode": not apply_time_filter,
             },
         }
 
@@ -395,6 +475,16 @@ async def query_weather_alarm_data(
         if not raw_real_event_id and "|" in raw_unique_id:
             display_alarm_id = raw_unique_id.split("|")[-1].strip()
 
+        # 与推送路径一致：p 编码先映射为 11B 码再拼图标 URL，避免 CMA 来源图标失效。
+        icon_code = (
+            resolve_weather_icon_code(
+                weather_type_code, title=title_text, headline=headline_text
+            )
+            if weather_type_code
+            else None
+        )
+        # 图标 URL 弹性构建：本地精确图标 → 本地颜色 fallback → 远程兜底。
+        icon_url = build_weather_icon_url(icon_code or weather_type_code)
         items.append(
             {
                 "issue_time": format_cn_time(entry["event_time_utc"]),
@@ -410,11 +500,7 @@ async def query_weather_alarm_data(
                 "title_text": title_text,
                 "headline_text": headline_text,
                 "weather_type_code": weather_type_code,
-                "icon_url": (
-                    f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={weather_type_code}"
-                    if weather_type_code
-                    else None
-                ),
+                "icon_url": icon_url,
             }
         )
 
@@ -428,7 +514,8 @@ async def query_weather_alarm_data(
             "location": location_keyword or "全国",
             "type": query_type,
             "color": query_color,
-            "time_window_hours": 72,
+            "time_window_hours": None if not apply_time_filter else 72,
+            "all_date_mode": not apply_time_filter,
         },
         "items": items,
         "text_blocks": chunked_blocks,

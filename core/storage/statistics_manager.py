@@ -4,6 +4,7 @@
 作为 storage 目录中统计子系统的统一协调层。
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from astrbot.api import logger
@@ -18,6 +19,7 @@ from ..services.identity.event_identity import (
     resolve_source_id,
 )
 from .database_manager import DatabaseManager
+from .history_dirty_data_cleanup_service import HistoryDirtyDataCleanupService
 from .stats.event_stats_aggregator import EventStatsAggregator
 from .stats.stats_event_support_service import StatsEventSupportService
 from .stats.stats_load_service import StatsLoadService
@@ -43,6 +45,14 @@ class StatisticsManager:
         self.display_timezone = self.config.get("display_timezone", "UTC+8")
         self.data_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
         self.stats_file = self.data_dir / "statistics.json"
+
+        # 气象预警正文是否入库：默认记录完整正文供管理端回看。
+        weather_config = self.config.get("weather_config", {})
+        if not isinstance(weather_config, dict):
+            weather_config = {}
+        self.record_weather_description = bool(
+            weather_config.get("record_weather_description", True)
+        )
 
         # 数据库负责保存历史事件明细与更新轨迹，供恢复与查询流程复用。
         self.db = DatabaseManager(self.data_dir / "events.db")
@@ -71,6 +81,11 @@ class StatisticsManager:
         self.aggregator = EventStatsAggregator(self)
         self.record_service = StatsRecordService(self)
         self.load_service = StatsLoadService(self)
+        # S-Net 峰值观测：独立于通用事件流，维护测站历史最大震度档案。
+        # 延迟导入，避免 snet ↔ storage 包级循环依赖。
+        from ..services.snet.snet_peak_service import SnetPeakService
+
+        self.snet_peak_service = SnetPeakService(self)
 
     async def initialize(self):
         """异步初始化数据库并加载历史数据"""
@@ -78,6 +93,14 @@ class StatisticsManager:
         if not self._db_initialized:
             await self.db.initialize()
             self._db_initialized = True
+            # 启动时清理历史脏数据（海啸重复折叠 + CWA 报告 id 复用污染）
+            try:
+                cleanup = HistoryDirtyDataCleanupService(self.db)
+                await cleanup.run_once()
+            except Exception as exc:
+                logger.warning(
+                    f"[灾害预警] 历史脏数据清理跳过/失败: {exc}", exc_info=True
+                )
             await self._load_stats()
 
     async def record_push(
@@ -90,6 +113,18 @@ class StatisticsManager:
             # 这里统一串联聚合、近期列表更新、会话统计与持久化流程。
             if not self._db_initialized:
                 await self.initialize()
+
+            # S-Net 是连续观测网：峰值已在轮询侧归档，这里只记会话推送统计，
+            # 避免与 snet_poll_service._observe_station_peaks 双写 hit_count。
+            if self.snet_peak_service.is_snet_event(event):
+                pushed_sessions = pushed_sessions or []
+                current_time = datetime.now(timezone.utc).isoformat()
+                if pushed_sessions:
+                    self.session_service.record_session_stats(
+                        pushed_sessions, current_time
+                    )
+                self.save_stats()
+                return
 
             # 先完成聚合，统一拿到本次写入所需的时间、来源与唯一标识。
             aggregate_result = await self.aggregator.aggregate_event(event)
@@ -170,7 +205,10 @@ class StatisticsManager:
 
             if self._db_initialized:
                 await self.db.clear_all_events()
+                await self.snet_peak_service.clear_peaks()
 
+            # 重置后 query_service 仍引用旧 stats 字典，需要重新绑定。
+            self.query_service = StatsQueryService(self.stats, self.display_timezone)
             self.save_stats()
             logger.info("[灾害预警] 统计数据已重置")
 

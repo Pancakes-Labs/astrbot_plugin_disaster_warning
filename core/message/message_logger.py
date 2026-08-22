@@ -37,6 +37,9 @@ from .logging.support.p2p_area_mapping_loader import P2PAreaMappingLoader
 class MessageLogger:
     """原始消息格式记录器。"""
 
+    # 原始消息日志文件名（硬编码，不再暴露为用户配置项）。
+    RAW_MESSAGE_LOG_FILE_NAME = "raw_messages.log"
+
     def __init__(self, config: dict[str, Any], plugin_name: str):
         # 消息记录器负责装配日志子系统，并持有共享配置与运行时状态。
         self.config = config
@@ -48,11 +51,9 @@ class MessageLogger:
         )  # 载入 P2P 气象预警区域代码对应表
         debug_config = self.config_accessor.debug_config()
 
-        # 是否启用、文件名、轮转大小与保留份数都由调试配置控制。
+        # 是否启用、轮转大小与保留份数都由调试配置控制。
         self.enabled = debug_config.get("enable_raw_message_logging", False)
-        self.log_file_name = debug_config.get(
-            "raw_message_log_path", "raw_messages.log"
-        )
+        self.log_file_name = self.RAW_MESSAGE_LOG_FILE_NAME
         self.max_size_mb = debug_config.get(
             "log_max_size_mb", 50
         )  # 单个日志文件最大 MB 数
@@ -69,7 +70,10 @@ class MessageLogger:
             "filter_connection_status", True
         )
         self.wolfx_list_log_max_items = debug_config.get("wolfx_list_log_max_items", 5)
-        self.startup_silence_duration = debug_config.get("startup_silence_duration", 0)
+        # 静默启动由主服务 StartupSilenceCoordinator 统一判定；
+        # 实际日志静默走 silence_checker 回调。
+        self.startup_silence_duration = 0
+        self._silence_checker = None
 
         self.start_time = datetime.now(timezone.utc)
         # 这些内存缓存分别服务于事件级去重与最近日志内容比对。
@@ -131,13 +135,21 @@ class MessageLogger:
         self._raw_message_logging_service = RawMessageLoggingService(self)
         self._earthquake_list_summary_service = EarthquakeListSummaryService(self)
 
-        logger.info("[灾害预警] 消息记录器初始化完成")
-        if self.filter_heartbeat:
-            logger.debug("[灾害预警] 消息过滤配置已启用:")
-            logger.debug(f"[灾害预警] - 基础类型过滤: {self.filter_types}")
-            logger.debug(f"[灾害预警] - P2P节点状态过滤: {self.filter_p2p_areas}")
-            logger.debug(f"[灾害预警] - 重复事件过滤: {self.filter_duplicate_events}")
-            logger.debug(f"[灾害预警] - 连接状态过滤: {self.filter_connection_status}")
+        logger.debug("[灾害预警] 消息记录器初始化完成")
+
+    def set_silence_checker(self, checker) -> None:
+        """注入启动静默判定回调（通常绑定主服务 is_silencing）。"""
+        self._silence_checker = checker
+
+    def is_in_startup_silence(self) -> bool:
+        """是否处于启动静默期（委托主服务协调器）。"""
+        checker = self._silence_checker
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
 
     def _should_filter_message(self, payload_data: Any, source_id: str = "") -> str:
         """判断是否应该过滤该消息，返回过滤原因，空字符串表示不过滤。"""
@@ -180,7 +192,7 @@ class MessageLogger:
         conn_type = (connection_info or {}).get("connection_type", "")
         if message_type != "websocket_message" and conn_type != "websocket":
             return None
-        if "global_quake" not in source.lower():
+        if "global_quake" not in source.lower() and "openquake" not in source.lower():
             return None
 
         try:

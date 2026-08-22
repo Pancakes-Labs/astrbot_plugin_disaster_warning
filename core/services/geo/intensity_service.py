@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import math
 
+from ....utils.converters import ScaleConverter
+
 
 class IntensityService:
     """地震烈度计算服务。"""
@@ -108,6 +110,37 @@ class IntensityService:
         if intensity < 10.0:
             return "🔴 毁灭性"
         return "🟣 极度毁灭"
+
+    @staticmethod
+    def get_shindo_description(value: float | int | None) -> str:
+        """
+        获取日本震度描述（带颜色 Emoji）。
+
+        阈值与项目惯例对齐，保证描述与展示的震度阶级一致；
+        emoji 色序与展示层档位保持一致。
+        """
+        classified = ScaleConverter.classify_measured_intensity(value)
+        if classified is None:
+            return "⚪ 无感"
+        if classified >= 7.0:
+            return "🟣 无法行动"
+        if classified >= 6.0:  # 6强
+            return "🔴 无法站立"
+        if classified >= 5.5:  # 6弱
+            return "🔴 站立困难"
+        if classified >= 5.0:  # 5强
+            return "🟠 行动困难"
+        if classified >= 4.5:  # 5弱
+            return "🟠 行动不便"
+        if classified >= 3.5:  # 震度4
+            return "🟡 惊惧难行"
+        if classified >= 2.5:  # 震度3
+            return "🟢 摇晃明显"
+        if classified >= 1.5:  # 震度2
+            return "🔵 室内有感"
+        if classified >= 0.5:  # 震度1
+            return "⚪ 轻微有感"
+        return "⚪ 无感"  # 震度0
 
 
 IntensityCalculator = IntensityService

@@ -40,7 +40,8 @@ class LocalIntensityRule(BaseRule):
             return RuleDecision.accept(
                 reason="模拟模式跳过本地严格拦截",
                 detail=(
-                    f"本地预估烈度 {result.get('intensity', 0):.1f}，"
+                    f"本地预估{result.get('threshold_unit', '烈度')} "
+                    f"{result.get('intensity', 0):.1f}，"
                     f"距离 {result.get('distance', 0):.1f} km"
                 ),
                 context=dict(result),
@@ -51,7 +52,8 @@ class LocalIntensityRule(BaseRule):
             return RuleDecision.reject(
                 reason="本地烈度规则过滤",
                 detail=(
-                    f"本地预估烈度 {result.get('intensity', 0):.1f} 未达到阈值，"
+                    f"本地预估{result.get('threshold_unit', '烈度')} "
+                    f"{result.get('intensity', 0):.1f} 未达到阈值，"
                     f"距离 {result.get('distance', 0):.1f} km"
                 ),
                 context=dict(result),
@@ -61,7 +63,8 @@ class LocalIntensityRule(BaseRule):
         return RuleDecision.accept(
             reason="本地烈度规则通过",
             detail=(
-                f"本地预估烈度 {result.get('intensity', 0):.1f}，"
+                f"本地预估{result.get('threshold_unit', '烈度')} "
+                f"{result.get('intensity', 0):.1f}，"
                 f"距离 {result.get('distance', 0):.1f} km"
             ),
             context=dict(result),

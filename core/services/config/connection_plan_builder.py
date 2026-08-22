@@ -10,6 +10,10 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...network.websocket.fan_studio_connection_policy import (
+    ServerPreference,
+    resolve_server_urls,
+)
 from ...sources.source_catalog import SOURCE_CATALOG
 from ...sources.source_entry import SourceEntry
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
@@ -20,6 +24,9 @@ class ConnectionPlanBuilder:
 
     负责把已启用的数据源目录项转换为运行时可直接消费的连接计划。
     """
+
+    # FAN Studio 应用 ID（硬编码，不再暴露为用户配置项）。
+    FAN_STUDIO_APP_ID = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
 
     @staticmethod
     def _resolve_connection_plan(
@@ -39,12 +46,59 @@ class ConnectionPlanBuilder:
             if key != "group_key" and value not in (None, "")
         }
 
+    @staticmethod
+    def _resolve_fan_studio_auth(config: dict[str, Any]) -> tuple[str, str]:
+        """从全局配置解析 FAN Studio 鉴权字段。
+
+        app_id 已硬编码为类常量，仅从配置读取 api_key。
+        """
+        data_sources = config.get("data_sources")
+        fan_cfg: dict[str, Any] = {}
+        if isinstance(data_sources, dict):
+            raw = data_sources.get("fan_studio")
+            if isinstance(raw, dict):
+                fan_cfg = raw
+        app_id = ConnectionPlanBuilder.FAN_STUDIO_APP_ID
+        api_key = str(fan_cfg.get("api_key") or "").strip()
+        return app_id, api_key
+
     @classmethod
-    def build(cls, config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """根据统一数据源目录与启用状态构建连接计划。"""
+    def _resolve_fan_server_preference(cls, config: dict[str, Any]) -> str:
+        """从全局配置解析 FAN Studio 服务器偏好。"""
+        data_sources = config.get("data_sources")
+        if not isinstance(data_sources, dict):
+            return ServerPreference.PRIMARY_FIRST.value
+        fan_cfg = data_sources.get("fan_studio", {})
+        if not isinstance(fan_cfg, dict):
+            return ServerPreference.PRIMARY_FIRST.value
+        raw = str(fan_cfg.get("fan_server_preference") or "").strip()
+        return ServerPreference.normalize(raw)
+
+    @classmethod
+    def build(
+        cls,
+        config: dict[str, Any],
+        fan_server_pref_override: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """根据统一数据源目录与启用状态构建连接计划。
+
+        Args:
+            config: 全局配置字典。
+            fan_server_pref_override: 可选的 FAN Studio 服务器偏好临时覆盖值。
+                传入时仅影响本次连接计划的 URL 顺序，不写入配置，
+                用于运行期临时切换（如 /服务器切换 指令）；
+                缺省时从配置读取持久化偏好。
+        """
         # 使用运行时查询服务拉取当前的物理数据源启用列表
         runtime_query = SourceRuntimeQueryService(config)
         connections: dict[str, dict[str, Any]] = {}
+        fan_app_id, fan_api_key = cls._resolve_fan_studio_auth(config)
+        fan_server_pref = (
+            ServerPreference.normalize(fan_server_pref_override)
+            if fan_server_pref_override
+            else cls._resolve_fan_server_preference(config)
+        )
+        fan_auth_warned = False
 
         # 只为当前已启用的数据源生成连接计划，避免创建无效连接占位。
         enabled_source_ids = runtime_query.get_enabled_source_ids()
@@ -62,16 +116,39 @@ class ConnectionPlanBuilder:
             # 同一连接分组只保留一份计划，避免多个子源重复覆盖/创建同一连接。
             if group_key in connections:
                 continue
+
+            # FAN Studio 连接必须携带 appId + API Key，否则跳过建连计划。
+            if group_key.startswith("fan_studio"):
+                if not fan_app_id or not fan_api_key:
+                    if not fan_auth_warned:
+                        logger.warning(
+                            "[灾害预警] FAN Studio 相关数据源已启用，但未配置 AppID 或 API Key，已跳过 FAN 连接。"
+                            "请到开发者平台申请 Key 后填入配置。"
+                        )
+                        fan_auth_warned = True
+                    continue
+                plan["fan_app_id"] = fan_app_id
+                plan["fan_api_key"] = fan_api_key
+                # 按服务器偏好调整 URL 顺序（沿用 build 入口解析出的偏好，
+                # 支持临时覆盖值，避免此处重复读取配置导致覆盖失效）
+                plan["server_preference"] = fan_server_pref
+                original_url = str(plan.get("url") or "").strip()
+                original_backup = str(plan.get("backup_url") or "").strip()
+                first_url, second_url = resolve_server_urls(
+                    original_url,
+                    original_backup,
+                    fan_server_pref,
+                )
+                plan["url"] = first_url
+                plan["backup_url"] = second_url
+                # 记录原始 URL（供切换时恢复）
+                plan["original_url"] = original_url
+                plan["original_backup"] = original_backup
+
             connections[group_key] = plan
-            if group_key == "fan_studio_all":
-                logger.info("[灾害预警] 已配置 FAN Studio 全量数据连接")
-            elif group_key == "p2p_main":
-                logger.info("[灾害预警] 已配置 P2P 地震情报连接")
-            elif group_key == "wolfx_all":
-                logger.info("[灾害预警] 已配置 Wolfx 全量数据连接")
-            elif group_key == "global_quake":
-                logger.info("[灾害预警] Global Quake 数据源已启用")
-            else:
-                logger.info(f"[灾害预警] 已配置数据连接，连接分组为 {group_key}")
+
+        if connections:
+            group_list = "、".join(sorted(connections.keys()))
+            logger.debug(f"[灾害预警] 已配置数据连接分组: {group_list}")
 
         return connections

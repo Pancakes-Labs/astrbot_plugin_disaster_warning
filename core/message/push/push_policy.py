@@ -35,15 +35,21 @@ def evaluate_push_decision_with_components(
     )
     decision = rule_chain.evaluate(rule_context)
 
+    metadata = getattr(event, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+        event.metadata = metadata
+
     local_estimation = rule_context.extras.get("local_estimation")
     if isinstance(local_estimation, dict) and local_estimation:
         # 规则链可能在判定过程中顺带产出本地预估信息，
         # 这里把它回写到事件元数据，供后续展示器直接复用。
-        metadata = getattr(event, "metadata", None)
-        if not isinstance(metadata, dict):
-            metadata = {}
-            event.metadata = metadata
         metadata["local_estimation"] = dict(local_estimation)
+
+    typhoon_local_estimation = rule_context.extras.get("typhoon_local_estimation")
+    if isinstance(typhoon_local_estimation, dict) and typhoon_local_estimation:
+        # 台风距离/预报逼近估算同样回写元数据，供文本展示与调试复用。
+        metadata["typhoon_local_estimation"] = dict(typhoon_local_estimation)
 
     if not decision.accepted and emit_filter_log and logger_instance is not None:
         detail_suffix = f"，{decision.detail}" if decision.detail else ""

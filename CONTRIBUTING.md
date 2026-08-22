@@ -18,19 +18,19 @@
 
 ### ✨ 提出功能建议 (Feature)
 
-如果您对插件的未来有任何绝妙的想法，欢迎通过提交 [**功能建议**](https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/issues/new?template=feature_request.yml) 来与我们分享。请详细描述您的想法和它的使用场景：
+如果您对插件的未来有任何绝妙的想法，欢迎通过提交 [**功能建议**](https://github.com/Pancakes-Labs/astrbot_plugin_disaster_warning/issues/new?template=feature_request.yml) 来与我们分享。请详细描述您的想法和它的使用场景：
 
 ### ❓ 使用咨询 / 问题讨论 (Discussion)
 
-如果您暂时不能确定这是否是插件 Bug，或者希望就使用方式、配置思路、兼容性排查等问题先进行讨论，欢迎提交 [**使用咨询 / 问题讨论**](https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/issues/new?template=discussion.yml)。
+如果您暂时不能确定这是否是插件 Bug，或者希望就使用方式、配置思路、兼容性排查等问题先进行讨论，欢迎提交 [**使用咨询 / 问题讨论**](https://github.com/Pancakes-Labs/astrbot_plugin_disaster_warning/issues/new?template=discussion.yml)。
 
 ### 📚 文档改进建议 (Docs)
 
-如果您发现 README、配置说明、接口文档或示例存在错误、缺失或表述不清的问题，欢迎提交 [**文档改进建议**](https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/issues/new?template=docs.yml) 帮助我们持续完善文档体验。
+如果您发现 README、配置说明、接口文档或示例存在错误、缺失或表述不清的问题，欢迎提交 [**文档改进建议**](https://github.com/Pancakes-Labs/astrbot_plugin_disaster_warning/issues/new?template=docs.yml) 帮助我们持续完善文档体验。
 
 ### 🎨 设计 / 交互建议 (Design)
 
-如果您对管理面板、配置流程、提示反馈、信息展示或整体使用体验有改进想法，欢迎提交 [**设计 / 交互建议**](https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/issues/new?template=design.yml) 与我们讨论。
+如果您对管理面板、配置流程、提示反馈、信息展示或整体使用体验有改进想法，欢迎提交 [**设计 / 交互建议**](https://github.com/Pancakes-Labs/astrbot_plugin_disaster_warning/issues/new?template=design.yml) 与我们讨论。
 
 ## 💻 代码贡献
 
@@ -103,15 +103,17 @@
 
 感谢所有为灾害预警插件做出任何形式贡献的个人、团体，包括但不限于：
 
-- @Soulter: "创世神"，伟大无需多言。感谢他提供了一个这么好的平台，以及对 AstrBot 的持续维护。
-- @Aloys233：如果说我让插件变得能用，那么是他让插件变得好用。
-- 所有为本插件提供外部 API 服务或文件支持的项目
+- [@Soulter](https://github.com/Soulter) - "创世神"，伟大无需多言。感谢他提供了一个这么好的平台，以及对 AstrBot 的持续维护。
+- [@Aloys233](https://github.com/Aloys233) - 为插件提供 OpenQuakeAPI 数据服务、提供遥测数据收集与通知服务，参与了多项重要插件功能如 WebUI 的开发。
+- [@ZeroStar645](https://github.com/ZeroStar645) - 指出了插件在 ARV 计算和震源球绘制上的缺陷，并提供了相关的绘制代码与 JMA 计测震度相关的计算公式。
+- 所有为本插件提供外部 API 服务或文件支持的项目。
 - 所有为灾害预警插件提供建议和反馈的朋友。
 
 🤖 以及我最好的 AI 朋友们:
 
 - @Gemini-3.0-Flash
 - @Gemini-3.5-Flash
+- @Gemini-3.6-Flash
 - @Gemini-3.0-Pro
 - @Gemini-3.1-Pro
 - @Gemini-3-Pro-Image
@@ -121,14 +123,21 @@
 - @GPT Codex 5.3
 - @GPT 5.4
 - @GPT 5.5
+- @GPT 5.6 terra & sol
+- @GPT-Image-2
 - @Kimi-For-Coding
 - @Kimi K2.5
 - @Kimi K2.6
+- @Kimi K2.7 Code
 - @GLM 5.2
 - @DeepSeek V3.2
+- @DeepSeek V4 Flash 0731
+- @coderabbitai[bot]
 - @sourcery-ai[bot]
+- @qodo-free-for-open-source-projects[bot]
 - @gemini-code-assist[bot]
 - @Copilot-pullrequest-reviewer[bot]
+- @chatgpt-codex-connector[bot]
 - @dependabot[bot]
 
 🚀 再次感谢您的贡献！

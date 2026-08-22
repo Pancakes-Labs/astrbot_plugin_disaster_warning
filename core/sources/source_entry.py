@@ -16,6 +16,7 @@ class SourceType(Enum):
     EARTHQUAKE_INFO = "earthquake_info"  # 地震测定与历史报告
     TSUNAMI = "tsunami"  # 海啸预警/情报
     WEATHER = "weather"  # 气象预警
+    TYPHOON = "typhoon"  # 台风/热带气旋
 
 
 class ProviderFamily(Enum):
@@ -25,6 +26,8 @@ class ProviderFamily(Enum):
     P2P = "p2p"  # 日本 P2P 地震情报网
     WOLFX = "wolfx"  # Wolfx API
     GLOBAL_QUAKE = "global_quake"  # Global Quake 自建或公共服务器
+    EQSC = "eqsc"  # EQSC HTTP API（海啸/台风/火山等富化数据源）
+    DIRECT_HTTP = "direct_http"  # 直连 HTTP 轮询源（如 NIED S-Net / MSIL 瓦片）
 
 
 class FusionRole(Enum):

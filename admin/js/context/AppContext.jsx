@@ -23,22 +23,41 @@ const AppContext = createContext();
  * 
  * @param {Object} data - 从后端 API `/api/status` 接口接收到的原始状态数据字典。
  * @param {string} previousVersion - 缓存的上一轮系统版本号，用于异常缺失时的回退策略。
+ * @param {Date|null} [previousStartTime=null] - 上一轮已解析的启动时间，用于稳定 Date 引用。
  * @returns {Object} 包含标准化属性的系统状态对象。
  */
-function toStatusUpdate(data = {}, previousVersion = '未知版本') {
+function toStatusUpdate(data = {}, previousVersion = '未知版本', previousStartTime = null) {
     const statusUpdate = {
         running: data.running,                                     // 服务运行状态标识 (布尔型)
         activeConnections: data.active_connections,               // 当前活跃网络连接数 (整型)
         totalConnections: data.total_connections,                 // 注册的总连接服务数 (整型)
-        uptime: data.uptime,                                       // 服务运行时长（由后端格式化好的字符串）
         subSourceStatus: data.sub_source_status,                   // 各子数据源心跳与健康检查树状结构
         eewQueryStatus: data.eew_query_status || null,             // 紧急地震速报 (EEW) 的轮询与连接状态
         version: data.version || previousVersion,                  // 系统当前运行的固件/插件版本
     };
 
-    // 若后端提供了服务启动时间，则转换为前端标准的 Date 实例，以便本地进行精确的跳秒运行时长计算
+    // 若后端提供了服务启动时间，则转换为前端标准的 Date 实例，以便本地进行精确的跳秒运行时长计算。
+    // 启动时间未变化时复用旧 Date 引用，避免触发 uptime 本地计时 effect 反复重建。
+    // 有 start_time 时由前端本地跳秒独占 uptime 字段，避免与服务端 uptime 字符串互相覆盖造成前后跳秒。
     if (data.start_time) {
-        statusUpdate.startTime = new Date(data.start_time);
+        const nextStartTime = new Date(data.start_time);
+        const nextStartTimeMs = nextStartTime.getTime();
+        const previousStartTimeMs = previousStartTime instanceof Date
+            ? previousStartTime.getTime()
+            : null;
+
+        if (
+            previousStartTime instanceof Date
+            && !Number.isNaN(previousStartTimeMs)
+            && previousStartTimeMs === nextStartTimeMs
+        ) {
+            statusUpdate.startTime = previousStartTime;
+        } else if (!Number.isNaN(nextStartTimeMs)) {
+            statusUpdate.startTime = nextStartTime;
+        }
+    } else if (typeof data.uptime === 'string') {
+        // 仅在缺少本地跳秒基准时回退使用服务端格式化的运行时长
+        statusUpdate.uptime = data.uptime;
     }
 
     return statusUpdate;
@@ -68,14 +87,14 @@ function AppProvider({ children }) {
             const data = await statusApi.getStatus();
             dispatch({
                 type: window.AppActionTypes.UPDATE_STATUS,
-                payload: toStatusUpdate(data, state.status.version),
+                payload: toStatusUpdate(data, state.status.version, state.status.startTime),
             });
             return data;
         } catch (err) {
             console.error('Failed to fetch status:', err);
             throw err;
         }
-    }, [statusApi, state.status.version]);
+    }, [statusApi, state.status.version, state.status.startTime]);
 
     /**
      * 异步拉取当前各数据源连接明细与网络延迟数据

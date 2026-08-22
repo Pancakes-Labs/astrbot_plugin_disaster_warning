@@ -30,10 +30,15 @@ function useWebSocket() {
             if (!data) return;
 
             // 1. 同步系统负载与运行态
+            // 传入 previousStartTime，避免每次推送重建 startTime 引用并覆盖本地 uptime 跳秒
             if (data.status) {
                 dispatch({
                     type: window.AppActionTypes.UPDATE_STATUS,
-                    payload: window.toStatusUpdate(data.status, state.status.version),
+                    payload: window.toStatusUpdate(
+                        data.status,
+                        state.status.version,
+                        state.status.startTime,
+                    ),
                 });
             }
             // 2. 同步图表多维分析数据

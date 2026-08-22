@@ -18,12 +18,47 @@
     display: flex;
 }
 
+.stats-overview-main-stack {
+    width: 100%;
+    gap: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 震级分布下方：历史最大地震 + S-Net 峰值并排 */
+.stats-peak-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    width: 100%;
+    /* 与右侧说明卡片同高，避免说明卡被内容撑高 */
+    flex: 0 0 auto;
+    height: var(--stats-bottom-card-height, 200px);
+    min-height: var(--stats-bottom-card-height, 200px);
+}
+
+.stats-peak-pair-item {
+    min-width: 0;
+    display: flex;
+    height: 100%;
+    min-height: 0;
+}
+
+.stats-peak-pair-item > .card {
+    width: 100%;
+    height: 100%;
+}
+
+.stats-overview-note-wrap {
+    margin-top: 0;
+}
+
 /* 侧边机构、区域排行面板（居右） */
 .stats-overview-side {
     grid-column: span 4;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
 }
 
 .stats-fill-column {
@@ -70,9 +105,9 @@
    2. 统计摘要总览卡片 (Summary Header Cards)
    ========================================================================== */
 .stats-summary-card {
-    background: var(--md-sys-color-primary-container);
+    --card-bg: var(--md-sys-color-primary-container);
+    --card-border-color: transparent;
     color: var(--md-sys-color-on-primary-container);
-    border: none;
 }
 
 .stats-summary-title {
@@ -331,8 +366,9 @@
    4. 灾害发生趋势线型图 (Trend SVG Linear Chart)
    ========================================================================== */
 .trend-chart-card {
+    --hover-lift: 0px;
     position: relative;
-    overflow: hidden;
+    overflow: hidden; /* 图表内部绘制区域裁剪 */
 }
 
 .trend-chart-header {
@@ -569,18 +605,85 @@
    6. 最大地震发生及频发天气预警级别展示区 (Max Earthquake & Weather Levels)
    ========================================================================== */
 
-.max-mag-card,
 .weather-level-card,
 .log-stats-card {
     height: 100%;
     min-height: 200px;
 }
 
-/* 本期最大地震卡片：采用特殊渐变警告红/橙色强调灾害烈度 */
+/* 底部三卡统一高度基准（最大地震 / S-Net / 说明） */
+:root {
+    --stats-bottom-card-height: 200px;
+}
+
+.max-mag-card,
+.snet-max-card,
+.stats-note-card {
+    height: var(--stats-bottom-card-height);
+    min-height: var(--stats-bottom-card-height);
+    max-height: var(--stats-bottom-card-height);
+    box-sizing: border-box;
+}
+
+/* 右侧说明槽：与左侧 peak-pair 同高 */
+.stats-note-slot {
+    flex: 0 0 auto;
+    height: var(--stats-bottom-card-height);
+    min-height: var(--stats-bottom-card-height);
+    display: flex;
+}
+
+.stats-note-slot > .card {
+    width: 100%;
+    height: 100%;
+}
+
+/* 最大地震卡片：暖色双层渐变（上层着色 + 底层 surface） */
 .max-mag-card {
-    background: linear-gradient(135deg, var(--md-sys-color-error-container) 0%, var(--md-sys-color-surface) 100%);
+    --card-bg:
+        linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--md-sys-color-error) 18%, transparent) 0%,
+            color-mix(in srgb, #ff8a65 26%, transparent) 18%,
+            color-mix(in srgb, var(--md-sys-color-error-container) 92%, transparent) 46%,
+            color-mix(in srgb, #ffe0b2 42%, transparent) 74%,
+            transparent 100%
+        ),
+        var(--md-sys-color-surface);
+    /* 描边权重对齐通用 .card（1px glass 级），色相跟随暖色 */
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-error) 18%, transparent);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-error) 32%, transparent);
+    --card-shadow: 0 4px 20px 0 color-mix(in srgb, var(--md-sys-color-error) 10%, transparent);
+    --card-hover-shadow: 0 12px 30px 0 color-mix(in srgb, var(--md-sys-color-error) 16%, transparent);
+    --hover-lift: 4px;
+
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+}
+
+/* S-Net 历史最大震度：主色双层渐变 + 与通用卡片一致的描边权重 */
+.snet-max-card {
+    --card-bg:
+        linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent) 0%,
+            color-mix(in srgb, var(--md-sys-color-primary-container) 86%, transparent) 44%,
+            transparent 100%
+        ),
+        var(--md-sys-color-surface);
+    /* 描边权重对齐通用 .card，色相跟随主色（避免“假紫边/过重”） */
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 32%, transparent);
+    --card-shadow: 0 4px 20px 0 color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent);
+    --card-hover-shadow: 0 12px 30px 0 color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
+    --hover-lift: 4px;
+
+    position: relative;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
 }
 
 .max-mag-card--empty {
@@ -612,21 +715,27 @@
 }
 
 .max-mag-card-header {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 }
 
-.max-mag-card-title,
-.max-mag-card-place,
-.max-mag-card-time,
-.max-mag-card-source-chip {
+.max-mag-card-title {
     color: var(--md-sys-color-on-error-container) !important;
+}
+
+.max-mag-card-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
 }
 
 .max-mag-card-mag-row {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-bottom: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 /* 最大震级超级数字展示 */
@@ -634,25 +743,293 @@
     font-weight: 800 !important;
     color: var(--md-sys-color-error) !important;
     line-height: 1 !important;
+    font-size: clamp(2rem, 2.6vw, 2.75rem) !important;
+    letter-spacing: -0.02em;
 }
 
 .max-mag-card-mag-prefix {
-    margin-right: 8px;
-}
-
-.max-mag-card-source-chip {
-    height: 24px !important;
-    font-size: 12px !important;
-    background: rgba(255, 255, 255, 0.3) !important;
+    margin-right: 4px;
+    opacity: 0.92;
 }
 
 .max-mag-card-place {
     font-weight: 800 !important;
-    margin-bottom: 8px !important;
+    color: var(--md-sys-color-on-error-container) !important;
+    line-height: 1.35 !important;
+    margin: 0 !important;
+}
+
+.max-mag-card-footer {
+    margin-top: auto;
+    padding-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.max-mag-card-time,
+.snet-max-card-time {
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+    line-height: 1.3 !important;
+    opacity: 0.88 !important;
 }
 
 .max-mag-card-time {
-    opacity: 0.7;
+    color: var(--md-sys-color-on-error-container) !important;
+}
+
+.max-mag-card-source {
+    color: var(--md-sys-color-on-error-container) !important;
+    font-weight: 700 !important;
+    opacity: 0.85;
+    white-space: nowrap;
+    max-width: 52%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.8rem !important;
+    line-height: 1.25 !important;
+}
+
+.snet-max-card--empty {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.snet-max-card-empty-icon {
+    font-size: 48px;
+    opacity: 0.2;
+}
+
+.snet-max-card-empty-text {
+    opacity: 0.5;
+    margin-top: 8px !important;
+}
+
+.snet-max-card-watermark {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    font-size: 100px;
+    opacity: 0.05;
+    pointer-events: none;
+    user-select: none;
+}
+
+.snet-max-card-header {
+    margin-bottom: 12px;
+}
+
+.snet-max-card-title {
+    color: var(--md-sys-color-on-primary-container) !important;
+}
+
+/* Top3 单行列表 */
+.snet-max-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+}
+
+.snet-max-card-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.snet-max-card-rank {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    opacity: 0.9;
+}
+
+.snet-max-card-line {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 6px;
+    color: var(--md-sys-color-on-primary-container) !important;
+    font-weight: 600 !important;
+    line-height: 1.35 !important;
+}
+
+.snet-max-card-station {
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.snet-max-card-label {
+    font-weight: 700;
+    color: var(--md-sys-color-primary);
+}
+
+.snet-max-card-value {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.78;
+    font-weight: 600;
+}
+
+.snet-max-card-sep {
+    display: none;
+}
+
+.snet-max-card-footer {
+    margin-top: auto;
+    padding-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.snet-max-card-time,
+.snet-max-card-source {
+    color: var(--md-sys-color-on-primary-container) !important;
+    line-height: 1.25 !important;
+}
+
+.snet-max-card-source {
+    font-weight: 700 !important;
+    opacity: 0.85;
+    white-space: nowrap;
+    font-size: 0.8rem !important;
+}
+
+/* 统计口径说明小卡片：与最大震级 / S-Net 同高，描边完全对齐通用 .card */
+.stats-note-card {
+    --card-bg:
+        linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--md-sys-color-surface-variant) 55%, transparent) 0%,
+            color-mix(in srgb, var(--md-sys-color-primary-container) 14%, transparent) 42%,
+            transparent 100%
+        ),
+        var(--md-sys-color-surface);
+    /* 与通用 .card 完全一致的描边/阴影 token，避免“另起一套边框” */
+    --card-border-color: var(--glass-border);
+    --card-hover-border-color: rgba(103, 80, 164, 0.26);
+    --card-shadow: var(--glass-shadow);
+    --card-hover-shadow: 0 12px 30px 0 rgba(103, 80, 164, 0.12);
+    --hover-lift: 4px;
+
+    height: var(--stats-bottom-card-height, 200px);
+    min-height: var(--stats-bottom-card-height, 200px);
+    max-height: var(--stats-bottom-card-height, 200px);
+    position: relative;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 深色主题：说明卡 hover 描边跟随全局 dark card */
+body.dark-theme .stats-note-card,
+html.theme-dark .stats-note-card {
+    --card-hover-border-color: rgba(208, 188, 255, 0.24);
+    --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(208, 188, 255, 0.08);
+}
+
+/* 深色主题：最大地震 / S-Net 描边与阴影略提亮，避免边框发灰 */
+body.dark-theme .max-mag-card,
+html.theme-dark .max-mag-card {
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-error) 28%, transparent);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-error) 42%, transparent);
+    --card-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.28);
+    --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 0 1px color-mix(in srgb, var(--md-sys-color-error) 22%, transparent);
+}
+
+body.dark-theme .snet-max-card,
+html.theme-dark .snet-max-card {
+    --card-border-color: color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+    --card-hover-border-color: color-mix(in srgb, var(--md-sys-color-primary) 42%, transparent);
+    --card-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.28);
+    --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent);
+}
+
+.stats-note-card-watermark {
+    position: absolute;
+    top: -8px;
+    right: -6px;
+    font-size: 84px;
+    opacity: 0.05;
+    pointer-events: none;
+    user-select: none;
+}
+
+.stats-note-card-header {
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.stats-note-card-title {
+    color: var(--md-sys-color-on-surface) !important;
+    font-weight: 800 !important;
+}
+
+.stats-note-card-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+}
+
+.stats-note-card-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.stats-note-card-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.stats-note-card-bullet {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    opacity: 0.9;
+    margin-top: 1px;
+}
+
+.stats-note-card-text {
+    opacity: 0.9;
+    line-height: 1.4 !important;
+    font-size: 12.5px !important;
+    color: var(--md-sys-color-on-surface-variant);
+    font-weight: 600 !important;
 }
 
 /* 天气警报级别卡片 */
@@ -694,7 +1071,6 @@
     width: 60%;
     height: 60%;
     background: var(--md-sys-color-surface);
-    background-color: #e5e7eb;
     background-image: linear-gradient(var(--md-sys-color-surface), var(--md-sys-color-surface));
     border-radius: 50%;
     display: flex;
@@ -904,6 +1280,41 @@
     .stats-overview-side {
         grid-column: span 12;
     }
+
+    .stats-peak-pair {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .stats-note-slot {
+        min-height: 180px;
+    }
+}
+
+@media (max-width: 720px) {
+    .stats-peak-pair {
+        grid-template-columns: 1fr;
+    }
+
+    /* 单列后允许高度随内容展开，避免第二张卡被固定 180px 裁切/覆盖 */
+    .stats-peak-pair,
+    .stats-note-slot,
+    .max-mag-card,
+    .snet-max-card,
+    .stats-note-card {
+        --stats-bottom-card-height: 180px;
+        height: auto;
+        min-height: var(--stats-bottom-card-height);
+        max-height: none;
+    }
+
+    .max-mag-card-mag-value {
+        font-size: 2rem !important;
+    }
+
+    .max-mag-card-source,
+    .snet-max-card-source {
+        max-width: 46%;
+    }
 }
 
 .log-stats-progress-bar {
@@ -930,7 +1341,327 @@
 }
 
 /* ==========================================================================
-   8. 响应式布局大断点媒体查询适配
+   8. 会话推送统计排行榜卡片 (Session Push Top 10)
+   ========================================================================== */
+
+.session-push-card {
+    height: 100%;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+}
+
+.session-push-empty-text {
+    opacity: 0.5;
+    text-align: center;
+    padding-top: 32px;
+    padding-bottom: 32px;
+}
+
+.session-push-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.session-push-row {
+    position: relative;
+    padding: 6px 8px;
+    border-radius: 8px;
+    z-index: 1;
+    overflow: hidden;
+}
+
+/* 排行单项内的条形对比进度条背景 */
+.session-push-progress {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 40px;
+    right: 8px;
+    z-index: -1;
+}
+
+.session-push-progress-bar {
+    width: var(--session-push-percent, 0%);
+    height: 100%;
+    background: var(--md-sys-color-primary);
+    opacity: 0.2;
+    border-radius: 4px;
+    transition: width 0.5s ease-out;
+}
+
+.session-push-content,
+.session-push-label-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.session-push-content {
+    justify-content: space-between;
+    position: relative;
+}
+
+.session-push-label-wrap {
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    margin-right: 8px;
+}
+
+/* 排行名次序号小盒子 */
+.session-push-rank {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--md-sys-color-surface-variant);
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* 前三名高亮 */
+.session-push-rank--podium {
+    background: var(--md-sys-color-primary);
+    color: #fff;
+}
+
+.session-push-label {
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    max-width: 100%;
+}
+
+.session-push-metrics {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.session-push-pushed {
+    font-weight: 700;
+    font-size: 13px;
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   9. 台风强度等级环形比例图表卡片 (Typhoon Level Donut Chart)
+   ========================================================================== */
+
+.typhoon-level-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 200px;
+}
+
+.typhoon-level-card-empty-text {
+    opacity: 0.5;
+    text-align: center;
+    padding: 32px 0 !important;
+}
+
+.typhoon-level-card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 16px 0;
+}
+
+/* 环形比例甜甜圈饼图框架 */
+.typhoon-level-card-donut {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    position: relative;
+    margin-bottom: 32px;
+}
+
+/* 甜甜圈中央圆环遮罩，内部展示台风累计总量 */
+.typhoon-level-card-donut-inner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60%;
+    height: 60%;
+    background: var(--md-sys-color-surface);
+    background-image: linear-gradient(var(--md-sys-color-surface), var(--md-sys-color-surface));
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.typhoon-level-card-total {
+    font-weight: 800 !important;
+    line-height: 1 !important;
+}
+
+.typhoon-level-card-total-label {
+    opacity: 0.6;
+    font-size: 11px !important;
+    margin-top: 4px !important;
+}
+
+.typhoon-level-card-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.typhoon-level-card-row,
+.typhoon-level-card-row-label,
+.typhoon-level-card-row-metrics {
+    display: flex;
+    align-items: center;
+}
+
+.typhoon-level-card-row {
+    justify-content: space-between;
+    font-size: 13px;
+}
+
+.typhoon-level-card-row-label,
+.typhoon-level-card-row-metrics {
+    gap: 8px;
+}
+
+.typhoon-level-card-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.typhoon-level-card-level {
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.typhoon-level-card-count {
+    font-weight: 700;
+}
+
+.typhoon-level-card-ratio {
+    opacity: 0.5;
+    min-width: 45px;
+    text-align: right;
+}
+
+/* ==========================================================================
+   10. 台风风王榜排行榜卡片 (Typhoon Wind King Top 10)
+   ========================================================================== */
+
+.typhoon-wind-king-card {
+    height: 100%;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+}
+
+.typhoon-wind-king-empty-text {
+    opacity: 0.5;
+    text-align: center;
+    padding-top: 32px;
+    padding-bottom: 32px;
+}
+
+.typhoon-wind-king-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.typhoon-wind-king-row {
+    position: relative;
+    padding: 6px 8px;
+    border-radius: 8px;
+    z-index: 1;
+    overflow: hidden;
+}
+
+/* 排行单项内的条形对比进度条背景 */
+.typhoon-wind-king-progress {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 40px;
+    right: 8px;
+    z-index: -1;
+}
+
+.typhoon-wind-king-progress-bar {
+    width: var(--typhoon-wind-king-percent, 0%);
+    height: 100%;
+    opacity: 0.25;
+    border-radius: 4px;
+    transition: width 0.5s ease-out;
+}
+
+.typhoon-wind-king-content,
+.typhoon-wind-king-label-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.typhoon-wind-king-content {
+    justify-content: space-between;
+    position: relative;
+}
+
+.typhoon-wind-king-label-wrap {
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    margin-right: 8px;
+}
+
+/* 排行名次序号小盒子 */
+.typhoon-wind-king-rank {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--md-sys-color-surface-variant);
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* 前三名高亮 */
+.typhoon-wind-king-rank--podium {
+    background: var(--md-sys-color-error, #F44336);
+    color: #fff;
+}
+
+.typhoon-wind-king-label {
+    font-weight: 600 !important;
+    font-size: 13px !important;
+}
+
+.typhoon-wind-king-wind {
+    font-weight: 700 !important;
+    opacity: 0.7;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   11. 响应式布局大断点媒体查询适配
    ========================================================================== */
 
 /* 中尺寸屏幕设备（如PC窄窗口或平板电脑） */
@@ -939,5 +1670,16 @@
     .stats-overview-main,
     .stats-overview-side {
         grid-column: span 12;
+    }
+
+    /* 中屏保留双列极值卡片，窄屏再单列 */
+    .stats-peak-pair {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .stats-peak-pair {
+        grid-template-columns: 1fr;
     }
 }

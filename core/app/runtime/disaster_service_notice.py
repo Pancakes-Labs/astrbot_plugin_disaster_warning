@@ -9,8 +9,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from ...network.websocket.fan_studio_connection_policy import (
+    resolve_active_server_label,
+)
 from ...services.config.config_service import ConfigAccessor
 from ...services.config.config_validation_service import ConfigValidator
+from ...sources.display_registry import CONNECTION_DISPLAY_NAMES
 
 
 class DisasterServiceNoticeService:
@@ -22,6 +26,40 @@ class DisasterServiceNoticeService:
         "fallback": "进入兜底重试",
         "stop": "停止重连",
     }
+
+    # 离线通知场景投影：内部数据源代号折叠到"物理通道"粒度。
+    # 展示名统一从 display_registry.CONNECTION_DISPLAY_NAMES 派生，
+    # 避免通道展示名在各模块重复维护；折叠规则本身属于通知场景的有意设计
+    # （用户只需知道哪个通道离线，无需细分到子源），保留在此处。
+    _SOURCE_GROUP_KEY_MAP: dict[str, str] = {
+        "fan_studio_mixed": "fan_studio_all",
+        # cenc_ir_fanstudio 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
+        "cenc_ir_fanstudio": "fan_studio_cenc_ir",
+        "wolfx_mixed": "wolfx_all",
+        "openquake_mixed": "openquake_api",
+        "jma_p2p": "p2p_main",
+        "jma_p2p_info": "p2p_main",
+        "jma_tsunami_p2p": "p2p_main",
+        "jma_tsunami_eqsc": "eqsc",
+        "cenc_ir_eqsc": "eqsc",
+        "typhoon_eqsc": "eqsc",
+        "snet_msil": "snet_msil",
+    }
+
+    def _resolve_source_display(self, data_source: str) -> str:
+        """按离线通知场景把内部数据源代号解析为用户可读的通道展示名。
+
+        折叠规则命中时返回通道级展示名；未命中则防御性地尝试直接按
+        data_source 查一次连接组展示名（覆盖未来新增的“连接级别” key），
+        最后才回退原始代号。
+        """
+        group_key = self._SOURCE_GROUP_KEY_MAP.get(data_source)
+        if group_key is not None:
+            return CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
+        direct_display = CONNECTION_DISPLAY_NAMES.get(data_source)
+        if direct_display is not None:
+            return direct_display
+        return data_source
 
     def __init__(self, service):
         # 与生命周期服务类似，这里只保留主服务引用，便于共享配置、状态与消息发送能力。
@@ -106,6 +144,21 @@ class DisasterServiceNoticeService:
             key_name="target_sessions",
         )
 
+    def _resolve_server_label_for_connection(self, connection_name: str) -> str:
+        """解析连接当前的活跃服务器标签。"""
+        if not connection_name:
+            return ""
+        ws_manager = getattr(self.service, "ws_manager", None)
+        if ws_manager is None:
+            return ""
+        info = ws_manager.connection_info.get(connection_name)
+        if not isinstance(info, dict):
+            return ""
+        label = resolve_active_server_label(info)
+        if label and label != "未知":
+            return f"（{label}）"
+        return ""
+
     def build_offline_notification_message(
         self,
         *,
@@ -119,7 +172,13 @@ class DisasterServiceNoticeService:
     ) -> str:
         """构建具体展示的离线通知富文本消息。"""
         # 阶段文案、重试次数和下一次重试时间会一起展示，
-        # 目的是让使用者能在一条通知里快速判断当前处于“短时抖动”还是“长期离线”。
+        # 目的是让使用者能在一条通知里快速判断当前处于"短时抖动"还是"长期离线"。
+        # 数据源代号先映射为展示名，避免把内部标识暴露给用户。
+        source_display = self._resolve_source_display(data_source)
+        # 附加服务器标签，让离线通知也能反映当前连接的是主还是备
+        server_label = self._resolve_server_label_for_connection(connection_name)
+        if server_label:
+            source_display = f"{source_display} {server_label}"
         stage_text = self._OFFLINE_STAGE_MAP.get(stage, stage)
         retry_part = (
             f"短时重试: {retry_count}" if retry_count is not None else "短时重试: 未知"
@@ -134,15 +193,14 @@ class DisasterServiceNoticeService:
         )
 
         message_lines = [
-            "⚠️ 数据源离线通知",
-            f"📡 连接: {connection_name}",
-            f"🧩 数据源: {data_source}",
+            f"⚠️ {source_display} 离线通知",
+            "",
             f"⛔ 状态: {stage_text}",
             f"📝 原因: {reason}",
             f"🔁 {retry_part}",
             f"🛟 {fallback_part}",
         ]
-        # “离线时间过长”和“进入兜底重试”都适合展示下一次重试时间，帮助运维判断恢复窗口。
+        # "离线时间过长"和"进入兜底重试"都适合展示下一次重试时间，帮助运维判断恢复窗口。
         if stage in {"short_retry", "fallback"}:
             message_lines.append(f"⏳ {next_retry_part}")
         return "\n".join(message_lines)

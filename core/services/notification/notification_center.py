@@ -33,6 +33,8 @@ class NotificationCenter:
         self._sync_in_progress = False
         # 定时轮询通知更新的后台 Task 句柄
         self._poll_task: asyncio.Task | None = None
+        # 启动时首次远端同步任务句柄（避免 create_task 无强引用被 GC）
+        self._initial_sync_task: asyncio.Task | None = None
         # 内存运行态通知缓存字典
         self._cache: dict[str, Any] = NotificationCacheRepository.empty_cache()
 
@@ -191,9 +193,15 @@ class NotificationCenter:
             logger.info("[灾害预警] 通知系统未启用。")
             return
 
-        # 启动时优先执行一次远端数据拉取刷新
-        await self.refresh()
-        await self._broadcast_notification_update()
+        # 启动时将首次远端同步改为异步非阻塞，避免网络不通时卡住整个启动流程
+        async def _initial_sync() -> None:
+            try:
+                await self.refresh()
+                await self._broadcast_notification_update()
+            except Exception as e:
+                logger.warning(f"[灾害预警] 启动时同步远端通知失败: {e} (可忽略)")
+
+        self._initial_sync_task = asyncio.create_task(_initial_sync())
 
         async def _poll_loop() -> None:
             while True:
@@ -208,19 +216,27 @@ class NotificationCenter:
 
         # 挂载后台长轮询定时协程任务
         self._poll_task = asyncio.create_task(_poll_loop())
-        logger.info("[灾害预警] 通知系统已启动。")
+        logger.debug("[灾害预警] 通知系统已启动")
 
-    async def stop(self) -> None:
-        """停止通知中心。"""
-        if self._poll_task:
-            self._poll_task.cancel()
+    async def _cancel_task(self, task: asyncio.Task | None) -> None:
+        """取消并等待后台任务结束。"""
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
             try:
-                await self._poll_task
+                await task
             except asyncio.CancelledError:
                 pass
             except Exception:
                 pass
-            self._poll_task = None
+
+    async def stop(self) -> None:
+        """停止通知中心。"""
+        await self._cancel_task(self._initial_sync_task)
+        self._initial_sync_task = None
+        await self._cancel_task(self._poll_task)
+        self._poll_task = None
         # 停止前将当前缓存内容原子落盘保存
         await self.save_cache()
-        logger.info("[灾害预警] 通知系统已停止。")
+        logger.debug("[灾害预警] 通知系统已停止")

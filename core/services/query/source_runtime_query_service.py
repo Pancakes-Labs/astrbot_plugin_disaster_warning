@@ -8,25 +8,16 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from ...sources.display_registry import CONNECTION_DISPLAY_NAMES, CONNECTION_GROUP_ALIAS
 from ...sources.source_catalog import SOURCE_CATALOG
-from ...sources.source_entry import ProviderFamily, SourceEntry
+from ...sources.source_entry import SourceEntry
 from ..config.config_service import ConfigAccessor
 
-# 物理连接到连接分组的键映射，统一在此集中配置，消除魔法硬编码字符串
-_CONNECTION_GROUP_ALIAS: dict[str, str] = {
-    ProviderFamily.FAN_STUDIO.value: "fan_studio_all",
-    ProviderFamily.P2P.value: "p2p_main",
-    ProviderFamily.WOLFX.value: "wolfx_all",
-    ProviderFamily.GLOBAL_QUAKE.value: "global_quake",
-}
-
-# 物理连接的友好展示名称，供管理后台和 API 使用
-_CONNECTION_DISPLAY_NAME: dict[str, str] = {
-    "fan_studio_all": "FAN Studio",
-    "p2p_main": "P2P地震情報",
-    "wolfx_all": "Wolfx",
-    "global_quake": "Global Quake",
-}
+# 物理连接到连接分组的键映射、物理连接的友好展示名称
+# 已统一收编至 core/sources/display_registry.py（CONNECTION_GROUP_ALIAS /
+# CONNECTION_DISPLAY_NAMES），此处直接引用事实层常量。
+# EQSC / S-Net 等 HTTP 通道展示名同样来自 CONNECTION_DISPLAY_NAMES，
+# 与 ConnectionsPayloadBuilder 派生自同一事实源，天然保持一致。
 
 
 class SourceRuntimeQueryService:
@@ -104,7 +95,7 @@ class SourceRuntimeQueryService:
         if explicit_group:
             return explicit_group
         # 降级使用静态定义的全局家族别名列表
-        return _CONNECTION_GROUP_ALIAS.get(
+        return CONNECTION_GROUP_ALIAS.get(
             entry.provider_family.value, entry.provider_family.value
         )
 
@@ -113,7 +104,7 @@ class SourceRuntimeQueryService:
         groups: dict[str, str] = {}
         for entry in SOURCE_CATALOG.values():
             group_key = self.get_connection_group_key(entry)
-            groups[group_key] = _CONNECTION_DISPLAY_NAME.get(group_key, group_key)
+            groups[group_key] = CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
         return groups
 
     def get_connection_group_source_map(self) -> dict[str, list[str]]:
@@ -132,6 +123,67 @@ class SourceRuntimeQueryService:
             grouped[group_key][source_id] = self.is_source_enabled(source_id)
         return dict(grouped)
 
+    def resolve_active_connection_metrics(
+        self,
+        service: Any | None,
+        actual_connections: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """统一计算活跃连接数与 OpenQuakeAPI 在线标记。
+
+        口径：
+        - WebSocket：ws_manager 连接表中 connected=True
+        - EQSC HTTP：AccessToken 有效计入活跃
+        - S-Net HTTP：配置启用且轮询任务 running 计入活跃
+        - total_connections 不在此计算，由 build_runtime_snapshot 按 expected_groups 统计
+        """
+        actual_connections = actual_connections or {}
+        active = sum(
+            1
+            for status in actual_connections.values()
+            if isinstance(status, dict) and bool(status.get("connected"))
+        )
+
+        # 延迟导入，避免 query 层与 app 层形成硬循环依赖。
+        from ...app.services.eqsc_channel_service import EqscChannelService
+
+        eqsc_active, _eqsc_total = EqscChannelService.resolve_connection_counts(service)
+        active += int(eqsc_active or 0)
+
+        snet_poll = getattr(service, "snet_poll_service", None) if service else None
+        try:
+            snet_enabled = bool(self.is_source_enabled("snet_msil"))
+        except Exception:
+            snet_enabled = False
+        if (
+            snet_enabled
+            and snet_poll is not None
+            and getattr(snet_poll, "running", False)
+        ):
+            active += 1
+
+        # OpenQuakeAPI 在线标记优先以实际连接状态为准：
+        # 建连失败/服务停止后任务名仍可能残留，无法代表真实连通性。
+        # actual_connections 由 ws_manager 实时维护 connected 状态，作为首选口径；
+        # 任务名检查仅作为连接状态缺失时的兜底。
+        oq_status = actual_connections.get("openquake_api")
+        openquake_connected = bool(
+            isinstance(oq_status, dict) and oq_status.get("connected")
+        )
+        if not openquake_connected:
+            connection_tasks = (
+                getattr(service, "connection_tasks", []) if service is not None else []
+            )
+            openquake_connected = any(
+                "openquake_api" in task.get_name()
+                if hasattr(task, "get_name")
+                else False
+                for task in connection_tasks
+            )
+        return {
+            "active_websocket_connections": int(active),
+            "openquake_connected": bool(openquake_connected),
+        }
+
     def build_runtime_snapshot(
         self,
         *,
@@ -142,7 +194,7 @@ class SourceRuntimeQueryService:
         uptime: str = "未运行",
         active_websocket_connections: int = 0,
         message_logger_enabled: bool = False,
-        global_quake_connected: bool = False,
+        openquake_connected: bool = False,
     ) -> dict[str, Any]:
         """构建统一运行态快照。
 
@@ -168,6 +220,9 @@ class SourceRuntimeQueryService:
                     },
                 )
             )
+            # 稳定主键：健康采样 / 前端映射优先读 group_key，避免展示名微调后失配。
+            conn_info["group_key"] = group_key
+            conn_info["display_name"] = display_name
             # 计算该物理连接链路下是否有任何一个子数据源开关被开启
             conn_info["enabled"] = any(group_status_map.get(group_key, {}).values())
             # 写入当前链路的探测网络延时
@@ -176,12 +231,15 @@ class SourceRuntimeQueryService:
             conn_info["source_ids"] = list(group_source_map.get(group_key, []))
             connections[display_name] = conn_info
 
+        # 总连接数按 catalog 期望的物理通道口径统计（含已停用但应展示的通道），
+        # 避免数据源被临时关闭后从分母消失，出现 6/6 而非 6/7。
+        # expected_groups 已包含 WS（FAN/P2P/Wolfx/GQ）与 HTTP（EQSC/S-Net）。
         return {
             "running": running,
             "uptime": uptime,
             "active_websocket_connections": active_websocket_connections,
-            "global_quake_connected": global_quake_connected,
-            "total_connections": len(actual_connections),
+            "openquake_connected": openquake_connected,
+            "total_connections": len(expected_groups),
             "connection_details": actual_connections,
             "connections": connections,
             "sub_source_status": self.build_sub_source_status(),

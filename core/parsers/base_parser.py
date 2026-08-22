@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import traceback
@@ -14,6 +15,7 @@ from typing import Any
 
 from ...utils.plugin_logger import plugin_logger
 from ...utils.time_converter import TimeConverter
+from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import get_source_entry
 
 
@@ -27,6 +29,8 @@ class BaseParser:
         self.source_entry = get_source_entry(source_id)
         self.source_config = self.source_entry
         self.message_logger = message_logger
+        # 遥测管理器引用（由主服务在 set_telemetry 时注入），用于解析失败的轻量上报
+        self._telemetry = None
 
         # 存放上一次接收到心跳或空载荷数据的时间戳，用于节流检测，避免过多 debug 日志输出
         self._last_heartbeat_check: dict[str, float] = {}
@@ -49,11 +53,34 @@ class BaseParser:
             return self.build_event(payload)
         except json.JSONDecodeError as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} JSON解析失败: {exc}")
+            # JSON 解码失败已被内部吞掉，不会冒泡到路由层，需在此主动上报。
+            # 同步上下文无法 await，通过事件循环创建后台任务安全上报。
+            self._track_parse_error(exc, stage="json_decode")
             return None
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 消息处理失败: {exc}")
             plugin_logger.error(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            self._track_parse_error(exc, stage="build_event")
             return None
+
+    def _track_parse_error(self, exception: Exception, stage: str) -> None:
+        """在同步上下文中安全上报解析器异常（best-effort，不影响主流程）。"""
+        if not self._telemetry or not getattr(self._telemetry, "enabled", False):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(
+            track_error_safely(
+                self._telemetry,
+                exception,
+                module=f"core.parser.{self.source_id}.{stage}",
+                log_context="解析器错误遥测",
+            )
+        )
+        # 绑定 done 回调吞噬结果，避免 "Task exception was never retrieved" 噪音
+        task.add_done_callback(lambda _t: None)
 
     def decode_message(self, message: str | bytes) -> Any:
         """解码原始消息。"""
@@ -83,14 +110,11 @@ class BaseParser:
         """提取实际业务数据，兼容多种外层包装格式。"""
         # 兼容首字母大写的 "Data" 键
         if "Data" in data:
-            plugin_logger.debug(f"[灾害预警] {self.source_id} 使用 Data 字段获取数据")
             return data["Data"] or {}
         # 兼容小写的 "data" 键
         if "data" in data:
-            plugin_logger.debug(f"[灾害预警] {self.source_id} 使用 data 字段获取数据")
             return data["data"] or {}
         # 无包装时，直接视整个载荷为数据体
-        plugin_logger.debug(f"[灾害预警] {self.source_id} 使用整个消息作为数据")
         return data
 
     def _is_heartbeat_message(self, msg_data: dict[str, Any]) -> bool:
@@ -105,6 +129,23 @@ class BaseParser:
 
         self._last_heartbeat_check[cache_key] = current_time
 
+        # 规则 0：天气源以"展示字段全部为空"作为心跳判定。
+        # 天气预警支持 headline 回退为 title 的归一化（见 weather_parser），
+        # 若用 title/description 的缺失比例判定心跳，会误过滤"仅有 headline"
+        # 的有效 CMA 预警；因此天气源放宽为任一展示字段有值即视为有效消息。
+        if self.source_id in ("china_weather_fanstudio", "china_weather_openquake"):
+            if not isinstance(msg_data, dict):
+                return True
+            display_values = [
+                msg_data.get(field)
+                for field in ("title", "headline", "description", "name")
+            ]
+            # 任一展示字段非空即视为有效业务内容
+            for value in display_values:
+                if value not in self._heartbeat_patterns["empty_fields"]:
+                    return False
+            return True
+
         # 规则 1：检查坐标值是否为 (0,0) 的空心跳包
         if "latitude" in msg_data and "longitude" in msg_data:
             lat = msg_data.get("latitude")
@@ -118,8 +159,11 @@ class BaseParser:
         # 规则 2：根据各数据源特定的必填字段，检查是否大面积为空
         critical_fields = {
             "usgs_fanstudio": ["id", "magnitude", "placeName"],
+            "sa_fanstudio": ["id", "magnitude", "placeName"],
+            "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
             "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
             "china_weather_fanstudio": ["title", "description"],
+            "china_weather_openquake": ["title", "description"],
         }
 
         if self.source_id in critical_fields:
@@ -166,7 +210,25 @@ class BaseParser:
         # 调用时间转换工具进行多格式兼容解析
         dt = TimeConverter.parse_datetime(time_str)
         if dt is None and time_str:
+            # 该工具同时服务天气、海啸、台风、地震等多类解析器，
+            # 按 source_id 解析事件流标签，避免非地震解析失败日志被误标为 earthquake。
+            stream = self._resolve_parser_event_stream()
             plugin_logger.warning(
-                f"[灾害预警] 时间解析失败: '{time_str}'", is_event_linked=True
+                f"[灾害预警] 时间解析失败: '{time_str}'",
+                is_event_linked=True,
+                event_stream=stream,
             )
         return dt
+
+    def _resolve_parser_event_stream(self) -> str:
+        """根据数据源标识解析事件流标签，用于细粒度日志级别控制。"""
+        source_id = str(self.source_id or "").strip().lower()
+        if "weather" in source_id:
+            return "weather_alarm"
+        if "typhoon" in source_id:
+            return "typhoon"
+        if "tsunami" in source_id:
+            return "tsunami"
+        if "global_quake" in source_id:
+            return "global_quake"
+        return "earthquake"

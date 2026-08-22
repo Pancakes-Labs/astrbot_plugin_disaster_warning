@@ -14,14 +14,19 @@ from .base_presenter import BasePresenter
 from .earthquake_presenter import (
     CeaEewPresenter,
     CencEarthquakePresenter,
+    CencIntensityReportPresenter,
     CwaEewPresenter,
     CwaReportPresenter,
+    FssnCmtPresenter,
     GlobalQuakeTextPresenter,
     JmaEarthquakeInfoPresenter,
     JmaEewPresenter,
+    ShakeAlertEewPresenter,
+    SnetPresenter,
     UsgsEarthquakePresenter,
 )
 from .tsunami_presenter import JmaTsunamiPresenter, TsunamiAlertPresenter
+from .typhoon_presenter import TyphoonPresenter
 from .weather_presenter import WeatherAlertPresenter
 
 # 文本展示键到具体展示器的映射表。
@@ -32,11 +37,16 @@ _TEXT_PRESENTER_REGISTRY = {
     "jma_eew": JmaEewPresenter,
     "global_quake": GlobalQuakeTextPresenter,
     "cenc_report": CencEarthquakePresenter,
+    "cenc_ir_report": CencIntensityReportPresenter,
     "jma_report": JmaEarthquakeInfoPresenter,
     "usgs_report": UsgsEarthquakePresenter,
+    "shakealert_eew": ShakeAlertEewPresenter,
+    "fssn_cmt": FssnCmtPresenter,
+    "snet": SnetPresenter,
     "tsunami_cn": TsunamiAlertPresenter,
     "tsunami_jma": JmaTsunamiPresenter,
     "weather_cn": WeatherAlertPresenter,
+    "typhoon": TyphoonPresenter,
 }
 
 # 当来源未声明专用文本展示器时，按灾种选择默认展示器。
@@ -44,6 +54,7 @@ DEFAULT_TEXT_PRESENTERS_BY_EVENT_TYPE = {
     "earthquake": CwaReportPresenter,
     "tsunami": TsunamiAlertPresenter,
     "weather": WeatherAlertPresenter,
+    "typhoon": TyphoonPresenter,
 }
 
 

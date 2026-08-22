@@ -9,11 +9,25 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from datetime import timezone as dt_timezone
 
 from ....utils.converters import ScaleConverter
+from ....utils.severity_emoji import (
+    INTENSITY_CIRCLE_EMOJIS,
+    INTENSITY_SQUARE_EMOJIS,
+)
 from ....utils.time_converter import TimeConverter
+from ...domain.earthquake.cmt_normalize import format_fault_type_label
 from ...domain.event_context import EarthquakeDisplayContext
+from ...services.geo.cn_district_intensity_service import (
+    CnDistrictIntensityService,
+)
 from ...services.geo.intensity_service import IntensityCalculator
+from ...services.geo.jma_seis_int_loc_loader import get_sect_map
+from ...services.geo.jp_sect_intensity_service import JpSectIntensityService
+from ...services.geo.travel_time_service import compute_s_wave_countdown
+from ...services.identity.event_identity import ensure_aware_datetime
 from .base_presenter import BasePresenter
 
 
@@ -30,15 +44,15 @@ def _get_intensity_emoji(value, is_eew: bool = True, is_shindo: bool = False) ->
         return ""
 
     # 预警场景与普通情报场景使用两套图形，便于视觉区分。
-    circles = ["⚪", "🔵", "🟢", "🟡", "🟠", "🔴", "🟣"]
-    squares = ["⬜", "🟦", "🟩", "🟨", "🟧", "🟥", "🟪"]
-    emojis = circles if is_eew else squares
+    # 色序统一由 utils.severity_emoji 维护。
+    emojis = INTENSITY_CIRCLE_EMOJIS if is_eew else INTENSITY_SQUARE_EMOJIS
 
     try:
         val_str = str(value)
         num_val = None
 
-        match = re.search(r"(\d+(\.\d+)?)", val_str)
+        # 必须捕获可选负号，否则 S-Net 計測震度 -2.8 会被当成 2.8
+        match = re.search(r"(-?\d+(?:\.\d+)?)", val_str)
         if match:
             num_val = float(match.group(1))
 
@@ -64,6 +78,7 @@ def _get_intensity_emoji(value, is_eew: bool = True, is_shindo: bool = False) ->
                     else:
                         idx = 6
                 else:
+                    # 0 以下 / 震度 0~1 ：最低档（白）
                     if num_val < 1.5:
                         idx = 0
                     elif num_val < 2.5:
@@ -154,11 +169,30 @@ def _resolve_shock_time(display_context: EarthquakeDisplayContext):
     return display_context.occurred_at
 
 
+# S 波倒计时进入「即将到达」紧迫文案的阈值（秒）。
+# 剩余时间小于等于该值时，展示为紧迫提示文案，提醒用户做好避险准备。
+S_WAVE_URGENT_THRESHOLD_SEC = 10
+
+# S 波倒计时的传输/构建延迟补偿秒数。
+# 倒计时在 presenter 构建消息时计算，到消息真正送达用户还有地图渲染、
+# 网络传输等耗时；这里主动扣除预估延迟，让用户看到的剩余时间更贴近真实接收时刻
+S_WAVE_TRANSMIT_DELAY_SEC = 1.0
+
+
 def _append_local_estimation(
     lines: list[str],
     display_context: EarthquakeDisplayContext,
+    *,
+    include_travel_time: bool = True,
 ) -> None:
-    """把本地影响预估信息附加到文本尾部。"""
+    """把本地影响预估信息附加到文本尾部。
+
+    Args:
+        lines: 待追加的消息行列表。
+        display_context: 地震展示上下文。
+        include_travel_time: 是否附加 P/S 波预计到达时间。
+            仅地震预警（EEW）场景有意义；正式测定/情报类应传 False。
+    """
     local_est = display_context.local_estimation
     if not local_est:
         return
@@ -166,11 +200,168 @@ def _append_local_estimation(
     dist = local_est.get("distance", 0.0)
     inte = local_est.get("intensity", 0.0)
     place = local_est.get("place_name", "本地")
-    desc = IntensityCalculator.get_intensity_description(inte)
+    # 本地监控按坐标自动选择体系：jma（日本震度）用震度文案，
+    # cenc（中国烈度）保持烈度文案；缺失时默认按中国烈度处理。
+    system = str(local_est.get("system") or "cenc").strip().lower()
 
     lines.append("")
     lines.append(f"📍{place}预估：")
-    lines.append(f"距离震中 {dist:.1f} km，预估最大烈度 {inte:.1f} ({desc})")
+    if system == "jma":
+        scale_display = ScaleConverter.format_measured_intensity_display(inte)
+        if not scale_display:
+            scale_display = f"{inte:.1f}"
+        desc = IntensityCalculator.get_shindo_description(inte)
+        lines.append(f"距离震中 {dist:.1f} km，预估最大震度 {scale_display} ({desc})")
+    else:
+        desc = IntensityCalculator.get_intensity_description(inte)
+        lines.append(f"距离震中 {dist:.1f} km，预估最大烈度 {inte:.1f} ({desc})")
+
+    # P/S 波预计到达时间仅对预警类消息有意义（震后情报已无预警价值）
+    if not include_travel_time:
+        return
+
+    p_sec = local_est.get("p_travel_sec")
+    s_sec = local_est.get("s_travel_sec")
+    if p_sec is not None:
+        lines.append(f"⏱️预计P波走时：约 {p_sec:.0f} 秒")
+    if s_sec is not None:
+        lines.append(f"⏱️预计S波走时：约 {s_sec:.0f} 秒")
+
+    # S 波实时倒计时（近似实时预估）：
+    # 保留上方两行绝对走时展示，这里额外追加一行基于「发震时间 + 当前墙钟」
+    # 投影出的剩余到达秒数，让每一报推送都展示当下最新的临近状态。
+    # 关键点：
+    # - 发震时间与走时均使用「当报最新数据」，绝不冻结历史值；
+    #   若后续报修正把发震时间往晚调，剩余秒数允许自然回涨（正常延时）。
+    # - naive 发震时间按来源时区补齐（如日本源为 JST），避免被误当 UTC
+    #   导致 elapsed 错算、倒计时几乎不走。
+    # - 额外扣除传输/构建延迟补偿，让数字更贴近用户真实接收时刻。
+    # 缺发震时间或 S 波走时时静默跳过该行，不影响原有展示。
+    occurred_aware = ensure_aware_datetime(
+        display_context.occurred_at,
+        display_context.source_id,
+    )
+    s_remaining = compute_s_wave_countdown(
+        occurred_aware,
+        s_sec,
+        extra_delay_sec=S_WAVE_TRANSMIT_DELAY_SEC,
+    )
+    if s_remaining is not None:
+        if s_remaining <= 0:
+            lines.append("⏳S波已到达，请保持警惕")
+        elif s_remaining <= S_WAVE_URGENT_THRESHOLD_SEC:
+            lines.append(f"⏳S波即将到达！约 {s_remaining:.0f} 秒")
+        else:
+            lines.append(f"⏳S波倒计时：约 {s_remaining:.0f} 秒")
+
+
+def _append_cn_district_estimation(
+    lines: list[str],
+    display_context: EarthquakeDisplayContext,
+    *,
+    enabled: bool = True,
+) -> None:
+    """把中国影响区县预估列表附加到文本尾部。
+
+    仅用于中国地震预警展示；正式测定不附加。
+    仅在开关开启、震中位于中国大陆附近、且能解析出受影响区县时输出。
+    资源加载失败或无命中区县时静默跳过，不影响主推送链路。
+    """
+    if not enabled:
+        return
+
+    lat = display_context.latitude
+    lon = display_context.longitude
+    mag = display_context.magnitude
+    depth = display_context.depth
+    # 缺少位置或震级时无法估算；深度缺失时按 10 km 兜底
+    if lat is None or lon is None or mag is None:
+        return
+    depth_km = float(depth) if depth is not None else 10.0
+
+    try:
+        estimates = CnDistrictIntensityService.estimate_affected_districts(
+            float(lat), float(lon), float(mag), depth_km
+        )
+    except Exception:
+        return
+
+    if not estimates:
+        return
+
+    # 按烈度整数分组
+    groups = CnDistrictIntensityService.group_by_intensity(estimates)
+    if not groups:
+        return
+
+    lines.append("")
+    lines.append("📡预估影响区县（仅供参考）：")
+    for level, names in groups.items():
+        emoji = _get_intensity_emoji(float(level), is_eew=True, is_shindo=False)
+        # 每行最多展示 5 个区县名，超出部分用「等N处」省略
+        max_show = 5
+        if len(names) > max_show:
+            loc_str = "、".join(names[:max_show]) + f" 等{len(names)}处"
+        else:
+            loc_str = "、".join(names)
+        lines.append(f"  {emoji}[烈度{level}] {loc_str}")
+
+
+def _append_jp_sect_estimation(
+    lines: list[str],
+    display_context: EarthquakeDisplayContext,
+) -> None:
+    """把日本影响地域震度预估列表附加到文本尾部。
+
+    仅用于日本紧急地震速报展示；正式测定不附加。
+    仅在开关开启、且能解析出受影响地域时输出。
+    资源加载失败或无命中地域时静默跳过，不影响主推送链路。
+    """
+    lat = display_context.latitude
+    lon = display_context.longitude
+    mag = display_context.magnitude
+    depth = display_context.depth
+    # 缺少位置或震级时无法估算；深度缺失时按 10 km 兜底
+    if lat is None or lon is None or mag is None:
+        return
+    depth_km = float(depth) if depth is not None else 10.0
+
+    # PLUM/假定震源下 M1.0 为占位震级：JMA 距离衰减式对 <3 无意义，直接跳过
+    try:
+        mag_f = float(mag)
+    except (TypeError, ValueError):
+        return
+    if mag_f < 3.0:
+        return
+
+    try:
+        estimates = JpSectIntensityService.estimate_affected_sects(
+            float(lat), float(lon), mag_f, depth_km
+        )
+    except Exception:
+        return
+
+    if not estimates:
+        return
+
+    # 按震度阶级分组
+    groups = JpSectIntensityService.group_by_shindo(estimates)
+    if not groups:
+        return
+
+    lines.append("")
+    lines.append("📡预估影响地域（仅供参考）：")
+    for level, sects in groups.items():
+        # 阶级值转展示文本（4.5→5弱, 5.0→5强, ...）
+        scale_display = ScaleConverter.format_jma_cwa_scale_display(level)
+        emoji = _get_intensity_emoji(level, is_eew=True, is_shindo=True)
+        # 每行最多展示 5 个地域名，超出部分用「等N处」省略
+        max_show = 5
+        if len(sects) > max_show:
+            loc_str = "、".join(sects[:max_show]) + f" 等{len(sects)}处"
+        else:
+            loc_str = "、".join(sects)
+        lines.append(f"  {emoji}[震度{scale_display}] {loc_str}")
 
 
 class CeaEewPresenter(BasePresenter):
@@ -232,16 +423,28 @@ class CeaEewPresenter(BasePresenter):
         display_context: EarthquakeDisplayContext,
         options: dict | None = None,
     ) -> str:
-        """展示 CeaEew 消息入口，并附带本地影响距离估值。"""
+        """展示 CeaEew 消息入口，并附带本地影响距离估值与影响区县列表。
+
+        本地预估（距离/烈度/P-S 波）跟随会话级 local_monitoring 配置：
+        仅当该配置启用且上下文携带 local_estimation 时才会输出。
+        影响区县列表为独立增强，不依赖本地监控开关。
+        """
         rendered = cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
         if not _is_earthquake_view(display_context):
             return rendered
         lines = rendered.split("\n") if rendered else []
-        # 若正文尚未包含本地预估，则在尾部补充，避免重复展示。
-        if not any("距离震中" in line for line in lines):
-            _append_local_estimation(lines, display_context)
+        # 本地预估仅在上下文携带 local_estimation 时输出（跟随会话级配置）
+        _append_local_estimation(lines, display_context)
+        # 追加中国影响区县预估列表（受会话级开关控制，独立于本地监控配置）
+        cn_enabled = bool(
+            _resolve_options(display_context, options).get(
+                "cn_district_intensity_estimate", False
+            )
+        )
+        if not any("预估影响区县" in line for line in lines):
+            _append_cn_district_estimation(lines, display_context, enabled=cn_enabled)
         return "\n".join(lines)
 
 
@@ -322,8 +525,7 @@ class CwaEewPresenter(BasePresenter):
             if not inserted:
                 lines.append(f"⚠️影响区域：{impact_area_text}")
 
-        if not any("距离震中" in line for line in lines):
-            _append_local_estimation(lines, display_context)
+        _append_local_estimation(lines, display_context)
         return "\n".join(lines)
 
 
@@ -386,7 +588,21 @@ class JmaEewPresenter(BasePresenter):
             coords = _format_coordinates(data.latitude, data.longitude)
             lines.append(f"📍震中：{data.title} ({coords})")
 
-        if data.magnitude is not None:
+        # PLUM/假定震源下 M1.0 为占位震级：优先读 metadata 标记，再兜底 is_assumption+≈1.0
+        magnitude_is_placeholder = bool(
+            (data.metadata or {}).get("magnitude_is_placeholder")
+        )
+        if (
+            not magnitude_is_placeholder
+            and data.is_assumption
+            and data.magnitude is not None
+            and abs(float(data.magnitude) - 1.0) < 0.05
+        ):
+            magnitude_is_placeholder = True
+
+        if magnitude_is_placeholder or (data.is_assumption and data.magnitude is None):
+            lines.append("📊震级：不明（PLUM法）")
+        elif data.magnitude is not None:
             lines.append(f"📊震级：M {data.magnitude:.1f}")
 
         if data.depth is not None:
@@ -411,7 +627,7 @@ class JmaEewPresenter(BasePresenter):
         display_context: EarthquakeDisplayContext,
         options: dict | None = None,
     ) -> str:
-        """展示速报，并拼装细分的警报覆盖县市与预估范围。"""
+        """展示速报，并按震度档汇总警报区域（方案 C）。"""
         rendered = cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
@@ -420,48 +636,71 @@ class JmaEewPresenter(BasePresenter):
 
         lines = rendered.split("\n") if rendered else []
 
-        jma_warning_areas = display_context.jma_warning_areas
-        if (
-            isinstance(jma_warning_areas, list)
-            and jma_warning_areas
-            and not any(line.startswith("⚠️警报区域：") for line in lines)
-        ):
-            lines.append("⚠️警报区域：")
-            # 多区域场景按固定数量分行，避免单行过长影响阅读。
-            chunk_size = 3
-            for i in range(0, len(jma_warning_areas), chunk_size):
-                chunk = [
-                    str(item).strip()
-                    for item in jma_warning_areas[i : i + chunk_size]
-                    if str(item).strip()
+        # 按震度档汇总区域，替代旧的「预估震度范围」逐条输出
+        area_groups = getattr(display_context, "jma_warning_area_groups", None)
+        if not isinstance(area_groups, list) or not area_groups:
+            # 兼容旧 metadata / 未透传字段的路径
+            raw_groups = (display_context.metadata or {}).get("jma_warning_area_groups")
+            area_groups = raw_groups if isinstance(raw_groups, list) else []
+
+        has_group_block = False
+        if isinstance(area_groups, list) and area_groups:
+            group_lines: list[str] = []
+            for group in area_groups:
+                if not isinstance(group, dict):
+                    continue
+                range_text = str(group.get("range_text") or "").strip()
+                if not range_text:
+                    continue
+                emoji = str(group.get("emoji") or "").strip() or "⚪"
+                areas = [
+                    str(name).strip()
+                    for name in list(group.get("areas") or [])
+                    if str(name).strip()
                 ]
-                if chunk:
-                    lines.append("  " + "、".join(chunk))
+                if not areas:
+                    continue
+                group_lines.append(f"  {emoji} {range_text}：{'、'.join(areas)}")
 
-        jma_warn_area = display_context.jma_warn_area
-        if (
-            isinstance(jma_warn_area, str)
-            and jma_warn_area.strip()
-            and not any(line.startswith("⚠️警报区域：") for line in lines)
-        ):
-            lines.append(f"⚠️警报区域：{jma_warn_area.strip()}")
+            if group_lines:
+                lines.append("💥预估震度分布：")
+                lines.extend(group_lines)
+                has_group_block = True
 
-        jma_warning_area_ranges = display_context.jma_warning_area_ranges
-        if isinstance(jma_warning_area_ranges, list):
-            for shindo_range in jma_warning_area_ranges:
-                if (
-                    isinstance(shindo_range, str)
-                    and shindo_range.strip()
-                    and not any(
-                        line.startswith("💥预估震度范围：")
-                        and shindo_range.strip() in line
-                        for line in lines
-                    )
-                ):
-                    lines.append(f"💥预估震度范围：{shindo_range.strip()}")
+        # 无分组数据时回退到旧的警报区域列表展示
+        if not has_group_block:
+            jma_warning_areas = display_context.jma_warning_areas
+            if (
+                isinstance(jma_warning_areas, list)
+                and jma_warning_areas
+                and not any(line.startswith("⚠️警报区域：") for line in lines)
+            ):
+                lines.append("⚠️警报区域：")
+                chunk_size = 3
+                for i in range(0, len(jma_warning_areas), chunk_size):
+                    chunk = [
+                        str(item).strip()
+                        for item in jma_warning_areas[i : i + chunk_size]
+                        if str(item).strip()
+                    ]
+                    if chunk:
+                        lines.append("  " + "、".join(chunk))
 
-        if not any("距离震中" in line for line in lines):
-            _append_local_estimation(lines, display_context)
+            jma_warn_area = display_context.jma_warn_area
+            if (
+                isinstance(jma_warn_area, str)
+                and jma_warn_area.strip()
+                and not any(line.startswith("⚠️警报区域：") for line in lines)
+            ):
+                lines.append(f"⚠️警报区域：{jma_warn_area.strip()}")
+
+        _append_local_estimation(lines, display_context)
+        # 追加日本影响地域震度预估列表（受会话级开关控制）
+        jp_enabled = bool(
+            _resolve_options(display_context, options).get("jma_shindo_estimate", False)
+        )
+        if jp_enabled and not any("预估影响地域" in line for line in lines):
+            _append_jp_sect_estimation(lines, display_context)
         return "\n".join(lines)
 
 
@@ -532,7 +771,10 @@ class CencEarthquakePresenter(BasePresenter):
         display_context: EarthquakeDisplayContext,
         options: dict | None = None,
     ) -> str:
-        """展示中国地震台网测定。"""
+        """展示中国地震台网测定。
+
+        测定类型（自动测定/正式测定等地震情报类）不附加本地预估信息。
+        """
         return cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
@@ -606,6 +848,163 @@ class UsgsEarthquakePresenter(BasePresenter):
         return cls.format_message(
             display_context, _resolve_options(display_context, options)
         )
+
+
+class FssnCmtPresenter(BasePresenter):
+    """FSSN 矩心矩张量解 (CMT) 展示器。"""
+
+    presenter_name = "fssn_cmt_presenter"
+
+    @staticmethod
+    def _format_depth_error(depth: float | None, error: float | None) -> str:
+        if depth is None:
+            return "未知"
+        if depth == 0.0:
+            return "极浅"
+        if error is not None:
+            return f"{depth} km (±{error})"
+        return f"{depth} km"
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        """构建 FSSN CMT 中文基础文本。"""
+        if not _is_earthquake_view(data):
+            return "🚨[CMT] 数据类型错误"
+
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+
+        # 标题固定使用 [CMT] FSSN 矩心矩张量解
+        lines = ["🌐[CMT] FSSN 矩心矩张量解"]
+
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            lines.append(
+                f"⏰发震时间：{TimeConverter.format_time(shock_time, timezone)}"
+            )
+
+        if data.title and data.latitude is not None and data.longitude is not None:
+            coords = _format_coordinates(data.latitude, data.longitude)
+            lines.append(f"📍震中：{data.title} ({coords})")
+
+        # 整理 CMT 震级格式：M xxx (Mww yyy / mB zzz ...)
+        meta = data.metadata if isinstance(data.metadata, dict) else {}
+        all_mags = meta.get("all_magnitudes") or {}
+
+        # 主显示使用 display_magnitude_type，默认取 stats_magnitude (M)
+        display_mag = data.magnitude
+        display_mag_type = meta.get("display_magnitude_type", "M")
+
+        # 补充震级列表
+        mag_tokens = []
+        for key in ("Mww", "mB", "mb", "MLv", "Mwp"):
+            val = all_mags.get(key)
+            if val is not None and key != display_mag_type:
+                mag_tokens.append(f"{key} {val:.1f}")
+
+        mag_str = (
+            f"{display_mag:.1f}" if isinstance(display_mag, (int, float)) else "未知"
+        )
+        if mag_tokens:
+            lines.append(
+                f"📊震级：{display_mag_type} {mag_str}（{' / '.join(mag_tokens)}）"
+            )
+        else:
+            lines.append(f"📊震级：{display_mag_type} {mag_str}")
+
+        # 震源深度与矩心深度
+        depth_val = meta.get("depth") if meta.get("depth") is not None else data.depth
+        depth_err = meta.get("depth_error")
+        centroid_val = meta.get("centroid_depth")
+
+        depth_text = cls._format_depth_error(depth_val, depth_err)
+        if centroid_val is not None:
+            lines.append(f"🏔️深度：{depth_text}｜矩心深度：{centroid_val} km")
+        else:
+            lines.append(f"🏔️深度：{depth_text}")
+
+        # 两个节面断层走向、倾角与滑动角
+        plane1 = meta.get("nodal_plane1")
+        plane2 = meta.get("nodal_plane2")
+
+        if plane1:
+            lines.append(
+                f"🧭节面1：走向 {plane1.get('strike')}° / 倾角 {plane1.get('dip')}° / 滑动角 {plane1.get('rake')}°"
+            )
+            lines.append(f"    类型：{format_fault_type_label(plane1)}")
+        if plane2:
+            lines.append(
+                f"🧭节面2：走向 {plane2.get('strike')}° / 倾角 {plane2.get('dip')}° / 滑动角 {plane2.get('rake')}°"
+            )
+            lines.append(f"    类型：{format_fault_type_label(plane2)}")
+
+        lines.append("📋备注：左/右旋最终确定需依赖实际发震断层面")
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        """展示 FSSN CMT。"""
+        return cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )
+
+
+class ShakeAlertEewPresenter(BasePresenter):
+    """美国 ShakeAlert 地震预警展示器。"""
+
+    presenter_name = "shakealert_eew_presenter"
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        """构建 ShakeAlert 地震预警中文基础文本。"""
+        if not _is_earthquake_view(data):
+            return "🚨[地震预警] 数据类型错误"
+
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+        lines = ["🚨[地震预警] 美国 ShakeAlert"]
+
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            lines.append(
+                f"⏰发震时间：{TimeConverter.format_time(shock_time, timezone)}"
+            )
+
+        if data.title and data.latitude is not None and data.longitude is not None:
+            coords = _format_coordinates(data.latitude, data.longitude)
+            lines.append(f"📍震中：{data.title} ({coords})")
+
+        if data.magnitude is not None:
+            lines.append(f"📊震级：M {data.magnitude:.1f}")
+
+        if data.depth is not None:
+            lines.append(f"🏔️深度：{_format_depth(data.depth)}")
+
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        """展示 ShakeAlert 预警，并按会话配置附加本地预估。"""
+        rendered = cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )
+        if not _is_earthquake_view(display_context):
+            return rendered
+        lines = rendered.split("\n") if rendered else []
+        _append_local_estimation(lines, display_context)
+        return "\n".join(lines)
 
 
 class JmaEarthquakeInfoPresenter(BasePresenter):
@@ -745,37 +1144,66 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
                 scale_groups.setdefault(scale, []).append(addr)
 
             if scale_groups:
-                if merged_options.get("detailed_jma_intensity", False):
-                    # 详细模式下按震度从高到低逐级展开展示。
-                    sorted_scales = sorted(scale_groups.keys(), reverse=True)
-                    lines.append("📡各地震度详情：")
-                    for scale_key in sorted_scales:
-                        scale_disp = ScaleConverter.format_jma_cwa_scale_display(
-                            scale_key
+                if merged_options.get("jma_region_intensity", True):
+                    # 地域汇总模式：将町丁目按 sect 聚合，
+                    # 每个 sect 的震度取其内所有町丁目的最大震度，
+                    # 然后按震度从高到低分组展示地域列表，不做截断。
+                    sect_map = get_sect_map()
+                    if sect_map:
+                        # 每个 sect 的最大震度
+                        # scale_key 来自 jma_points 原始数据，可能是 int（P2P）
+                        # 或 str（Wolfx），避免异质类型比较使用 in 检查
+                        sect_max_scale: dict[str, object] = {}
+                        for scale_key, addrs in scale_groups.items():
+                            for addr in addrs:
+                                sect = sect_map.get(addr)
+                                if not sect:
+                                    continue
+                                if (
+                                    sect not in sect_max_scale
+                                    or scale_key > sect_max_scale[sect]
+                                ):
+                                    sect_max_scale[sect] = scale_key
+
+                        if sect_max_scale:
+                            # 按震度从高到低分组展示地域
+                            region_scale_groups: dict[object, list[str]] = {}
+                            for sect, s_scale in sect_max_scale.items():
+                                region_scale_groups.setdefault(s_scale, []).append(sect)
+
+                            sorted_scales = sorted(
+                                region_scale_groups.keys(), reverse=True
+                            )
+                            # detailed_jma_intensity=false 时仅展示最大震度档的地域，
+                            # 与町丁目简略模式保持语义一致；true 时展示全部震度档。
+                            if not merged_options.get("detailed_jma_intensity", False):
+                                sorted_scales = sorted_scales[:1]
+                            lines.append("📡各地震度详情：")
+                            for scale_key in sorted_scales:
+                                scale_disp = (
+                                    ScaleConverter.format_jma_cwa_scale_display(
+                                        scale_key
+                                    )
+                                )
+                                emoji = _get_intensity_emoji(
+                                    scale_key, is_eew=False, is_shindo=True
+                                )
+                                # 地域级不做截断，完整展示所有地域
+                                locs = sorted(region_scale_groups[scale_key])
+                                loc_str = "、".join(locs)
+                                lines.append(f"  {emoji}[震度{scale_disp}] {loc_str}")
+                        else:
+                            # sect 映射全部未命中时回退到町丁目模式
+                            cls._render_town_scale_groups(
+                                merged_options, scale_groups, lines
+                            )
+                    else:
+                        # 映射表加载失败时回退到町丁目模式
+                        cls._render_town_scale_groups(
+                            merged_options, scale_groups, lines
                         )
-                        emoji = _get_intensity_emoji(
-                            scale_key, is_eew=False, is_shindo=True
-                        )
-                        locs = scale_groups[scale_key]
-                        max_show = 20
-                        loc_str = "、".join(locs[:max_show])
-                        if len(locs) > max_show:
-                            loc_str += f" 等{len(locs)}处"
-                        lines.append(f"  {emoji}[震度{scale_disp}] {loc_str}")
                 else:
-                    # 简略模式仅展示最大震度对应的代表观测点，控制文本长度。
-                    max_scale_key = max(scale_groups.keys())
-                    scale_disp = ScaleConverter.format_jma_cwa_scale_display(
-                        max_scale_key
-                    )
-                    emoji = _get_intensity_emoji(
-                        max_scale_key, is_eew=False, is_shindo=True
-                    )
-                    locs = scale_groups[max_scale_key][:5]
-                    suffix = "等" if len(scale_groups[max_scale_key]) > 5 else ""
-                    lines.append(
-                        f"📡震度 {scale_disp} {emoji} 观测点：{'、'.join(locs)}{suffix}"
-                    )
+                    cls._render_town_scale_groups(merged_options, scale_groups, lines)
 
         jma_comment = display_context.jma_comment
         if (
@@ -786,6 +1214,44 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
             lines.append(f"📝备注：{jma_comment.strip()}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _render_town_scale_groups(
+        merged_options: dict,
+        scale_groups: dict[object, list[str]],
+        lines: list[str],
+    ) -> None:
+        """按町丁目级震度分组渲染（原始模式，带截断）。
+
+        当 detailed_jma_intensity 开启时逐级展示所有震度的町丁目，
+        否则仅展示最大震度的代表观测点。町丁目列表会做截断处理以控制文本长度。
+
+        该方法同时作为地域汇总模式的回退路径，detailed_jma_intensity 的
+        语义在此处与地域汇总分支保持一致：false 时仅保留最大震度档。
+        """
+        if merged_options.get("detailed_jma_intensity", False):
+            # 详细模式下按震度从高到低逐级展开展示。
+            sorted_scales = sorted(scale_groups.keys(), reverse=True)
+            lines.append("📡各地震度详情：")
+            for scale_key in sorted_scales:
+                scale_disp = ScaleConverter.format_jma_cwa_scale_display(scale_key)
+                emoji = _get_intensity_emoji(scale_key, is_eew=False, is_shindo=True)
+                locs = scale_groups[scale_key]
+                max_show = 20
+                loc_str = "、".join(locs[:max_show])
+                if len(locs) > max_show:
+                    loc_str += f" 等{len(locs)}处"
+                lines.append(f"  {emoji}[震度{scale_disp}] {loc_str}")
+        else:
+            # 简略模式仅展示最大震度对应的代表观测点，控制文本长度。
+            max_scale_key = max(scale_groups.keys())
+            scale_disp = ScaleConverter.format_jma_cwa_scale_display(max_scale_key)
+            emoji = _get_intensity_emoji(max_scale_key, is_eew=False, is_shindo=True)
+            locs = scale_groups[max_scale_key][:5]
+            suffix = "等" if len(scale_groups[max_scale_key]) > 5 else ""
+            lines.append(
+                f"📡震度 {scale_disp} {emoji} 观测点：{'、'.join(locs)}{suffix}"
+            )
 
 
 class GlobalQuakeTextPresenter(BasePresenter):
@@ -923,3 +1389,218 @@ class CwaReportPresenter(BasePresenter):
         merged_options.setdefault("image_uri", display_context.image_uri)
         merged_options.setdefault("shakemap_uri", display_context.shakemap_uri)
         return cls.format_message(display_context, merged_options)
+
+
+class CencIntensityReportPresenter(BasePresenter):
+    """中国地震台网烈度速报展示器。"""
+
+    presenter_name = "cenc_ir_report_presenter"
+    _TOP_N = 5
+
+    # 上游烈度速报正文常见格式问题处理：
+    # - 零宽/不可见格式字符（Word Joiner、ZWJ、BOM、不可见运算符等）
+    # - GB/T 标准号连字符缺失（GB/T177422020）与引号包裹
+    # - 英文标点混入中文正文
+    _INVISIBLE_CHARS_RE = re.compile(r"[\u200b-\u200f\u2060-\u2064\ufeff\u0361]")
+    _GB_T_STANDARD_RE = re.compile(r"GB/T\s*(\d+)\s*-?\s*(\d{4})")
+    _GB_T_BEFORE_CJK_RE = re.compile(r"([\u4e00-\u9fff])GB/T")
+    _GB_T_AFTER_YEAR_CJK_RE = re.compile(r"(GB/T\s*\d+-\d{4})([\u4e00-\u9fff])")
+    _QUOTE_CHARS_RE = re.compile(r"['\"“”‘’]")
+
+    @staticmethod
+    def _strip_invisible_chars(text: str) -> str:
+        """清理上游数据中混入的零宽/不可见格式字符。"""
+        return CencIntensityReportPresenter._INVISIBLE_CHARS_RE.sub("", str(text or ""))
+
+    @classmethod
+    def _normalize_intensity_text(cls, text: str) -> list[str]:
+        """把上游烈度概述文本规范化为多行正文。
+
+        处理内容：
+        1. 清理零宽/不可见格式字符；
+        2. 去除标准号周围引号、修正 GB/T 标准号为规范形式
+           （GB/T 17742-2020），并在标准号与相邻中文之间补空格；
+        3. 英文标点（, . ;）转中文标点（，。；），句点转句号时保留小数点；
+        4. 按句子切分为多行。
+        """
+        content = cls._strip_invisible_chars(text)
+        content = cls._QUOTE_CHARS_RE.sub("", content)
+        content = cls._GB_T_STANDARD_RE.sub(r"GB/T \1-\2", content)
+        content = cls._GB_T_BEFORE_CJK_RE.sub(r"\1 GB/T", content)
+        content = cls._GB_T_AFTER_YEAR_CJK_RE.sub(r"\1 \2", content)
+        content = content.replace(",", "，").replace(";", "；")
+        # 仅排除「小数点」情形（点前是数字），其余点号统一转句号。
+        # 例如「6度.5度区」→「6度。5度区」，而「M 4.8」「28.54°」不受影响。
+        content = re.sub(r"(?<!\d)\.", "。", content)
+        # 按句切分后，每段补回中文句号（原始句号已被切分符吞掉）。
+        return [
+            f"{segment.strip()}。"
+            for segment in re.split(r"[。；\n]+", content)
+            if segment.strip()
+        ]
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        """构建中国地震台网烈度速报文本。"""
+        if not _is_earthquake_view(data):
+            return "🚨[烈度速报] 数据类型错误"
+
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+        metadata = data.metadata if isinstance(data.metadata, dict) else {}
+        lines = ["🚨[烈度速报] 中国地震台网"]
+
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            lines.append(
+                f"⏰发震时间：{TimeConverter.format_time(shock_time, timezone)}"
+            )
+
+        place_name = str(data.title or "").strip()
+        if place_name and data.latitude is not None and data.longitude is not None:
+            coords = _format_coordinates(data.latitude, data.longitude)
+            lines.append(f"📍震中：{place_name} ({coords})")
+        elif place_name:
+            lines.append(f"📍震中：{place_name}")
+
+        if data.magnitude is not None:
+            lines.append(f"📊震级：M {data.magnitude:.1f}")
+        if data.depth is not None:
+            lines.append(f"🏔️深度：{_format_depth(data.depth)}")
+        if data.intensity is not None:
+            emoji = _get_intensity_emoji(data.intensity, is_eew=False, is_shindo=False)
+            lines.append(f"💥最大仪器烈度：{data.intensity} {emoji}")
+
+        intensity_info_text = str(
+            metadata.get("intensity_info_text")
+            or merged_options.get("intensity_info_text")
+            or ""
+        ).strip()
+        if intensity_info_text:
+            lines.append("")
+            lines.append("📝推测烈度说明：")
+            lines.extend(cls._normalize_intensity_text(intensity_info_text))
+
+        stations = metadata.get("stations") or data.stations or []
+        if isinstance(stations, dict):
+            stations = list(stations.values())
+        if not isinstance(stations, list):
+            stations = []
+        station_rows = [item for item in stations if isinstance(item, dict)]
+        if station_rows:
+            lines.append("")
+            lines.append(f"📡台站实测 Top{min(cls._TOP_N, len(station_rows))}：")
+            for row in station_rows[: cls._TOP_N]:
+                name = str(row.get("name") or "未知台站").strip() or "未知台站"
+                intensity = row.get("intensity")
+                if intensity is None:
+                    lines.append(f"  · {name}  烈度 --")
+                    continue
+                try:
+                    intensity_text = f"{float(intensity):.1f}"
+                except (TypeError, ValueError):
+                    intensity_text = str(intensity)
+                emoji = _get_intensity_emoji(intensity, is_eew=False, is_shindo=False)
+                lines.append(f"{emoji}[烈度{intensity_text}] {name}")
+
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        """展示烈度速报。"""
+        return cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )
+
+
+class SnetPresenter(BasePresenter):
+    """NIED S-Net 海底震度分布展示器。"""
+
+    presenter_name = "snet_presenter"
+    _TOP_N = 5
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        """构建 S-Net 文本消息。
+
+        样例（手机窄屏尽量单行）：
+        🚨[S-Net震度分布] NIED
+        ⏰更新时间：2026年07月15日 20时29分00秒 (UTC+8)
+        📊震度降序前 5 测站：
+          N.S5N06  ⚪震度0以下 (-0.792)
+        """
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+        metadata = data.metadata if isinstance(data.metadata, dict) else {}
+
+        stations = metadata.get("stations") or data.stations or []
+        if isinstance(stations, dict):
+            stations = list(stations.values())
+        if not isinstance(stations, list):
+            stations = []
+        station_rows = [s for s in stations if isinstance(s, dict)]
+
+        display_time = "未知时间"
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            display_time = TimeConverter.format_time(shock_time, timezone)
+        else:
+            timestamp = str(metadata.get("timestamp") or "").strip()
+            if timestamp:
+                try:
+                    dt = datetime.strptime(timestamp, "%Y%m%d%H%M00").replace(
+                        tzinfo=dt_timezone.utc
+                    )
+                    display_time = TimeConverter.format_time(dt, timezone)
+                except (ValueError, TypeError):
+                    display_time = timestamp
+
+        sorted_stations = sorted(
+            station_rows,
+            key=lambda s: float(s.get("shindo", -999.0)),
+            reverse=True,
+        )
+        top_n = int(merged_options.get("top_n", cls._TOP_N) or cls._TOP_N)
+        top_n = max(1, min(top_n, 20))
+        top_stations = sorted_stations[:top_n]
+
+        lines = [
+            "🚨[S-Net震度分布] NIED",
+            f"⏰更新时间：{display_time}",
+            f"📊震度降序前 {len(top_stations)} 测站：",
+        ]
+        for station in top_stations:
+            name = str(station.get("name") or "?").strip() or "?"
+            try:
+                shindo = float(station.get("shindo", 0.0))
+            except (TypeError, ValueError):
+                shindo = 0.0
+            # 复用项目统一震度文本与圆形 emoji 指示器
+            scale_text = ScaleConverter.format_measured_intensity_display(shindo)
+            if not scale_text:
+                scale_text = "?"
+            # 0以下仍走最低档白色圆形指示；其余按計測震度阈值选色
+            emoji = _get_intensity_emoji(shindo, is_eew=True, is_shindo=True) or "⚪"
+            # 两个空格 + 站名 + 两个空格 + emoji + 震度描述 + 空格 + 半角括号数值
+            lines.append(f"  {name}  {emoji}震度{scale_text} ({shindo:.3f})")
+
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        """展示 S-Net 消息入口。"""
+        return cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )

@@ -112,7 +112,11 @@ class GlobalQuakeCardBuilder:
                 )
                 image_path = os.path.join(self.temp_dir, image_filename)
                 return await self.browser_manager.render_card(
-                    html_content, image_path, selector="#card-wrapper"
+                    html_content,
+                    image_path,
+                    selector="#card-wrapper",
+                    render_label="GlobalQuake 卡片",
+                    event_stream="global_quake",
                 )
 
             result_path = await render_with_cache(card_cache_key, render_gq_card)

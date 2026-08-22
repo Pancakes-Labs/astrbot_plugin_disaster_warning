@@ -11,6 +11,7 @@ from ...domain.event_models import (
     EarthquakeEvent,
     EventEnvelope,
     TsunamiEvent,
+    TyphoonEvent,
     WeatherEvent,
 )
 from ...domain.event_payload import SourcePayload
@@ -21,6 +22,8 @@ MAJOR_EARTHQUAKE_MAGNITUDE_THRESHOLD = 6.0
 MAJOR_WEATHER_LEVEL_KEYWORD = "红"
 # 重大灾害预警文本短语匹配列表
 MAJOR_WEATHER_TEXT_PHRASES = ("红色预警",)
+# 重大台风等级关键词：强台风及以上（强台风、超强台风）
+MAJOR_TYPHOON_LEVEL_KEYWORDS = ("强台风", "超强台风")
 
 
 def is_major_weather_level(*candidates: Any) -> bool:
@@ -28,6 +31,12 @@ def is_major_weather_level(*candidates: Any) -> bool:
     return any(
         MAJOR_WEATHER_LEVEL_KEYWORD in str(candidate or "") for candidate in candidates
     )
+
+
+def is_major_typhoon_level(*candidates: Any) -> bool:
+    """判断台风等级字段是否达到强台风及以上级别。"""
+    text = "".join(str(candidate or "") for candidate in candidates)
+    return any(keyword in text for keyword in MAJOR_TYPHOON_LEVEL_KEYWORDS)
 
 
 def is_major_weather_text(*candidates: Any) -> bool:
@@ -55,6 +64,17 @@ def is_major_record(record: dict[str, Any]) -> bool:
     if record_type == "tsunami":
         # 海啸事件因为罕见且危险性高，一律判定为重大事件
         return True
+    if record_type == "typhoon":
+        # 台风仅强台风及以上级别判定为重大事件。
+        # 注意：数据库主表 level 存储的是历史峰值（用于风王榜等统计），
+        # 因此重大事件判断必须使用 _snapshot_level（当前观测等级），
+        # 避免已减弱的台风（如巴威从超强台风回落到热带风暴）仍被误判为重大事件。
+        # 峰值 level 仅在 _snapshot_level 缺失时（如历史重建记录）作为回退。
+        current_level = str(record.get("_snapshot_level") or "")
+        if current_level:
+            return is_major_typhoon_level(current_level)
+        level = str(record.get("level") or "")
+        return is_major_typhoon_level(level)
     if record_type == "weather_alarm":
         level = str(record.get("level") or "")
         description = str(record.get("description") or "")
@@ -80,6 +100,9 @@ def is_major_event(event: EventEnvelope) -> bool:
     if isinstance(domain_event, TsunamiEvent):
         # 海啸事件一律视为重大事件
         return True
+    if isinstance(domain_event, TyphoonEvent):
+        # 台风仅强台风及以上级别判定为重大事件
+        return is_major_typhoon_level(domain_event.typhoon_type)
     if isinstance(domain_event, WeatherEvent):
         # 获取源数据载荷字典
         payload = (

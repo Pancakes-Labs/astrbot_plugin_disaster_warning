@@ -11,11 +11,14 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ...domain.typhoon import format_display_name, normalize_typhoon_id
 from ...message.presenters.weather_constants import (
     COLOR_LEVEL_EMOJI,
     SORTED_WEATHER_TYPES,
 )
 from ...services.identity.event_classifier import is_major_record
+from ..source_compat import normalize_source_name
+from .typhoon_stats_accumulator import record_typhoon_observation
 
 
 class StatsLoadService:
@@ -49,9 +52,14 @@ class StatsLoadService:
             db_events = await self.manager.db.get_recent_events(500)
             time_series_counts = await self.manager.db.get_time_series_counts()
             rebuild_events = await self.manager.db.get_statistics_rebuild_events()
+            # 气象预警每天数千条，仅恢复最近 500 条通用事件不够：
+            # 重载后上游重推超出窗口的旧预警会被统计成新事件。
+            # 这里按 type 轻量拉取最近 10000 条气象唯一键，补进统计去重集合。
+            weather_keys = await self.manager.db.list_recent_weather_unique_ids(10000)
+            self._restore_weather_unique_ids(weather_keys)
             if db_events:
                 # 数据库是当前版本的主要历史来源，命中后优先以数据库结果覆盖近期事件缓存。
-                logger.info(f"[灾害预警] 从数据库加载了 {len(db_events)} 条历史记录")
+                logger.debug(f"[灾害预警] 从数据库加载了 {len(db_events)} 条历史记录")
                 self.manager.stats["recent_pushes"] = db_events
                 self._restore_recorded_ids_from_db(db_events)
                 self._restore_time_series_counts(time_series_counts)
@@ -91,6 +99,9 @@ class StatsLoadService:
                 await self.migrate_json_from_file()
         except Exception as e:
             logger.error(f"[灾害预警] 从数据库加载失败: {e}")
+
+        # S-Net 峰值档案独立于 events 表：即使通用事件恢复失败也要尝试恢复。
+        await self._restore_snet_stats()
 
     async def migrate_json_from_file(self) -> None:
         """将 JSON 文件中的历史记录一次性迁移到数据库。"""
@@ -148,6 +159,28 @@ class StatsLoadService:
                         f"{source_key}:{unique_id}"
                     )
 
+    def _restore_weather_unique_ids(self, weather_keys: list[dict[str, Any]]) -> None:
+        """把气象唯一键补进统计去重集合，扩大重载后的防重复窗口。
+
+        气象源高频且量大，仅靠通用 recent_events(500) 无法覆盖
+        重载后被上游重推的旧预警，这里单独把气象键批量登记，
+        避免重载后统计虚增（total_events / by_type / by_source / 时间序列）。
+        """
+        for row in weather_keys or []:
+            unique_id = str(row.get("unique_id") or "").strip()
+            real_event_id = str(row.get("real_event_id") or "").strip()
+            raw_source = str(row.get("source_id") or row.get("source") or "").strip()
+            # 与统计聚合器 by_source 键口径保持一致：
+            # build_source_stats_key 对非台风源返回 normalize_source_name(source)。
+            source_key = normalize_source_name(raw_source) if raw_source else ""
+            # unique_id 与 real_event_id 都可能作为事件唯一键使用，一并登记。
+            for key in (unique_id, real_event_id):
+                if not key:
+                    continue
+                self.manager._recorded_event_ids.add(key)
+                if source_key:
+                    self.manager._recorded_source_event_ids.add(f"{source_key}:{key}")
+
     async def refresh_derived_stats_from_database(self) -> None:
         """从数据库全量刷新统计卡片依赖的聚合与派生统计。"""
         db_stats = await self.manager.db.get_statistics()
@@ -177,6 +210,17 @@ class StatsLoadService:
             rebuild_events,
             allow_weather_fallback=False,
         )
+        await self._restore_snet_stats()
+
+    async def _restore_snet_stats(self) -> None:
+        """从 snet_station_peaks 恢复内存 snet_stats。"""
+        peak_service = getattr(self.manager, "snet_peak_service", None)
+        if peak_service is None:
+            return
+        try:
+            await peak_service.refresh_stats_from_database()
+        except Exception as e:
+            logger.warning(f"[灾害预警] 恢复 S-Net 峰值统计失败: {e}")
 
     def _restore_time_series_counts(self, counts: dict[str, Any] | None) -> None:
         """恢复数据库全量聚合得到的时间序列桶。"""
@@ -209,6 +253,14 @@ class StatsLoadService:
         weather_levels: defaultdict[str, int] = defaultdict(int)
         weather_types: defaultdict[str, int] = defaultdict(int)
         weather_regions: defaultdict[str, int] = defaultdict(int)
+        typhoon_levels: defaultdict[str, int] = defaultdict(int)
+        typhoon_max_levels: defaultdict[str, int] = defaultdict(int)
+        # 风王榜：{name: {"wind_speed": float, "pressure": float|None}}
+        typhoon_max_wind: dict[str, dict[str, Any]] = {}
+        # 气压榜：{name: min_pressure}
+        typhoon_min_pressure: dict[str, float] = {}
+        # 台风个体最高等级映射表，用于 by_max_level 去重统计。
+        typhoon_max_level_map: dict[str, str] = {}
         self.manager._recorded_cenc_official_region_ids.clear()
 
         for event in events or []:
@@ -240,11 +292,29 @@ class StatsLoadService:
                     weather_regions=weather_regions,
                     allow_fallback=allow_weather_fallback,
                 )
+            elif event_type == "typhoon":
+                self._record_typhoon_rebuild_stats(
+                    event,
+                    typhoon_levels=typhoon_levels,
+                    typhoon_max_levels=typhoon_max_levels,
+                    typhoon_max_wind=typhoon_max_wind,
+                    typhoon_min_pressure=typhoon_min_pressure,
+                    typhoon_max_level_map=typhoon_max_level_map,
+                )
 
         self.manager.stats["earthquake_stats"]["by_region"] = earthquake_regions
         self.manager.stats["weather_stats"]["by_level"] = weather_levels
         self.manager.stats["weather_stats"]["by_type"] = weather_types
         self.manager.stats["weather_stats"]["by_region"] = weather_regions
+        self.manager.stats["typhoon_stats"]["by_level"] = typhoon_levels
+        self.manager.stats["typhoon_stats"]["by_max_level"] = typhoon_max_levels
+        self.manager.stats["typhoon_stats"]["max_wind_typhoons"] = typhoon_max_wind
+        self.manager.stats["typhoon_stats"]["min_pressure_typhoons"] = (
+            typhoon_min_pressure
+        )
+        self.manager.stats["typhoon_stats"]["_typhoon_max_level_map"] = (
+            typhoon_max_level_map
+        )
 
     def _is_cenc_official_record(self, event: dict[str, Any]) -> bool:
         """判断数据库记录是否属于 CENC 正式测定统计口径。"""
@@ -318,6 +388,53 @@ class StatsLoadService:
         if region:
             weather_regions[region] += 1
 
+    def _record_typhoon_rebuild_stats(
+        self,
+        event: dict[str, Any],
+        *,
+        typhoon_levels: defaultdict[str, int],
+        typhoon_max_levels: defaultdict[str, int],
+        typhoon_max_wind: dict[str, dict[str, Any]],
+        typhoon_min_pressure: dict[str, float],
+        typhoon_max_level_map: dict[str, str],
+    ) -> None:
+        """从数据库峰值字段恢复台风统计，公式与实时聚合完全一致。"""
+        # subtitle 已由入库链路写入 format_display_name 结果；
+        # 这里只做缺省回退，不再复制一套中英文拼接规则。
+        subtitle = str(event.get("subtitle") or "").strip()
+        place_name = str(event.get("place_name") or "").strip()
+        typhoon_id = str(
+            event.get("real_event_id")
+            or event.get("unique_id")
+            or event.get("event_id")
+            or ""
+        ).strip()
+        display_name = format_display_name(
+            subtitle or place_name,
+            "",
+            typhoon_id,
+            fallback=typhoon_id or "未知台风",
+        )
+        display_name = display_name.replace("TD No.", "TD")
+        # 与实时路径对齐：以归一化台风编号作为统计身份键，条目内保留展示名，
+        # 避免同一台风展示名变化导致统计分裂；实时/重建共用同一身份键规则。
+        identity_key = normalize_typhoon_id(typhoon_id)
+        # 主表已经保存历史峰值，因此重建时把它作为一次完整观测输入即可。
+        record_typhoon_observation(
+            {
+                "by_level": typhoon_levels,
+                "by_max_level": typhoon_max_levels,
+                "max_wind_typhoons": typhoon_max_wind,
+                "min_pressure_typhoons": typhoon_min_pressure,
+                "_typhoon_max_level_map": typhoon_max_level_map,
+            },
+            display_name=display_name,
+            identity_key=identity_key,
+            level=str(event.get("level") or "未知").strip() or "未知",
+            wind_speed=event.get("wind_speed"),
+            pressure=event.get("pressure"),
+        )
+
     def _normalize_weather_level(self, raw_level: Any, text: str) -> str:
         """把数据库中的气象级别恢复为前端统计使用的展示键。"""
         level_text = str(raw_level or "").strip()
@@ -333,6 +450,6 @@ class StatsLoadService:
             if saved_on_disk.get("recent_pushes"):
                 saved_on_disk["recent_pushes"] = []
                 self.manager.repository.save_stats(saved_on_disk)
-                logger.debug("[灾害预警] 已清理 JSON 文件中残留的 recent_pushes")
+                logger.debug("[灾害预警] 已清理 JSON 文件中残留的近期推送")
         except Exception as e:
-            logger.debug(f"[灾害预警] 清理 JSON recent_pushes 失败（非致命）: {e}")
+            logger.debug(f"[灾害预警] 清理 JSON 的近期推送失败（非致命）: {e}")

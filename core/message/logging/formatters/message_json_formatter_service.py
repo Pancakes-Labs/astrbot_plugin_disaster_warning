@@ -32,6 +32,38 @@ class MessageJsonFormatterService:
         "updated_at": "更新时间",
         "started_at": "开始时间",
         "expire": "过期时间",
+        # 🌀 台风相关字段（Fan Studio / EQSC）
+        "typhoon": "台风列表",
+        "nameEN": "英文名",
+        "nameCN": "中文名",
+        "name_en": "英文名",
+        "isActive": "是否活跃",
+        "historyTrack": "历史路径",
+        "futureTrack": "预测路径",
+        "history_track": "历史路径",
+        "future_track": "预测路径",
+        "typeNameCN": "强度等级(中文)",
+        "pressure": "中心气压(hPa)",
+        "speed": "移动速度(km/h)",
+        "direction": "移动方向",
+        "directionCN": "移动方向(中文)",
+        "moveDirection": "移动方向",
+        "moveSpeed": "移动速度(km/h)",
+        "windSpeed": "最大风速(m/s)",
+        "power": "中心风力(级)",
+        "radius7": "七级风圈半径(km)",
+        "radius10": "十级风圈半径(km)",
+        "windCircle": "风圈半径",
+        "wind_circle": "风圈半径",
+        "30KTS": "七级风圈(30KTS)",
+        "50KTS": "十级风圈(50KTS)",
+        "64KTS": "十二级风圈(64KTS)",
+        "NE": "东北象限(km)",
+        "SE": "东南象限(km)",
+        "SW": "西南象限(km)",
+        "NW": "西北象限(km)",
+        "Data": "数据主体",
+        "provider": "数据服务商",
         # 🏔️ 地震核心信息
         "earthquake": "地震信息",
         "magnitude": "震级",
@@ -43,7 +75,7 @@ class MessageJsonFormatterService:
         "longitude": "经度",
         "Longitude": "经度",  # 大写版本
         "placeName": "地名",
-        "name": "地点名称",
+        "name": "名称",  # 通用：地名/台风中文名等
         "shockTime": "发震时间",
         "OriginTime": "发震时间",  # JMA格式
         "place": "震中",
@@ -68,6 +100,16 @@ class MessageJsonFormatterService:
         "EventID": "事件ID",  # JMA格式
         "event_id": "事件ID",  # 下划线版本
         "EventId": "事件编码",  # FAN Studio格式
+        "uniEventId": "事件唯一ID",  # CENC 烈度速报
+        "locName": "震中地名",
+        "nameByInfo": "报告标题",
+        "oriTime": "发震时间",
+        "gmtCreate": "报告生成时间",
+        "focDepth": "震源深度(km)",
+        "intensity_info_text": "烈度概述",
+        "instrument_intensity_json": "台站仪器烈度",
+        "contour_geojson": "等震线GeoJSON",
+        "subjectCodes": "报告主题编码",
         "Serial": "报序号",  # JMA格式
         "updates": "更新次数",
         "ReportNum": "发报数",  # Wolfx格式
@@ -175,6 +217,198 @@ class MessageJsonFormatterService:
         "server": "服务器",
         "port": "端口",
         "status_code": "状态码",
+        # 🌐 协议/封装层字段 (Global Quake / OpenQuakeAPI / Fan Studio)
+        "timestampMs": "时间戳(毫秒)",
+        "payload": "数据载荷",
+        "protobuf": "Protobuf格式",
+        "data": "数据",
+        "message": "消息内容",
+        "summary": "摘要标志",
+        "total_events": "事件总数",
+        "note": "备注说明",
+        "preview": "预览",
+        "_truncated": "内容已截断",
+        "_original_chars": "原始字符数",
+        # 🗂️ EQSC 列表/事件字段
+        "eventID": "事件ID",  # EQSC格式
+        "reportTime": "发报时间",  # EQSC/JMA格式（camelCase）
+        "register": "登记时间",  # EQSC/P2P格式
+        "expiresAt": "过期时间",  # EQSC格式
+        "originTime": "发震时间",  # 小写camelCase
+        "issueHypocenter": "震源信息",  # EQSC格式
+        "hypoCenterName": "震源地名称",  # EQSC格式
+        # Wolfx / JMA 大写变体
+        "Magnitude": "震级",  # Wolfx/JMA大写
+        "HypoCenter": "震源中心",  # Wolfx格式
+        "Issue": "发布信息",  # Wolfx格式
+        "Source": "情报来源",  # Wolfx格式
+        "Status": "情报状态",  # Wolfx格式
+        "Accuracy": "精度信息",  # Wolfx格式
+        "Epicenter": "震中",  # Wolfx精度子字段
+        "MaxIntChange": "最大震度变化",  # Wolfx格式
+        "String": "变化说明",  # Wolfx格式
+        "Reason": "变化原因",  # Wolfx格式
+        "WarnArea": "预警区域",  # Wolfx格式
+        "Pond": "P2P区域代码",  # Wolfx格式
+        "Chiiki": "地域名称",  # Wolfx预警区域子字段
+        "Shindo1": "预测震度(上)",  # Wolfx格式
+        "Shindo2": "预测震度(下)",  # Wolfx格式
+        "Time": "时刻",  # Wolfx预警区域子字段
+        "Type": "类型",  # Wolfx预警区域子字段
+        "Arrive": "到达预测",  # Wolfx格式
+        # JMA 情报字段 (Global Quake payload)
+        "codeType": "情报类型",  # JMA格式
+        "announcedTime": "发布时间",  # JMA格式（camelCase）
+        "targetTime": "目标时间",  # JMA格式
+        "publishingOffice": "发布机构",  # JMA格式
+        "editorialOffice": "编辑机构",  # JMA格式
+        "originalText": "原电文",  # JMA格式（camelCase）
+        "serial": "报序号",  # JMA/P2P格式（camelCase）
+        # P2P 数据源字段
+        "convert": "转换时间",  # P2P格式
+        "user_agent": "客户端标识",  # P2P格式（下划线版）
+        "kindCode": "种类代码",  # P2P格式
+        "scaleFrom": "震度下限",  # P2P格式
+        "scaleTo": "震度上限",  # P2P格式
+        "reduceName": "简略地域名",  # P2P格式
+        "display": "显示标识",  # P2P格式
+        # Fan Studio 子源分组键
+        "fssn": "FSSN地震速报",
+        "fssn-cmt": "FSSN矩心矩张量解",
+        "weatheralarm": "气象预警",
+        "cenc": "中国地震台网",
+        "cea": "中国地震预警网",
+        "cea-pr": "中国地震预警网（省级）",
+        "ningxia": "宁夏地震台网",
+        "guangxi": "广西地震台网",
+        "shanxi": "山西地震台网",
+        "beijing": "北京地震台网",
+        "yunnan": "云南地震台网",
+        "cwa": "台湾中央气象署地震报告",
+        "cwa-eew": "台湾中央气象署强震即时警报",
+        "jma": "日本气象厅",
+        "hko": "香港天文台",
+        "usgs": "美国地质调查局",
+        "emsc": "欧洲地中海地震中心",
+        "bcsf": "BCSF地震台网",
+        "gfz": "德国地球科学中心",
+        "usp": "USP地震台网",
+        "kma": "韩国气象厅",
+        "kma-eew": "韩国地震速报",
+        "sa": "美国 ShakeAlert",
+        "gq": "Global Quake",
+        # Fan Studio 常规字段补充
+        "magnitudel": "震级",  # FAN Studio云南格式
+        "placeName_zh": "中文地名",  # FAN Studio格式
+        "citystring": "城市描述",  # HKO/FAN Studio格式
+        "verify": "核实标志",  # HKO/FAN Studio格式
+        "imageURI": "图片地址",  # CWA格式
+        "shakemapURI": "等震度图地址",  # CWA格式
+        # 📐 CENC 烈度速报 (Fan Studio cenc-ir)
+        "epiLon": "震中经度",
+        "epiLat": "震中纬度",
+        "raw_event_json": "原始事件数据",
+        "origin": "震源信息",
+        "eqType": "地震类型",
+        "magNum": "震级数值",
+        "magType": "震级类型",
+        "costTime": "计算耗时",
+        "trigStaNum": "触发台站数",
+        "sendTime": "发送时间",
+        "geometry": "几何信息",  # GeoJSON
+        "properties": "属性信息",  # GeoJSON
+        "INT": "烈度",  # 等震线GeoJSON属性
+        "F_AREA": "影响面积",  # 等震线GeoJSON属性
+        "Mag": "震级",  # 台站观测
+        "PGA": "峰值加速度",  # 台站观测
+        "PGV": "峰值速度",  # 台站观测
+        "tag": "标签",
+        "City": "城市",
+        "County": "县区",
+        "Province": "省份",
+        "Site": "场地",
+        "Town": "城镇",
+        "Dist": "距离",
+        "Date": "日期",
+        "IPGA": "仪器烈度(PGA)",
+        "IPGV": "仪器烈度(PGV)",
+        "Vs30": "剪切波速Vs30",
+        "evdp": "事件深度",
+        "evla": "事件纬度",
+        "evlo": "事件经度",
+        "evName": "事件名称",
+        "stID": "台站ID",
+        "stName": "台站名称",
+        "stla": "台站纬度",
+        "stlo": "台站经度",
+        "IDiff": "到时差",
+        "PGA_E": "PGA东西向",
+        "PGA_N": "PGA南北向",
+        "PGA_Z": "PGA垂直向",
+        "PGV_E": "PGV东西向",
+        "PGV_N": "PGV南北向",
+        "PGV_Z": "PGV垂直向",
+        "network": "台网",
+        "Unnamed": "未命名列",
+        "estimateInt": "预估烈度",
+        # 🔬 FSSN CMT 矩张量字段
+        "allMagnitudes": "全震级列表",
+        "M": "主震级",
+        "mB": "体波震级(mB)",
+        "mb": "体波震级(mb)",
+        "MLv": "面波震级(MLv)",
+        "Mwp": "W相位震级(Mwp)",
+        "Mww": "矩震级(Mww)",
+        "Mj": "日本气象厅震级(Mj)",
+        "Mw(mB)": "矩震级Mw(mB)",
+        "Mw(Mwp)": "矩震级Mw(Mwp)",
+        "centroidDepth": "质心深度",
+        "nodalPlane1": "节面1",
+        "nodalPlane2": "节面2",
+        "mnn": "矩张量分量Mnn",
+        "mee": "矩张量分量Mee",
+        "mdd": "矩张量分量Mdd",
+        "mne": "矩张量分量Mne",
+        "mnd": "矩张量分量Mnd",
+        "med": "矩张量分量Med",
+        # 🌊 NMEFC 海啸预警字段
+        "orgUnit": "发布单位",
+        "issueTime": "发布时间",  # NMEFC格式
+        "depthKm": "深度(km)",  # NMEFC格式
+        "depthDescription": "深度描述",  # NMEFC格式
+        "earthquakeDescription": "地震描述",  # NMEFC格式
+        "assessment": "评估结论",  # NMEFC格式
+        "followUpNote": "后续跟踪说明",  # NMEFC格式
+        "waterLevelNote": "水位说明",  # NMEFC格式
+        "classificationNote": "分类说明",  # NMEFC格式
+        "dutyOfficer": "值班员",  # NMEFC格式
+        "dutyPhone": "值班电话",  # NMEFC格式
+        "supervisingAuthority": "监管机构",  # NMEFC格式
+        "earthquakePositionImageUrl": "震中位置图",  # NMEFC格式
+        "signatureImageUrl": "签名图",  # NMEFC格式
+        "waterLevels": "水位监测列表",  # NMEFC格式
+        "coordinates": "坐标",  # NMEFC格式
+        "timeBjt": "北京时间",  # NMEFC格式
+        "maxAmplitudeCm": "最大波幅(cm)",  # NMEFC格式
+        # 🌊 NMEFC 海浪警报字段
+        "warnType": "警报类型",
+        "author": "作者",
+        "logo": "标识图",
+        "image": "图片",
+        "signUrl": "签名图地址",
+        "phone": "联系电话",
+        # 🌊 海啸详情字段
+        "subtitle": "副标题",
+        "alarmDate": "警报日期",
+        "updateDate": "更新日期",
+        "shockInfo": "地震信息",
+        "batch": "批次",
+        "logoUrl": "标识图地址",
+        "htmlUrl": "详情链接",
+        "maps": "图件集合",
+        "earthquakeMapUrl": "震中图地址",
+        "amplitudeMapUrl": "波幅图地址",
+        "coastalMapUrl": "沿岸图地址",
     }
 
     _MAX_SCALE_MAP = {
@@ -243,6 +477,9 @@ class MessageJsonFormatterService:
             return "无数据"
         if value == "":
             return "空字符串"
+        # EQSC 台风路径字段常用 "NULL" 表示缺失
+        if isinstance(value, str) and value.strip().upper() in {"NULL", "NONE"}:
+            return "无数据"
         if isinstance(value, bool):
             return "是" if value else "否"
         if isinstance(value, (int, float)):
@@ -261,6 +498,24 @@ class MessageJsonFormatterService:
             return f"{value:.2f}km" if isinstance(value, float) else f"{value}km"
         if key in ["latitude", "Latitude", "longitude", "Longitude"]:
             return f"{value:.5f}"
+        # 台风气压 / 风速 / 移速 / 风圈半径
+        if key in ["pressure", "Pressure"]:
+            return f"{value} hPa"
+        if key in ["windSpeed", "WindSpeed"]:
+            if isinstance(value, float) and not value.is_integer():
+                return f"{value:.1f} m/s"
+            return f"{int(value) if float(value).is_integer() else value} m/s"
+        if key in ["moveSpeed", "speed", "Speed"]:
+            # EQSC speed 可能是数值，也可能是 STNR 字符串（字符串分支已处理）
+            if isinstance(value, float) and not value.is_integer():
+                return f"{value:.1f} km/h"
+            return f"{int(value) if float(value).is_integer() else value} km/h"
+        if key in ["radius7", "radius10", "NE", "SE", "SW", "NW"]:
+            if isinstance(value, float) and not value.is_integer():
+                return f"{value:.1f} km"
+            return f"{int(value) if float(value).is_integer() else value} km"
+        if key == "power":
+            return f"{int(value) if float(value).is_integer() else value} 级"
         if key in [
             "maxPGA",
             "errOrigin",

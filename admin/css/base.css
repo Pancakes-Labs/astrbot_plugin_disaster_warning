@@ -24,6 +24,12 @@
     --md-sys-color-on-surface-variant: #49454F;
     --md-sys-color-surface-variant: #E7E0EC;
 
+    /* 错误色 (Error)：危险态、最大震级等暖色强调 */
+    --md-sys-color-error: #B3261E;
+    --md-sys-color-on-error: #FFFFFF;
+    --md-sys-color-error-container: #F9DEDC;
+    --md-sys-color-on-error-container: #410E0B;
+
     /* 背景色 (Background)：应用的主背景色 */
     --md-sys-color-background: #FEF7FF;
     --md-sys-color-outline-variant: rgba(103, 80, 164, 0.1);
@@ -32,6 +38,14 @@
     --glass-bg: rgba(255, 255, 255, 0.65);
     --glass-border: rgba(103, 80, 164, 0.15);
     --glass-shadow: 0 4px 20px 0 rgba(103, 80, 164, 0.08);
+
+    /* --- 通用品牌色变量（simulation.css 等自研视图使用） ---
+       与 MaterialUI 主色保持一致：亮色为深紫 #6750A4，暗色为淡紫 #D0BCFF。
+       此前这些变量未定义，simulation 视图 fallback 到 #1976d2 亮蓝，
+       在暗色主题下既突兀又缺乏对比。 */
+    --primary: #6750A4;
+    --primary-light: rgba(103, 80, 164, 0.12);
+    --primary-light-solid: #EADDFF;
 
     /* --- 圆角规范 (Border Radius) --- */
     --radius-sm: 8px;     /* 小圆角：适用于小工具、输入框及小徽标 */
@@ -97,6 +111,12 @@ body.dark-theme {
     --md-sys-color-on-surface-variant: #CAC4D0;
     --md-sys-color-surface-variant: #49454F;
 
+    /* 错误色 (Error) 深色变体 */
+    --md-sys-color-error: #F2B8B5;
+    --md-sys-color-on-error: #601410;
+    --md-sys-color-error-container: #8C1D18;
+    --md-sys-color-on-error-container: #F9DEDC;
+
     --md-sys-color-background: #141218;
     --md-sys-color-outline-variant: rgba(208, 188, 255, 0.1);
 
@@ -106,6 +126,11 @@ body.dark-theme {
     --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 
     --status-tone-disabled-border: rgba(255, 255, 255, 0.08);
+
+    /* 通用品牌色变量暗色定义（与 html.theme-dark body 块保持一致） */
+    --primary: #D0BCFF;
+    --primary-light: rgba(208, 188, 255, 0.18);
+    --primary-light-solid: #4F378B;
 }
 
 html.theme-dark body {
@@ -120,12 +145,21 @@ html.theme-dark body {
     --md-sys-color-on-surface-variant: #CAC4D0;
     --md-sys-color-surface-variant: #49454F;
 
+    --md-sys-color-error: #F2B8B5;
+    --md-sys-color-on-error: #601410;
+    --md-sys-color-error-container: #8C1D18;
+    --md-sys-color-on-error-container: #F9DEDC;
+
     --md-sys-color-background: #141218;
     --md-sys-color-outline-variant: rgba(208, 188, 255, 0.1);
 
     --glass-bg: rgba(28, 27, 31, 0.7);
     --glass-border: rgba(208, 188, 255, 0.1);
     --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+
+    --primary: #D0BCFF;
+    --primary-light: rgba(208, 188, 255, 0.18);
+    --primary-light-solid: #4F378B;
 }
 
 /* ==========================================================================
@@ -194,22 +228,87 @@ body {
     overflow-x: hidden; /* 防止水平溢出滚动条 */
 }
 
-/* 视觉隐藏辅助类：主要用于无障碍朗读器(Screen Reader)，在视觉上完全隐藏但保留在DOM树中 */
+/* 视觉隐藏辅助类：主要用于无障碍朗读器(Screen Reader)，在视觉上完全隐藏但保留在DOM树中。
+   额外追加 !important 保护，防止被组件库/全局样式中的 display:none 等规则误覆盖，
+   避免读屏用户丢失关键标签文本 */
 .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* 移动端导航角标：加大触控目标（padding 撑高），便于拇指点击未读徽标 */
+@media (max-width: 768px) {
+    .nav-badge {
+        min-width: 26px;
+        height: 26px;
+    }
+}
+
+/* ==========================================================================
+   无障碍支持：跳转链接与键盘焦点指示 (Skip Link & Focus Indicators)
+   ========================================================================== */
+
+/* 跳过导航链接：仅在键盘聚焦时可见，帮助键盘/读屏用户直达主内容 */
+.skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 100000;
+    padding: 10px 18px;
+    border-radius: 12px;
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    transform: translateY(-160%);
+    transition: transform 0.2s ease-out;
+}
+
+.skip-link:focus-visible {
+    transform: translateY(0);
+}
+
+/* 统一的可访问焦点指示：所有键盘可达元素获得高对比度外环，替代浏览器默认样式保证跨主题一致 */
+:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 65%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* 禁用 outline:none 的控件在聚焦时提供等价视觉反馈（用 box-shadow 环形光圈替代） */
+.event-filter-select:focus,
+.event-filter-keyword-input:focus,
+.event-filter-source-summary:focus,
+.bl-input:focus,
+.pagination-input:focus,
+.weather-query-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
 }
 
 /* ==========================================================================
    4. 首屏加载及登录器 (Boot Loader & Login Panel)
    ========================================================================== */
+
+/* --- 背景渐变呼吸动画 --- */
+@keyframes boot-bg-breathe {
+    0%, 100% {
+        background-size: 100% 100%;
+    }
+    50% {
+        background-size: 110% 110%;
+    }
+}
+
 .boot-loader {
     position: fixed;
     inset: 0;
@@ -227,6 +326,7 @@ body {
     opacity: 1;
     transform: translateZ(0);
     will-change: opacity, transform;
+    animation: boot-bg-breathe 6s ease-in-out infinite;
 }
 
 html.theme-dark .boot-loader,
@@ -238,15 +338,69 @@ body.dark-theme .boot-loader {
         #141218;
 }
 
-/* 骨架屏或加载器退出动画 */
+/* --- "拨云见雾" 退出动画 ---
+   加载完成时，骨架屏中心产生径向光晕向外扩散，
+   并伴随缩放淡出，营造云雾散开的效果 */
+/* 拨云见雾：骨架屏缩放淡出（更长，营造缓缓消散的云雾感） */
 #loading-skeleton.is-exiting {
     opacity: 0;
-    transform: scale(0.985);
-    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+    transform: scale(0.88);
+    transition: opacity 0.7s ease-out, transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 加载器中的品牌Logo容器 */
+/* 拨云见雾：径向光晕从中心向外扩散（更长，光晕缓缓散开） */
+#loading-skeleton.is-exiting::after {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    z-index: -1;
+    background: radial-gradient(circle at center, rgba(255,255,255,0.6) 0%, transparent 60%);
+    opacity: 0;
+    animation: cloud-clear-glow 0.9s ease-out forwards;
+    pointer-events: none;
+}
+
+html.theme-dark #loading-skeleton.is-exiting::after,
+body.dark-theme #loading-skeleton.is-exiting::after {
+    background: radial-gradient(circle at center, rgba(208,188,255,0.25) 0%, transparent 60%);
+}
+
+@keyframes cloud-clear-glow {
+    0% {
+        opacity: 0;
+        transform: scale(0.5);
+    }
+    40% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: scale(2.2);
+    }
+}
+
+/* --- 拨云见雾后主界面从模糊到清晰渐入（更长，缓缓浮现） --- */
+#root.root-reveal {
+    animation: root-blur-in 0.8s ease-out forwards;
+}
+
+@keyframes root-blur-in {
+    0% {
+        filter: blur(16px);
+        opacity: 0.2;
+    }
+    50% {
+        opacity: 0.7;
+    }
+    100% {
+        filter: blur(0);
+        opacity: 1;
+    }
+}
+
+/* --- Logo 脉冲波纹动画 --- */
 .boot-loader__logo {
+    position: relative;
     width: 80px;
     height: 80px;
     border-radius: 20px;
@@ -257,8 +411,8 @@ body.dark-theme .boot-loader {
     background: rgba(103, 80, 164, 0.08);
     border: 1px solid rgba(103, 80, 164, 0.18);
     box-shadow: 0 4px 24px rgba(103, 80, 164, 0.12);
-    overflow: hidden;
-    animation: boot-loader-float 2.4s ease-in-out infinite; /* 浮动跳跃动效 */
+    overflow: visible;
+    animation: boot-loader-float 2.4s ease-in-out infinite;
     will-change: transform;
 }
 
@@ -267,6 +421,34 @@ body.dark-theme .boot-loader {
     height: 56px;
     object-fit: contain;
     border-radius: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Logo 脉冲波纹扩散环 */
+.boot-loader__logo-pulse {
+    position: absolute;
+    inset: -8px;
+    border-radius: 24px;
+    border: 2px solid rgba(103, 80, 164, 0.2);
+    opacity: 0;
+    animation: logo-pulse-wave 2.4s ease-out infinite;
+    pointer-events: none;
+}
+
+@keyframes logo-pulse-wave {
+    0% {
+        transform: scale(0.92);
+        opacity: 0.6;
+    }
+    50% {
+        transform: scale(1.08);
+        opacity: 0.15;
+    }
+    100% {
+        transform: scale(1.15);
+        opacity: 0;
+    }
 }
 
 html.theme-dark .boot-loader__logo,
@@ -274,6 +456,11 @@ body.dark-theme .boot-loader__logo {
     background: rgba(208, 188, 255, 0.08);
     border-color: rgba(208, 188, 255, 0.15);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+html.theme-dark .boot-loader__logo-pulse,
+body.dark-theme .boot-loader__logo-pulse {
+    border-color: rgba(208, 188, 255, 0.2);
 }
 
 /* 加载页面主标题 */
@@ -292,9 +479,13 @@ body.dark-theme .boot-loader__title {
 
 /* 加载页面副标题 */
 .boot-loader__subtitle {
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     color: #49454F;
     margin-bottom: 28px;
+    letter-spacing: 0.02em;
+    transition: opacity 0.25s ease;
+    min-height: 1.4em;
 }
 
 html.theme-dark .boot-loader__subtitle,
@@ -304,39 +495,85 @@ body.dark-theme .boot-loader__subtitle {
 
 /* 进度条轨道容器 */
 .boot-loader__progress {
-    width: min(260px, 68vw);
-    height: 3px;
+    width: min(280px, 72vw);
+    height: 4px;
     border-radius: 999px;
     overflow: hidden;
-    background: rgba(103, 80, 164, 0.12);
-    contain: paint; /* 性能优化，限制子元素重绘区域 */
+    background: rgba(103, 80, 164, 0.1);
+    contain: paint;
+    margin-bottom: 20px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 html.theme-dark .boot-loader__progress,
 body.dark-theme .boot-loader__progress {
-    background: rgba(208, 188, 255, 0.12);
+    background: rgba(208, 188, 255, 0.1);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-/* 滚动进度条指示器 */
+/* 真实进度条指示器 - 纯绿色渐变，由 JS requestAnimationFrame 驱动平滑插值 */
 .boot-loader__progress-bar {
     height: 100%;
-    width: 42%;
+    width: 0%;
     border-radius: 999px;
-    background: linear-gradient(90deg,
-        rgba(103, 80, 164, 0.25) 0%,
-        rgba(103, 80, 164, 0.85) 50%,
-        rgba(103, 80, 164, 0.25) 100%);
-    animation: boot-loader-progress 1.45s ease-in-out infinite;
-    will-change: transform;
-    transform: translate3d(-110%, 0, 0) scaleX(0.35);
+    background: linear-gradient(90deg, #43A047, #66BB6A);
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.3);
+    will-change: width;
 }
 
 html.theme-dark .boot-loader__progress-bar,
 body.dark-theme .boot-loader__progress-bar {
-    background: linear-gradient(90deg,
-        rgba(208, 188, 255, 0.2) 0%,
-        rgba(208, 188, 255, 0.9) 50%,
-        rgba(208, 188, 255, 0.2) 100%);
+    background: linear-gradient(90deg, #66BB6A, #81C784);
+    box-shadow: 0 0 8px rgba(129, 199, 132, 0.25);
+}
+
+/* --- 阶段指示器（5段圆点） ---
+   红绿状态：active=红色脉冲，done=绿色实心，pending=灰色 */
+.bl-stage-dots {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.bl-stage-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(103, 80, 164, 0.15);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* 当前阶段：红色脉冲发光 */
+.bl-stage-dot.active {
+    background: #E53935;
+    box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.15), 0 0 12px rgba(229, 57, 53, 0.2);
+    width: 11px;
+    height: 11px;
+}
+
+/* 已完成阶段：绿色实心 */
+.bl-stage-dot.done {
+    background: #43A047;
+    box-shadow: 0 0 0 2px rgba(67, 160, 71, 0.12);
+}
+
+html.theme-dark .bl-stage-dot,
+body.dark-theme .bl-stage-dot {
+    background: rgba(208, 188, 255, 0.15);
+}
+
+html.theme-dark .bl-stage-dot.active,
+body.dark-theme .bl-stage-dot.active {
+    background: #EF5350;
+    box-shadow: 0 0 0 4px rgba(239, 83, 80, 0.15), 0 0 12px rgba(239, 83, 80, 0.2);
+}
+
+html.theme-dark .bl-stage-dot.done,
+body.dark-theme .bl-stage-dot.done {
+    background: #66BB6A;
+    box-shadow: 0 0 0 2px rgba(102, 187, 106, 0.12);
 }
 
 /* 核心加载状态包裹框 */
@@ -499,14 +736,21 @@ body.dark-theme .bl-error {
     box-shadow: var(--glass-shadow);
 }
 
-/* 侧边栏及主导航栏导航单项 */
+/* 侧边栏及主导航栏导航单项（现为语义化 button，需重置浏览器默认样式） */
 .nav-item {
+    width: 100%;
     padding: 14px 20px;
     border-radius: 16px;
+    border: none;
+    background: transparent;
     display: flex;
     align-items: center;
     gap: 16px;
     cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.43;
+    text-align: left;
     transition:
         background-color 0.18s ease-out,
         color 0.18s ease-out,
@@ -515,6 +759,11 @@ body.dark-theme .bl-error {
     color: var(--md-sys-color-on-surface);
     opacity: 0.8;
     margin-bottom: 4px;
+}
+
+.nav-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
+    outline-offset: 2px;
 }
 
 .nav-item:hover {
@@ -563,19 +812,55 @@ body.dark-theme .bl-error {
     gap: 24px;
 }
 
-/* 通用基础卡片 */
+/*
+ * 通用基础卡片 —— 命中壳 / 视觉面分离
+ *
+ * 命中壳 (.card)：布局与 hit-testing 固定，永不 transform。
+ * 视觉面 (.card::before)：背景/描边/阴影，仅此层做 translateY。
+ * 内容子节点 (.card > *)：与视觉面同步上浮，避免“壳抬起、字不动”。
+ *
+ * isolation + z-index:-1 保证视觉面在内容下方，且不污染外层堆叠；
+ * 不强制改写子元素 position，避免破坏卡片内绝对定位装饰。
+ */
 .card {
-    background: var(--md-sys-color-surface);
+    --hover-lift: 4px;
+    --card-bg: var(--md-sys-color-surface);
+    --card-border-color: var(--glass-border);
+    --card-shadow: var(--glass-shadow);
+    --card-hover-border-color: rgba(103, 80, 164, 0.26);
+    --card-hover-shadow: 0 12px 30px 0 rgba(103, 80, 164, 0.12);
+    position: relative;
+    isolation: isolate;
+    background: transparent; /* 视觉交给 ::before，壳本身透明 */
     border-radius: var(--radius-lg);
     padding: 24px;
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
+    border: 1px solid transparent; /* 占位描边宽度，真实描边画在视觉面 */
+    box-shadow: none;
+    color: var(--md-sys-color-on-surface);
+    transition: color 0.16s ease-out;
+}
+
+/* 视觉面：承载背景、描边、阴影，可安全位移 */
+.card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border-color);
+    box-shadow: var(--card-shadow);
+    pointer-events: none; /* 命中全部交给外壳 */
     transition:
-        background-color 0.16s ease-out,
+        transform 0.18s ease-out,
+        background 0.16s ease-out,
         border-color 0.16s ease-out,
-        color 0.16s ease-out,
-        box-shadow 0.18s ease-out,
-        transform 0.18s ease-out;
+        box-shadow 0.18s ease-out;
+}
+
+/* 内容与视觉面同步位移（不改 position，兼容绝对定位子节点） */
+.card > * {
+    transition: transform 0.18s ease-out;
 }
 
 /* 所有卡片和视图子面板的淡入上浮统一动效配置 */
@@ -589,17 +874,18 @@ body.dark-theme .bl-error {
 .connection-item,
 .connection-sub-source-item,
 .weather-query-panel,
+.typhoon-query-panel,
 .weather-query-result-card,
+.typhoon-query-result-card,
 .weather-query-list-item,
 .news-ticker-card,
 .notifications-hero-card,
 .notifications-empty-card,
 .notification-feed-card,
-.markdown-docs-sidebar-card,
+.markdown-docs-toc-inner,
 .markdown-docs-content-card,
 .markdown-docs-empty-card,
-.markdown-docs-empty-side-card,
-.markdown-docs-file-item,
+.markdown-docs-toc-item,
 .config-card,
 .config-header,
 .config-renderer-shell,
@@ -622,7 +908,7 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(1),
 .weather-query-result-card,
 .notifications-hero-card,
-.markdown-docs-sidebar-card,
+.markdown-docs-toc-inner,
 .config-header,
 .config-renderer-aside {
     animation-delay: 0.02s;
@@ -652,12 +938,11 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(3),
 .weather-query-list-item:nth-child(2),
 .notification-feed-card:nth-child(2),
-.markdown-docs-file-item:nth-child(1),
+.markdown-docs-toc-item:nth-child(1),
 .config-renderer-shell,
 .config-renderer-preview-card,
 .notifications-empty-card,
-.markdown-docs-empty-card,
-.markdown-docs-empty-side-card {
+.markdown-docs-empty-card {
     animation-delay: 0.10s;
 }
 
@@ -670,24 +955,40 @@ body.dark-theme .bl-error {
 .connection-item .connection-sub-source-item:nth-child(n+4),
 .weather-query-list-item:nth-child(n+3),
 .notification-feed-card:nth-child(n+3),
-.markdown-docs-file-item:nth-child(n+2),
+.markdown-docs-toc-item:nth-child(n+2),
 .config-card .MuiAccordion-root:nth-child(n+1),
 .config-card .MuiPaper-root:nth-child(n+1),
 .notifications-inline-meta-item:nth-child(n+1) {
     animation-delay: 0.14s;
 }
 
-/* 悬停卡片时的浮起与发光效果 */
-.card:hover:not(.news-ticker-card) {
-    transform: translateY(-4px);
-    border-color: rgba(103, 80, 164, 0.26);
-    box-shadow: 0 12px 30px 0 rgba(103, 80, 164, 0.12);
+/* 悬停：仅视觉面 + 内容上浮；命中壳保持不动 */
+.card:hover:not(.news-ticker-card)::before,
+.card:hover:not(.news-ticker-card) > * {
+    transform: translateY(calc(-1 * var(--hover-lift)));
 }
 
-html.theme-dark .card:hover:not(.news-ticker-card),
-body.dark-theme .card:hover:not(.news-ticker-card) {
-    border-color: rgba(208, 188, 255, 0.24);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(208, 188, 255, 0.08);
+.card:hover:not(.news-ticker-card)::before {
+    border-color: var(--card-hover-border-color);
+    box-shadow: var(--card-hover-shadow);
+}
+
+html.theme-dark .card,
+body.dark-theme .card {
+    --card-hover-border-color: rgba(208, 188, 255, 0.24);
+    --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(208, 188, 255, 0.08);
+}
+
+/*
+ * overflow:hidden 会裁切上浮的视觉面顶部。
+ * 这类卡片关闭位移，只保留阴影/描边反馈。
+ */
+.card.notification-feed-card,
+.card.notifications-hero-card,
+.card.trend-chart-card,
+.card.config-card,
+.card.news-ticker-card {
+    --hover-lift: 0px;
 }
 
 /* 栅格占位助手类 */
@@ -705,6 +1006,27 @@ body.dark-theme .card:hover:not(.news-ticker-card) {
 
 .badge-success { background: #dcfce7; color: #166534; }
 .badge-error { background: #fee2e2; color: #991b1b; }
+
+/* 暗色主题下的状态徽标：采用深色底 + 高亮前景，避免浅绿/浅红块在暗色中刺眼 */
+html.theme-dark .badge-success,
+body.dark-theme .badge-success {
+    background: #16331F;
+    color: #86EFAC;
+}
+
+html.theme-dark .badge-error,
+body.dark-theme .badge-error {
+    background: #3B1215;
+    color: #FECACA;
+}
+
+/* 原生表单控件（日期选择器、复选框、下拉等）在暗色主题下采用暗色渲染，
+   否则 datetime-local 等控件的弹层/日历在暗色模式仍显示白底，极其刺眼 */
+html.theme-dark input,
+html.theme-dark select,
+html.theme-dark textarea {
+    color-scheme: dark;
+}
 
 /* 震级高亮小方块/徽标 */
 .mag-badge {
@@ -838,6 +1160,8 @@ body.dark-theme .btn-action:hover {
 
 /* 支持平滑滚动的容器 */
 .sidebar > div:nth-child(2),
+.sidebar > nav:nth-child(2),
+.sidebar-nav,
 .main-content {
     -webkit-overflow-scrolling: touch; /* 开启iOS弹性滚动效果 */
     scroll-behavior: smooth;
@@ -864,9 +1188,18 @@ body.dark-theme .btn-action:hover {
 /* 灾害数据源连接网格容器 */
 .connections-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
     width: 100%;
+    align-items: stretch;
+}
+
+.connections-grid .connection-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    height: 100%;
 }
 
 /* 过滤按钮组容器 */
@@ -990,8 +1323,13 @@ body.dark-theme .btn-action:hover {
     .span-12 { grid-column: span 6; }
 
     .connections-grid {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
+    }
+
+    /* 中屏：堆叠列（P2P+S-Net / GQ+EQSC）仍占一格，避免变成多卡散落 */
+    .connections-grid .connection-stack {
+        gap: 10px;
     }
 
     .card {
@@ -1003,6 +1341,7 @@ body.dark-theme .btn-action:hover {
 @media (max-width: 768px) {
     .nav-item {
         white-space: nowrap;
+        width: auto; /* 覆盖桌面竖排的 100% 宽度，恢复横向滚动导航的按内容收缩 */
         padding: 10px 16px;
         margin-bottom: 0;
         flex-shrink: 0;
@@ -1024,13 +1363,51 @@ body.dark-theme .btn-action:hover {
         gap: 12px;
     }
 
+    /* 小屏：堆叠列改为普通纵向序列，卡片恢复常规高度 */
+    .connections-grid .connection-stack {
+        display: contents;
+    }
+
+    .connections-grid .connection-item--compact {
+        min-height: 140px;
+        padding: 16px;
+    }
+
     .card {
         padding: 16px;
         border-radius: var(--radius-md);
     }
 
-    .card:hover {
-        transform: none; /* 禁用触屏手机的悬浮位移防抖动 */
+    /* 触屏小屏：关闭所有卡片视觉位移，仅保留命中壳静态反馈 */
+    .card,
+    .connection-item,
+    .markdown-docs-toc-item,
+    .event-filters-toolbar,
+    .event-filter-field-card,
+    .event-filter-pill,
+    .event-group-expanded,
+    .event-card {
+        --hover-lift: 0px;
+        --hover-shift-x: 0px;
+    }
+
+    .card:hover::before,
+    .card:hover > *,
+    .connection-item:hover::before,
+    .connection-item:hover > *,
+    .markdown-docs-toc-item:hover,
+    .markdown-docs-toc-item:hover > *,
+    .event-filters-toolbar:hover::before,
+    .event-filters-toolbar:hover > *,
+    .event-filter-field-card:hover::before,
+    .event-filter-field-card:hover > *,
+    .event-filter-pill:hover::before,
+    .event-filter-pill:hover > *,
+    .event-group-expanded:hover::before,
+    .event-group-expanded:hover > *,
+    .event-card:hover::before,
+    .event-card:hover > * {
+        transform: none;
     }
 
     .mag-row {
@@ -1070,10 +1447,6 @@ body.dark-theme .btn-action:hover {
     .connection-item {
         padding: 16px;
     }
-
-    .connection-item:hover {
-        transform: none;
-    }
 }
 
 /* 超小屏设备 (大部分小型及中型直板智能手机，最大宽 480px) */
@@ -1083,7 +1456,8 @@ body.dark-theme .btn-action:hover {
         font-size: 13px;
     }
 
-    .nav-item span {
+    /* 仅放大导航图标，文字标签保持与按钮一致的 13px，避免超小屏按钮被撑宽 */
+    .nav-item .nav-item__icon {
         font-size: 16px !important;
     }
 
@@ -1171,8 +1545,10 @@ body.dark-theme .btn-action:hover {
 /* 打印机/纸质打印样式重置 */
 @media print {
     .card {
+        --card-shadow: none !important;
+        --card-border-color: #ddd !important;
         box-shadow: none !important;
-        border: 1px solid #ddd !important;
+        border: 1px solid transparent !important;
         break-inside: avoid; /* 避免卡片在打印分页时断开 */
     }
 }
@@ -1233,7 +1609,9 @@ html.theme-dark .skeleton {
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
     .boot-loader__logo,
+    .boot-loader__logo-pulse,
     .boot-loader__progress-bar,
+    .boot-loader,
     .skeleton,
     .card-animated,
     .card,
@@ -1242,17 +1620,18 @@ html.theme-dark .skeleton {
     .connection-item,
     .connection-sub-source-item,
     .weather-query-panel,
+    .typhoon-query-panel,
     .weather-query-result-card,
+    .typhoon-query-result-card,
     .weather-query-list-item,
     .news-ticker-card,
     .notifications-hero-card,
     .notifications-empty-card,
     .notification-feed-card,
-    .markdown-docs-sidebar-card,
+    .markdown-docs-toc-inner,
     .markdown-docs-content-card,
     .markdown-docs-empty-card,
-    .markdown-docs-empty-side-card,
-    .markdown-docs-file-item,
+    .markdown-docs-toc-item,
     .config-card,
     .config-header,
     .config-renderer-shell,
@@ -1263,7 +1642,16 @@ html.theme-dark .skeleton {
     .config-renderer-session-card,
     .tasks-empty-card,
     .notifications-inline-meta-item {
-        animation: none !important; /* 强制移除所有旋转/淡入/平移动画 */
+        animation: none !important;
+    }
+
+    .boot-loader {
+        animation: none !important;
+        background-size: 100% 100% !important;
+    }
+
+    .boot-loader__logo-pulse {
+        display: none !important;
     }
 
     #loading-skeleton.is-exiting {
@@ -1271,10 +1659,27 @@ html.theme-dark .skeleton {
         transform: none !important;
     }
 
+    #loading-skeleton.is-exiting::after {
+        animation: none !important;
+        display: none !important;
+    }
+
+    #root.root-reveal {
+        animation: none !important;
+        filter: none !important;
+        opacity: 1 !important;
+    }
+
     .event-card,
-    .event-card:hover,
+    .event-card::before,
+    .event-card > *,
+    .event-card:hover::before,
+    .event-card:hover > *,
     .event-group-expanded,
-    .event-group-expanded:hover,
+    .event-group-expanded::before,
+    .event-group-expanded > *,
+    .event-group-expanded:hover::before,
+    .event-group-expanded:hover > *,
     .event-group .MuiCollapse-root {
         transition: none !important;
         transform: none !important;
@@ -1282,11 +1687,58 @@ html.theme-dark .skeleton {
     }
 
     .boot-loader__progress-bar {
-        transform: translate3d(0, 0, 0) scaleX(1);
+        width: 100% !important;
+    }
+
+    .bl-stage-dot {
+        transition: none !important;
     }
 
     html.theme-switching::before {
         animation: none !important;
         opacity: 0 !important;
     }
+}
+
+/* ==========================================================================
+   全局渲染错误边界（AppErrorBoundary）降级卡片
+   ========================================================================== */
+.app-error-boundary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 60vh;
+    padding: 32px;
+    text-align: center;
+}
+
+.app-error-boundary-title {
+    font-weight: 700 !important;
+}
+
+.app-error-boundary-desc {
+    max-width: 480px;
+    line-height: 1.7;
+}
+
+.app-error-boundary-msg {
+    max-width: 480px;
+    word-break: break-all;
+    opacity: 0.55;
+    font-family: 'Consolas', 'Menlo', 'Courier New', monospace;
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+.app-error-boundary .MuiButton-root {
+    text-transform: none !important;
+}
+
+[data-theme='dark'] .app-error-boundary-msg,
+html.theme-dark .app-error-boundary-msg,
+body.dark-theme .app-error-boundary-msg {
+    background: rgba(255, 255, 255, 0.06);
 }

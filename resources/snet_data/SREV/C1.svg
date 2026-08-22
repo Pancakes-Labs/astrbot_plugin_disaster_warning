@@ -1,0 +1,14 @@
+<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="20" cy="20" r="18" fill="#666666"/>
+  <circle cx="20" cy="20" r="18" stroke="#AEB8BD" stroke-width="3" fill="none"/>
+  <text
+    x="20"
+    y="20"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="32"
+    font-weight="700"
+    fill="#ffffff"
+  >1</text>
+</svg>

@@ -34,11 +34,38 @@
             font-size: 24px;
             line-height: 1;
         }
+        /* 左上角事件描述文字胶囊：纯白底、小圆角，字体与配色对齐管理端设计 */
+        #event-caption {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 1000;
+            max-width: calc(100% - 12px);
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: #FFFFFF;
+            color: #6750A4;
+            font-family: 'Noto Sans SC', 'Noto Sans', 'Source Han Sans SC', 'Source Han Sans', '思源黑体', "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "WenQuanYi Micro Hei", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 16px;
+            font-weight: 900;
+            line-height: 1.3;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+            pointer-events: none;
+            box-sizing: border-box;
+        }
+        #event-caption.is-empty {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div id="card-wrapper">
         <div id="map-container"></div>
+        <div id="event-caption" class="is-empty" data-caption="{{ event_caption|e }}"></div>
     </div>
 
     <script>
@@ -46,6 +73,12 @@
         const lng = Number("{{ longitude }}");
         const zoom = Number("{{ zoom_level }}");
         const source = "{{ map_source }}";
+        const captionEl = document.getElementById('event-caption');
+        const captionText = captionEl ? captionEl.getAttribute('data-caption') : '';
+        if (captionText && String(captionText).trim()) {
+            captionEl.textContent = String(captionText);
+            captionEl.classList.remove('is-empty');
+        }
 
         // 初始化地图
         const map = L.map('map-container', {

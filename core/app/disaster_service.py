@@ -20,6 +20,7 @@ from astrbot.api.star import StarTools
 if TYPE_CHECKING:
     from ..services.telemetry.telemetry_service import TelemetryManager
 
+from ...utils.plugin_logger import plugin_logger
 from ..domain.event_models import EventEnvelope
 from ..message.message_logger import MessageLogger
 from ..message.message_manager import MessagePushManager
@@ -27,9 +28,14 @@ from ..message.presenters.presenter_registry import (
     get_presenter,
     get_text_presenter_keys,
 )
+from ..message.push.weather_aggregation_service import WeatherAggregationService
 from ..network.event_ingress_dispatch_service import EventIngressDispatchService
 from ..network.source_ingress_side_effect_service import SourceIngressSideEffectService
 from ..network.source_message_router import SourceMessageRouter
+from ..network.websocket.fan_studio_connection_policy import (
+    ServerPreference,
+    attach_fan_auth_from_plan,
+)
 from ..network.websocket.websocket_manager import HTTPDataFetcher, WebSocketManager
 from ..parsers.parser_registry import (
     create_parser_for_source,
@@ -37,14 +43,25 @@ from ..parsers.parser_registry import (
 )
 from ..services.config.config_service import ConfigAccessor
 from ..services.config.connection_plan_builder import ConnectionPlanBuilder
+from ..services.eqsc.eqsc_cenc_intensity_poll_service import (
+    EqscCencIntensityPollService,
+)
+from ..services.eqsc.eqsc_tsunami_poll_service import EqscTsunamiPollService
+from ..services.eqsc.eqsc_typhoon_poll_service import EqscTyphoonPollService
+from ..services.geo.cn_seis_int_loc_loader import get_district_points
+from ..services.geo.jma_seis_int_loc_loader import get_sect_map
 from ..services.geo.region_service import region_service
+from ..services.geo.travel_time_loader import get_travel_times
 from ..services.notification import NotificationCenter
 from ..services.query.earthquake_list_service import EarthquakeListService
 from ..services.query.eew_query_state_service import EEWQueryStateService
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
+from ..services.snet.snet_poll_service import SnetPollService
+from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import SOURCE_CATALOG
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
+from ..storage.source_compat import normalize_source_name
 from ..storage.statistics_manager import StatisticsManager
 from .pipeline.event_pipeline import EventPipeline
 from .runtime.disaster_service_cache import DisasterServiceCacheService
@@ -53,29 +70,35 @@ from .runtime.disaster_service_notice import DisasterServiceNoticeService
 from .runtime.disaster_service_reconnect import DisasterServiceReconnectService
 from .runtime.disaster_service_runtime import DisasterServiceRuntimeService
 from .runtime.disaster_service_status import DisasterServiceStatusService
+from .runtime.startup_silence_coordinator import StartupSilenceCoordinator
+from .services.eqsc_channel_service import EqscChannelService
+from .services.typhoon_enrichment_service import TyphoonEnrichmentService
+from .services.typhoon_history_rebuild_service import TyphoonHistoryRebuildService
 
 
 def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) -> bool:
-    """根据统一的数据源目录判断某个数据源是否启用。"""
-    # 当配置结构异常或为空时，默认返回启用，
-    # 以避免查询展示链路因为局部配置缺失而整体失效。
+    """根据统一的数据源目录判断某个数据源是否启用。
+
+    与 SourceRuntimeQueryService.is_source_enabled / SourceEnabledRule 对齐：
+    缺省为 False（opt-in），避免新源（如 S-Net）在配置缺失时被误判为开启。
+    """
     if not isinstance(data_sources, dict):
-        return True
+        return False
 
     source_entry = SOURCE_CATALOG.get(source_id)
     if source_entry is None:
-        return True
+        return False
 
     # 获取数据源组配置，如果组被禁用，则该数据源禁用
     group_cfg = data_sources.get(source_entry.config_group, {})
     if not isinstance(group_cfg, dict):
-        return True
-
-    if group_cfg.get("enabled", True) is False:
         return False
 
-    # 返回具体数据源开关的布尔值
-    return bool(group_cfg.get(source_entry.config_key, True))
+    if not bool(group_cfg.get("enabled", False)):
+        return False
+
+    # 返回具体数据源开关的布尔值（缺省 False）
+    return bool(group_cfg.get(source_entry.config_key, False))
 
 
 class DisasterWarningService:
@@ -89,6 +112,8 @@ class DisasterWarningService:
         self.config = config  # 插件的全局配置字典
         self.context = context  # 框架上下文环境
         self.running = False  # 运行状态标识
+        # 服务初始化起点（启动耗时统计用），在 initialize() 开始时记录。
+        self.init_started_at = None
         # 启停锁用于避免重复启动或并发停止时出现状态竞争。
         self._start_lock = asyncio.Lock()
         self._stop_lock = asyncio.Lock()
@@ -154,12 +179,55 @@ class DisasterWarningService:
         )
         # 通知中心独立维护远端通知同步、本地缓存和已读状态，供管理端前端复用。
         self.notification_center = NotificationCenter(self)
+        # EQSC 通道服务：统一管理 EQSC 鉴权、健康状态与熔断器，
+        # 台风富化、海啸轮询、CENC 烈度速报轮询共享该通道。
+        self.eqsc_channel_service = EqscChannelService(config)
+        # 台风 EQSC 富化服务，在台风事件进入流水线前按需拉取 EQSC 详细数据。
+        # 注入 message_logger，使 EQSC HTTP 响应进入原始消息日志链路。
+        self.typhoon_enrichment_service = TyphoonEnrichmentService(
+            config,
+            self.eqsc_channel_service,
+            message_logger=self.message_logger,
+        )
+        # 冷启动历史重建编排独立服务，避免主服务继续堆叠台风业务细节。
+        self.typhoon_history_rebuild_service = TyphoonHistoryRebuildService(
+            enrichment_service=self.typhoon_enrichment_service,
+            statistics_manager=self.statistics_manager,
+        )
+        # S-Net MSIL 瓦片轮询（直连 HTTP，不走 WebSocket）
+        self.snet_poll_service = SnetPollService(self)
+        # EQSC JMA 海啸 HTTP 轮询（复用 EQSC 令牌，作为 P2P 高优先级补充）
+        self.eqsc_tsunami_poll_service = EqscTsunamiPollService(self)
+        # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
+        self.eqsc_typhoon_poll_service = EqscTyphoonPollService(self)
+        # EQSC CENC 烈度速报 HTTP 轮询（列表发现 + 详情投递；优先于 FAN 独立 WS）
+        self.eqsc_cenc_intensity_poll_service = EqscCencIntensityPollService(self)
+        # 连接健康采样 / 90 天条带 / 自动事故（Statuspage 风格）
+        # 延迟导入，避免 health ↔ app 包级循环依赖。
+        from ..services.health.connection_health_service import ConnectionHealthService
+
+        self.connection_health_service = ConnectionHealthService(self)
+        # 启动静默协调器：建连/首包完成前抑制推送并播种去重指纹
+        self.startup_silence = StartupSilenceCoordinator()
+        self.startup_silence.bind_service(self)
+        self.message_logger.set_silence_checker(self.is_silencing)
+        # 静默期事件流日志抑制也需要感知"当前是否处于静默期"，
+        # 这样静默结束后事件流日志能立即恢复打印，不会被永久屏蔽。
+        plugin_logger.set_silence_checker(self.is_silencing)
+        # WebSocket 连接成功日志同样复用静默判定：启动静默期降级为 DEBUG，
+        # 静默结束后恢复 INFO，避免建连阶段刷屏同时保留重连成功反馈。
+        self.ws_manager.set_silence_checker(self.is_silencing)
         self._setup_runtime_services()
 
     def _setup_runtime_services(self) -> None:
         """装配灾害服务运行时子服务。"""
         # 以下服务分别承接事件流水线、生命周期、运行时调度、缓存、状态整理、通知、重连与接入旁路编排，主服务本身只保留高层协调职责。
         self.event_pipeline = EventPipeline(self)  # 事件流处理流水线
+        # 气象预警聚合推送服务，注入到事件流水线
+        self._weather_aggregation_service = WeatherAggregationService(self.config)
+        self.event_pipeline.set_weather_aggregation_service(
+            self._weather_aggregation_service
+        )
         self.lifecycle_service = DisasterServiceLifecycleService(
             self
         )  # 服务启停生命周期服务
@@ -235,12 +303,6 @@ class DisasterWarningService:
             logger.warning(
                 f"[灾害预警] 以下数据源缺少 SOURCE_CATALOG.source_enum 定义: {missing_source_enum}"
             )
-        if (
-            not unresolved_presenters
-            and not missing_text_presenters
-            and not missing_source_enum
-        ):
-            logger.debug("[灾害预警] source catalog / presenter 注册完整性自检通过")
 
     def set_telemetry(self, telemetry: Optional["TelemetryManager"]):
         """设置遥测管理器引用。"""
@@ -251,27 +313,177 @@ class DisasterWarningService:
             self.ws_manager._telemetry = telemetry
         if self.message_manager:
             self.message_manager.set_telemetry(telemetry)
+        # 解析器也会在同步上下文内部捕获异常（如 JSON 解码失败），
+        # 需要注入遥测引用以便解析层也能轻量上报。
+        if self.parsers:
+            for parser in self.parsers.values():
+                if parser is not None:
+                    parser._telemetry = telemetry
 
     async def initialize(self):
         """初始化服务。"""
         try:
-            logger.info("[灾害预警] 正在初始化灾害预警服务...")
+            self.init_started_at = datetime.now(timezone.utc)
+            logger.debug("[灾害预警] 正在初始化灾害预警服务...")
             # 初始化阶段只做“静态装配”：校验注册表、加载基础数据、注册解析器调度、生成连接计划。
             validate_catalog_parser_names()
             self._check_registry_integrity()
             await region_service.load_data_async()  # 加载地理省份数据文件
+            # 预加载 JMA 町丁目->地域映射表，避免首条地震情报时延迟加载
+            get_sect_map()
+            # 预加载走时模型与中国区县采样点，避免首条地震预警时延迟加载
+            get_travel_times()
+            get_district_points()
             self.http_fetcher = HTTPDataFetcher(self.config)  # 初始化 HTTP 轮询拉取组件
             self._register_handlers()
             self._configure_connections()
-            logger.info("[灾害预警] 灾害预警服务初始化完成")
+            # 装配启动静默回调到消息推送链（编排器 + 融合服务），
+            # 使融合分流路径在静默期统一走吸收分支，避免绕过静默闸口。
+            if self.message_manager is not None:
+                bind = getattr(self.message_manager, "set_silence_callbacks", None)
+                if callable(bind):
+                    bind(self.is_silencing, self._absorb_event_for_silence)
+            # 就绪日志以真实轮询服务为准
+            typhoon_poll = getattr(self, "eqsc_typhoon_poll_service", None)
+            poll_enabled = bool(typhoon_poll is not None and typhoon_poll.is_enabled())
+            channel = self.eqsc_channel_service
+            if poll_enabled:
+                logger.debug("[灾害预警] EQSC 台风轮询服务已就绪")
+            elif getattr(channel, "is_channel_enabled", False):
+                logger.info(
+                    "[灾害预警] EQSC 通道已启用，但台风轮询子开关关闭；"
+                    "实时台风推送将不可用"
+                )
+            else:
+                logger.debug("[灾害预警] EQSC 数据源未启用，相关数据源将不可用")
+            logger.debug("[灾害预警] 灾害预警服务初始化完成")
+
+            # 注意：EQSC 历史台风重建不得在 initialize() 中同步/阻塞执行。
+            # 该阶段会阻塞后续 start()，而 token 网络请求可能长达数十秒。
+            # 重建统一放到 start() 完成后由后台任务触发。
 
         except Exception as e:
             logger.error(f"[灾害预警] 初始化服务失败: {e}")
-            if self._telemetry and self._telemetry.enabled:
-                await self._telemetry.track_error(
-                    e, module="core.disaster_service.initialize"
-                )
+            # 统一 best-effort 封装上报初始化错误（服务层内部上报点）。
+            # 上报成功后为异常打上标记，供外层（main.initialize）去重，
+            # 避免同一异常产生两条遥测记录。
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.disaster_service.initialize",
+                log_context="服务初始化错误遥测",
+            )
+            try:
+                setattr(e, "_telemetry_reported", True)
+            except Exception:
+                pass
             raise
+
+    def schedule_eqsc_token_warmup(self) -> None:
+        """启动后第一时间后台预热 EQSC AccessToken，并开启保活续期。
+
+        状态面板只读内存 token 有效性；若仅启动预热、无业务请求触发续期，
+        AccessToken（约 1 小时）过期后会长期显示“鉴权失效”。
+        """
+        # 通道级预热：只要组总闸开启且 token 已配置即可，不依赖台风富化子开关
+        channel = self.eqsc_channel_service
+        if not channel.is_channel_enabled:
+            return
+
+        async def _warmup_and_keepalive() -> None:
+            try:
+                await channel.warm_up_access_token()
+            except Exception as exc:
+                # 预热失败不抛给事件循环，避免“Task exception was never retrieved”噪音
+                logger.warning(f"[灾害预警] EQSC AccessToken 预热异常（已记录）: {exc}")
+            # 预热成功与否都启动保活：失败时循环会按重试间隔继续尝试
+            try:
+                start_keepalive = getattr(channel, "start_token_keepalive", None)
+                if callable(start_keepalive):
+                    start_keepalive(register_task=self.register_background_task)
+            except Exception as exc:
+                logger.warning(f"[灾害预警] EQSC token 保活启动异常（已记录）: {exc}")
+
+        warmup_task = asyncio.create_task(
+            _warmup_and_keepalive(),
+            name="dw_eqsc_token_warmup",
+        )
+        self.register_background_task(warmup_task)
+
+    def schedule_typhoon_db_rebuild(self) -> None:
+        """在后台调度 EQSC 历史台风数据库重建，避免阻塞启动链路。"""
+        if not self.typhoon_enrichment_service.is_enabled:
+            return
+        # 依赖可能在 initialize 后才完全就绪，调度前再绑定一次。
+        self.typhoon_history_rebuild_service.bind(
+            enrichment_service=self.typhoon_enrichment_service,
+            statistics_manager=self.statistics_manager,
+        )
+
+        async def _safe_rebuild() -> None:
+            try:
+                await self.typhoon_history_rebuild_service.try_cold_start_rebuild()
+            except Exception as exc:
+                # 重建失败不抛给事件循环，避免“Task exception was never retrieved”噪音
+                logger.warning(
+                    f"[灾害预警] EQSC 历史台风数据库重建异常（已记录）: {exc}"
+                )
+
+        rebuild_task = asyncio.create_task(
+            _safe_rebuild(),
+            name="dw_rebuild_typhoon_db",
+        )
+        self.register_background_task(rebuild_task)
+
+    def _absorb_event_for_silence(self, event: EventEnvelope) -> None:
+        """静默期统一吸收事件：播种去重指纹并推进门闩计数。
+
+        供推送编排器与融合服务在静默期吸收事件时复用，
+        与主入口 _handle_disaster_event 的静默分支保持语义一致。
+        """
+        self._seed_event_for_silence(event)
+        # 静默期吸收的气象事件同样登记进统计去重集合，
+        # 避免重载后上游重推同 id 预警被统计成新事件。
+        self._seed_weather_stats_identity(event)
+        coordinator = getattr(self, "startup_silence", None)
+        if coordinator is not None:
+            try:
+                coordinator.note_event_absorbed(event)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 静默吸收推进门闩失败（已忽略）: {exc}")
+
+    def _seed_weather_stats_identity(self, event: EventEnvelope) -> None:
+        """把气象事件的唯一键登记进统计去重集合。
+
+        与统计侧 resolve_event_unique_key 口径保持一致：
+        优先使用 identity.event_id，缺失时回退到来源+生效时间+标题。
+        """
+        from ..services.identity.event_identity import (
+            resolve_event_unique_key,
+            resolve_source_id,
+        )
+
+        # 与统计聚合器 by_source 键口径保持一致，需要来源归一化。
+        try:
+            stats_manager = getattr(self, "statistics_manager", None)
+            if stats_manager is None:
+                return
+            event_type = str(getattr(event, "event_type", "") or "")
+            if event_type != "weather_alarm":
+                return
+            unique_key = resolve_event_unique_key(event)
+            if not unique_key:
+                return
+            raw_source = resolve_source_id(event)
+            # 与统计聚合器 by_source 键口径一致（非台风源 => normalize_source_name）。
+            source_key = normalize_source_name(raw_source) if raw_source else ""
+            stats_manager._recorded_event_ids.add(unique_key)
+            if source_key:
+                stats_manager._recorded_source_event_ids.add(
+                    f"{source_key}:{unique_key}"
+                )
+        except Exception as exc:
+            logger.debug(f"[灾害预警] 静默登记气象统计去重键失败（已忽略）: {exc}")
 
     def _register_handlers(self):
         """注册消息调度处理器。"""
@@ -280,13 +492,49 @@ class DisasterWarningService:
         registry.register_all(self.ws_manager)
         self.ws_manager.set_offline_notify_callback(self._handle_offline_notification)
 
+        def _on_ws_established(name: str) -> None:
+            coordinator = getattr(self, "startup_silence", None)
+            if coordinator is not None:
+                coordinator.note_connection_established(name)
+
+        self.ws_manager.on_connection_established = _on_ws_established
+
     def _configure_connections(self):
         """根据数据源配置生成连接计划。"""
         self.connections = ConnectionPlanBuilder.build(self.config)
 
-    async def start(self):
-        """启动服务"""
-        await self.lifecycle_service.start()
+    async def start(self, *, defer_silence_arm: bool = False) -> None:
+        """启动服务。
+
+        Args:
+            defer_silence_arm: 首次启动/进程重启时推迟静默武装，
+                等待 AstrBot 加载完成钩子显式武装（避免硬超时被加载耗时耗尽）。
+        """
+        await self.lifecycle_service.start(defer_silence_arm=defer_silence_arm)
+
+    def arm_startup_silence(self, *, hard_timeout_seconds: float | None = None) -> None:
+        """正式武装启动静默（供 AstrBot 加载完成钩子调用）。"""
+        if hasattr(self, "lifecycle_service") and self.lifecycle_service is not None:
+            arm = getattr(self.lifecycle_service, "arm_startup_silence", None)
+            if callable(arm):
+                arm(hard_timeout_seconds=hard_timeout_seconds)
+                return
+        # 生命周期服务不可用时降级：直接按默认参数武装
+        logger.warning("[灾害预警] 生命周期服务不可用，无法推迟静默启动")
+
+    def warmup_browser(self) -> None:
+        """在合适的时机（静默协调器武装后）后台预热浏览器渲染底座。
+
+        首次启动时此刻 AstrBot 已加载完成、事件循环空闲，避免页面创建超时；
+        插件重载时 AstrBot 已就绪，同样安全。预热自带异常吞噬，不影响主链路。
+        """
+        manager = getattr(self, "message_manager", None)
+        if manager is None:
+            return
+        warmup = getattr(manager, "warmup_browser", None)
+        if callable(warmup):
+            # 透传任务登记回调，确保预热任务纳入停机统一回收
+            warmup(register_task=self.register_background_task)
 
     async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
         """取消并等待任务结束。"""
@@ -316,41 +564,106 @@ class DisasterWarningService:
         """启动清理任务。"""
         await self.runtime_service.start_cleanup_task()
 
+    def is_silencing(self) -> bool:
+        """是否处于启动静默（建连/首轮同步阶段）。"""
+        coordinator = getattr(self, "startup_silence", None)
+        if coordinator is None:
+            return False
+        return bool(coordinator.is_silencing())
+
     def is_in_silence_period(self) -> bool:
-        """检查是否处于启动后的静默期。"""
-        if not hasattr(self, "start_time"):
-            return False
+        """兼容旧接口：等价于 is_silencing()。"""
+        return self.is_silencing()
 
-        debug_config = self.config.get("debug_config", {})
-        silence_duration = debug_config.get("startup_silence_duration", 0)
+    def _seed_event_for_silence(self, event: EventEnvelope) -> None:
+        """静默期播种去重指纹（推送管理器 + 统计侧，若存在）。"""
+        managers = []
+        message_manager = getattr(self, "message_manager", None)
+        if message_manager is not None:
+            managers.append(getattr(message_manager, "deduplicator", None))
+        stats_manager = getattr(self, "statistics_manager", None)
+        if stats_manager is not None:
+            managers.append(getattr(stats_manager, "deduplicator", None))
+        seen: set[int] = set()
+        for deduplicator in managers:
+            if deduplicator is None:
+                continue
+            ident = id(deduplicator)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            seed = getattr(deduplicator, "seed_event", None)
+            if callable(seed):
+                try:
+                    seed(event)
+                except Exception as exc:
+                    logger.debug(f"[灾害预警] 静默播种去重指纹失败（已忽略）: {exc}")
 
-        if silence_duration <= 0:
-            return False
+    async def notify_simulation_progress(self, run) -> None:
+        """模拟执行进度回调：转发给管理端 WebSocket 实时推送。
 
-        elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
-        return elapsed < silence_duration
+        由 SimulationRunner 在每步状态变更后触发；web_admin_server 可能尚未
+        启动（执行器懒装配时），缺省静默忽略。
 
-    async def _handle_disaster_event(self, event: EventEnvelope):
-        """处理灾害事件。主链路仅接收解析器产出的统一事件。"""
+        注意：必须为 async 并直接 await 管理端推送。runner 的 _notify_progress
+        会 await 本回调的返回值，若在内部 ensure_future 转后台任务，多个步骤
+        的进度推送会并发执行、顺序不定，且未登记的任务可能被 GC 导致消息丢失。
+        """
+        server = getattr(self, "web_admin_server", None)
+        if server is None:
+            return
+        notify = getattr(server, "notify_simulation_progress", None)
+        if callable(notify):
+            try:
+                await notify(run)
+            except Exception as exc:
+                logger.debug(f"[灾害预警] 模拟进度推送失败（已忽略）: {exc}")
+
+    async def _handle_disaster_event(self, event: EventEnvelope) -> bool:
+        """处理灾害事件。主链路仅接收解析器产出的统一事件。
+
+        Returns:
+            True: 事件已被正常处理（含静默吸收、业务去重跳过、流水线完成）。
+            False: 处理过程出现未恢复异常。轮询侧据此决定是否提交“已处理”指纹。
+        """
         try:
             # 地震预警查询状态更新属于轻量级旁路状态维护，即使失败也不阻断主流程。
             self._update_eew_query_state(event)
         except Exception as e:
             logger.debug(f"[灾害预警] 更新 EEW 查询状态失败（已忽略）: {e}")
 
-        # 启动静默期过滤逻辑，防止插件重载后反复造成消息推送
-        if self.is_in_silence_period():
-            debug_config = self.config.get("debug_config", {})
-            silence_duration = debug_config.get("startup_silence_duration", 0)
-            elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
-            logger.debug(
-                f"[灾害预警] 处于启动静默期 (剩余 {silence_duration - elapsed:.1f}s)，忽略事件: {event.id}"
-            )
-            return
+        # 启动静默：不推送/不统计，但播种指纹并推进门闩。
+        # 复用 _absorb_event_for_silence 统一吸收逻辑（含门闩计数异常保护），
+        # 与推送编排器/融合服务的静默吸收语义保持一致。
+        if self.is_silencing():
+            self._absorb_event_for_silence(event)
+            logger.debug(f"[灾害预警] 静默启动中，已吸收并播种事件: {event.id}")
+            return True
 
         try:
+            # 台风事件：
+            # 1) FAN 触发路径：多台风共舞时会整包重推，富化前先只读去重；
+            #    该路径数据仅有单值风圈，需 EQSC 富化补充轨迹与四象限风圈；
+            # 2) EQSC 独立轮询：事件已含完整轨迹，跳过二次富化。
+            if event.event_type == "typhoon":
+                source_id = str(getattr(event, "source_id", "") or "").strip()
+                if source_id == "typhoon_fanstudio":
+                    deduplicator = getattr(
+                        getattr(self, "message_manager", None), "deduplicator", None
+                    )
+                    peek = getattr(deduplicator, "peek_typhoon_should_push", None)
+                    if callable(peek) and not peek(event):
+                        logger.debug(
+                            f"[灾害预警] 台风事件在富化前被去重过滤，跳过后续推送: {event.id}"
+                        )
+                        return True
+
+                    # 仅对 FAN 触发路径执行 EQSC 富化（遗留兼容）
+                    event = await self.typhoon_enrichment_service.enrich(event)
+
             # 真正的日志记录、推送、统计与 Web 管理端通知由事件流水线统一处理。
             await self.event_pipeline.handle(event)
+            return True
 
         except Exception as e:
             logger.error(f"[灾害预警] 处理灾害事件失败: {e}")
@@ -358,13 +671,14 @@ class DisasterWarningService:
                 f"[灾害预警] 失败的事件ID: {event.id if hasattr(event, 'id') else 'unknown'}"
             )
             logger.error(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
-            if self._telemetry and self._telemetry.enabled:
-                asyncio.create_task(
-                    self._telemetry.track_error(
-                        exception=e,
-                        module="disaster_service._handle_disaster_event",
-                    )
-                )
+            # 统一 best-effort 封装上报事件处理错误（内部自带启用检查与异常吞噬）
+            await track_error_safely(
+                self._telemetry,
+                e,
+                module="core.disaster_service._handle_disaster_event",
+                log_context="事件处理错误遥测",
+            )
+            return False
 
     async def _handle_offline_notification(self, payload: dict[str, Any]) -> None:
         """处理 WebSocket 管理器的离线通知回调。"""
@@ -374,9 +688,85 @@ class DisasterWarningService:
         """
         强制重连所有已启用但离线的数据源。
 
-        返回值为“连接名 -> 处理结果”的对应表。
+        返回值为"连接名 -> 处理结果"的对应表。
         """
         return await self.reconnect_service.reconnect_all_sources()
+
+    async def switch_fan_server_preference(self, preference: str) -> dict[str, str]:
+        """临时切换 FAN Studio 服务器偏好并重新连接。
+
+        Args:
+            preference: "主服务器优先" 或 "备用服务器优先"
+
+        Returns:
+            "连接名 -> 处理结果"映射表
+
+        说明：
+        - 仅做运行期临时切换：不修改 data_sources.fan_studio.fan_server_preference
+          配置项，也不会持久化写回配置；
+        - 服务重启或连接计划重建后自动恢复配置中的原始偏好；
+        - 切换后的临时偏好随 connection_config 一并写入连接信息，
+          断线重连仍按临时偏好交替主备地址。
+        """
+        pref_obj = ServerPreference.parse_strict(preference)
+        if pref_obj is None:
+            return {"error": f"无效的服务器偏好: {preference}"}
+        pref = pref_obj.value
+
+        # 重新生成连接计划（传入临时偏好覆盖值，仅影响本次运行期 URL 顺序）
+        new_connections = ConnectionPlanBuilder.build(
+            self.config,
+            fan_server_pref_override=pref,
+        )
+        # 仅更新 FAN Studio 相关连接
+        results: dict[str, str] = {}
+        for conn_name, conn_config in new_connections.items():
+            if not str(conn_name or "").startswith("fan_studio"):
+                continue
+            # 更新连接配置
+            self.connections[conn_name] = conn_config
+            # 先断开旧连接
+            try:
+                await self.ws_manager.disconnect(conn_name)
+            except Exception as e:
+                logger.debug(f"[灾害预警] 断开 {conn_name} 旧连接时忽略: {e}")
+            # 重建连接信息
+            connection_info = {
+                "connection_name": conn_name,
+                "handler_type": conn_config["handler"],
+                "data_source": conn_config.get("data_source", conn_name),
+                "established_time": None,
+                "backup_url": conn_config.get("backup_url"),
+                "connection_config": dict(conn_config),
+            }
+            attach_fan_auth_from_plan(connection_info, conn_config)
+            # 触发强制重连
+            try:
+                # 清理旧连接信息
+                self.ws_manager.connection_info.pop(conn_name, None)
+                self.ws_manager.connection_retry_counts.pop(conn_name, None)
+                self.ws_manager.fallback_retry_counts.pop(conn_name, None)
+                # 取消同连接名的旧切换建连任务，避免两次切换交叉修改共享状态
+                task_name = f"dw_switch_{conn_name}"
+                for old_task in list(self.connection_tasks):
+                    if old_task.get_name() == task_name and not old_task.done():
+                        old_task.cancel()
+                # 异步建连
+                task = asyncio.create_task(
+                    self.ws_manager.connect(
+                        name=conn_name,
+                        uri=conn_config["url"],
+                        connection_info=connection_info,
+                    ),
+                    name=task_name,
+                )
+                self.connection_tasks.append(task)
+                results[conn_name] = f"✅ 已切换至 {pref}"
+            except Exception as e:
+                results[conn_name] = f"❌ 切换失败: {e}"
+                logger.error(f"[灾害预警] 切换 {conn_name} 服务器失败: {e}")
+
+        return results
 
     def get_service_status(self) -> dict[str, Any]:
         """获取服务状态。"""

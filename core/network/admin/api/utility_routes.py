@@ -13,6 +13,11 @@ from pathlib import Path
 
 from astrbot.api import logger
 
+from ....sources.display_registry import (
+    CONNECTION_DISPLAY_NAMES,
+    SOURCE_ALIAS_MAP,
+    SOURCE_DISPLAY_MAP,
+)
 from ..host.runtime_environment import is_running_in_docker
 from ..payloads.api_response import ApiResponse
 
@@ -176,6 +181,21 @@ def register_utility_routes(app, disaster_service, plugin_root: str):
             return candidate
         except ValueError:
             return None
+
+    @app.get("/api/sources/meta")
+    async def get_sources_meta():
+        """返回数据源展示元数据（事实层）。
+
+        供管理端前端动态拉取，用于补充本地映射表缺失的 key，
+        避免新增数据源后前端漏配展示名。只读接口，无副作用。
+        """
+        return ApiResponse.success(
+            {
+                "source_alias_map": SOURCE_ALIAS_MAP,
+                "source_display_map": SOURCE_DISPLAY_MAP,
+                "connection_display_names": CONNECTION_DISPLAY_NAMES,
+            }
+        )
 
     @app.get("/api/markdown-files")
     async def list_markdown_files():

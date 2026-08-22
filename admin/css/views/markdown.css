@@ -4,6 +4,22 @@
    1. Markdown 视图大纲与骨架布局 (Markdown View Layout Framework)
    ========================================================================== */
 
+/* 外层视图：固定高度、内部纵向 flex，阅读区独立滚动（根治覆盖 bug） */
+.markdown-docs-view {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: calc(100vh - var(--top-bar-height) - 24px);
+    height: calc(100dvh - var(--top-bar-height) - 24px); /* 移动端动态视口：与 .app 的 100dvh 保持一致 */
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Hero 卡与目录条固定不压缩，剩余空间全部交给阅读区滚动 */
+.markdown-docs-view .notifications-hero-card {
+    flex-shrink: 0;
+}
+
 /* 视图大标题布局栈 */
 .markdown-docs-view .notifications-title-stack {
     display: flex;
@@ -21,154 +37,275 @@
     margin-bottom: 4px !important;
 }
 
-/* 文档双栏左右分栏外壳 */
-.markdown-docs-shell {
-    display: grid;
-    /* 左侧为固定的文档树侧栏，右侧自适应承载文章渲染区域 */
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
-}
+/* ==========================================================================
+   2. 顶部固定横向文档目录条 (Top Fixed Horizontal TOC Bar)
+   ========================================================================== */
 
-.markdown-docs-aside-column {
+/* 主工作区：包裹「目录条 + 阅读区」的纵向 flex 容器。
+   目录条固定（不滚动），阅读区占满剩余高度并独立滚动，
+   彻底避免目录条覆盖阅读区的问题 */
+.markdown-docs-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px; /* 目录条与阅读区间距（减半） */
     min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
 }
 
-/* 侧栏定位：向下滑动时贴紧在顶部栏之下 */
-.markdown-docs-aside-sticky {
-    position: sticky;
-    top: calc(var(--top-bar-height) + 16px);
-}
-
-.markdown-docs-sidebar-card,
-.markdown-docs-content-card {
-    min-height: 520px;
-}
-
-/* 侧栏高度跟随视窗高度，自适应控制列表滚动 */
-.markdown-docs-sidebar-card {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    height: calc(100vh - var(--top-bar-height) - 32px);
-    max-height: 880px;
-    overflow: hidden;
-}
-
-.markdown-docs-sidebar-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+/* 目录条外壳：固定在布局顶部，不参与滚动 */
+.markdown-docs-toc {
     flex-shrink: 0;
+    z-index: 5;
 }
 
-/* 文档文件列表容器 (列表过长时纵向滚动) */
-.markdown-docs-file-list {
+/* 目录条内层卡片：毛玻璃视觉，内容完全渲染在阅读区之上方 */
+.markdown-docs-toc-inner {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    min-height: 0;
-    flex: 1;
-    overflow-y: auto;
-    padding-right: 4px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
-.markdown-docs-content-column {
+body.dark-theme .markdown-docs-toc-inner {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 文档列表区域：始终渲染，通过 max-height + opacity 过渡实现平滑收起/展开。
+   收起时高度归零并淡出，展开时恢复完整高度 */
+.markdown-docs-toc-body {
+    max-height: 260px;
+    overflow: hidden;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    transition:
+        max-height 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.24s ease-out,
+        visibility 0.32s linear,
+        transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.markdown-docs-toc.is-collapsed .markdown-docs-toc-body {
+    max-height: 0;
+    opacity: 0;
+    visibility: hidden; /* 移出无障碍树与 Tab 序列，避免键盘聚焦到不可见目录项 */
+    transform: translateY(-6px);
+}
+
+/* 收起时内层卡片的内边距同步收敛，目录条仅保留一行标题的高度 */
+.markdown-docs-toc.is-collapsed .markdown-docs-toc-inner {
+    gap: 0;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+/* 目录头部：标题与展开/收起按钮一行排布 */
+.markdown-docs-toc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.markdown-docs-toc-head-text {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
     min-width: 0;
 }
 
-/* ==========================================================================
-   2. 文档侧边栏文件单项样式 (Sidebar Markdown Document Item)
-   ========================================================================== */
-.markdown-docs-file-item {
-    width: 100%;
-    text-align: left;
-    padding: 14px 16px;
-    border-radius: 16px;
-    border: 1px solid rgba(103, 80, 164, 0.12);
-    background: rgba(255, 255, 255, 0.56);
-    color: var(--md-sys-color-on-surface);
-    cursor: pointer;
-    transition:
-        background-color 0.18s ease-out,
-        border-color 0.18s ease-out,
-        color 0.18s ease-out,
-        transform 0.18s ease-out;
+.markdown-docs-toc-subtitle {
+    opacity: 0.72;
+    font-size: 12px !important;
 }
 
-body.dark-theme .markdown-docs-file-item {
-    background: rgba(32, 29, 39, 0.86);
-    border-color: rgba(208, 188, 255, 0.12);
-    color: var(--md-sys-color-on-surface);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-}
-
-.markdown-docs-file-item:hover {
-    transform: translateY(-2px);
+/* 展开/收起切换按钮 */
+.markdown-docs-toc-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(103, 80, 164, 0.18);
     background: rgba(103, 80, 164, 0.08);
-    border-color: rgba(103, 80, 164, 0.18);
-    box-shadow: 0 8px 22px rgba(103, 80, 164, 0.08);
+    color: var(--md-sys-color-primary);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.18s ease-out, border-color 0.18s ease-out, transform 0.18s ease-out;
 }
 
-body.dark-theme .markdown-docs-file-item:hover {
-    background: rgba(208, 188, 255, 0.13);
-    border-color: rgba(208, 188, 255, 0.26);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+.markdown-docs-toc-toggle:hover {
+    background: rgba(103, 80, 164, 0.16);
+    border-color: rgba(103, 80, 164, 0.3);
+    transform: translateY(-1px);
 }
 
-/* 激活的文档文件菜单项 */
-.markdown-docs-file-item.is-active {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-    border-color: rgba(103, 80, 164, 0.22);
+.markdown-docs-toc-toggle-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    /* 箭头方向由 JSX 中的字符（▸/▾）直接表达，不再叠加 CSS 旋转，避免状态不一致 */
 }
 
-body.dark-theme .markdown-docs-file-item.is-active {
-    background: linear-gradient(135deg, rgba(103, 80, 164, 0.94), rgba(79, 55, 139, 0.94));
-    color: #F4EEFF;
-    border-color: rgba(208, 188, 255, 0.32);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+/* 横向文档列表容器：溢出时横向滚动 */
+.markdown-docs-toc-list {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 2px 6px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
 }
 
-.markdown-docs-file-item.is-active .markdown-docs-file-path {
-    color: var(--md-sys-color-on-primary-container);
-    opacity: 0.82;
+.markdown-docs-toc-list::-webkit-scrollbar {
+    height: 6px;
 }
 
-.markdown-docs-file-item-top {
+/* 单个横向文档项 */
+.markdown-docs-toc-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 6px;
+    flex: 0 0 auto;
+    max-width: 300px;
+    min-width: 180px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(103, 80, 164, 0.12);
+    background: rgba(255, 255, 255, 0.56);
+    color: var(--md-sys-color-on-surface);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.18s ease-out, border-color 0.18s ease-out, transform 0.18s ease-out, box-shadow 0.18s ease-out;
 }
 
-.markdown-docs-file-icon {
+body.dark-theme .markdown-docs-toc-item {
+    background: rgba(32, 29, 39, 0.86);
+    border-color: rgba(208, 188, 255, 0.12);
+}
+
+.markdown-docs-toc-item:hover {
+    background: rgba(103, 80, 164, 0.08);
+    border-color: rgba(103, 80, 164, 0.24);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(103, 80, 164, 0.08);
+}
+
+/* 激活的文档项 */
+.markdown-docs-toc-item.is-active {
+    background: var(--md-sys-color-primary-container);
+    border-color: rgba(103, 80, 164, 0.28);
+    color: var(--md-sys-color-on-primary-container);
+}
+
+body.dark-theme .markdown-docs-toc-item.is-active {
+    background: linear-gradient(135deg, rgba(103, 80, 164, 0.94), rgba(79, 55, 139, 0.94));
+    border-color: rgba(208, 188, 255, 0.32);
+    color: #F4EEFF;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+.markdown-docs-toc-item-icon {
     flex-shrink: 0;
 }
 
-.markdown-docs-file-title {
-    font-size: 14px;
-    font-weight: 800;
-    line-height: 1.35;
-    word-break: break-word;
-    letter-spacing: -0.01em;
+.markdown-docs-toc-item-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
 }
 
-/* 文件的磁盘路径展示文案 */
-.markdown-docs-file-path {
+.markdown-docs-toc-item-title {
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.markdown-docs-toc-item-path {
     opacity: 0.72;
-    font-size: 12px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.35;
 }
 
-/* 右侧文档主要内容卡片 */
+.markdown-docs-toc-item.is-active .markdown-docs-toc-item-path {
+    opacity: 0.82;
+}
+
+/* 目录条加载 / 空状态 */
+.markdown-docs-toc-loading,
+.markdown-docs-toc-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 18px 0 6px;
+}
+
+.markdown-docs-toc-empty-icon {
+    font-size: 18px;
+}
+
+/* ==========================================================================
+   3. 全宽文档阅读区 (Full-Width Document Reader)
+   ========================================================================== */
+/* 阅读区列容器：占据布局剩余高度，内部独立滚动（根治覆盖 bug） */
+.markdown-docs-content-column {
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.markdown-docs-content-column--full {
+    width: 100%;
+}
+
+/* 阅读卡片：占满列容器高度。
+   卡片自身不滚动（视觉面 ::before 背景完整覆盖整个卡片区域），
+   滚动发生在内部 .markdown-docs-content-scroll 容器中，
+   从而避免 .card::before 绝对定位背景只覆盖可视区域、
+   滚动出的内容暴露在透明背景上的问题 */
+/* 卡片仅含单一滚动容器子元素，flex gap 无实际间距效果（gap 已由内部滚动容器
+   的 flex:1 撑满承担），保留 display:flex 以维持列方向布局 */
 .markdown-docs-content-card {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* 卡片内部独立滚动容器：承载全部阅读内容并滚动 */
+.markdown-docs-content-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 /* 文章头部区域 */
@@ -194,7 +331,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   3. Markdown 正文排版与渲染规范 (Markdown Typography Core Styles)
+   5. Markdown 正文排版与渲染规范 (Markdown Typography Core Styles)
    ========================================================================== */
 .markdown-docs-article {
     min-height: 380px;
@@ -354,7 +491,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   4. Markdown 警示呼叫盒组件 (Markdown Callouts/Admonitions)
+   6. Markdown 警示呼叫盒组件 (Markdown Callouts/Admonitions)
    ========================================================================== */
 .notification-md .notification-md-callout {
     position: relative;
@@ -442,7 +579,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   5. 行内代码与多行代码高亮渲染 (Code Block & Code Highlights)
+   7. 行内代码与多行代码高亮渲染 (Code Block & Code Highlights)
    ========================================================================== */
 
 /* 行内小代码标签 `code` */
@@ -460,30 +597,89 @@ body.dark-theme .markdown-docs-file-item.is-active {
     line-height: 1.45;
 }
 
-/* 代码高亮块及画板 Mermaid 容器 */
+/* 代码高亮块及画板 Mermaid 容器：明暗双主题 VSCode 风格终端底 + 红绿灯标题栏 */
 .notification-md-code-block,
 .notification-md-mermaid-block {
     margin: 0 0 0.95rem;
     overflow: hidden;
-    border-radius: 18px;
+    border-radius: 14px;
     border: 1px solid rgba(103, 80, 164, 0.18);
-    background:
-        linear-gradient(180deg, rgba(103, 80, 164, 0.18), rgba(103, 80, 164, 0.05) 18%, rgba(255, 255, 255, 0.94) 100%),
-        rgba(255, 255, 255, 0.92);
+    background: #faf8f5;
     box-shadow:
-        0 10px 28px rgba(103, 80, 164, 0.12),
+        0 10px 28px rgba(0, 0, 0, 0.10),
         inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
-/* 代码头部状态栏（包含代码语言与一键复制等操作） */
+/* 代码头部状态栏（红绿灯 + 语言徽章） */
 .notification-md-code-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 12px;
     min-height: 42px;
     padding: 0 14px;
     border-bottom: 1px solid rgba(103, 80, 164, 0.10);
-    background: linear-gradient(180deg, rgba(103, 80, 164, 0.12), rgba(103, 80, 164, 0.06));
+    background: linear-gradient(180deg, #f0ede8, #e9e5df);
+}
+
+/* ===== 暗色主题：代码块切换为 VSCode Dark 终端底，与 Dark Modern token 协调 =====
+   统一使用 html.theme-dark 选择器（首屏预挂载，见 index.html 主题拦截器）。
+   body.dark-theme 的历史规则见文末，保持值一致，避免级联顺序导致跳变。 */
+html.theme-dark .notification-md-code-block,
+html.theme-dark .notification-md-mermaid-block {
+    border-color: rgba(255, 255, 255, 0.10);
+    background: #1e1e1e;
+    box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html.theme-dark .notification-md-code-header {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #2d2d30, #252526);
+}
+
+html.theme-dark .notification-md-code-lang {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--md-sys-color-primary);
+}
+
+html.theme-dark .notification-md pre {
+    background: #1e1e1e;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+html.theme-dark .notification-md-traffic-light {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html.theme-dark .notification-md pre code {
+    color: #D4D4D4; /* VSCode Dark Modern 默认前景色 */
+}
+
+/* 红绿灯圆点组（经典 macOS 风格） */
+.notification-md-code-traffic-lights {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.notification-md-traffic-light {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.10);
+    transition: filter 0.18s ease-out, transform 0.18s ease-out;
+}
+
+.notification-md-traffic-light.is-red { background: #FF5F56; }
+.notification-md-traffic-light.is-yellow { background: #FFBD2E; }
+.notification-md-traffic-light.is-green { background: #27C93F; }
+
+.notification-md-code-header:hover .notification-md-traffic-light {
+    filter: brightness(1.15);
 }
 
 /* 代码块语言提示标 (如 "JSON", "PYTHON") */
@@ -492,6 +688,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
     align-items: center;
     justify-content: center;
     min-height: 24px;
+    margin-left: auto;
     padding: 0 10px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.58);
@@ -508,10 +705,8 @@ body.dark-theme .markdown-docs-file-item.is-active {
     margin: 0;
     padding: 1rem 1.05rem 1.05rem;
     border: none;
-    border-radius: 0 0 18px 18px;
-    background:
-        radial-gradient(circle at top right, rgba(103, 80, 164, 0.08), transparent 34%),
-        linear-gradient(180deg, rgba(248, 245, 255, 0.96), rgba(241, 236, 251, 0.96));
+    border-radius: 0 0 14px 14px;
+    background: #faf8f5;
     box-shadow: none;
     scrollbar-width: thin;
     scrollbar-color: rgba(103, 80, 164, 0.28) transparent;
@@ -528,22 +723,75 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 .notification-md pre code .token {
-    font-weight: 600;
+    font-weight: 400; /* 恢复常规字重，避免 token 全局加粗干扰 Dark Modern 的细腻观感 */
 }
 
-/* Prism 代码高亮词法配色绑定 */
-.notification-md .token-key, .notification-md .token-property { color: var(--md-code-token-key, #7C3AED); }
-.notification-md .token-string { color: var(--md-code-token-string, #0F766E); }
-.notification-md .token-number { color: var(--md-code-token-number, #B45309); }
-.notification-md .token-boolean { color: var(--md-code-token-boolean, #B45309); }
-.notification-md .token-keyword { color: var(--md-code-token-keyword, #B91C1C); }
-.notification-md .token-function { color: var(--md-code-token-function, #2563EB); }
-.notification-md .token-command { color: var(--md-code-token-command, #2563EB); font-weight: 800; }
-.notification-md .token-flag { color: var(--md-code-token-flag, #9333EA); }
-.notification-md .token-punctuation { color: var(--md-code-token-punctuation, #6B7280); }
+/* ===== VSCode Dark Modern 语法高亮配色（暗色主题使用，与 VSCode Dark+ 对齐） ===== */
+.notification-md .token-comment  { color: #6A9955; font-style: italic; }
+.notification-md .token-keyword  { color: #569CD6; }
+.notification-md .token-control  { color: #569CD6; }
+.notification-md .token-string   { color: #CE9178; }
+.notification-md .token-number   { color: #B5CEA8; }
+.notification-md .token-boolean  { color: #569CD6; }
+.notification-md .token-function { color: #DCDCAA; }
+.notification-md .token-class    { color: #4EC9B0; }
+.notification-md .token-type     { color: #4EC9B0; }
+.notification-md .token-property { color: #9CDCFE; }
+.notification-md .token-key      { color: #9CDCFE; }
+.notification-md .token-variable { color: #9CDCFE; }
+.notification-md .token-parameter{ color: #9CDCFE; }
+.notification-md .token-builtin  { color: #4EC9B0; }
+.notification-md .token-constant { color: #4FC1FF; }
+.notification-md .token-regex    { color: #D16969; }
+.notification-md .token-decorator{ color: #DCDCAA; }
+.notification-md .token-atrule   { color: #C586C0; }
+.notification-md .token-selector { color: #D7BA7D; }
+.notification-md .token-tag      { color: #569CD6; }
+.notification-md .token-attribute{ color: #9CDCFE; }
+.notification-md .token-punctuation { color: #D4D4D4; }
+.notification-md .token-operator { color: #D4D4D4; }
+.notification-md .token-command  { color: #DCDCAA; }
+.notification-md .token-flag     { color: #C586C0; }
+.notification-md .token-unit     { color: #B5CEA8; }
+.notification-md .token-cdata    { color: #D4D4D4; }
+.notification-md .token-import   { color: #9CDCFE; }
+.notification-md .token-value    { color: #9CDCFE; }
+
+/* ===== VSCode Light Modern 语法高亮配色（亮色主题覆盖，与 VSCode Light+ 对齐） =====
+   亮色下代码块底色为米白 #faf8f5，token 统一切换为深色系保证对比度与可读性。
+   使用 html:not(.theme-dark) 选择器：默认即亮色，即使 data-theme 尚未挂载也生效，避免首屏闪烁。 */
+html:not(.theme-dark) .notification-md .token-comment  { color: #008000; font-style: italic; }
+html:not(.theme-dark) .notification-md .token-keyword  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-control  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-string   { color: #A31515; }
+html:not(.theme-dark) .notification-md .token-number   { color: #098658; }
+html:not(.theme-dark) .notification-md .token-boolean  { color: #0000FF; }
+html:not(.theme-dark) .notification-md .token-function { color: #795E26; }
+html:not(.theme-dark) .notification-md .token-class    { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-type     { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-property { color: #001080; }
+html:not(.theme-dark) .notification-md .token-key      { color: #001080; }
+html:not(.theme-dark) .notification-md .token-variable { color: #001080; }
+html:not(.theme-dark) .notification-md .token-parameter{ color: #001080; }
+html:not(.theme-dark) .notification-md .token-builtin  { color: #267F99; }
+html:not(.theme-dark) .notification-md .token-constant { color: #0451A5; }
+html:not(.theme-dark) .notification-md .token-regex    { color: #811F3F; }
+html:not(.theme-dark) .notification-md .token-decorator{ color: #795E26; }
+html:not(.theme-dark) .notification-md .token-atrule   { color: #AF00DB; }
+html:not(.theme-dark) .notification-md .token-selector { color: #800000; }
+html:not(.theme-dark) .notification-md .token-tag      { color: #800000; }
+html:not(.theme-dark) .notification-md .token-attribute{ color: #001080; }
+html:not(.theme-dark) .notification-md .token-punctuation { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-operator { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-command  { color: #795E26; }
+html:not(.theme-dark) .notification-md .token-flag     { color: #AF00DB; }
+html:not(.theme-dark) .notification-md .token-unit     { color: #098658; }
+html:not(.theme-dark) .notification-md .token-cdata    { color: #383A42; }
+html:not(.theme-dark) .notification-md .token-import   { color: #001080; }
+html:not(.theme-dark) .notification-md .token-value    { color: #001080; }
 
 /* ==========================================================================
-   6. Markdown 表格渲染及列宽定制 (Markdown Tables Layout)
+   8. Markdown 表格渲染及列宽定制 (Markdown Tables Layout)
    ========================================================================== */
 .notification-md .notification-md-table-wrap {
     overflow-x: auto;
@@ -614,8 +862,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* 空白占位卡片 */
-.markdown-docs-empty-card,
-.markdown-docs-empty-side-card {
+.markdown-docs-empty-card {
     min-height: 240px;
     display: flex;
     flex-direction: column;
@@ -630,7 +877,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   7. HTML 折叠折叠盒组件 (Markdown Details Expanders)
+   9. HTML 折叠折叠盒组件 (Markdown Details Expanders)
    ========================================================================== */
 .notification-md .notification-md-details {
     overflow: hidden;
@@ -688,7 +935,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   8. Mermaid 流程图/拓扑图平移缩放渲染器 (Mermaid SVG Pan/Zoom Viewport)
+   10. Mermaid 流程图/拓扑图平移缩放渲染器 (Mermaid SVG Pan/Zoom Viewport)
    ========================================================================== */
 .notification-md-mermaid {
     overflow: hidden;
@@ -784,7 +1031,7 @@ body.dark-theme .markdown-docs-file-item.is-active {
 }
 
 /* ==========================================================================
-   9. 深色模式适配 (Dark Theme Adaptive Override)
+   11. 深色模式适配 (Dark Theme Adaptive Override)
    ========================================================================== */
 body.dark-theme .notification-md h1 {
     border-bottom-color: rgba(208, 188, 255, 0.18);
@@ -867,35 +1114,39 @@ body.dark-theme .notification-md :not(pre) > code {
     border-color: rgba(208, 188, 255, 0.18);
 }
 
+/* 兼容选择器：body.dark-theme 与 html.theme-dark 同时挂载（useThemeSync 同步 toggle），
+   此处保持与上方 html.theme-dark 规则完全一致，防止级联顺序导致首屏跳变。 */
 body.dark-theme .notification-md-code-block,
 body.dark-theme .notification-md-mermaid-block {
-    border-color: rgba(208, 188, 255, 0.18);
-    background:
-        linear-gradient(180deg, rgba(208, 188, 255, 0.12), rgba(79, 55, 139, 0.08) 16%, rgba(23, 20, 29, 0.96) 100%),
-        rgba(23, 20, 29, 0.96);
+    border-color: rgba(255, 255, 255, 0.10);
+    background: #1e1e1e;
     box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 body.dark-theme .notification-md-code-header {
-    border-bottom-color: rgba(208, 188, 255, 0.12);
-    background: linear-gradient(180deg, rgba(208, 188, 255, 0.14), rgba(79, 55, 139, 0.20));
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #2d2d30, #252526);
+}
+
+/* 暗色下红绿灯描边微调，保持立体感 */
+body.dark-theme .notification-md-traffic-light {
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 body.dark-theme .notification-md-code-lang {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(208, 188, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--md-sys-color-primary);
 }
 
 body.dark-theme .notification-md pre {
-    background:
-        radial-gradient(circle at top right, rgba(208, 188, 255, 0.08), transparent 34%),
-        linear-gradient(180deg, rgba(30, 27, 38, 0.98), rgba(20, 18, 24, 0.98));
+    background: #1e1e1e; /* 与外壳同色，形成一整块终端画布 */
 }
 
 body.dark-theme .notification-md pre code {
-    color: #ECE7F6;
+    color: #D4D4D4; /* VSCode Dark Modern 默认前景色 */
 }
 
 body.dark-theme .notification-md .notification-md-table-wrap {
@@ -914,22 +1165,74 @@ body.dark-theme .notification-md-mermaid-tool-btn {
     background: rgba(255, 255, 255, 0.08);
 }
 
+/* 暗色模式：内层 mermaid 画布容器必须覆盖为深色底。 */
+body.dark-theme .notification-md-mermaid {
+    background:
+        radial-gradient(circle at top right, rgba(208, 188, 255, 0.07), transparent 34%),
+        linear-gradient(180deg, rgba(30, 27, 38, 0.98), rgba(20, 18, 24, 0.98));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* 暗色模式：Mermaid 图表的暗色适配由 useMermaidRenderer.js 的
+   applyMermaidDarkAdaptation() 统一负责——它以 setProperty(..., 'important')
+   写内联样式，优先级高于此处外部样式表的 !important 规则。
+   因此节点形状、文字、连线的强制覆盖规则不再在此重复维护（运行时不会生效），
+   仅保留 JS 未覆盖的部分：a 链接颜色与边标签背景。 */
+
+/* 暗色模式：锚点/链接文字与背景边框同步浅色化，避免深底上的深色文字看不清 */
+body.dark-theme .notification-md-mermaid svg a {
+    fill: #D8B4FE;
+    stroke: none;
+}
+
+/* 边标签背景：JS 暗色适配未覆盖，保持深色半透明底以区分标签与画布 */
+body.dark-theme .notification-md-mermaid svg .edgeLabels .edgeLabel {
+    background: rgba(30, 27, 38, 0.92);
+}
+
 /* ==========================================================================
-   10. 响应式分栏断点媒体查询适配
+   12. 响应式断点适配 (Responsive Adaptive)
    ========================================================================== */
 
-/* 平板及移动端视窗（最大宽 920px）：由横向双栏重置为单栏瀑布流 */
+/* 平板及移动端视窗（最大宽 920px）：条目宽度自适应收窄 */
 @media (max-width: 920px) {
-    .markdown-docs-shell {
-        grid-template-columns: 1fr;
+    .markdown-docs-toc-item {
+        min-width: 150px;
+    }
+}
+
+/* 移动端（最大宽 768px）：顶部栏转为静态占位，视图回归正常文档流 */
+@media (max-width: 768px) {
+    /* 移动端不锁定视图高度，内容自然流动，由页面整体滚动承载 */
+    .markdown-docs-view {
+        height: auto;
+        overflow: visible;
     }
 
-    .markdown-docs-aside-sticky {
-        position: static; /* 移除悬浮粘性定位，列表变为自然流动排布在上方 */
+    .markdown-docs-layout {
+        gap: 7px;
     }
 
-    .markdown-docs-sidebar-card,
-    .markdown-docs-content-card {
-        min-height: auto;
+    /* 移动端阅读卡片与内部滚动容器恢复自然高度，由页面整体滚动承载 */
+    .markdown-docs-content-card,
+    .markdown-docs-content-scroll {
+        overflow: visible;
+        flex: none;
+    }
+
+    .markdown-docs-toc-head {
+        flex-wrap: wrap;
+    }
+
+    .markdown-docs-toc-subtitle {
+        width: 100%;
+    }
+
+    /* 触屏小屏：关闭目录项的悬停位移，仅保留静态反馈。
+       变量关闭与 hover 禁用已在 base.css 768px 触屏规则中统一声明，
+       此处仅保留尺寸收窄，避免重复维护同值变量 */
+    .markdown-docs-toc-item {
+        min-width: 140px;
+        max-width: 260px;
     }
 }

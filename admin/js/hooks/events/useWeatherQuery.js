@@ -14,6 +14,7 @@ function useWeatherQuery() {
     const [keyword, setKeyword] = React.useState('');         // 精确预警标识或检索省市地名关键字
     const [optionalA, setOptionalA] = React.useState('');     // 辅助备选过滤项（如预警类型）
     const [optionalB, setOptionalB] = React.useState('');     // 辅助备选过滤项（如预警颜色）
+    const [timeRange, setTimeRange] = React.useState('');     // 时间范围：''=近72小时 / '全部'=全日期
     const [loading, setLoading] = React.useState(false);       // 查询中加载状态锁
     const [error, setError] = React.useState('');             // 出错时的警告提示文字
     const [result, setResult] = React.useState(null);         // 后端返回的标准化结果对象
@@ -46,6 +47,8 @@ function useWeatherQuery() {
                 keyword: kw,
                 optionalA: (optionalA || '').trim(),
                 optionalB: (optionalB || '').trim(),
+                filterByTime: !(timeRange === '全部'),
+                optionalC: timeRange === '全部' ? '全部' : '',
             });
 
             // 拦截查无结果的情况，组合展示友好的排查信息
@@ -58,6 +61,8 @@ function useWeatherQuery() {
                     const segments = [`地区=${data.filters.location || ''}`].filter(Boolean);
                     if (data.filters.type) segments.push(`预警类型=${data.filters.type}`);
                     if (data.filters.color) segments.push(`预警颜色=${data.filters.color}`);
+                    if (data.filters.all_date_mode) segments.push('时间范围=全部日期');
+                    else if (data.filters.time_window_hours) segments.push(`时间范围=近${data.filters.time_window_hours}小时`);
                     setError(`${baseError}${segments.length ? `\n检索条件：${segments.join('，')}` : ''}`);
                 } else {
                     setError(baseError);
@@ -74,7 +79,7 @@ function useWeatherQuery() {
         } finally {
             setLoading(false);
         }
-    }, [eventsApi, keyword, optionalA, optionalB]);
+    }, [eventsApi, keyword, optionalA, optionalB, timeRange]);
 
     /**
      * 重置表单，擦除搜索足迹
@@ -83,6 +88,7 @@ function useWeatherQuery() {
         setKeyword('');
         setOptionalA('');
         setOptionalB('');
+        setTimeRange('');
         setError('');
         setResult(null);
         setPage(1);
@@ -92,6 +98,7 @@ function useWeatherQuery() {
         keyword, setKeyword,
         optionalA, setOptionalA,
         optionalB, setOptionalB,
+        timeRange, setTimeRange,
         loading,
         error,
         result,
