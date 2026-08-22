@@ -211,7 +211,7 @@
 - 新增 EQSC API 文档 by @DBJD-CR in #147 #175
 - 新增 OpenQuakeAPI 文档并移除了过时的 Global Quake (HTML) 文档 by @DBJD-CR in #173
 - 更新各文档至最新官方版本 by @DBJD-CR in #191 #210 #214
-- 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210
+- 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210 #214
 
 ~~### 🧪 Testing & CI (测试与CI)~~
 
