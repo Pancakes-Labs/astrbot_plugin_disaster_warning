@@ -8,7 +8,7 @@
 
 # 2026/08/23 v1.6.1
 
-本版本中快速修复了两个问题。如果您的 AstrBot 版本大于等于 **v4.27.x**，且正在使用 **v1.6.0** 版本，请尽快更新到该版本。
+本版本中快速修复了三个问题。如果您的 AstrBot 版本大于等于 **v4.27.x**，且正在使用 **v1.6.0** 版本，请尽快更新到该版本。
 
 ## 🚀 What's Changed
 
@@ -16,6 +16,7 @@
 
 - 修复了 AstrBot 版本大于等于 v4.27.x 时无法正常加载插件的问题 by @DBJD-CR in #216
 - 优化了启动静默机制以保证在各场景下的稳定性 by @DBJD-CR in #216
+- 修复了预估震度分布上下限文本颠倒的问题 by @DBJD-CR in #216
 
 **Full Changelog**: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/compare/v1.6.0...v1.6.1
 
