@@ -79,7 +79,9 @@ class StartupSilenceCoordinator:
     # 同时保留硬超时兜底，避免慢源无限阻塞推送。
     min_silence_seconds: float = 0.5
     settle_seconds: float = 1.0
-    hard_timeout_seconds: float = 30.0
+    # 硬超时兜底：留足余量（冷启动通常更久）；已就绪场景由 _evaluate_ready 提前结束，
+    # 不会被本超时拖慢。门闩级 first_payload/first_poll 超时仍负责单个源提前放行。
+    hard_timeout_seconds: float = 60.0
     first_payload_timeout_seconds: float = 2.0
     # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
     first_poll_timeout_seconds: float = 8.0

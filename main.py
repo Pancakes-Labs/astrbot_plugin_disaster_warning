@@ -844,10 +844,3 @@ class DisasterWarningPlugin(Star):
         if service is None:
             logger.debug("[灾害预警] AstrBot 已加载完成，灾害预警服务尚未初始化")
             return
-
-        # 首次启动/进程重启时静默武装被推迟，此刻正式武装：
-        # 静默硬超时从 AstrBot 真正加载完成时刻起算，避免被加载耗时提前耗尽。
-        arm = getattr(service, "arm_startup_silence", None)
-        if callable(arm):
-            arm()
-        logger.debug("[灾害预警] AstrBot 已加载完成，静默启动已正式武装")
