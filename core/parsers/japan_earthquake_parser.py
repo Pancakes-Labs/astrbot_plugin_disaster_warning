@@ -266,12 +266,14 @@ class JmaEarthquakeWolfxParser(BaseParser):
             jma_warning_area_ranges: list[str] = []
             if isinstance(warn_area, dict):
                 jma_warn_area = str(warn_area.get("Chiiki", "") or "").strip()
+                # Shindo1 为最大震度、Shindo2 为最小震度（Wolfx 字段语义），
+                # 展示时按「最小 ～ 最大」升序输出。
                 shindo1 = warn_area.get("Shindo1")
                 shindo2 = warn_area.get("Shindo2")
                 if shindo1:
                     range_text = f"{shindo1}"
                     if shindo2 and shindo2 != shindo1:
-                        range_text += f" ～ {shindo2}"
+                        range_text = f"{shindo2} ～ {shindo1}"
                     jma_warning_area_ranges.append(range_text)
 
             source_entry = get_source_entry(self.source_id)

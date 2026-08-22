@@ -448,9 +448,13 @@ class JmaEewWolfxParser(BaseParser):
 
     @staticmethod
     def _format_wolfx_shindo_range(shindo1: Any, shindo2: Any) -> str:
-        """格式化 Wolfx 区域震度范围文本。"""
-        left = ScaleConverter.format_jma_cwa_scale_display(shindo1) if shindo1 else ""
-        right = ScaleConverter.format_jma_cwa_scale_display(shindo2) if shindo2 else ""
+        """格式化 Wolfx 区域震度范围文本。
+
+        Wolfx 字段语义：Shindo1 为地区最大震度，Shindo2 为地区最小震度。
+        展示时按「最小 ～ 最大」升序输出，避免出现 "5弱 ～ 4" 的反向文本。
+        """
+        left = ScaleConverter.format_jma_cwa_scale_display(shindo2) if shindo2 else ""
+        right = ScaleConverter.format_jma_cwa_scale_display(shindo1) if shindo1 else ""
         if left and right and left != right:
             return f"{left} ～ {right}"
         return left or right
