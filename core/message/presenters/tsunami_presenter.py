@@ -20,6 +20,7 @@ from ...domain.tsunami.jma_tsunami_normalize import GRADE_TITLE_MAP, coerce_bool
 from ...domain.tsunami.tsunami_levels import (
     normalize_cn_tsunami_level,
     normalize_jp_tsunami_level,
+    to_optional_float,
 )
 from ...sources.source_catalog import get_source_entry
 from .base_presenter import BasePresenter
@@ -137,7 +138,11 @@ class TsunamiAlertPresenter(BasePresenter):
 
         shock_parts: list[str] = []
         if display_context.magnitude is not None:
-            shock_parts.append(f"M {display_context.magnitude}")
+            mag_value = to_optional_float(display_context.magnitude)
+            if mag_value is not None:
+                shock_parts.append(f"M {mag_value:.1f}")
+            else:
+                shock_parts.append(f"M {display_context.magnitude}")
         if display_context.depth is not None:
             depth = display_context.depth
             depth_text = int(depth) if float(depth).is_integer() else depth
@@ -347,12 +352,18 @@ class JmaTsunamiPresenter(BasePresenter):
         shock_time = metadata.get("shock_time") or metadata.get("origin_time_raw")
 
         # 示例：🌍震源参数：三陸沖 Mj 8.2
-        if place_name and magnitude is not None and magnitude != "":
-            lines.append(f"🌍震源参数：{place_name} Mj {magnitude}")
+        mag_value = to_optional_float(magnitude)
+        mag_text = (
+            f"{mag_value:.1f}"
+            if mag_value is not None
+            else str(magnitude or "").strip()
+        )
+        if place_name and mag_text:
+            lines.append(f"🌍震源参数：{place_name} Mj {mag_text}")
         elif place_name:
             lines.append(f"🌍震源参数：{place_name}")
-        elif magnitude is not None and magnitude != "":
-            lines.append(f"🌍震源参数：Mj {magnitude}")
+        elif mag_text:
+            lines.append(f"🌍震源参数：Mj {mag_text}")
 
         if shock_time:
             shock_text = cls._format_dt(shock_time, timezone)

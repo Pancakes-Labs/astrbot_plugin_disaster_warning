@@ -4,7 +4,7 @@
 
 请在您的地图应用中使用以下格式的 URL ：
 
-`https://tilemap.fanstudio.tech/{source}/{z}/{x}/{y} (或 {z}/{y}/{x})`
+`https://tilemap.fanstudio.tech/{source}/{z}/{x}/{y}`
 
 其中 `{source}` 是下方列出的地图源标识之一。无需添加.png 等后缀。
 
@@ -16,9 +16,9 @@
 
 **URL:**
 
-`https://tilemap.fanstudio.tech/arcwi/{z}/{y}/{x}`
+`https://tilemap.fanstudio.tech/arcwi/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/arcwi/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/arcwi/7/101/52)
 
 ### ArcGIS 地形图
 
@@ -26,9 +26,9 @@
 
 **URL:**
 
-`https://tilemap.fanstudio.tech/arcwob/{z}/{y}/{x}`
+`https://tilemap.fanstudio.tech/arcwob/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/arcwob/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/arcwob/7/101/52)
 
 ### ArcGIS 山影图
 
@@ -36,9 +36,9 @@
 
 **URL:**
 
-`https://tilemap.fanstudio.tech/arcwh/{z}/{y}/{x}`
+`https://tilemap.fanstudio.tech/arcwh/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/arcwh/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/arcwh/7/101/52)
 
 ### DEM高程数据
 
@@ -48,7 +48,7 @@
 
 `https://tilemap.fanstudio.tech/dem/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/dem/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/dem/7/101/52)
 
 ### PetalMap 矢量图 亮
 
@@ -58,7 +58,7 @@
 
 `https://tilemap.fanstudio.tech/petallight/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/petallight/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/petallight/7/101/52)
 
 ### PetalMap 矢量图 暗
 
@@ -68,7 +68,7 @@
 
 `https://tilemap.fanstudio.tech/petaldark/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/petaldark/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/petaldark/7/101/52)
 
 ### 电子海图
 
@@ -76,9 +76,9 @@
 
 **URL:**
 
-`https://tilemap.fanstudio.tech/enc/{z}/{y}/{x}`
+`https://tilemap.fanstudio.tech/enc/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/enc/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/enc/7/101/52)
 
 ### 实况云图层
 
@@ -88,7 +88,7 @@
 
 `https://tilemap.fanstudio.tech/cloud/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/cloud/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/cloud/7/101/52)
 
 ### 实况降水图层
 
@@ -98,7 +98,7 @@
 
 `https://tilemap.fanstudio.tech/rain/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/rain/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/rain/7/101/52)
 
 ### 实况风图层
 
@@ -108,7 +108,7 @@
 
 `https://tilemap.fanstudio.tech/wind/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/wind/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/wind/7/101/52)
 
 ### 中国境内等高线
 
@@ -118,7 +118,7 @@
 
 `https://tilemap.fanstudio.tech/cncl/{z}/{x}/{y}`
 
-[查看示例瓦片](https://tilemap.fanstudio.tech/cncl/7/52/101)
+[查看示例瓦片](https://tilemap.fanstudio.tech/cncl/7/101/52)
 
 ---
 

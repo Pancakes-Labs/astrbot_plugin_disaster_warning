@@ -6,7 +6,7 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
-# 2026/08/21 v1.6.0
+# 2026/08/22 v1.6.0
 
 经历了几次跳票、砍需求、加上我连续一个多月的爆肝后，灾害预警 v1.6.0 正式版本（没错原先计划的其他 beta 版直接跳过了）也是终于问世了！
 
@@ -90,6 +90,8 @@
 - 优化了抓取远程图件的稳定性 by @DBJD-CR in #203
 - 改进在 TLS 阻断场景下的主备切换与重连行为，避免在不可用地址上反复重试 by @DBJD-CR in #206
 - 加强遥测覆盖率、隐私保护、节流控制和生命周期清理 by @DBJD-CR in #207
+- 迁移遥测与通知中心至新域名 by @DBJD-CR & Aloys233 in #214
+- 调整地图瓦片请求格式以适应上游协议 by @DBJD-CR in #214
 
 ### 🧠 Rules & Filters (规则与过滤)
 
@@ -155,7 +157,7 @@
 
 ### ♻️ Refactor (重构)
 
-- 对海啸相关的前后端内容与推送文本进行了大幅重构与增强 by @DBJD-CR in #154
+- 对海啸相关的前后端内容与推送文本进行了大幅重构与增强 by @DBJD-CR in #154 #214
 - 重构静默启动流程，使其在插件重载和 AstrBot 启动/重载的场景下都更加科学且无感 by @DBJD-CR in #171 #174 #180 #181
 - 将 Global Quake 纳入为 OpenQuakeAPI 的子源并统一修改内部和外部展示名 by @DBJD-CR in #173 #183
 - 气象预警图标优先使用本地图标，并拓展更多气象预警图标 by @DBJD-CR in #181 #187 #203
@@ -208,8 +210,8 @@
 
 - 新增 EQSC API 文档 by @DBJD-CR in #147 #175
 - 新增 OpenQuakeAPI 文档并移除了过时的 Global Quake (HTML) 文档 by @DBJD-CR in #173
-- 更新各文档至最新官方版本 by @DBJD-CR in #191 #210
-- 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210
+- 更新各文档至最新官方版本 by @DBJD-CR in #191 #210 #214
+- 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210 #214
 
 ~~### 🧪 Testing & CI (测试与CI)~~
 

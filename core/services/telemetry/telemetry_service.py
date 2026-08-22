@@ -36,9 +36,9 @@ class TelemetryManager:
     """
 
     # 统一接收遥测的云端接入服务端点
-    _ENDPOINT = "https://telemetry.aloys233.top/api/ingest"
+    _ENDPOINT = "https://plugincenter.aloys23.link/api/ingest"
     # App Key 经过 base64 编码，增加源码探测复杂度
-    _ENCODED_KEY = "dGtfVFMxaVEtcGVJbUlKczFVM3VBcGM4anREUlRhbC00VGY="
+    _ENCODED_KEY = "dGtfbEJ6a2k0eDhBZE40ZFVCVVhRVnpmYnRGT3NWdVYyTmE="
     _APP_KEY = base64.b64decode(_ENCODED_KEY).decode()
 
     # 特定高频事件的最小加入队列间隔（秒），用于在内存中提前丢弃同质化冗余遥测
@@ -401,7 +401,7 @@ class TelemetryManager:
                 logger.debug(f"[灾害预警] 遥测数据负载异常，错误为 {e}")
                 return False
             except aiohttp.ClientError as e:
-                logger.debug(f"[灾害预警] 遥测网络请求异常，错误为 {e}")
+                logger.warning(f"[灾害预警] 遥测网络请求异常，错误为 {e}")
                 return False
             except Exception as e:
                 logger.debug(f"[灾害预警] 遥测发送遇到未知异常，错误为 {e}")
