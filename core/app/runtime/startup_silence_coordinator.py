@@ -674,7 +674,10 @@ class StartupSilenceCoordinator:
                 "[灾害预警] 待武装静默超时（PENDING 超时兜底），"
                 "仍处于延迟武装等待期，继续等待 start() 正式武装"
             )
-            # 重新启动 watchdog 继续超时兜底（逃生失败/迟迟不武装时再次触发）。
+            # 重置 PENDING 超时起点后重启 watchdog：若不更新 _pending_started_mono，
+            # 新 watchdog 会立即再次满足 pending_timeout_seconds，导致
+            # "创建 watchdog → 立即逃生 → 再创建"的紧循环，CPU/事件循环负载飙升。
+            self._pending_started_mono = self._try_mono()
             self._start_watchdog()
             return
         self._force_ready("pending_timeout_escape")
