@@ -6,9 +6,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import threading
 from collections import OrderedDict
 
 import astrbot.api.message_components as Comp
@@ -16,11 +14,11 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.core import DEMO_MODE
 from astrbot.core.desktop_runtime import is_desktop_managed_backend
-from astrbot.core.updator import AstrBotUpdator
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
 from ...utils.version import get_plugin_name, get_plugin_version
+from ..astrbot_restart import restart_astrbot_in_background
 from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
 
@@ -149,14 +147,15 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         1. 先通过 yield 发送「即将重启」提示（此时管道仍可用）
         2. 检查桌面版托管 / DEMO 模式守卫，拒绝时直接提示
         3. 通过 context.send_message 发送最终提示（进程即将替换，yield 管道已不可靠）
-        4. 起 daemon 线程调用 AstrBotUpdator()._reboot()，内部 sleep 3 秒后
-           终止全部子进程并 os.exec* 替换当前进程完成重启
+        4. 通过重启适配层在后台 daemon 线程触发进程重启（内部 sleep 3 秒后
+           终止全部子进程并 os.exec* 替换当前进程完成重启），适配层会
+           按 AstrBot 版本自动选择新版 process_restart 或旧版 updator 策略
         """
         if not await self.plugin.is_plugin_admin(event):
             yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
             return
 
-        # 桌面版 Launcher 托管后端时不允许核心直接重启，_reboot() 内部也会抛错，
+        # 桌面版 Launcher 托管后端时不允许核心直接重启，重启策略内部也会抛错，
         # 这里提前拦截并给出更友好的提示。
         if is_desktop_managed_backend():
             yield event.plain_result(
@@ -185,7 +184,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             # 重启前先通过 context.send_message 发送最终提示：
             # 进程级替换不销毁任何插件对象，但事件总线管道可能在进程退出瞬间被中断，
-            # 因此最终提示不依赖 yield，直接用 send_message 发送，_reboot 内部会
+            # 因此最终提示不依赖 yield，直接用 send_message 发送，重启线程内部会
             # sleep 3 秒，足以让消息送达平台。
             await self.plugin.context.send_message(
                 event.unified_msg_origin,
@@ -198,34 +197,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 ),
             )
 
-            # _reboot 是同步阻塞函数（内部 sleep 3s + 杀子进程 + os.exec*），
-            # 必须放入 daemon 线程执行，避免阻塞事件循环。
-            # 线程内用包装函数捕获异常，防止 _reboot 抛错时用户收到成功提示却无失败反馈。
-            loop = asyncio.get_running_loop()
-            unified_msg_origin = event.unified_msg_origin
-
-            def _reboot_wrapper() -> None:
-                try:
-                    AstrBotUpdator()._reboot()
-                except Exception as reboot_err:
-                    logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {reboot_err}")
-                    # 线程内无法直接 await，用 run_coroutine_threadsafe 将失败通知
-                    # 与失败遥测调度回事件循环执行（线程安全）。
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            self._notify_restart_astrbot_failure(
-                                unified_msg_origin, reboot_err
-                            ),
-                            loop,
-                        )
-                    except Exception:
-                        pass
-
-            threading.Thread(
-                target=_reboot_wrapper,
-                name="astrbot-core-restart",
-                daemon=True,
-            ).start()
+            # 重启动作由适配层在后台 daemon 线程执行：
+            ok, error = restart_astrbot_in_background()
+            if not ok:
+                raise RuntimeError(f"无法触发 AstrBot 重启: {error or '未知原因'}")
         except Exception as e:
             logger.error(f"[灾害预警] 触发 AstrBot 重启失败: {e}")
             # 上报失败（启动线程前的异常路径）。
@@ -246,31 +221,6 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 )
             except Exception:
                 pass
-
-    async def _notify_restart_astrbot_failure(
-        self, unified_msg_origin: str, error: Exception
-    ) -> None:
-        """AstrBot 重启线程失败时，向原会话推送失败通知并上报失败遥测。"""
-        try:
-            await self.plugin.context.send_message(
-                unified_msg_origin,
-                MessageChain([Comp.Plain(f"❌ AstrBot 重启失败: {error}")]),
-            )
-        except Exception:
-            pass
-        try:
-            # reason 仅用固定失败码 + 异常类型名，不上报原始异常消息文本。
-            await self._track_command_feature(
-                "command_admin_action",
-                {
-                    "action": "restart_astrbot",
-                    "success": False,
-                    "reason": "exception",
-                    "error_type": type(error).__name__,
-                },
-            )
-        except Exception:
-            pass
 
     async def handle_disaster_reconnect(self, event):
         """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
