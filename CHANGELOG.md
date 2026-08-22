@@ -91,6 +91,7 @@
 - 改进在 TLS 阻断场景下的主备切换与重连行为，避免在不可用地址上反复重试 by @DBJD-CR in #206
 - 加强遥测覆盖率、隐私保护、节流控制和生命周期清理 by @DBJD-CR in #207
 - 迁移遥测与通知中心至新域名 by @DBJD-CR & Aloys233 in #214
+- 调整地图瓦片请求格式以适应上游协议 by @DBJD-CR in #214
 
 ### 🧠 Rules & Filters (规则与过滤)
 
@@ -209,7 +210,7 @@
 
 - 新增 EQSC API 文档 by @DBJD-CR in #147 #175
 - 新增 OpenQuakeAPI 文档并移除了过时的 Global Quake (HTML) 文档 by @DBJD-CR in #173
-- 更新各文档至最新官方版本 by @DBJD-CR in #191 #210
+- 更新各文档至最新官方版本 by @DBJD-CR in #191 #210 #214
 - 更新适用于 v1.6.0 的 README 文档、贡献指南和更新日志 by @DBJD-CR in #210
 
 ~~### 🧪 Testing & CI (测试与CI)~~
