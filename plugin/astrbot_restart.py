@@ -68,11 +68,18 @@ _RESTART_STRATEGIES: tuple[tuple[Callable[[], None], Callable[[], None]], ...] =
 )
 
 
-def restart_astrbot_in_background() -> tuple[bool, Exception | None]:
+def restart_astrbot_in_background(
+    on_failure: Callable[[Exception], None] | None = None,
+) -> tuple[bool, Exception | None]:
     """在后台 daemon 线程中触发 AstrBot 进程重启。
 
     重启动作是同步阻塞的（内部 sleep 3s + 杀子进程 + os.exec*），因此必须
     放入 daemon 线程执行，避免阻塞插件事件循环。
+
+    Args:
+        on_failure: 可选失败回调。重启线程内部执行失败（如桌面托管守卫抛错、
+            exec 替换失败）时，会在线程内以该回调通知调用方；回调应尽量轻量，
+            且自行消化自身异常，避免线程内二次抛错。若为 None，失败仅记录日志。
 
     Returns:
         (ok, error)：ok 表示是否成功派发重启线程；
@@ -108,8 +115,21 @@ def restart_astrbot_in_background() -> tuple[bool, Exception | None]:
             continue
 
         # 探测成功：在后台 daemon 线程真正执行重启。
+        # 线程内必须捕获异常并回调 on_failure，否则重启失败只会产生未处理的
+        # 线程异常，而调用方早已报告成功，用户无法感知失败。
+        def _run_with_guard() -> None:
+            try:
+                run()
+            except Exception as exc:  # noqa: BLE001 - 线程边界兜底
+                logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {exc}")
+                if on_failure is not None:
+                    try:
+                        on_failure(exc)
+                    except Exception:  # noqa: BLE001 - 回调自身异常不允许二次抛错
+                        logger.error(f"[灾害预警] AstrBot 重启失败回调执行出错: {exc}")
+
         threading.Thread(
-            target=run,
+            target=_run_with_guard,
             name="astrbot-core-restart",
             daemon=True,
         ).start()
