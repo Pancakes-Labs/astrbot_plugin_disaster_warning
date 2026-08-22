@@ -6,6 +6,19 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+# 2026/08/23 v1.6.1
+
+本版本中快速修复了两个问题。如果您的 AstrBot 版本大于等于 **v4.27.x**，且正在使用 **v1.6.0** 版本，请尽快更新到该版本。
+
+## 🚀 What's Changed
+
+### 🐛 Bug Fixes (修复)
+
+- 修复了 AstrBot 版本大于等于 v4.27.x 时无法正常加载插件的问题 by @DBJD-CR in #216
+- 优化了启动静默机制以保证在各场景下的稳定性 by @DBJD-CR in #216
+
+**Full Changelog**: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/compare/v1.6.0...v1.6.1
+
 # 2026/08/22 v1.6.0
 
 经历了几次跳票、砍需求、加上我连续一个多月的爆肝后，灾害预警 v1.6.0 正式版本（没错原先计划的其他 beta 版直接跳过了）也是终于问世了！
