@@ -508,12 +508,13 @@ class DisasterWarningService:
 
         Args:
             defer_silence_arm: 首次启动/进程重启时推迟静默武装，
-                等待 AstrBot 加载完成钩子显式武装（避免硬超时被加载耗时耗尽）。
+                真正武装在 start() 内部 ws_manager.start() 之后、建连任务创建
+                之前完成（避免硬超时被加载耗时耗尽）。
         """
         await self.lifecycle_service.start(defer_silence_arm=defer_silence_arm)
 
     def arm_startup_silence(self, *, hard_timeout_seconds: float | None = None) -> None:
-        """正式武装启动静默（供 AstrBot 加载完成钩子调用）。"""
+        """正式武装启动静默（兜底入口，PENDING 超时逃生等场景复用）。"""
         if hasattr(self, "lifecycle_service") and self.lifecycle_service is not None:
             arm = getattr(self.lifecycle_service, "arm_startup_silence", None)
             if callable(arm):

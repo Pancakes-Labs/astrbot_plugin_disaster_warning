@@ -24,16 +24,20 @@ class DisasterServiceLifecycleService:
     def __init__(self, service):
         # 这里只保存主服务引用；真正的状态与资源都仍由主服务统一持有。
         self.service = service  # 主服务 DisasterWarningService 实例
-        # 是否推迟静默武装（首次启动/进程重启时等待 AstrBot 加载完成钩子）
+        # 是否推迟静默武装（首次启动/进程重启时，真正武装推迟到 start() 内部
+        # ws_manager.start() 之后、建连任务创建之前执行）
         self._defer_arm = False
 
     async def start(self, *, defer_silence_arm: bool = False) -> None:
         """异步启动灾害预警服务。
 
         Args:
-            defer_silence_arm: 为 True 时推迟静默武装，等待 AstrBot 加载完成
-                钩子显式调用 arm_startup_silence()；用于首次启动/进程重启，
-                避免 30 秒硬超时被 AstrBot 加载耗时提前耗尽。
+            defer_silence_arm: 为 True 时推迟静默武装（首次启动/进程重启）。
+                此时协调器先进入 PENDING 吸收模式（事件被吸收播种但不计时），
+                真正武装在 start() 内部 ws_manager.start() 之后、建连任务创建
+                之前完成，确保硬超时从"建连真正开始"时刻起算，不被 AstrBot
+                加载耗时或数据库初始化提前耗尽。arm_startup_silence() 公共
+                入口仅作为兜底机制（PENDING 超时逃生等）保留。
         """
         # 启动过程必须串行化，避免重复启动导致连接、定时任务或缓存恢复被执行多次。
         async with self.service._start_lock:
@@ -161,6 +165,9 @@ class DisasterServiceLifecycleService:
                 # 启动失败时必须回滚运行标记，避免外部误判服务已可用。
                 logger.error(f"[灾害预警] 启动服务失败: {e}")
                 self.service.running = False
+                # 复位延迟武装标记：本次启动已失败，避免下次非延迟启动
+                # （插件重载）重复执行延迟武装或重复武装。
+                self._defer_arm = False
                 coordinator = getattr(self.service, "startup_silence", None)
                 if coordinator is not None:
                     coordinator.disarm()
@@ -186,11 +193,17 @@ class DisasterServiceLifecycleService:
         _arm_startup_silence()，硬超时从"建连真正开始"时刻起算；
         本入口保留给 PENDING 超时逃生等兜底路径复用，避免静默永久停在 PENDING。
 
-        若服务尚未运行（running 仍为 False），会调度延迟重试后再武装。
+        若服务尚未运行（running 仍为 False），或仍处于延迟武装等待期
+        （_defer_arm 为 True），会调度延迟重试后再武装。
         """
-        if not getattr(self.service, "running", False):
-            # 服务后台任务尚未真正开始：延迟重试，避免时序竞态导致静默永久停在 PENDING。
-            logger.warning("[灾害预警] 服务尚未运行，静默启动推迟重试")
+        if not getattr(self.service, "running", False) or self._defer_arm:
+            # 服务后台任务尚未真正开始，或首次启动仍等待 start() 内部在建连前
+            # 完成正式武装：延迟重试，避免时序竞态导致静默永久停在 PENDING，
+            # 也避免 PENDING watchdog 逃生提前武装并清除 _defer_arm，
+            # 导致硬超时从"建连真正开始"之前就起算。
+            logger.warning(
+                "[灾害预警] 服务尚未就绪或仍处于延迟武装等待期，静默启动推迟重试"
+            )
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
