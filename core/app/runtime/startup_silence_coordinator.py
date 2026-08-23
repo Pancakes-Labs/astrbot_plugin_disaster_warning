@@ -79,7 +79,9 @@ class StartupSilenceCoordinator:
     # 同时保留硬超时兜底，避免慢源无限阻塞推送。
     min_silence_seconds: float = 0.5
     settle_seconds: float = 1.0
-    hard_timeout_seconds: float = 30.0
+    # 硬超时兜底：留足余量（冷启动通常更久）；已就绪场景由 _evaluate_ready 提前结束，
+    # 不会被本超时拖慢。门闩级 first_payload/first_poll 超时仍负责单个源提前放行。
+    hard_timeout_seconds: float = 60.0
     first_payload_timeout_seconds: float = 2.0
     # 轮询门闩：武装后若长时间无成功首轮，按超时视为可跳过，避免拖到硬超时
     first_poll_timeout_seconds: float = 8.0
@@ -208,7 +210,6 @@ class StartupSilenceCoordinator:
         self._pending_skipped.clear()
         self._cancel_watchdog()
         self._start_watchdog()  # PENDING 阶段也启动 watchdog，提供超时逃生通道
-        logger.debug("[灾害预警] 静默启动进入待武装状态（等待 AstrBot 加载完成钩子）")
 
     def arm(
         self,
@@ -220,7 +221,7 @@ class StartupSilenceCoordinator:
     ) -> None:
         """服务 start() 时武装静默期并注册门闩。"""
         self.enabled = bool(enabled)
-        # 允许调用方按场景覆盖硬超时（如插件重载时缩短，避免等满默认 30 秒）
+        # 允许调用方按场景覆盖硬超时（默认 60 秒兜底，可缩短以适配重载等场景）
         if hard_timeout_seconds is not None and hard_timeout_seconds > 0:
             self.hard_timeout_seconds = float(hard_timeout_seconds)
         self.started_at = self._now()
@@ -633,11 +634,20 @@ class StartupSilenceCoordinator:
         self._force_ready(reason)
 
     def _force_pending_escape(self) -> None:
-        """PENDING 超时逃生：尝试正式武装，失败则直接放行。"""
+        """PENDING 超时逃生：尝试正式武装或进入延迟重试，失败则直接放行。
+
+        时序说明：
+        - 首次启动（_defer_arm=True）时，arm_startup_silence() 会因 _defer_arm
+          守卫进入延迟重试（调度 1 秒后重试），硬超时仍在 start() 内部正式武装
+          后才起算，不会因 PENDING 逃生提前武装耗尽；此时保持 PENDING 等待，
+          不强制放行。
+        - 非延迟场景（watchdog 在 ARMING/PRIMING 阶段误入）或重试持续失败时，
+          确保状态离开 PENDING，避免无限吸收事件。
+        """
         self._cancel_watchdog()
-        # 若主服务已运行，尝试按当前连接计划正式武装；
-        # 否则直接放行，避免静默永久停在 PENDING 无限吸收事件。
         service = self._service
+        # 尝试触发正式武装（首次启动时会因 _defer_arm 守卫转为延迟重试）。
+        lifecycle = None
         if service is not None and getattr(service, "running", False):
             lifecycle = getattr(service, "lifecycle_service", None)
             if lifecycle is not None:
@@ -649,9 +659,28 @@ class StartupSilenceCoordinator:
                         logger.debug(
                             f"[灾害预警] PENDING 超时强制武装失败（已忽略）: {exc}"
                         )
-        # 无论武装是否成功，都确保状态离开 PENDING，避免无限吸收。
-        if self.state == SilenceState.PENDING:
-            self._force_ready("pending_timeout_escape")
+        # 若已离开 PENDING（arm 成功进入正式门闩流程），无需再放行。
+        if self.state != SilenceState.PENDING:
+            return
+        # 仍在 PENDING：判断是否进入延迟重试等待（服务运行中 + 延迟武装等待中）。
+        # 是 → 保留 PENDING，等待 start() 内部在建连前完成正式武装；
+        # 否 → 强制放行，避免无限吸收。
+        if (
+            service is not None
+            and getattr(service, "running", False)
+            and getattr(lifecycle, "_defer_arm", False)
+        ):
+            logger.warning(
+                "[灾害预警] 待武装静默超时（PENDING 超时兜底），"
+                "仍处于延迟武装等待期，继续等待 start() 正式武装"
+            )
+            # 重置 PENDING 超时起点后重启 watchdog：若不更新 _pending_started_mono，
+            # 新 watchdog 会立即再次满足 pending_timeout_seconds，导致
+            # "创建 watchdog → 立即逃生 → 再创建"的紧循环，CPU/事件循环负载飙升。
+            self._pending_started_mono = self._try_mono()
+            self._start_watchdog()
+            return
+        self._force_ready("pending_timeout_escape")
         logger.warning(
             "[灾害预警] 待武装静默超时（PENDING 超时兜底），已强制结束静默，"
             "防止灾害事件被无限期吸收"

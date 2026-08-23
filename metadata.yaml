@@ -1,7 +1,7 @@
 name: astrbot_plugin_disaster_warning
 display_name: 灾害预警
 desc: 为 AstrBot 而生的全球灾害预警与气象情报插件，聚合多机构数据源，让地震、海啸、气象、台风情报与专业分析一键直达你的 Bot。
-version: v1.6.0
+version: v1.6.1
 author: DBJD-CR & Aloys233
 repo: https://github.com/Pancakes-Labs/astrbot_plugin_disaster_warning
 astrbot_version: ">=4.11.2"

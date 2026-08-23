@@ -70,8 +70,10 @@ class DisasterWarningPlugin(Star):
 
             # 区分首次启动/进程重启与插件重载：
             # - 首次启动/进程重启：AstrBot 尚未加载完成，推迟静默武装，
-            #   等 on_astrbot_loaded 钩子触发后再武装，避免硬超时被加载耗时耗尽；
-            # - 插件重载：AstrBot 已就绪，立即武装（仍保留 30 秒兜底）。
+            #   真正武装在 start() 内部 ws_manager.start() 之后、建连任务创建
+            #   之前完成（协调器先进入 PENDING 吸收模式），避免硬超时被
+            #   AstrBot 加载耗时或数据库初始化提前耗尽；
+            # - 插件重载：AstrBot 已就绪，立即武装（默认 60 秒兜底）。
             first_boot = is_first_boot_in_process()
             if first_boot:
                 logger.info(
@@ -844,10 +846,3 @@ class DisasterWarningPlugin(Star):
         if service is None:
             logger.debug("[灾害预警] AstrBot 已加载完成，灾害预警服务尚未初始化")
             return
-
-        # 首次启动/进程重启时静默武装被推迟，此刻正式武装：
-        # 静默硬超时从 AstrBot 真正加载完成时刻起算，避免被加载耗时提前耗尽。
-        arm = getattr(service, "arm_startup_silence", None)
-        if callable(arm):
-            arm()
-        logger.debug("[灾害预警] AstrBot 已加载完成，静默启动已正式武装")

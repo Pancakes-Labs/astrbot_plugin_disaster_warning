@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/AstrBot-v4.26.4%20Compatible-brightgreen.svg" alt="Compatible with AstrBot v4.26.4">
+  <img src="https://img.shields.io/badge/AstrBot-v4.27.4%20Compatible-brightgreen.svg" alt="Compatible with AstrBot v4.27.4">
   <img src="https://img.shields.io/github/v/release/DBJD-CR/astrbot_plugin_disaster_warning?label=Release&color=brightgreen" alt="Latest Release">
   <img src="https://img.shields.io/badge/QQ群-1033089808-12B7F3.svg" alt="QQ Group">
 </p>
@@ -97,9 +97,9 @@
 >
 > 开发时长：累计 171 天（主插件部分）
 >
-> 累计工时：约 760 小时（主插件部分）
+> 累计工时：约 763 小时（主插件部分）
 >
-> Tokens Used：4,631,641,997
+> Tokens Used：4,637,105,072
 
 ## ✨ 功能特性
 
@@ -1617,6 +1617,8 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 ---
 
+</details>
+
 ### ♨️ WebUI 配置热重载说明
 
 通过插件自带 WebUI（内置管理端）保存配置后，**并非所有配置项都需要重载插件**。
@@ -1629,8 +1631,6 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 >
 > 1. 修改“过滤器/会话覆写/消息格式”等业务规则时，可先直接在插件 WebUI 保存并观察推送结果。
 > 2. 修改“服务监听/连接管理/渲染器初始化”相关参数后，建议手动重载插件以确保全部组件按新配置重建。
-
-</details>
 
 ---
 
@@ -2026,14 +2026,14 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 # fssn_cmt_fanstudio (FSSN 矩心矩张量解 CMT - FAN)
 ```
 
+</details>
+
 > [!NOTE]
 >
 > 插件对于灾害事件的统计与日志统计是分开管理的，如果需要清除对应的数据请使用相应的指令。
 >
 > `/灾害预警统计`命令中，地震震级分布与最大地震的统计可能会不一致，这是由于对数据源的筛选逻辑不一样导致的，前者比较宽松，后者比较严格。
 > `/气象预警查询`命令中，查询到的数据仅基于插件本地的数据库（在插件运行期间生成），结果仅供参考。
-
-</details>
 
 ---
 
@@ -3073,7 +3073,7 @@ graph TB
     - **远程模式**: 支持 browserless 远程渲染，本地浏览器零常驻内存。
 - **🗄️ 持久化与统计开销**:
   - **SQLite 写入**: 异步 `aiosqlite` 批量写入 + 单次提交，单事件落库 **< 10ms**；全表扫描受行数上限保护。
-  - **消息日志**: 原始报文格式化后追加写盘（带文件锁与 50MB×5 轮转），与主链路解耦，单次写盘 **<details 1ms**。
+  - **消息日志**: 原始报文格式化后追加写盘（带文件锁与 50MB×5 轮转），与主链路解耦，单次写盘 **< 1ms**。
 - **🖥️ 管理端实时通道**:
   - **广播策略**: 完整快照仅在新客户端接入 / 手动刷新时下发，常规更新统一构建一次载荷再分发，**30s 保底广播** + 事件即时推送双通道。
   - **通知同步**: 远端通知默认 **300s/轮**，带列表签名比对，内容无变化不产生额外请求。
