@@ -480,7 +480,7 @@ class TelemetryManager:
     # 命中即**整体删除**，不做统计聚合，避免群号、会话 ID、管理员标识等
     # 个人可识别信息随匿名遥测外泄。
     # 注意：这些键不属于凭据类，_sanitize_credentials 的占位符替换无法覆盖，
-    # 因此必须在 track_config 中显式维护删除清单。
+    # 因此统一在 _sanitize_credentials 的递归遍历中识别并删除（含嵌套结构）。
     _SENSITIVE_IDENTITY_KEYS = {
         "adminusers",
         "targetsessions",
@@ -513,12 +513,7 @@ class TelemetryManager:
         try:
             config_copy = copy.deepcopy(config)
 
-            # 对可能存有用户/会话标识的键进行严格删除脱敏，确保用户隐私安全。
-            # 统一遍历 _SENSITIVE_IDENTITY_KEYS（规范化键名），同时覆盖命名变体，避免遗漏。
-            for key in list(config_copy.keys()):
-                if self._normalize_credential_key(key) in self._SENSITIVE_IDENTITY_KEYS:
-                    del config_copy[key]
-
+            # 先删除地理位置与管理端密码等顶层敏感字段
             if "local_monitoring" in config_copy:
                 lm = config_copy["local_monitoring"]
                 if isinstance(lm, dict):
@@ -534,7 +529,8 @@ class TelemetryManager:
                 if isinstance(wa, dict) and "password" in wa:
                     del wa["password"]
 
-            # 递归脱敏数据源凭据类键，兜底未来新增的敏感字段
+            # 递归脱敏：删除用户/会话标识键（含嵌套结构），
+            # 并对数据源凭据类键做占位符替换，兜底未来新增的敏感字段。
             self._sanitize_credentials(config_copy)
 
             return await self.track("config", config_copy, immediate=True)
@@ -544,25 +540,27 @@ class TelemetryManager:
             return False
 
     def _sanitize_credentials(self, node: Any) -> None:
-        """就地递归脱敏配置树中的凭据类键值。
+        """就地递归脱敏配置树中的敏感键值。
 
         注意：本方法会**就地修改**传入的配置节点。调用方若需保留原始凭据值
         （例如后续仍会复用同一配置字典），请先自行 copy.deepcopy 再传入，
         以免原始凭据在内存中被覆盖为脱敏占位符。
 
         脱敏规则：
-        1. dict 的键做"去分隔符 + 大小写不敏感"匹配（覆盖 snake_case /
-           camelCase / kebab-case）；命中 _SENSITIVE_CREDENTIAL_KEYS 的值统一
-           替换为脱敏占位符；
-        2. dict 中的字符串值（即使键本身不敏感）应用 URL 查询凭据脱敏正则并
+        1. dict 的键做"去分隔符 + 大小写不敏感"匹配；
+        2. 命中 _SENSITIVE_CREDENTIAL_KEYS 的值统一替换为脱敏占位符；
+        3. dict 中的字符串值（即使键本身不敏感）应用 URL 查询凭据脱敏正则并
            回写，覆盖形如 {"endpoint": "https://api.example/?refreshToken=secret"}
            这类在普通键下携带带鉴权 URL 的场景；
-        3. list 内元素继续递归，确保嵌套配置结构（如数据源列表）同样被覆盖。
+        4. list 内元素继续递归，确保嵌套配置结构（如数据源列表）同样被覆盖。
         """
         if isinstance(node, dict):
             for key in list(node.keys()):
                 normalized = self._normalize_credential_key(key)
-                if normalized in self._SENSITIVE_CREDENTIAL_KEYS:
+                if normalized in self._SENSITIVE_IDENTITY_KEYS:
+                    # 用户/会话标识键整体删除，防止群号、会话 ID 等随遥测外泄
+                    del node[key]
+                elif normalized in self._SENSITIVE_CREDENTIAL_KEYS:
                     node[key] = "***"
                 elif isinstance(node[key], str):
                     # 字符串值应用 URL 查询凭据脱敏（与 _sanitize_message 同一规则），
