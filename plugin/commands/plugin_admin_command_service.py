@@ -281,6 +281,139 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception:
             pass
 
+    async def web_reload_plugin(self) -> tuple[bool, str]:
+        """Web 管理端重载插件（等价于 /灾害预警重启 指令）。
+
+        只负责在请求内完成守卫与遥测上报并立即返回。
+        """
+        plugin_manager = getattr(self.plugin.context, "_star_manager", None)
+        if plugin_manager is None:
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "reload_plugin",
+                    "success": False,
+                    "reason": "no_plugin_manager",
+                },
+            )
+            return False, "无法获取 AstrBot 插件管理器"
+
+        plugin_name = get_plugin_name()
+        await self._track_command_feature(
+            "command_admin_action",
+            {
+                "action": "reload_plugin_requested",
+                "success": True,
+                "plugin": plugin_name,
+            },
+        )
+        return True, "正在重载灾害预警插件，请稍候…"
+
+    def register_reload_task(
+        self,
+        background_tasks,
+        plugin_manager,
+        plugin_name: str,
+    ) -> str:
+        """向 FastAPI BackgroundTasks 注册重载任务并返回响应文案。"""
+
+        async def _run_reload() -> None:
+            try:
+                success, message = await plugin_manager.reload(plugin_name)
+                if not success:
+                    logger.warning(f"[灾害预警] Web 端重载插件操作失败: {message}")
+                    await self._track_command_feature(
+                        "command_admin_action",
+                        {
+                            "action": "reload_plugin",
+                            "success": False,
+                            "reason": "reload_failed",
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001 - 后台任务边界兜底
+                logger.error(f"[灾害预警] Web 端重载插件操作失败: {exc}")
+                await self._track_command_feature(
+                    "command_admin_action",
+                    {
+                        "action": "reload_plugin",
+                        "success": False,
+                        "reason": "exception",
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        async def _dispatch() -> None:
+            # 仅创建独立任务后立即返回，绝不等待 reload 完成，
+            # 避免在请求上下文内阻塞导致 uvicorn 优雅关闭死锁。
+            asyncio.create_task(_run_reload())
+
+        background_tasks.add_task(_dispatch)
+        return "正在重载灾害预警插件，请稍候…"
+
+    async def web_restart_astrbot(self) -> tuple[bool, str]:
+        """Web 管理端重启 AstrBot 进程（等价于 /重启AstrBot 指令）。
+
+        与指令路径共享同一套桌面托管/DEMO 守卫、遥测与重启适配层调用。
+        重启由适配层在后台 daemon 线程执行（内部 sleep 3 秒后 os.exec*
+        替换进程），因此本方法在派发成功后立即返回，响应可安全送达。
+        """
+        if is_desktop_managed_backend():
+            return False, (
+                "当前由 AstrBot Desktop 托管运行，无法通过核心命令重启。\n"
+                "请从桌面客户端执行重启或更新。"
+            )
+
+        if DEMO_MODE:
+            return False, "演示模式（DEMO_MODE）下不允许执行此操作。"
+
+        await self._track_command_feature(
+            "command_admin_action",
+            {
+                "action": "restart_astrbot_requested",
+                "success": True,
+            },
+        )
+
+        loop = asyncio.get_running_loop()
+
+        def _on_thread_failure(restart_err: Exception) -> None:
+            """重启线程内失败回调：仅记录日志并上报失败遥测（Web 无会话可推送）。"""
+            logger.error(f"[灾害预警] AstrBot 重启线程执行失败: {restart_err}")
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._track_command_feature(
+                        "command_admin_action",
+                        {
+                            "action": "restart_astrbot",
+                            "success": False,
+                            "reason": "exception",
+                            "error_type": type(restart_err).__name__,
+                        },
+                    ),
+                    loop,
+                )
+            except Exception:
+                pass
+
+        try:
+            ok, error = restart_astrbot_in_background(on_failure=_on_thread_failure)
+            if not ok:
+                raise RuntimeError(f"无法触发 AstrBot 重启: {error or '未知原因'}")
+        except Exception as e:
+            logger.error(f"[灾害预警] Web 端触发 AstrBot 重启失败: {e}")
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "restart_astrbot",
+                    "success": False,
+                    "reason": "exception",
+                    "error_type": type(e).__name__,
+                },
+            )
+            return False, "触发 AstrBot 重启失败，请查看服务端日志"
+
+        return True, "已触发 AstrBot 重启，进程将在数秒内重新启动，请稍候…"
+
     async def handle_disaster_reconnect(self, event):
         """处理强制重连命令，尝试对所有离线或异常的数据源触发重连尝试。
 

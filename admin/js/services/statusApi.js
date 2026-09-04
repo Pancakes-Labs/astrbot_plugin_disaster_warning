@@ -37,6 +37,14 @@
             method: 'POST',
             body: { password },
         }),
+        /**
+         * 重载灾害预警插件（等价于 /灾害预警重启 指令）
+         */
+        reloadPlugin: () => client.request('/plugin/reload', { method: 'POST' }),
+        /**
+         * 重启 AstrBot 进程（等价于 /重启AstrBot 指令）
+         */
+        restartAstrbot: () => client.request('/astrbot/restart', { method: 'POST' }),
     };
 
     window.DisasterStatusApi = statusApi;

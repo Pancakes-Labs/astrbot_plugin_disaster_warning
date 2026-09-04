@@ -33,7 +33,7 @@ jobs:
         run: |
           gh label create "status/stale" --color "EDEDED" --description "长期无活动的 Issue" || gh label edit "status/stale" --color "EDEDED" --description "长期无活动的 Issue"
 
-      - uses: actions/stale@v10
+      - uses: actions/stale@v11
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           operations-per-run: 200

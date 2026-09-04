@@ -94,6 +94,7 @@ class WebServerRuntimeService:
             connections_payload_builder=self.server._connections_payload_builder,
             config_payload_builder=self.server._config_payload_builder,
             expected_sources_getter=self.server.get_expected_data_sources,
+            plugin=self.server.plugin,
         )
         register_utility_routes(
             app,

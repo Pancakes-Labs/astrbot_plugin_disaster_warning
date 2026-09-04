@@ -91,7 +91,9 @@ class DisasterWarningPlugin(Star):
             self._lifecycle_service.start_telemetry_tasks()
 
             if self.config.get("web_admin", {}).get("enabled", False):
-                self.web_server = WebAdminServer(self.disaster_service, self.config)
+                self.web_server = WebAdminServer(
+                    self.disaster_service, self.config, plugin=self
+                )
                 # 注入引用以支持事件驱动的实时推送
                 self.disaster_service.web_admin_server = self.web_server
                 await self.web_server.start()

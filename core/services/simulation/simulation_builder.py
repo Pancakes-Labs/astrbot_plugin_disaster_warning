@@ -523,11 +523,16 @@ class SimulationBuilder:
             # 布尔标记
             if params.get("is_training"):
                 extra["is_training"] = True
+                domain_event.metadata["is_training"] = True
             if params.get("is_assumption"):
                 extra["is_assumption"] = True
                 extra["magnitude_is_placeholder"] = True
+                # 同步写入领域事件元数据
+                domain_event.metadata["is_assumption"] = True
+                domain_event.metadata["magnitude_is_placeholder"] = True
             if params.get("is_cancel"):
                 extra["is_cancel"] = True
+                domain_event.metadata["is_cancel"] = True
             # 警报区域：优先使用 jma_warning_areas JSON，转换成展示器读取的格式。
             raw_areas = params.get("jma_warning_areas")
             if raw_areas:

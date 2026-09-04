@@ -5,8 +5,11 @@ Web 管理端运行态路由。
 
 from __future__ import annotations
 
+from fastapi import BackgroundTasks
+
 from astrbot.api import logger
 
+from .....utils.version import get_plugin_name
 from ....services.telemetry.telemetry_utils import track_feature_safely
 from ..payloads.api_response import ApiResponse
 
@@ -18,8 +21,13 @@ def register_runtime_admin_routes(
     connections_payload_builder,
     config_payload_builder,
     expected_sources_getter,
+    plugin=None,
 ):
-    """注册运行态管理路由。"""
+    """注册运行态管理路由。
+
+    plugin: 插件实例（可选）。注入后 Web 按钮可复用指令侧的重载/重启
+        链路，保证与插件指令行为等价。
+    """
 
     async def _track_admin_feature(feature_name: str, extra: dict | None = None):
         telemetry = getattr(disaster_service, "_telemetry", None)
@@ -95,4 +103,55 @@ def register_runtime_admin_routes(
             return ApiResponse.success(config_payload_builder.build_summary())
         except Exception as e:
             logger.error(f"[灾害预警] 获取配置失败: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+
+    @app.post("/api/plugin/reload")
+    async def reload_plugin(background_tasks: BackgroundTasks):
+        """重载灾害预警插件（等价于 /灾害预警重启 指令）。
+
+        使用 FastAPI BackgroundTasks：框架保证响应发送完成之后才执行
+        后台重载任务，因此客户端一定能先收到 200 响应，再触发销毁旧
+        插件实例/重建管理端，彻底消除重载与响应之间的竞态。
+        """
+        try:
+            admin_service = getattr(plugin, "_admin_command_service", None)
+            if admin_service is None:
+                return ApiResponse.error("插件管理服务未就绪", status_code=503)
+
+            plugin_manager = getattr(
+                getattr(plugin, "context", None), "_star_manager", None
+            )
+            if plugin_manager is None:
+                await _track_admin_feature("web_reload_plugin", {"success": False})
+                return ApiResponse.error("无法获取 AstrBot 插件管理器", status_code=503)
+
+            plugin_name = get_plugin_name()
+            message = admin_service.register_reload_task(
+                background_tasks, plugin_manager, plugin_name
+            )
+            await _track_admin_feature("web_reload_plugin", {"success": True})
+            return ApiResponse.success({"success": True, "message": message})
+        except Exception as e:
+            await _track_admin_feature("web_reload_plugin", {"failed": True})
+            logger.error(f"[灾害预警] Web端重载插件失败: {e}")
+            return ApiResponse.error(str(e), status_code=500)
+
+    @app.post("/api/astrbot/restart")
+    async def restart_astrbot():
+        """重启 AstrBot 进程（等价于 /重启AstrBot 指令）。"""
+        try:
+            admin_service = getattr(plugin, "_admin_command_service", None)
+            if admin_service is None:
+                return ApiResponse.error("插件管理服务未就绪", status_code=503)
+
+            ok, message = await admin_service.web_restart_astrbot()
+            if not ok:
+                await _track_admin_feature("web_restart_astrbot", {"success": False})
+                return ApiResponse.error(message, status_code=500)
+
+            await _track_admin_feature("web_restart_astrbot", {"success": True})
+            return ApiResponse.success({"success": True, "message": message})
+        except Exception as e:
+            await _track_admin_feature("web_restart_astrbot", {"failed": True})
+            logger.error(f"[灾害预警] Web端重启 AstrBot 失败: {e}")
             return ApiResponse.error(str(e), status_code=500)

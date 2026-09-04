@@ -38,10 +38,18 @@ except ImportError:
 class WebAdminServer:
     """Web 管理端服务器。"""
 
-    def __init__(self, disaster_service, config: dict[str, Any]):
-        """初始化管理端宿主，并装配运行时依赖。"""
+    def __init__(self, disaster_service, config: dict[str, Any], plugin=None):
+        """初始化管理端宿主，并装配运行时依赖。
+
+        Args:
+            disaster_service: 灾害预警主服务实例。
+            config: 插件配置字典。
+            plugin: 插件实例（DisasterWarningPlugin）。注入后路由端点可复用
+                指令侧的重载/重启链路，保持 Web 按钮与插件指令行为等价。
+        """
         self.disaster_service = disaster_service
         self.config = config
+        self.plugin = plugin
         self.config_accessor = ConfigAccessor(config)
         self.app = None
         self.server = None

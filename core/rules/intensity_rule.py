@@ -214,13 +214,14 @@ class EarthquakeThresholdRule(BaseRule):
         # 模式 3：震度过滤器（日本、台湾）
         if intensity_mode == "scale":
             runtime_filter = policy_state.get("scale_filter") or {}
-            # PLUM/假定震源下 M1.0 为占位震级，解析层已将其置空。
-            # 震级阈值检查应跳过，仅按震度过滤，避免 all 模式误杀 PLUM 报
+            # 缺失震级或占位震级时跳过震级阈值检查，仅按震度过滤
+            # 统一跳过震级检查，避免 all 模式误杀此类消息，
             # 或 any 模式产生「震级 无 ≥ 2.0」误导性失败描述。
             eq_metadata = getattr(earthquake, "metadata", {}) or {}
             if not isinstance(eq_metadata, dict):
                 eq_metadata = {}
-            skip_magnitude = bool(
+            magnitude = earthquake.magnitude
+            skip_magnitude = magnitude is None or bool(
                 eq_metadata.get("is_assumption", False)
                 or eq_metadata.get("magnitude_is_placeholder", False)
             )
@@ -247,7 +248,7 @@ class EarthquakeThresholdRule(BaseRule):
                     True,
                 ),
                 accept_reason=(
-                    "震度规则通过（PLUM法占位震级，已跳过震级过滤）"
+                    "震度规则通过（震级缺失或为占位震级，已跳过震级过滤）"
                     if skip_magnitude
                     else "震度规则通过"
                 ),
