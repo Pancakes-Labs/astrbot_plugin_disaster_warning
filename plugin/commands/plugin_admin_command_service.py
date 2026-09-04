@@ -282,15 +282,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             pass
 
     async def web_reload_plugin(self) -> tuple[bool, str]:
-        """Web 管理端重载插件（等价于 /灾害预警重启 指令）。
-
-        与指令路径共享同一套守卫、遥测与插件管理器调用，保证行为等价。
-        注意：重载会销毁旧插件实例并重建 Web 管理端，若在 HTTP 请求内
-        同步等待重载完成，旧 uvicorn 服务器会因本请求仍处于优雅关闭窗口
-        而取消在途请求（打断 reload 中途），且新实例绑定端口可能冲突。
-        因此这里只完成守卫与遥测后立即返回，实际重载在后台 asyncio
-        任务中执行，与指令路径触发的底层操作完全一致。
-        """
+        """Web 管理端重载插件（等价于 /灾害预警重启 指令）。"""
         plugin_manager = getattr(self.plugin.context, "_star_manager", None)
         if plugin_manager is None:
             await self._track_command_feature(
@@ -317,6 +309,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
 
         async def _run_reload() -> None:
             try:
+                # 竞态防护：先让出事件循环并短暂等待，保证请求的 200 响应已被 uvicorn 发送给客户端，再销毁旧插件实例。
+                await asyncio.sleep(0.5)
                 success, message = await plugin_manager.reload(plugin_name)
                 if not success:
                     logger.warning(f"[灾害预警] Web 端重载插件操作失败: {message}")
