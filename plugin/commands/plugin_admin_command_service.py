@@ -282,7 +282,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             pass
 
     async def web_reload_plugin(self) -> tuple[bool, str]:
-        """Web 管理端重载插件（等价于 /灾害预警重启 指令）。"""
+        """Web 管理端重载插件（等价于 /灾害预警重启 指令）。
+
+        只负责在请求内完成守卫与遥测上报并立即返回。
+        """
         plugin_manager = getattr(self.plugin.context, "_star_manager", None)
         if plugin_manager is None:
             await self._track_command_feature(
@@ -304,13 +307,18 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 "plugin": plugin_name,
             },
         )
+        return True, "正在重载灾害预警插件，请稍候…"
 
-        loop = asyncio.get_running_loop()
+    def register_reload_task(
+        self,
+        background_tasks,
+        plugin_manager,
+        plugin_name: str,
+    ) -> str:
+        """向 FastAPI BackgroundTasks 注册重载任务并返回响应文案。"""
 
         async def _run_reload() -> None:
             try:
-                # 竞态防护：先让出事件循环并短暂等待，保证请求的 200 响应已被 uvicorn 发送给客户端，再销毁旧插件实例。
-                await asyncio.sleep(0.5)
                 success, message = await plugin_manager.reload(plugin_name)
                 if not success:
                     logger.warning(f"[灾害预警] Web 端重载插件操作失败: {message}")
@@ -334,13 +342,13 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     },
                 )
 
-        try:
-            loop.create_task(_run_reload())
-        except RuntimeError:
-            # 事件循环已关闭等极端场景下无法派发任务，视为失败。
-            return False, "无法派发插件重载任务，请查看服务端日志"
+        async def _dispatch() -> None:
+            # 仅创建独立任务后立即返回，绝不等待 reload 完成，
+            # 避免在请求上下文内阻塞导致 uvicorn 优雅关闭死锁。
+            asyncio.create_task(_run_reload())
 
-        return True, "正在重载灾害预警插件，请稍候…"
+        background_tasks.add_task(_dispatch)
+        return "正在重载灾害预警插件，请稍候…"
 
     async def web_restart_astrbot(self) -> tuple[bool, str]:
         """Web 管理端重启 AstrBot 进程（等价于 /重启AstrBot 指令）。
