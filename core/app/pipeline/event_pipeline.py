@@ -492,16 +492,29 @@ class EventPipeline:
                 entry for entry, _ in built_messages[full_batch_count * max_batch :]
             ]
 
-            plugin_logger.info(
-                f"[灾害预警] 气象预警合并转发已发送到 {session_log}, "
-                f"共 {sent_entry_count} 条预警，切为 {sent_nodes} 个节点"
-                f"（单批上限 {max_batch}）"
-                + (
-                    f"，{len(deferred_entries)} 条节点未满已放回缓冲区等待凑满"
-                    if deferred_entries
-                    else ""
+            # 推送结果日志：按"是否有节点成功发出"区分两种主句，
+            if sent_nodes > 0:
+                summary = (
+                    f"[灾害预警] 气象预警聚合推送完成：共发送 {sent_entry_count} 条预警"
+                    f"（{sent_nodes} 个节点）到 {session_log}"
                 )
-                + (f"，{failed_nodes} 个节点发送失败" if failed_nodes else ""),
+                if deferred_entries:
+                    summary += (
+                        f"，有 {len(deferred_entries)} 条未满，已放回缓冲区等待凑满"
+                    )
+                if failed_nodes:
+                    summary += f"，另有 {failed_nodes} 个节点发送失败"
+            else:
+                summary = f"[灾害预警] 气象预警聚合推送：本轮无预警发送到 {session_log}"
+                if deferred_entries:
+                    summary += (
+                        f"，预警数 {len(deferred_entries)} 条未满足单节点最低要求 "
+                        f"{max_batch} 条、已放回缓冲区等待凑满"
+                    )
+                if failed_nodes:
+                    summary += f"，{failed_nodes} 个节点发送失败"
+            plugin_logger.info(
+                summary,
                 event_stream="weather_alarm",
                 is_silent_window=True,
             )
