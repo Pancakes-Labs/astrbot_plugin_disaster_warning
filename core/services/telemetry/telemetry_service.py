@@ -476,6 +476,17 @@ class TelemetryManager:
         "authorization",
     }
 
+    # 配置快照中携带用户/会话标识的敏感键集合（存储规范化的键名）。
+    # 命中即**整体删除**，不做统计聚合，避免群号、会话 ID、管理员标识等
+    # 个人可识别信息随匿名遥测外泄。
+    # 注意：这些键不属于凭据类，_sanitize_credentials 的占位符替换无法覆盖，
+    # 因此必须在 track_config 中显式维护删除清单。
+    _SENSITIVE_IDENTITY_KEYS = {
+        "adminusers",
+        "targetsessions",
+        "offlinenotificationsessions",
+    }
+
     # URL query 中凭据类参数的键名模式（允许 -/_ 分隔符，大小写不敏感），
     # 用于脱敏异常消息与堆栈中拼接的带鉴权参数 URL，
     # 同时覆盖 snake_case / camelCase / kebab-case 变体（如 refreshToken、apiKey）。
@@ -494,8 +505,7 @@ class TelemetryManager:
         """
         上报配置快照。
 
-        会过滤管理员、目标会话、地理位置与管理端密码等敏感字段，
-        并对数据源凭据类键做递归脱敏替换，防止真实凭据随匿名遥测外泄。
+        会过滤敏感字段并对数据源凭据类键做递归脱敏替换，防止真实凭据随匿名遥测外泄。
         """
         if not self._enabled:
             return False
@@ -503,11 +513,11 @@ class TelemetryManager:
         try:
             config_copy = copy.deepcopy(config)
 
-            # 对可能存有敏感信息的键进行严格删除脱敏，确保用户隐私安全
-            if "admin_users" in config_copy:
-                del config_copy["admin_users"]
-            if "target_sessions" in config_copy:
-                del config_copy["target_sessions"]
+            # 对可能存有用户/会话标识的键进行严格删除脱敏，确保用户隐私安全。
+            # 统一遍历 _SENSITIVE_IDENTITY_KEYS（规范化键名），同时覆盖命名变体，避免遗漏。
+            for key in list(config_copy.keys()):
+                if self._normalize_credential_key(key) in self._SENSITIVE_IDENTITY_KEYS:
+                    del config_copy[key]
 
             if "local_monitoring" in config_copy:
                 lm = config_copy["local_monitoring"]
