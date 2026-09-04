@@ -8,5 +8,5 @@ tzdata>=2026.3
 tomli>=2.4.1; python_version < "3.11"
 fastapi>=0.141.1
 uvicorn>=0.52.4
-protobuf>=7.36.0
+protobuf>=6.33.5,<7
 aiosqlite>=0.22.1
