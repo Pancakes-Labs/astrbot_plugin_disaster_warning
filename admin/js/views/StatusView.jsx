@@ -20,6 +20,8 @@ function StatusView() {
     const [reconnecting, setReconnecting] = React.useState(false);
     const [refreshing, setRefreshing] = React.useState(false);
     const [resettingStats, setResettingStats] = React.useState(false);
+    const [reloadingPlugin, setReloadingPlugin] = React.useState(false);
+    const [restartingAstrbot, setRestartingAstrbot] = React.useState(false);
     
     // 获取全局 WebSocket 连接发送消息的方法
     const { sendMessage } = useWebSocket(); 
@@ -118,6 +120,50 @@ function StatusView() {
         }
     };
 
+    /**
+     * 重载灾害预警插件（等价于 /灾害预警重启 指令）
+     */
+    const handleReloadPlugin = async () => {
+        if (!confirm('确定要重载灾害预警插件吗？\n重载过程中服务会短暂中断。')) {
+            return;
+        }
+
+        setReloadingPlugin(true);
+        try {
+            const result = await statusApi.reloadPlugin();
+            showToast(result?.message || '正在重载灾害预警插件', 'success');
+            // 重载会重建 Web 管理端，短暂等待后刷新页面数据
+            setTimeout(() => {
+                refreshAll();
+            }, 3000);
+        } catch (e) {
+            console.error('Reload plugin failed:', e);
+            showToast(e.message || '重载插件失败，请检查网络连接', 'error');
+        } finally {
+            setReloadingPlugin(false);
+        }
+    };
+
+    /**
+     * 重启 AstrBot 进程（等价于 /重启AstrBot 指令）
+     */
+    const handleRestartAstrbot = async () => {
+        if (!confirm('确定要重启 AstrBot 吗？\n重启期间 WebUI 会短暂不可用。')) {
+            return;
+        }
+
+        setRestartingAstrbot(true);
+        try {
+            const result = await statusApi.restartAstrbot();
+            showToast(result?.message || '已触发 AstrBot 重启', 'success');
+        } catch (e) {
+            console.error('Restart AstrBot failed:', e);
+            showToast(e.message || '重启 AstrBot 失败，请检查网络连接', 'error');
+        } finally {
+            setRestartingAstrbot(false);
+        }
+    };
+
     return (
         <Box>
             {/* 网格主容器 */}
@@ -201,6 +247,46 @@ function StatusView() {
                                     <>
                                         <span className="status-action-icon">🧹</span>
                                         一键清除统计
+                                    </>
+                                )}
+                            </button>
+
+                            {/* 4. 重载灾害预警插件（等价于 /灾害预警重启 指令） */}
+                            <button
+                                className={`btn btn-action status-action-button ${!status.running ? 'is-disabled' : ''}`}
+                                onClick={handleReloadPlugin}
+                                disabled={reloadingPlugin || !status.running}
+                                title="重载灾害预警插件（等价于 /灾害预警重启）"
+                            >
+                                {reloadingPlugin ? (
+                                    <>
+                                        <span className="spinner status-action-spinner"></span>
+                                        重载中...
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="status-action-icon">♻️</span>
+                                        重载插件
+                                    </>
+                                )}
+                            </button>
+
+                            {/* 5. 重启 AstrBot 进程（等价于 /重启AstrBot 指令） */}
+                            <button
+                                className={`btn btn-action status-action-button ${!status.running ? 'is-disabled' : ''}`}
+                                onClick={handleRestartAstrbot}
+                                disabled={restartingAstrbot || !status.running}
+                                title="重启 AstrBot 进程（等价于 /重启AstrBot）"
+                            >
+                                {restartingAstrbot ? (
+                                    <>
+                                        <span className="spinner status-action-spinner"></span>
+                                        重启中...
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="status-action-icon">🔄</span>
+                                        重启 AstrBot
                                     </>
                                 )}
                             </button>
