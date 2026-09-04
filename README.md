@@ -212,7 +212,7 @@ Session ID: 「4C011A2B3D4C5E6F9F8E7D6C5B4A3210」
 The group's ID: 「7E933A67F5C0AD0A128A199EFCE140B4」. Set this ID to whitelist to allow the entire group.
 ```
 
-- 私聊推送请填 UMO 的部分，即 `default:GroupMessage:4C011A2B3D4C5E6F9F8E7D6C5B4A3210`。
+- 私聊推送请填 UMO 的部分，即 `default:FriendMessage:4C011A2B3D4C5E6F9F8E7D6C5B4A3210`。
 - 群聊推送请用 `The group's ID` 替换掉 `UID` 的部分，即填写 `default:GroupMessage:7E933A67F5C0AD0A128A199EFCE140B4`。
 
 其他平台配置流程基本类似。完成后重载插件即可开始推送。
@@ -3428,7 +3428,7 @@ GNU Affero General Public License v3.0 - 详见 [LICENSE](LICENSE) 文件。
 
 ## 📊 仓库状态
 
-![Alt](https://repobeats.axiom.co/api/embed/50006d7936120b80175215ef4e1437940e0ad51d.svg "Repobeats analytics image")
+![Alt](https://repobeats.axiom.co/api/embed/d7a10c133e742cf1c74294ca2d56110ae84a47a0.svg "Repobeats analytics image")
 
 ## ⭐️ 星星
 
