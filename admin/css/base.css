@@ -895,7 +895,12 @@ body.dark-theme .bl-error {
 .config-renderer-preview-card,
 .config-renderer-session-card,
 .tasks-empty-card,
-.notifications-inline-meta-item {
+.notifications-inline-meta-item,
+.sim-view-toolbar,
+.sim-view-draft-bar,
+.sim-view-left,
+.sim-view-right,
+.sim-view-console {
     animation: card-fade-up 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 
@@ -910,7 +915,8 @@ body.dark-theme .bl-error {
 .notifications-hero-card,
 .markdown-docs-toc-inner,
 .config-header,
-.config-renderer-aside {
+.config-renderer-aside,
+.sim-view-toolbar {
     animation-delay: 0.02s;
 }
 
@@ -926,7 +932,8 @@ body.dark-theme .bl-error {
 .config-card,
 .config-renderer-main,
 .config-renderer-form-card,
-.config-renderer-session-card {
+.config-renderer-session-card,
+.sim-view-draft-bar {
     animation-delay: 0.06s;
 }
 
@@ -942,7 +949,9 @@ body.dark-theme .bl-error {
 .config-renderer-shell,
 .config-renderer-preview-card,
 .notifications-empty-card,
-.markdown-docs-empty-card {
+.markdown-docs-empty-card,
+.sim-view-left,
+.sim-view-right {
     animation-delay: 0.10s;
 }
 
@@ -958,7 +967,8 @@ body.dark-theme .bl-error {
 .markdown-docs-toc-item:nth-child(n+2),
 .config-card .MuiAccordion-root:nth-child(n+1),
 .config-card .MuiPaper-root:nth-child(n+1),
-.notifications-inline-meta-item:nth-child(n+1) {
+.notifications-inline-meta-item:nth-child(n+1),
+.sim-view-console {
     animation-delay: 0.14s;
 }
 
