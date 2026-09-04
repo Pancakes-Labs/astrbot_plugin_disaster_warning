@@ -57,16 +57,17 @@ class JmaEarthquakeP2PParser(BaseParser):
             issue_type = issue.get("type", "") if isinstance(issue, dict) else ""
 
             magnitude = safe_float_convert(magnitude_raw)
-            # 过滤 P2P 默认的缺省值
+            # 过滤 P2P 默认的缺省值：-1 表示「未提供」，与深度/最大震度语义一致
             if magnitude == -1:
                 magnitude = None
 
-            # 仅在非震度速报场景下把震级视为硬性字段，兼容日本震度速报消息
-            if magnitude is None and issue_type != "ScalePrompt":
-                plugin_logger.error(
-                    f"[灾害预警] {self.source_id} 震级解析失败: {magnitude_raw}"
+            # 震级缺失不视为解析失败：P2P 对无震级数据（如火山喷发情报、
+            # 远地地震情报 Foreign、部分震度速报）统一用 -1 占位，缺震级时
+            # 交由下游规则链与展示层兜底（"未知震级"），而不是在此丢弃消息。
+            if magnitude is None:
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 震级缺失，交由下游兜底: {magnitude_raw}"
                 )
-                return None
 
             lat = safe_float_convert(latitude)
             lon = safe_float_convert(longitude)
@@ -90,6 +91,9 @@ class JmaEarthquakeP2PParser(BaseParser):
             )
 
             depth = safe_float_convert(hypocenter.get("depth"))
+            # P2P 深度 -1 同样表示「未提供」（原始数据常为 "-1km"），统一归一化为 None
+            if depth == -1:
+                depth = None
             shock_time = self._parse_datetime(earthquake_info.get("time", ""))
 
             # 日本地震情报可能带有订正类型，这里统一映射为中文说明
