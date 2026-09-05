@@ -363,11 +363,23 @@
       "strict_mode": {
         "description": "严格过滤模式",
         "type": "bool",
-        "hint": "开启后，如果本地烈度未达标，将忽略所有通知（包括其他地区的大地震）",
+        "hint": "开启后，如果本地烈度未达标，将忽略所有通知（包括其他地区的大地震）。已拆分为下方两个独立开关，此开关作为兼容保留，使用新开关时请务必关闭此开关。",
+        "default": false
+      },
+      "filter_insensitive_eew": {
+        "description": "过滤本地无感地震预警",
+        "type": "bool",
+        "hint": "开启后，地震预警在本地预估烈度/震度小于通知阈值时不推送。不影响其他地区大地震的正式测定消息。",
+        "default": false
+      },
+      "filter_insensitive_info": {
+        "description": "过滤本地无感地震情报",
+        "type": "bool",
+        "hint": "开启后，地震测定/情报在本地预估烈度/震度小于通知阈值时不推送。可与预警过滤独立开关。",
         "default": false
       },
       "intensity_threshold": {
-        "description": "通知阈值(烈度)",
+        "description": "地震预警通知阈值(烈度)",
         "type": "float",
         "hint": "只有当本地预估烈度大于等于此值时才通知",
         "default": 2.0,
@@ -378,10 +390,30 @@
         }
       },
       "shindo_threshold": {
-        "description": "通知阈值(震度)",
+        "description": "地震预警通知阈值(震度)",
         "type": "float",
         "hint": "只有当本地预估震度大于等于此值时才通知",
         "default": 2.0,
+        "slider": {
+          "min": 0,
+          "max": 7,
+          "step": 0.1
+        }
+      },
+      "info_intensity_threshold": {
+        "description": "地震测定/情报通知阈值(烈度)",
+        "type": "float",
+        "hint": "只有当本地预估烈度大于等于此值时才推送。留空时复用上方「地震预警通知阈值(烈度)」",
+        "slider": {
+          "min": 0,
+          "max": 12,
+          "step": 0.1
+        }
+      },
+      "info_shindo_threshold": {
+        "description": "地震测定/情报通知阈值(震度)",
+        "type": "float",
+        "hint": "只有当本地预估震度大于等于此值时才推送。留空时复用上方「地震预警通知阈值(震度)」",
         "slider": {
           "min": 0,
           "max": 7,
@@ -688,6 +720,31 @@
               "max": 12,
               "step": 0.1
             }
+          }
+        }
+      },
+      "measurement_type_filter": {
+        "description": "测定类型过滤器",
+        "type": "object",
+        "hint": "控制自动测定与正式测定地震情报的接收。适用于会区分这两种测定类型的数据源。关闭本过滤器时自动测定与正式测定均正常接收。",
+        "items": {
+          "enabled": {
+            "description": "启用测定类型过滤器",
+            "type": "bool",
+            "default": false,
+            "hint": "开启后按下方两个开关分别控制自动测定与正式测定消息的接收。"
+          },
+          "receive_automatic": {
+            "description": "接收自动测定消息",
+            "type": "bool",
+            "default": true,
+            "hint": "开启后接收自动测定地震情报。"
+          },
+          "receive_reviewed": {
+            "description": "接收正式测定消息",
+            "type": "bool",
+            "default": true,
+            "hint": "开启后接收正式测定地震情报。"
           }
         }
       }
