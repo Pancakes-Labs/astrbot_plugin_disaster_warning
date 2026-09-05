@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD029 -->
 <!-- markdownlint-disable MD033 -->
 <!-- markdownlint-disable MD041 -->
-![astrbot_plugin_disaster_warning](https://socialify.git.ci/Pancakes-Labs/astrbot_plugin_disaster_warning/image?custom_description=%F0%9F%9A%A8+%E4%B8%80%E4%B8%AA%E5%9F%BA%E4%BA%8E+AstrBot+%E7%9A%84%E5%A4%9A%E6%95%B0%E6%8D%AE%E6%BA%90%E7%81%BE%E5%AE%B3%E9%A2%84%E8%AD%A6%E6%8F%92%E4%BB%B6&description=1&font=Inter&forks=1&issues=1&language=1&name=1&owner=1&pattern=Charlie+Brown&pulls=1&stargazers=1&theme=Auto)
+![astrbot_plugin_disaster_warning](https://socialify.git.ci/Pancakes-Labs/astrbot_plugin_disaster_warning/image?custom_description=%E5%9F%BA%E4%BA%8E+AstrBot+%E7%9A%84%E6%96%B0%E4%B8%80%E4%BB%A3%E7%81%BE%E5%AE%B3%E9%A2%84%E8%AD%A6%E5%B9%B3%E5%8F%B0&custom_language=Python&description=1&font=Inter&forks=1&issues=1&language=1&name=1&owner=1&pattern=Charlie+Brown&pulls=1&stargazers=1&theme=Auto)
 
 <p align="center">
   <img src="resources/PluginRank.svg" alt="PluginRank">
@@ -95,11 +95,11 @@
 > [!TIP]
 > 本项目的相关开发数据 (持续更新中)：
 >
-> 开发时长：累计 171 天（主插件部分）
+> 开发时长：累计 173 天（主插件部分）
 >
-> 累计工时：约 763 小时（主插件部分）
+> 累计工时：约 769 小时（主插件部分）
 >
-> Tokens Used：4,637,105,072
+> Tokens Used：4,671,632,327
 
 ## ✨ 功能特性
 
@@ -3208,6 +3208,17 @@ graph TB
 >
 > 1. 数据源本身没有推送第 1 报 。
 > 2. 第 1 报及后续某些报数不满足推送标准被过滤，但随着后续数据更新变动又满足，因此会出现推送不完整的情况。
+
+</details>
+
+<details>
+<summary>Q: 为什么新的测定类型过滤器好像没有正常工作？</summary>
+
+>**A**: 不知道是什么神秘 bug，本地测试的时候我自己遇到了跨会话污染配置的情况。但是有解决办法：
+>
+> 1. **显式开关**：建议显式开启 `启用测定类型过滤器`，不要依赖原有的默认行为。根据你实际需求开启或关闭两个子开关。
+> 2. **重新保存配置并重载**：确认配置后记得保存刷新一下，并且建议重载插件，不要依赖实时热重载。
+> 3. 完成上述操作后，如果还是存在问题，请提交 Issue 进行反馈。
 
 </details>
 
