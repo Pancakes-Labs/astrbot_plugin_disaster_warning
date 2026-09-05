@@ -136,7 +136,12 @@ class JmaEarthquakeP2PParser(BaseParser):
                 "jma_warning_areas": [],
                 "jma_warning_area_ranges": [],
             }
-            event_id = str(data.get("id", "") or "").strip()
+            # P2P v2 顶层 ID 字段可能是 "id" 或 MongoDB 风格的 "_id"，
+            # 两者都需兼容，否则拿不到稳定事件标识，去重指纹会退化为
+            # 「发震时间+地点」，导致同一地点不同发布（如火山喷发更新情报）
+            # 被误判为重复事件。
+            raw_event_id = str(data.get("id", "") or data.get("_id", "") or "").strip()
+            event_id = raw_event_id
             # 缺少正式事件ID时使用时间与地点拼出稳定回退ID
             if not event_id:
                 fallback_time = (
@@ -171,9 +176,7 @@ class JmaEarthquakeP2PParser(BaseParser):
                 else "p2p",
                 source_enum=source_entry.source_enum if source_entry else "",
                 published_at=domain_event.occurred_at,
-                aliases=tuple(
-                    item for item in (str(data.get("id", "") or "").strip(),) if item
-                ),
+                aliases=tuple(item for item in (raw_event_id,) if item),
                 attributes={
                     "parser_name": self.source_entry.parser_name
                     if self.source_entry
