@@ -46,7 +46,6 @@ class MeasurementTypeRule(BaseRule):
 
         envelope_meta = event.metadata if isinstance(event.metadata, dict) else {}
 
-        raw_value = ""
         for candidate in (
             domain_meta.get("info_type"),
             domain_meta.get("infoTypeName"),
@@ -56,19 +55,16 @@ class MeasurementTypeRule(BaseRule):
             envelope_meta.get("status"),
             envelope_meta.get("issue_type"),
         ):
-            text = str(candidate or "").strip()
-            if text:
-                raw_value = text
-                break
+            raw_value = str(candidate or "").strip()
+            if not raw_value:
+                continue
 
-        if not raw_value:
-            return "unknown"
+            text_lower = raw_value.lower()
+            if "正式测定" in raw_value or text_lower == "reviewed":
+                return "reviewed"
+            if "自动测定" in raw_value or text_lower == "automatic":
+                return "automatic"
 
-        text_lower = raw_value.lower()
-        if "正式测定" in raw_value or text_lower == "reviewed":
-            return "reviewed"
-        if "自动测定" in raw_value or text_lower == "automatic":
-            return "automatic"
         return "unknown"
 
     def evaluate(self, context: RuleContext) -> RuleDecision:
