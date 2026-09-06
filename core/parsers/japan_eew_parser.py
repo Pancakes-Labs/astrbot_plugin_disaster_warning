@@ -377,9 +377,16 @@ class JmaEewP2PParser(BaseParser):
                 metadata=dict(metadata),
             )
 
-            # 构造身份模型
+            # 构造身份模型（P2P v2 顶层 ID 字段可能是 "id" 或 MongoDB 风格 "_id"，需双兼容）
+            candidate_event_id = str(issue_info.get("eventId", "") or "").strip()
+            candidate_id = str(data.get("id", "") or "").strip()
+            candidate_underscore_id = str(data.get("_id", "") or "").strip()
+            resolved_event_id = (
+                candidate_event_id or candidate_id or candidate_underscore_id
+            )
+
             identity = EventIdentity(
-                event_id=str(issue_info.get("eventId", "") or data.get("id", "") or ""),
+                event_id=resolved_event_id,
                 source_id=self.source_id,
                 event_type="earthquake_warning",
                 provider_family=source_entry.provider_family.value
@@ -389,9 +396,7 @@ class JmaEewP2PParser(BaseParser):
                 report_num=report_num,
                 published_at=shock_time,
                 is_final=bool(metadata.get("is_final", False)),
-                aliases=tuple(
-                    item for item in (str(data.get("id", "") or "").strip(),) if item
-                ),
+                aliases=tuple(item for item in (resolved_event_id,) if item),
                 attributes={
                     "parser_name": self.source_entry.parser_name
                     if self.source_entry

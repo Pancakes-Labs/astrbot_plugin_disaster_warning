@@ -6,6 +6,37 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+# 2026/09/06 v1.6.2
+
+## 🚀 What's Changed
+
+### ✨ New Features (新功能)
+
+- 拆分本地无感过滤开关，支持按消息类别独立过滤本地无感推送 by @DBJD-CR in #220
+- 新增测定类型过滤器，对应测定类型过滤规则 by @DBJD-CR in #220
+
+### 💻 WebUI / Frontend (前端)
+
+- 为模拟预警页面补全动画效果 by @DBJD-CR in #219
+- 为快捷操作区域新增重启插件与 AstrBot 的按钮 by @DBJD-CR in #219
+
+### 🐛 Bug Fixes (修复)
+
+- 修复远地地震信息（尤其是大规模喷火的类型）及其他缺少震级或深度数据的地震消息被错误丢弃的问题，并统一处理未提供字段 by @DBJD-CR in #219 #220
+- 增强遥测脱敏处理 by @DBJD-CR in #219
+
+### 📚 Documentation (文档)
+
+- 更新适用于 v1.6.2 的 README 文档和更新日志 by @DBJD-CR in #219 #220
+
+### 🔧 Chore (杂项)
+
+- 更新 Github Actions 版本 by @dependabot[bot] in #179
+- 更新 Python 运行依赖的最低版本要求 by @dependabot[bot] in #217
+- 改进气象预警聚合推送日志，使无发送、延迟、失败等结果更准确清晰 by @DBJD-CR in #219
+
+**Full Changelog**: https://github.com/DBJD-CR/astrbot_plugin_disaster_warning/compare/v1.6.1...v1.6.2
+
 # 2026/08/23 v1.6.1
 
 本版本中快速修复了三个问题。如果您的 AstrBot 版本大于等于 **v4.27.x**，且正在使用 **v1.6.0** 版本，请尽快更新到该版本。
@@ -194,6 +225,7 @@
 - 修复并优化有关海啸事件的去重问题 by @DBJD-CR in #177
 - 修复升级/降级类预警颜色识别错误与机构名提取遗漏的问题 by @DBJD-CR in #180
 - 修复了 `Task was destroyed but it is pending!` 的事件循环噪音 和 `GeneratorExit` 报错 by @DBJD-CR in #184
+- 修复了 USGS 正式测定有概率重复推送的问题 by @DBJD-CR in #187
 - 修复气象预警查询误匹配预警类型的问题 by @DBJD-CR in #193
 - 改进 websocket 重连通知，避免在重连间隔非常短时出现误报的「离线时间过长」提示 by @DBJD-CR in #194
 - 修复网络错误被误判为 SSL 错误并导致提前停止重连的问题 by @DBJD-CR in #206
@@ -780,8 +812,8 @@ Hot Fix For v1.3.5
 
 ### 🐛 Bug Fixes (修复)
 
-- 修复了预警消息重复推送的问题 in #55 by @Aloys233
-- 修复并增强了遥测的错误上报功能 in #51 by @Aloys233
+- 修复并增强了遥测的错误上报功能 by @Aloys233 in #51
+- 修复了预警消息重复推送的问题  by @Aloys233 in #55
 - 修复了未清理干净的函数调用 by @DBJD-CR
 
 ---
@@ -910,7 +942,7 @@ Hot Fix For v1.3.5
 - **Logic**: 修复了“只推送最终报”功能失效的问题 by @DBJD-CR
 - **Logic**: 修复了 KMA (韩国气象厅) 消息被错误识别为 CWA (台湾中央气象署) 的问题 by @DBJD-CR
 - **Config**: 修复了推送间隔为 0 时逻辑判断错误的问题 by @Aloys233 in #21
-- **System**: 修复了临时文件路径创建逻辑，确保正确使用 AstrBot 提供的数据目录 by @Aloys233 & DBJD-CR in #22 & #26
+- **System**: 修复了临时文件路径创建逻辑，确保正确使用 AstrBot 提供的数据目录 by @Aloys233 & DBJD-CR in #22 #26
 - **Data**: 修复了 Wolfx 地震信息测定字段解析错误的问题 by @DBJD-CR
 
 ### 📚 Documentation & Chore (文档与杂项)
@@ -1093,11 +1125,11 @@ Hot Fix For v1.3.5
 
 - 修复了原始消息记录器无法写入日志的问题。
 - 修复了`测试预警命令失效`的问题。
-- 修复了 WebSockets 库版本的兼容性问题，并添加依赖版本控制。@jinyiwei2012 in #4
+- 修复了 WebSockets 库版本的兼容性问题，并添加依赖版本控制。 by @jinyiwei2012 in #4
 
 ---
 
-## New Contributors
+## ❤️ New Contributors
 
 - @jinyiwei2012 made their first contribution in #4
 

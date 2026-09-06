@@ -304,6 +304,14 @@ class PushExecutionService:
                         "strict_mode": bool(
                             local_monitoring_cfg.get("strict_mode", False)
                         ),
+                        # 本地无感过滤独立开关同样影响拦截判定与展示文案，
+                        # 必须纳入缓存键，避免不同过滤策略的会话误复用渲染结果。
+                        "filter_insensitive_eew": bool(
+                            local_monitoring_cfg.get("filter_insensitive_eew", False)
+                        ),
+                        "filter_insensitive_info": bool(
+                            local_monitoring_cfg.get("filter_insensitive_info", False)
+                        ),
                         "intensity_threshold": local_monitoring_cfg.get(
                             "intensity_threshold", 2.0
                         ),
@@ -311,6 +319,13 @@ class PushExecutionService:
                         # 与展示文案，缺失时会导致不同会话误复用同一渲染结果。
                         "shindo_threshold": local_monitoring_cfg.get(
                             "shindo_threshold", 2.0
+                        ),
+                        # 情报/测定专用阈值同样影响过滤判定，纳入缓存键避免误复用。
+                        "info_intensity_threshold": local_monitoring_cfg.get(
+                            "info_intensity_threshold"
+                        ),
+                        "info_shindo_threshold": local_monitoring_cfg.get(
+                            "info_shindo_threshold"
                         ),
                         "intensity_system": str(
                             local_monitoring_cfg.get("intensity_system", "auto")

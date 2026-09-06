@@ -671,6 +671,7 @@ class UsgsEarthquakeParser(BaseParser):
                 if source_entry
                 else "earthquake_info",
                 "info_type": self._get_field(msg_data, "infoTypeName") or "",
+                "status": str(self._get_field(msg_data, "status") or "").strip(),
                 "update_time": update_time,
             }
             event_id = str(usgs_id or "")

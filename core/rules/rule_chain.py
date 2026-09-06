@@ -9,6 +9,7 @@ from .base_rule import RuleContext
 from .intensity_rule import EarthquakeThresholdRule
 from .keyword_rule import KeywordRule
 from .local_rule import LocalIntensityRule
+from .measurement_rule import MeasurementTypeRule
 from .report_rule import ReportRule
 from .rule_result import RuleDecision
 from .source_rule import SourceEnabledRule
@@ -51,6 +52,7 @@ def build_default_rule_chain() -> RuleChain:
         [
             EventTimeRule(),
             SourceEnabledRule(),
+            MeasurementTypeRule(),
             WeatherRule(),
             TyphoonRule(),
             TsunamiRule(),

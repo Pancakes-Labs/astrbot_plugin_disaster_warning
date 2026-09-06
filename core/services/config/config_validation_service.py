@@ -3,6 +3,7 @@
 负责对插件配置进行统一的合法性校验、范围修正和默认值填充。
 """
 
+import math
 from typing import Any
 
 from astrbot.api import logger
@@ -209,22 +210,54 @@ class ConfigValidator:
         # 阈值校验：本地预计烈度报警下限阈值（中国烈度体系）
         threshold = cfg.get("intensity_threshold")
         if isinstance(threshold, (int, float)):
-            if threshold < 0 or threshold > 12:
+            val = float(threshold)
+            if not math.isfinite(val) or val < 0 or val > 12:
                 logger.warning(
-                    f"[灾害预警] 配置警告: 烈度阈值 {threshold} 超出范围 (0~12)，已自动修正。"
+                    f"[灾害预警] 配置警告: 烈度阈值 {threshold} 无效或超出范围 (0~12)，已自动修正。"
                 )
                 # 烈度通常在 0 至 12 级范围内
-                cfg["intensity_threshold"] = max(0.0, min(12.0, float(threshold)))
+                cfg["intensity_threshold"] = (
+                    2.0 if not math.isfinite(val) else max(0.0, min(12.0, val))
+                )
 
         # 阈值校验：本地预计震度报警下限阈值（日本震度体系，計測震度 0~7）
         shindo_threshold = cfg.get("shindo_threshold")
         if isinstance(shindo_threshold, (int, float)):
-            if shindo_threshold < 0 or shindo_threshold > 7:
+            val = float(shindo_threshold)
+            if not math.isfinite(val) or val < 0 or val > 7:
                 logger.warning(
-                    f"[灾害预警] 配置警告: 震度阈值 {shindo_threshold} 超出范围 (0~7)，已自动修正。"
+                    f"[灾害预警] 配置警告: 震度阈值 {shindo_threshold} 无效或超出范围 (0~7)，已自动修正。"
                 )
                 # 計測震度通常在 0 至 7 档范围内（震度 7 为最高档）
-                cfg["shindo_threshold"] = max(0.0, min(7.0, float(shindo_threshold)))
+                cfg["shindo_threshold"] = (
+                    2.0 if not math.isfinite(val) else max(0.0, min(7.0, val))
+                )
+
+        # 阈值校验：情报/测定专用烈度阈值（未配置时在运行时回退通用烈度阈值）
+        info_threshold = cfg.get("info_intensity_threshold")
+        if isinstance(info_threshold, (int, float)):
+            val = float(info_threshold)
+            if not math.isfinite(val) or val < 0 or val > 12:
+                logger.warning(
+                    f"[灾害预警] 配置警告: 情报烈度阈值 {info_threshold} 无效或超出范围 (0~12)，已自动修正。"
+                )
+                if not math.isfinite(val):
+                    cfg.pop("info_intensity_threshold", None)
+                else:
+                    cfg["info_intensity_threshold"] = max(0.0, min(12.0, val))
+
+        # 阈值校验：情报/测定专用震度阈值（未配置时在运行时回退通用震度阈值）
+        info_shindo_threshold = cfg.get("info_shindo_threshold")
+        if isinstance(info_shindo_threshold, (int, float)):
+            val = float(info_shindo_threshold)
+            if not math.isfinite(val) or val < 0 or val > 7:
+                logger.warning(
+                    f"[灾害预警] 配置警告: 情报震度阈值 {info_shindo_threshold} 无效或超出范围 (0~7)，已自动修正。"
+                )
+                if not math.isfinite(val):
+                    cfg.pop("info_shindo_threshold", None)
+                else:
+                    cfg["info_shindo_threshold"] = max(0.0, min(7.0, val))
 
         # 地名校验：确保本地监控参考地名为字符串
         if "place_name" in cfg and not isinstance(cfg["place_name"], str):
@@ -233,6 +266,9 @@ class ConfigValidator:
         # 布尔值校验：校验本地预计烈度监控开关及严格模式开关
         ConfigValidator._ensure_bool(cfg, "enabled", False)
         ConfigValidator._ensure_bool(cfg, "strict_mode", False)
+        # 布尔值校验：本地无感过滤独立开关，仅当键已存在且类型非法时才修正.
+        ConfigValidator._ensure_bool(cfg, "filter_insensitive_eew", None)
+        ConfigValidator._ensure_bool(cfg, "filter_insensitive_info", None)
 
         # 强度体系校验：兼容中英文别名，统一规范化为英文内部值
         # 中文别名用于配置页下拉展示（自动判定/中国烈度/日本震度）
@@ -604,6 +640,14 @@ class ConfigValidator:
             _validate_combine_mode(gq_filter, "Global Quake过滤器")
             ConfigValidator._ensure_bool(gq_filter, "enabled", True)
             cfg["global_quake_filter"] = gq_filter
+
+        # 7. 测定类型过滤器（控制自动测定/正式测定消息的接收）
+        measurement_filter = cfg.get("measurement_type_filter", {})
+        if isinstance(measurement_filter, dict):
+            ConfigValidator._ensure_bool(measurement_filter, "enabled", False)
+            ConfigValidator._ensure_bool(measurement_filter, "receive_automatic", True)
+            ConfigValidator._ensure_bool(measurement_filter, "receive_reviewed", True)
+            cfg["measurement_type_filter"] = measurement_filter
 
         return cfg
 

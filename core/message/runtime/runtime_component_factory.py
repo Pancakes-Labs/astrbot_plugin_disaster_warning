@@ -95,6 +95,26 @@ class MessageRuntimeComponentFactory:
         }
 
     @staticmethod
+    def _build_measurement_type_filter_config(
+        earthquake_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """构建测定类型过滤配置。"""
+        measurement_filter_config = earthquake_filters.get(
+            "measurement_type_filter", {}
+        )
+        if not isinstance(measurement_filter_config, dict):
+            measurement_filter_config = {}
+        return {
+            "enabled": bool(measurement_filter_config.get("enabled", False)),
+            "receive_automatic": bool(
+                measurement_filter_config.get("receive_automatic", True)
+            ),
+            "receive_reviewed": bool(
+                measurement_filter_config.get("receive_reviewed", True)
+            ),
+        }
+
+    @staticmethod
     def _build_snet_filter_config(
         earthquake_filters: dict[str, Any],
     ) -> dict[str, Any]:
@@ -251,6 +271,9 @@ class MessageRuntimeComponentFactory:
                 earthquake_filters
             ),
             "global_quake_filter": MessageRuntimeComponentFactory._build_global_quake_filter_config(
+                earthquake_filters
+            ),
+            "measurement_type_filter": MessageRuntimeComponentFactory._build_measurement_type_filter_config(
                 earthquake_filters
             ),
             "snet_filter": MessageRuntimeComponentFactory._build_snet_filter_config(
