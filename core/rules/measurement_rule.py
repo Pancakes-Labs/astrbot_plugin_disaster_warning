@@ -50,8 +50,10 @@ class MeasurementTypeRule(BaseRule):
         for candidate in (
             domain_meta.get("info_type"),
             domain_meta.get("infoTypeName"),
+            domain_meta.get("status"),
             envelope_meta.get("info_type"),
             envelope_meta.get("infoTypeName"),
+            envelope_meta.get("status"),
             envelope_meta.get("issue_type"),
         ):
             text = str(candidate or "").strip()
