@@ -114,6 +114,7 @@ class MapAttachmentBuilder:
                 html_content,
                 image_path,
                 selector="#card-wrapper",
+                viewport={"width": 600, "height": 400},
                 render_label="地震震中地图",
                 event_stream="earthquake",
             )
