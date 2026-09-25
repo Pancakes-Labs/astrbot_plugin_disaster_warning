@@ -368,6 +368,13 @@ class MessageBuildService:
             "ignore_https_errors": bool(
                 config.get("browser_ignore_https_errors", False)
             ),
+            # 代理绕过直接影响底图能否加载，同样纳入缓存键避免复用旧空白图。
+            "bypass_proxy_for_map_tiles": bool(
+                config.get("browser_bypass_proxy_for_map_tiles", True)
+            ),
+            "proxy_bypass_domains": str(
+                config.get("browser_proxy_bypass_domains", "") or ""
+            ),
             "event_caption": event_caption or "",
         }
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
@@ -527,6 +534,13 @@ class MessageBuildService:
             # 是否忽略 HTTPS 证书错误会直接影响底图能否加载，纳入缓存键避免切换后误用旧图。
             "ignore_https_errors": bool(
                 message_format_config.get("browser_ignore_https_errors", False)
+            ),
+            # 代理绕过直接影响底图能否加载，同样纳入缓存键避免复用旧空白图。
+            "bypass_proxy_for_map_tiles": bool(
+                message_format_config.get("browser_bypass_proxy_for_map_tiles", True)
+            ),
+            "proxy_bypass_domains": str(
+                message_format_config.get("browser_proxy_bypass_domains", "") or ""
             ),
             "timezone": display_timezone,
         }
