@@ -848,6 +848,8 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
     然后在宿主机或其他服务器上运行：`npx playwright run-server --port 3000 --host 0.0.0.0`
 
+  - **代理环境**：如果宿主机/容器设置了代理环境变量（`ALL_PROXY`、`HTTPS_PROXY`、`http_proxy` 等），本地模式下的 Chromium 会继承这些变量，并可能把地图瓦片请求也发往代理。代理无法正确转发瓦片域名时会导致**地图底图整体空白**而卡片其他内容正常。插件默认会为地图瓦片域名配置代理绕过，无需手动处理；如使用自建瓦片服务，可通过 `额外绕过的域名（仅本地模式）` 追加。
+
 - **存储空间 (Storage)**：
   - 生成的图片文件会临时存储在插件数据目录下的 `temp` 文件夹中。
   - 插件内置了自动清理机制，会每隔 **24 小时** 自动清理 **3 小时前** 生成的图片，且如果文件过多也会自动提前清理，无需担心占用过多磁盘空间，但仍建议预留 200MB 左右的空间。
@@ -1396,6 +1398,16 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 - **忽略浏览器 HTTPS 证书错误 (`browser_ignore_https_errors`)**:
   - **默认值**: `false`
   - **说明**: 仅本地模式生效。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败（控制台出现 `ERR_CERT_DATE_INVALID`）时，开启后可继续加载底图；注意这会信任自签/过期证书，存在安全风险，请谨慎使用。
+- **地图瓦片绕过代理直连（仅本地模式） (`browser_bypass_proxy_for_map_tiles`)**:
+  - **默认值**: `true`
+  - **说明**: 仅本地模式生效。若 AstrBot 进程带有代理环境变量（如 systemd 单元、容器编排注入的 `ALL_PROXY`、`HTTPS_PROXY`，或 sing-box / clash 等工具注入的小写 `http_proxy`），Playwright 启动的 Chromium 会继承这些变量，并尝试经代理去请求地图瓦片。当代理无法正确转发瓦片域名时，浏览器表现为**地图底图整体空白**（卡片文字、标记正常）。
+  - 开启本项后，插件会在启动 Chromium 时同时设置两处：
+    1. `--proxy-bypass-list=...` 启动参数；
+    2. 子进程环境变量中的 `NO_PROXY` **与** `no_proxy`
+  - 默认直连域名为 `*.autonavi.com`、`*.amap.com`、`*.fanstudio.tech`（覆盖全部内置瓦片源）。仅在浏览器启动/重建时读取，切换后需重新加载插件生效。
+- **额外绕过的域名（仅本地模式） (`browser_proxy_bypass_domains`)**:
+  - **默认值**: `""`（空）
+  - **说明**: 可选。在默认地图域名基础上追加需要绕过代理直连的域名，支持逗号或分号分隔，适用于自建瓦片代理等场景。例如：`tiles.example.com, *.mycdn.net`。
 
 ```json
 "message_format": {
@@ -1413,7 +1425,9 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
   "global_quake_template": "Aurora",           // GQ 卡片视觉主题
   "emoji_filter_mode": "默认",                 // 推送文本 Emoji 过滤：默认/简洁/关闭
   "browser_pool_size": 2,                      // 浏览器页面池大小 (默认2)
-  "browser_ignore_https_errors": false         // 是否忽略瓦片源 HTTPS 证书错误（默认关闭）
+  "browser_ignore_https_errors": false,        // 是否忽略瓦片源 HTTPS 证书错误（默认关闭）
+  "browser_bypass_proxy_for_map_tiles": true,  // 地图瓦片绕过代理直连（默认开启）
+  "browser_proxy_bypass_domains": ""           // 额外绕过的域名，逗号/分号分隔（可选）
 }
 ```
 
@@ -3202,6 +3216,7 @@ graph TB
 > 3. **内核安装**：Playwright 需要手动安装浏览器内核。请在终端执行 `playwright install chromium`（下载耗时可能较长）。
 > 4. **网络限制**：检查机器人所在网络环境是否可以正常访问所选的地图瓦片源。
 > 5. **证书过期**：上游瓦片源的证书可能过期，可以开启 `忽略浏览器 HTTPS 证书错误（仅本地模式）` 的配置项，或等待上游证书续期即可恢复。
+> 6. **代理干扰**：若服务器配置了代理，Chromium 会继承并尝试经代理请求瓦片，代理无法转发时地图只剩空白底图。请保持 `地图瓦片绕过代理直连（仅本地模式）` 开启（默认即为开启），必要时用 `额外绕过的域名（仅本地模式）` 追加你的自建瓦片域名。
 
 </details>
 
