@@ -3,6 +3,9 @@
 统一管理所有地图瓦片的URL模板
 """
 
+import re
+from collections.abc import Iterable
+
 # 中文名称到英文标识的映射
 MAP_SOURCE_NAME_TO_ID = {
     "高德地图": "amap",
@@ -14,9 +17,17 @@ MAP_SOURCE_NAME_TO_ID = {
     "中科星图卫星影像": "geovis",
 }
 
+# 需要子域名轮询的地图源 —— 由 get_tile_subdomains() 提供候选列表。
+# Leaflet 的 L.tileLayer 原生支持 {s} 占位符 + {subdomains: [...]} 选项：
+# 它会为每个瓦片自动从列表中随机取一个子域替换 {s}，因此调用方无需任何额外处理。
+MAP_SOURCE_SUBDOMAINS = {
+    # 高德地图 webrd01 ~ webrd04
+    "amap": ["1", "2", "3", "4"],
+}
+
 # 地图瓦片源URL映射
 MAP_TILE_SOURCES = {
-    # 高德地图（直接访问官方服务器，需要 {s} 作为子域名占位符）
+    # 高德地图（直接访问官方服务器，{s} 为 Leaflet 原生子域名占位符）
     "amap": "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
     # PetalMap 矢量图（FAN Studio 瓦片代理）
     # 重要：FAN Studio(2026-08-22 01时左右)已将瓦片坐标从旧式 z/y/x 改为标准 z/x/y(Web Mercator XYZ)。
@@ -75,22 +86,189 @@ def get_tile_url(map_source: str) -> str:
     return MAP_TILE_SOURCES.get(source_id, MAP_TILE_SOURCES["petallight"])
 
 
-def get_tile_url_js(map_source: str) -> str:
+def get_tile_subdomains(map_source: str) -> list[str]:
     """
-    为JavaScript生成瓦片URL（处理特殊占位符）
+    获取指定地图源的子域名候选列表（用于 Leaflet 的 subdomains 选项）。
 
     Args:
         map_source: 地图源标识符（中文名称或英文标识）
 
     Returns:
-        适用于JavaScript的URL字符串
+        子域名字符串列表；无子域名需求的源返回空列表
     """
     source_id = normalize_map_source(map_source)
-    url = get_tile_url(map_source)
+    if source_id in UNAVAILABLE_SOURCES:
+        return []
+    return list(MAP_SOURCE_SUBDOMAINS.get(source_id, []))
 
-    # 高德地图需要子域名轮询（{s} -> 随机1-4）
-    if source_id == "amap":
-        # JavaScript中使用模板字符串处理
-        return url.replace("{s}", '${["1","2","3","4"][Math.floor(Math.random()*4)]}')
 
-    return url
+def get_tile_url_js(map_source: str) -> str:
+    """
+    为 JavaScript 生成瓦片 URL 模板。
+
+    Args:
+        map_source: 地图源标识符（中文名称或英文标识）
+
+    Returns:
+        适用于 Leaflet 的 URL 模板字符串（沿用 {s}/{x}/{y}/{z} 占位符）
+    """
+    return get_tile_url(map_source)
+
+
+# ── 代理绕过（proxy bypass）──────────────────────────────────────────────
+# Playwright 启动的 Chromium 默认继承 AstrBot 进程的环境变量。当进程带有
+# ALL_PROXY=socks5://... / HTTPS_PROXY=http://... 这类代理设置时（容器、systemd
+# 单元、sing-box / clash 注入小写变量都会造成这种情况），Chromium 会把这些地图
+# 瓦片请求一并发往代理。若代理无法正确转发这些域名，就会返回
+# net::ERR_EMPTY_RESPONSE，导致地图底图整体空白而卡片其他部分正常。
+#
+# 因此需要让地图瓦片域名绕过代理直连。有两个必须同时处理的点：
+# 1. Chromium 的 --proxy-bypass-list 启动参数与 NO_PROXY 环境变量走的是不同的
+#    判定路径，只设其一无法覆盖所有版本/场景，两者都要设置。
+# 2. Chromium 读取 no_proxy 时小写变量优先于大写，仅设置 NO_PROXY 往往不生效，
+#    因此大小写两份都必须写入。
+MAP_TILE_BYPASS_DOMAINS = {
+    # 高德：瓦片走 webrd0N.is.autonavi.com，同时放行 amap.com 便于后续扩展
+    "amap": ["*.autonavi.com", "*.amap.com"],
+}
+
+# 默认绕过域名：覆盖全部内置瓦片源域名，语义为「地图瓦片始终直连」。
+# 这样即使用户之后切换地图源（或某源临时失效需要兜底），也无需重新配置。
+DEFAULT_PROXY_BYPASS_DOMAINS: tuple[str, ...] = (
+    "*.autonavi.com",
+    "*.amap.com",
+    # FAN Studio 瓦片代理（PetalMap / ArcGIS 系列共用）
+    "*.fanstudio.tech",
+)
+
+# Chromium --proxy-bypass-list 以分号分隔。
+PROXY_BYPASS_LIST_SEPARATOR = ";"
+
+_NO_PROXY_ENV_KEYS: tuple[str, ...] = ("NO_PROXY", "no_proxy")
+
+_IPV4_PATTERN = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+
+
+def get_tile_bypass_domains(map_source: str) -> list[str]:
+    """
+    获取指定地图源建议的代理绕过域名（不含默认兜底项）。
+
+    Args:
+        map_source: 地图源标识符（中文名称或英文标识）
+
+    Returns:
+        该源专属的绕过域名列表；无需专属项时返回空列表
+    """
+    source_id = normalize_map_source(map_source)
+    return list(MAP_TILE_BYPASS_DOMAINS.get(source_id, []))
+
+
+def _normalize_bypass_token(token: str) -> str:
+    """把用户输入的一项绕过规则规范化为 Chromium 可识别的域名通配形式。"""
+    text = str(token or "").strip().lower()
+    if not text:
+        return ""
+    # 容忍用户直接粘贴完整 URL（http://、https://、socks5:// 等）
+    if "//" in text:
+        text = text.split("//", 1)[1]
+    # 去掉路径 / 查询 / 端口
+    text = re.split(r"[/?#]", text, maxsplit=1)[0]
+    text = text.split(":", 1)[0]
+    if not text:
+        return ""
+    # 已是通配符形式
+    if text.startswith("*."):
+        return text
+    # 前导点形式 .example.com -> *.example.com
+    if text.startswith("."):
+        return f"*.{text[1:]}"
+    # 裸域名补通配符，使其能匹配 webrd01.is.autonavi.com 这类子域；
+    # IPv4 与单标签主机（如 localhost）保持原样。
+    if _IPV4_PATTERN.fullmatch(text):
+        return text
+    if "." in text:
+        return f"*.{text}"
+    return text
+
+
+def normalize_proxy_bypass_domains(
+    extra: str | Iterable[str] | None,
+    *,
+    include_defaults: bool = True,
+) -> list[str]:
+    """
+    合并「默认地图域名」与「用户额外配置」，去重并保持顺序。
+
+    Args:
+        extra: 用户配置的额外域名，支持逗号/分号/空白分隔的字符串，
+            或已拆分好的字符串可迭代对象。
+        include_defaults: 是否把 DEFAULT_PROXY_BYPASS_DOMAINS 置于结果最前。
+
+    Returns:
+        规范化后的绕过域名列表
+    """
+    tokens: list[str] = []
+    if include_defaults:
+        tokens.extend(DEFAULT_PROXY_BYPASS_DOMAINS)
+    if isinstance(extra, str):
+        tokens.extend(re.split(r"[,;\s]+", extra))
+    elif extra is not None:
+        for item in extra:
+            if isinstance(item, str):
+                tokens.extend(re.split(r"[,;\s]+", item))
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        normalized = _normalize_bypass_token(token)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def build_proxy_bypass_list_arg(domains: Iterable[str]) -> str:
+    """生成 Chromium ``--proxy-bypass-list`` 的参数值（分号分隔）。"""
+    return PROXY_BYPASS_LIST_SEPARATOR.join(
+        str(domain).strip() for domain in domains if str(domain or "").strip()
+    )
+
+
+def merge_no_proxy_into_env(
+    env: dict[str, str],
+    domains: Iterable[str],
+) -> dict[str, str]:
+    """
+    把绕过域名合并进 NO_PROXY 与 no_proxy（大小写两份都写）。
+
+    合并时会先把两份已有值汇总去重，再统一写回，避免出现
+    「大写有、小写没有」导致 Chromium 仍走代理的情况。
+
+    Args:
+        env: 目标环境变量字典（通常为 dict(os.environ) 的拷贝），原地修改。
+        domains: 需要绕过代理的域名列表。
+
+    Returns:
+        同一个 env 对象，便于链式使用
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for key in _NO_PROXY_ENV_KEYS:
+        for item in re.split(r"[,;\s]+", str(env.get(key, "") or "")):
+            token = item.strip()
+            if token and token not in seen:
+                seen.add(token)
+                merged.append(token)
+
+    for domain in domains:
+        token = str(domain or "").strip()
+        if token and token not in seen:
+            seen.add(token)
+            merged.append(token)
+
+    value = ",".join(merged)
+    for key in _NO_PROXY_ENV_KEYS:
+        env[key] = value
+    return env
