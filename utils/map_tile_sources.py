@@ -3,8 +3,10 @@
 统一管理所有地图瓦片的URL模板
 """
 
+import ipaddress
 import re
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 # 中文名称到英文标识的映射
 MAP_SOURCE_NAME_TO_ID = {
@@ -146,7 +148,47 @@ PROXY_BYPASS_LIST_SEPARATOR = ";"
 
 _NO_PROXY_ENV_KEYS: tuple[str, ...] = ("NO_PROXY", "no_proxy")
 
-_IPV4_PATTERN = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+
+def _is_ip_literal(host: str) -> bool:
+    """判断主机是否为合法 IP 字面量。"""
+    candidate = host.strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    if not candidate:
+        return False
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+def _extract_host(token: str) -> str:
+    """从用户输入的一项规则中提取主机部分。
+
+    兼容用户直接粘贴完整 URL、带端口与带路径的写法；
+    IPv6 字面量的方括号会被保留，避免被端口分隔符截断
+    """
+    raw = str(token or "").strip()
+    if not raw:
+        return ""
+    # 含 scheme 或前导 //：交给 urlsplit 提取 hostname
+    if "://" in raw or raw.startswith("//"):
+        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+        hostname = parsed.hostname or ""
+        if not hostname:
+            return ""
+        # hostname 会剥离 IPv6 方括号，补回以保持可辨识
+        return f"[{hostname}]" if ":" in hostname else hostname
+    # 无 scheme：手工剥离路径 / 查询 / 端口
+    host = re.split(r"[/?#]", raw, maxsplit=1)[0]
+    # 带方括号的 IPv6：截取到匹配的右括号，忽略其后的端口
+    if host.startswith("["):
+        end = host.find("]")
+        return host[: end + 1] if end > 0 else host
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    return host
 
 
 def get_tile_bypass_domains(map_source: str) -> list[str]:
@@ -163,32 +205,25 @@ def get_tile_bypass_domains(map_source: str) -> list[str]:
     return list(MAP_TILE_BYPASS_DOMAINS.get(source_id, []))
 
 
-def _normalize_bypass_token(token: str) -> str:
-    """把用户输入的一项绕过规则规范化为 Chromium 可识别的域名通配形式。"""
-    text = str(token or "").strip().lower()
-    if not text:
-        return ""
-    # 容忍用户直接粘贴完整 URL（http://、https://、socks5:// 等）
-    if "//" in text:
-        text = text.split("//", 1)[1]
-    # 去掉路径 / 查询 / 端口
-    text = re.split(r"[/?#]", text, maxsplit=1)[0]
-    text = text.split(":", 1)[0]
-    if not text:
-        return ""
+def _normalize_bypass_tokens(token: str) -> list[str]:
+    """把用户输入的一项绕过规则规范化为 Chromium 可识别的域名规则列表。"""
+    host = _extract_host(token)
+    if not host:
+        return []
+    lowered = host.lower()
     # 已是通配符形式
-    if text.startswith("*."):
-        return text
-    # 前导点形式 .example.com -> *.example.com
-    if text.startswith("."):
-        return f"*.{text[1:]}"
-    # 裸域名补通配符，使其能匹配 webrd01.is.autonavi.com 这类子域；
-    # IPv4 与单标签主机（如 localhost）保持原样。
-    if _IPV4_PATTERN.fullmatch(text):
-        return text
-    if "." in text:
-        return f"*.{text}"
-    return text
+    if lowered.startswith("*."):
+        base = lowered[2:]
+        return [lowered] if base else []
+    # 前导点形式 .example.com -> *.example.com（前导点语义即"仅子域"）
+    if lowered.startswith("."):
+        base = lowered[1:]
+        return [f"*.{base}"] if base else []
+    # IP 字面量与单标签主机（如 localhost）只需精确匹配
+    if _is_ip_literal(lowered) or "." not in lowered:
+        return [lowered]
+    # 普通域名：精确主机 + 子域通配，二者都要，缺一不可
+    return [lowered, f"*.{lowered}"]
 
 
 def normalize_proxy_bypass_domains(
@@ -220,11 +255,12 @@ def normalize_proxy_bypass_domains(
     result: list[str] = []
     seen: set[str] = set()
     for token in tokens:
-        normalized = _normalize_bypass_token(token)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
+        # 单项规则可能展开为多条（精确主机 + 子域通配）
+        for normalized in _normalize_bypass_tokens(token):
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
     return result
 
 
@@ -240,10 +276,9 @@ def merge_no_proxy_into_env(
     domains: Iterable[str],
 ) -> dict[str, str]:
     """
-    把绕过域名合并进 NO_PROXY 与 no_proxy（大小写两份都写）。
+    把绕过域名分别追加进 NO_PROXY 与 no_proxy（两个变量互不搬运已有值）。
 
-    合并时会先把两份已有值汇总去重，再统一写回，避免出现
-    「大写有、小写没有」导致 Chromium 仍走代理的情况。
+    每个变量都以自身原有规则为基准，仅追加本功能的地图瓦片域名。
 
     Args:
         env: 目标环境变量字典（通常为 dict(os.environ) 的拷贝），原地修改。
@@ -252,23 +287,21 @@ def merge_no_proxy_into_env(
     Returns:
         同一个 env 对象，便于链式使用
     """
-    merged: list[str] = []
-    seen: set[str] = set()
-
+    additions = [
+        str(domain or "").strip() for domain in domains if str(domain or "").strip()
+    ]
     for key in _NO_PROXY_ENV_KEYS:
+        merged: list[str] = []
+        seen: set[str] = set()
+        # 基准：仅取该变量自身已有的值
         for item in re.split(r"[,;\s]+", str(env.get(key, "") or "")):
             token = item.strip()
             if token and token not in seen:
                 seen.add(token)
                 merged.append(token)
-
-    for domain in domains:
-        token = str(domain or "").strip()
-        if token and token not in seen:
-            seen.add(token)
-            merged.append(token)
-
-    value = ",".join(merged)
-    for key in _NO_PROXY_ENV_KEYS:
-        env[key] = value
+        for token in additions:
+            if token not in seen:
+                seen.add(token)
+                merged.append(token)
+        env[key] = ",".join(merged)
     return env
