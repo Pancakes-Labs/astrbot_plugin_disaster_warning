@@ -64,6 +64,9 @@ class SessionConfigManager:
         ("message_format", "browser_pool_size"),
         # 是否忽略 HTTPS 证书错误是浏览器启动级配置（context 全局创建），不允许会话级覆写
         ("message_format", "browser_ignore_https_errors"),
+        # 代理绕过是浏览器启动级配置（launch 参数 + 子进程 env），不允许会话级覆写
+        ("message_format", "browser_bypass_proxy_for_map_tiles"),
+        ("message_format", "browser_proxy_bypass_domains"),
     )
 
     def __init__(self, default_config_ref: dict[str, Any]):
