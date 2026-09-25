@@ -17,6 +17,11 @@ from playwright.async_api import Browser, Page, async_playwright
 from astrbot.api import logger
 
 from ....core.services.telemetry.telemetry_utils import track_error_safely
+from ....utils.map_tile_sources import (
+    build_proxy_bypass_list_arg,
+    merge_no_proxy_into_env,
+    normalize_proxy_bypass_domains,
+)
 from ....utils.plugin_logger import plugin_logger
 
 
@@ -33,6 +38,8 @@ class BrowserManager:
         mode: str = "local",
         server_url: str = "",
         ignore_https_errors: bool = False,
+        bypass_proxy_for_map_tiles: bool = True,
+        proxy_bypass_domains: str = "",
     ):
         """初始化浏览器管理器。
 
@@ -44,6 +51,10 @@ class BrowserManager:
             ignore_https_errors: 是否忽略 HTTPS 证书错误（仅本地模式生效）。
                 默认关闭。某些地图瓦片源（如 FAN Studio ）证书过期时，
                 开启后底图可继续加载；但会信任自签/过期证书，请谨慎使用。
+            bypass_proxy_for_map_tiles: 是否让地图瓦片域名绕过代理直连
+                （仅本地模式生效）。默认开启。
+            proxy_bypass_domains: 额外需要绕过代理的域名（逗号/分号/空白分隔）。
+                在默认地图域名基础上追加，便于适配自建瓦片代理等情况。
         """
         self.pool_size = pool_size
         self._browser: Browser | None = None
@@ -56,6 +67,12 @@ class BrowserManager:
         # 补池、应急建页等多协程路径并发调用，不加锁会重复创建 context 造成泄漏。
         self._context_lock = asyncio.Lock()
         self._ignore_https_errors = bool(ignore_https_errors)
+        # 代理绕过：两处 launch 分支都必须复用同一份结果，保证重建后的浏览器
+        # 行为与首次启动一致（否则「重启插件后恢复、跑一阵又空白」难以排查）。
+        self._bypass_proxy_for_map_tiles = bool(bypass_proxy_for_map_tiles)
+        self._proxy_bypass_domains = str(proxy_bypass_domains or "")
+        # 代理绕过提示在同一进程内只输出一次 INFO，避免浏览器反复重建时刷屏。
+        self._proxy_bypass_logged = False
         self._page_pool: asyncio.Queue = asyncio.Queue(maxsize=pool_size)
         # 信号量用于限制同时渲染数量，页面创建锁与初始化锁用于避免并发竞争。
         self._semaphore = asyncio.Semaphore(pool_size)
@@ -103,6 +120,80 @@ class BrowserManager:
                 "context has been closed",
             )
         )
+
+    def _resolve_proxy_bypass_domains(self) -> list[str]:
+        """汇总需要绕过代理的地图瓦片域名。
+
+        默认包含全部内置瓦片源域名（含高德 *.autonavi.com），并追加用户配置项，
+        同时对首次启动与浏览器重建两条路径保持完全一致。
+        """
+        if not self._bypass_proxy_for_map_tiles:
+            return []
+        return normalize_proxy_bypass_domains(self._proxy_bypass_domains)
+
+    def _build_launch_args(self) -> list[str]:
+        """构造 Chromium 启动参数（含地图瓦片代理绕过）。"""
+        args = ["--no-sandbox", "--disable-setuid-sandbox"]
+        bypass_domains = self._resolve_proxy_bypass_domains()
+        if not bypass_domains:
+            return args
+
+        bypass_list = build_proxy_bypass_list_arg(bypass_domains)
+        if bypass_list:
+            # Chromium 的 --proxy-bypass-list 与 NO_PROXY 是两条独立判定路径，
+            # 必须同时设置才能覆盖所有版本的代理决策逻辑。
+            args.append(f"--proxy-bypass-list={bypass_list}")
+        if os.environ.get("PT_DEBUG_PROXY_BYPASS_ARGS") == "1":
+            args.append("--enable-logging=stderr")
+            args.append("--v=1")
+        return args
+
+    def _build_browser_env(self) -> dict[str, str] | None:
+        """构造传给 Chromium 的环境变量（注入 NO_PROXY / no_proxy）。
+
+        返回 None 表示无需覆盖，让 Playwright 直接继承父进程环境。
+        """
+        bypass_domains = self._resolve_proxy_bypass_domains()
+        if not bypass_domains:
+            return None
+        env = {str(key): str(value) for key, value in os.environ.items()}
+        # 大小写两份都写：Chromium 读取 no_proxy 时小写变量优先，
+        # 仅设置大写的 NO_PROXY 在很多环境下并不会生效。
+        return merge_no_proxy_into_env(env, bypass_domains)
+
+    def _log_proxy_bypass(self, reason: str) -> None:
+        """输出代理绕过生效说明，便于用户确认配置是否符合预期。"""
+        bypass_domains = self._resolve_proxy_bypass_domains()
+        if not bypass_domains:
+            return
+
+        proxy_keys = (
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+        )
+        # 出站代理缺失时说明本机直连，无需提示绕过行为，避免日志噪声。
+        active_proxies = [
+            key for key in proxy_keys if str(os.environ.get(key, "") or "").strip()
+        ]
+        if not active_proxies:
+            if not self._proxy_bypass_logged:
+                self._proxy_bypass_logged = True
+                logger.debug("[灾害预警] 未检测到代理环境变量，地图瓦片将直连")
+            return
+
+        message = (
+            f"[灾害预警] {reason}：检测到代理环境变量 {active_proxies}，"
+            f"地图瓦片域名将绕过代理直连 {bypass_domains}"
+        )
+        if self._proxy_bypass_logged:
+            logger.debug(message)
+        else:
+            self._proxy_bypass_logged = True
+            logger.info(message)
 
     @staticmethod
     def _is_map_tile_url(url: str | None) -> bool:
@@ -262,8 +353,10 @@ class BrowserManager:
                 logger.info(f"[灾害预警] 正在启动浏览器（模式：{self._mode}）...")
                 start_time = time.time()
                 self._playwright = await async_playwright().start()
+                self._log_proxy_bypass("浏览器重建")
                 self._browser = await self._playwright.chromium.launch(
-                    args=["--no-sandbox", "--disable-setuid-sandbox"]
+                    args=self._build_launch_args(),
+                    env=self._build_browser_env(),
                 )
                 logger.info("[灾害预警] 本地浏览器启动成功")
                 await self._initialize_local_page_pool()
@@ -564,8 +657,10 @@ class BrowserManager:
                 self._playwright = await async_playwright().start()
 
                 # 本地模式：启动本地浏览器
+                self._log_proxy_bypass("浏览器启动")
                 self._browser = await self._playwright.chromium.launch(
-                    args=["--no-sandbox", "--disable-setuid-sandbox"]
+                    args=self._build_launch_args(),
+                    env=self._build_browser_env(),
                 )
                 logger.debug("[灾害预警] 本地浏览器启动成功")
 
