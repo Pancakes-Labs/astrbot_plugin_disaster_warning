@@ -531,6 +531,8 @@ var CHART_WINDS = Array.isArray(BOOT.chart_winds) ? BOOT.chart_winds : [];
 var CHART_PRESS = Array.isArray(BOOT.chart_pressures) ? BOOT.chart_pressures : [];
 var CHART_TIMES = Array.isArray(BOOT.chart_times) ? BOOT.chart_times : [];
 var TILE_URL = BOOT.tile_url || '';
+// 子域名候选：高德等源使用 {s} 占位符，必须显式传给 Leaflet 才会被替换。
+var TILE_SUBDOMAINS = Array.isArray(BOOT.tile_subdomains) ? BOOT.tile_subdomains : [];
 var PANEL = BOOT.panel || {};
 var FORECAST_ROWS = Array.isArray(BOOT.forecast_rows) ? BOOT.forecast_rows : [];
 var HISTORY_ROWS = Array.isArray(BOOT.history_rows) ? BOOT.history_rows : [];
@@ -1029,7 +1031,8 @@ try {
             minZoom: 0,
             keepBuffer: 2,
             updateWhenIdle: true,
-            updateWhenZooming: false
+            updateWhenZooming: false,
+            subdomains: TILE_SUBDOMAINS
         }).addTo(map);
     }
 } catch (e) {
@@ -1047,8 +1050,11 @@ if (tileLayer) {
         var coords = img._coords || {};
         this.fire('tileloadstart', { tile: img, coords: coords, url: img.src });
         setTimeout(function() {
+            // 必须保留原 URL 的 query（x/y/z/style/lang 等瓦片参数），仅追加
+            // 缓存击穿参数；旧实现 split('?')[0] 会把全部瓦片参数丢掉，
+            // 重试请求即使成功也拿不到正确的瓦片。
             var sep = img.src.indexOf('?') > -1 ? '&' : '?';
-            img.src = img.src.split('?')[0] + sep + '_retry=' + Date.now() + '_' + retries;
+            img.src = img.src + sep + '_retry=' + Date.now() + '_' + retries;
         }, delay);
     });
 }
