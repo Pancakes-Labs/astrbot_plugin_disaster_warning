@@ -173,6 +173,62 @@ _TITLE_TYPE_TO_11B_BASE: list[tuple[str, str]] = [
     ("霾", "11B19"),
 ]
 
+# 标题关键词 → 11B 基础码 的字典视图，供编码错标纠偏时
+# 判断"标题类型与编码类型是否指向同一图标"，指向同一基础码时结果等价，无需纠偏。
+_TITLE_TYPE_TO_11B_BASE_DICT: dict[str, str] = dict(_TITLE_TYPE_TO_11B_BASE)
+
+# 11B 基础码 → 规范类型名。用于"编码类型 vs 标题字面类型"一致性校验（编码错标兜底）
+# 二者不一致且不属于同一语义族（同义/父子类型）时，判定上游编码类型位错标，
+# 改以标题字面类型为准。只收录有明确 11B 图标的类型，与
+# _TITLE_TYPE_TO_11B_BASE / WEATHER_EMOJI_MAP 口径对齐。
+_CANONICAL_TYPE_BY_11B_BASE: dict[str, str] = {
+    "11B01": "台风",
+    "11B03": "暴雨",
+    "11B09": "高温",
+    "11B05": "寒潮",
+    "11B17": "大雾",
+    "11B04": "暴雪",
+    "11B06": "大风",
+    "11B07": "沙尘暴",
+    "11B15": "冰雹",
+    "11B22": "干旱",
+    "11B21": "道路结冰",
+    "11B14": "雷电",
+    "11B16": "霜冻",
+    "11B19": "霾",
+    "11B20": "雷雨大风",
+    "11E02": "风暴潮",
+    "11E06": "海浪",
+    "11B73": "雪灾",
+    "11B74": "严寒",
+    "11B75": "低温",
+    "11B76": "低温冻害",
+    "11B77": "内涝",
+    "11B78": "地质灾害",
+    "11B79": "大雪",
+    "11B80": "寒冷",
+    "11B81": "山洪灾害",
+    "11B82": "干热风",
+    "11B83": "强对流",
+    "11B84": "强降温",
+    "11B85": "强降雨",
+    "11B86": "持续低温",
+    "11B87": "森林火险",
+    "11B88": "沙尘",
+    "11B89": "泥石流",
+    "11B90": "海上大雾",
+    "11B91": "海上大风",
+    "11B92": "滑坡",
+    "11B93": "空气污染",
+    "11B94": "草原火险",
+    "11B95": "道路结雪",
+    "11B96": "重污染",
+    "11B97": "降温",
+    "11B98": "雷暴",
+    "11B99": "雷暴大风",
+    "11E99": "强季风",
+}
+
 # 标题关键词匹配排除表：当标题命中某关键词时，若同时包含其复合排除词，跳过该关键词。
 # 解决"雷暴大风/雷雨大风/海上大风"被"大风"误匹配的问题：
 # - "雷暴大风"已通过 _TITLE_TYPE_TO_11B_BASE 映射到私有扩展码 11B99，
@@ -250,9 +306,32 @@ def resolve_weather_icon_code(
     1. 已有 11B 编码：下划线格式（11B20_yellow）直接使用，
        紧凑格式（11B2001）标准化为 11B20_blue 后返回
     2. p 编码通用规则（4位类型码 + 末位颜色码）
-    3. 标题文本兜底（灾害类型 + 颜色）
+    3. 编码错标纠偏：编码类型与标题字面类型"完全不相干且非同义"时，改以标题为准
+    4. 标题文本兜底（灾害类型 + 颜色）
 
     返回 None 表示无法映射，调用方应走本地颜色回退。
+    """
+    # 先做编码错标纠偏：上游类型位错标时，
+    # 编码类型与标题字面完全不沾边，此时以标题为准重建 11B 码。
+    authoritative = resolve_title_authoritative_icon_code(
+        weather_type_code, title, headline
+    )
+    if authoritative is not None:
+        return authoritative
+    return _resolve_pure_icon_code(weather_type_code, title, headline)
+
+
+def _resolve_pure_icon_code(
+    weather_type_code: str,
+    title: str = "",
+    headline: str = "",
+) -> str | None:
+    """纯按编码解析 11B 完整码（不触发标题类型纠偏）。
+
+    解析优先级：
+    1. 已有 11B 编码：下划线格式直接使用，紧凑格式标准化后返回
+    2. p 编码通用规则（4位类型码 + 末位颜色码），失败时走标题兜底
+    3. 标题文本兜底（灾害类型 + 颜色）
     """
     code = (weather_type_code or "").strip()
 
@@ -553,3 +632,160 @@ def build_weather_icon_url(icon_code: str) -> str | None:
         return fallback_url
 
     return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={code}"
+
+
+# 同义类型族：族内类型可互相覆盖（不触发纠偏），仅收录含义等价、
+# 且图标语义一致的类型组，避免因分类粒度差异误切图标。
+_SYNONYM_TYPE_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"雷暴大风", "雷雨大风", "雷雨强风"}),
+    frozenset({"暴雪", "大雪"}),
+    frozenset({"雷电", "雷暴"}),
+    frozenset({"霾", "灰霾"}),
+    frozenset({"大雾", "浓雾"}),
+    frozenset({"沙尘暴", "沙尘"}),
+    frozenset({"森林火险", "草原火险"}),
+    frozenset({"暴雨", "强降雨", "短时强降水"}),
+)
+
+
+def is_same_weather_family(a: str, b: str) -> bool:
+    """判断两个气象类型名是否属于同一语义族（同义或父子类型）。
+
+    用途：编码错标纠偏时，若编码类型与标题字面类型只是"近亲"
+    （如"雷雨大风"与"雷暴大风"、"暴雪"与"大雪"、"海上大雾"与"大雾"），
+    视为语义一致，保留原编码，避免因分类粒度差异误切图标。
+
+    Args:
+        a: 类型名（如编码解析出的规范类型名）。
+        b: 类型名（如标题命中的类型关键词）。
+
+    Returns:
+        属于同一语义族返回 True，否则 False。
+    """
+    one = str(a or "").strip()
+    other = str(b or "").strip()
+    if not one or not other:
+        return False
+    if one == other:
+        return True
+    # 父子/包含关系：如"雷暴大风"与"大风"、"海上大雾"与"大雾"
+    if one in other or other in one:
+        return True
+    # 显式同义词族
+    for group in _SYNONYM_TYPE_GROUPS:
+        if one in group and other in group:
+            return True
+    return False
+
+
+def _apply_title_type_fallback(
+    weather_type_code: str,
+    title: str,
+    headline: str,
+) -> str | None:
+    """按标题字面类型重建 11B 完整码，并继承编码自身颜色。
+
+    颜色优先从标题关键词提取；标题没有颜色词时，沿用原编码解析出的颜色，
+    确保纠偏只改类型、不丢颜色，使本地图标文件仍能按颜色命中。
+
+    Args:
+        weather_type_code: 原始气象预警编码。
+        title: 预警标题。
+        headline: 预警副标题。
+
+    Returns:
+        纠偏后的 11B 完整码；无法从标题识别类型/颜色时返回 None。
+    """
+    base = _resolve_from_title(title, headline)
+    if not base:
+        return None
+    base_11b, _, color_suffix = base.partition("_")
+    if not color_suffix:
+        # 标题未给出颜色词，继承原编码解析出的颜色
+        original = _resolve_pure_icon_code(weather_type_code, title, headline)
+        if original and "_" in original:
+            color_suffix = original.rsplit("_", 1)[-1]
+    if not color_suffix:
+        return None
+    return f"{base_11b}_{color_suffix}"
+
+
+def _match_title_keyword(text: str) -> str | None:
+    """按 _TITLE_TYPE_TO_11B_BASE 提取标题命中的类型关键词。
+
+    与 _resolve_from_title 共用同一份关键词表与排除规则（同源同语义），
+    保证"标题类型判定"与"标题兜底图标"口径一致。
+
+    Args:
+        text: 标题与副标题合并后的文本。
+
+    Returns:
+        命中的类型关键词；无命中返回 None。
+    """
+    for keyword, _ in _TITLE_TYPE_TO_11B_BASE:
+        if keyword not in text:
+            continue
+        excluded = _TITLE_KEYWORD_EXCLUSIONS.get(keyword)
+        if excluded and any(item in text for item in excluded):
+            continue
+        return keyword
+    return None
+
+
+def resolve_title_authoritative_icon_code(
+    weather_type_code: str,
+    title: str = "",
+    headline: str = "",
+) -> str | None:
+    """编码错标纠偏：编码与标题类型矛盾时，返回以标题为准的 11B 完整码。
+
+    触发条件（需全部满足）：
+    1. 编码能解析出规范类型名（在 _CANONICAL_TYPE_BY_11B_BASE 中）；
+    2. 该规范类型名未出现在标题/副标题字面中；
+    3. 标题能明确匹配到另一个类型关键词；
+    4. 标题类型与编码类型不指向同一 11B 基础码（结果不等价）；
+    5. 标题类型与编码类型不属于同一语义族（非同义、非父子）。
+
+    返回 None 表示无需纠偏，调用方沿用编码解析结果（保证不回归）。
+
+    Args:
+        weather_type_code: 气象预警编码（p 码 / 11B 码 / 紧凑码）。
+        title: 预警标题。
+        headline: 预警副标题。
+
+    Returns:
+        以标题为准的 11B 完整码；无需纠偏时返回 None。
+    """
+    code = (weather_type_code or "").strip()
+    combined = f"{title or ''} {headline or ''}".strip()
+    if not code or not combined:
+        return None
+
+    # 1. 编码解析出的规范类型名
+    pure = _resolve_pure_icon_code(code, title, headline)
+    if not pure:
+        return None
+    canonical = _CANONICAL_TYPE_BY_11B_BASE.get(pure.split("_", 1)[0])
+    if not canonical:
+        return None
+
+    # 2. 编码类型必须完全未出现在标题字面中，否则视为一致，不纠偏
+    if canonical in combined:
+        return None
+
+    # 3. 标题能明确匹配到另一个类型关键词
+    title_keyword = _match_title_keyword(combined)
+    if not title_keyword:
+        return None
+
+    # 4. 标题类型与编码类型若指向同一 11B 基础码，结果等价，无需纠偏
+    #    （如"道路冰雪"与"道路结冰"同为 11B21，改与不改图标一致）
+    title_base = _TITLE_TYPE_TO_11B_BASE_DICT.get(title_keyword)
+    if title_base == pure.split("_", 1)[0]:
+        return None
+
+    # 5. 非同义/非父子关系才纠偏（父子关系如"雷暴大风"与"大风"保留编码）
+    if is_same_weather_family(canonical, title_keyword):
+        return None
+
+    return _apply_title_type_fallback(code, title, headline)
