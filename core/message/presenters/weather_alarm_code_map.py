@@ -634,17 +634,13 @@ def build_weather_icon_url(icon_code: str) -> str | None:
     return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={code}"
 
 
-# 同义类型族：族内类型可互相覆盖（不触发纠偏），仅收录含义等价、
-# 且图标语义一致的类型组，避免因分类粒度差异误切图标。
+# 同义类型族：族内类型可互相覆盖（不触发纠偏），仅收录「基础码相同、
+# 图标等价」的类型组，避免因分类粒度差异误切图标。
+# 注意：仅语义相近但图标基础码不同的类型不收录于此
+# 父子/包含关系由 is_same_weather_family 的包含判定覆盖。
 _SYNONYM_TYPE_GROUPS: tuple[frozenset[str], ...] = (
-    frozenset({"雷暴大风", "雷雨大风", "雷雨强风"}),
-    frozenset({"暴雪", "大雪"}),
-    frozenset({"雷电", "雷暴"}),
-    frozenset({"霾", "灰霾"}),
-    frozenset({"大雾", "浓雾"}),
-    frozenset({"沙尘暴", "沙尘"}),
-    frozenset({"森林火险", "草原火险"}),
-    frozenset({"暴雨", "强降雨", "短时强降水"}),
+    frozenset({"霾", "灰霾"}),  # 同为 11B19
+    frozenset({"大雾", "浓雾"}),  # 同为 11B17
 )
 
 
@@ -678,50 +674,20 @@ def is_same_weather_family(a: str, b: str) -> bool:
     return False
 
 
-def _apply_title_type_fallback(
-    weather_type_code: str,
-    title: str,
-    headline: str,
-) -> str | None:
-    """按标题字面类型重建 11B 完整码，并继承编码自身颜色。
-
-    颜色优先从标题关键词提取；标题没有颜色词时，沿用原编码解析出的颜色，
-    确保纠偏只改类型、不丢颜色，使本地图标文件仍能按颜色命中。
-
-    Args:
-        weather_type_code: 原始气象预警编码。
-        title: 预警标题。
-        headline: 预警副标题。
-
-    Returns:
-        纠偏后的 11B 完整码；无法从标题识别类型/颜色时返回 None。
-    """
-    base = _resolve_from_title(title, headline)
-    if not base:
-        return None
-    base_11b, _, color_suffix = base.partition("_")
-    if not color_suffix:
-        # 标题未给出颜色词，继承原编码解析出的颜色
-        original = _resolve_pure_icon_code(weather_type_code, title, headline)
-        if original and "_" in original:
-            color_suffix = original.rsplit("_", 1)[-1]
-    if not color_suffix:
-        return None
-    return f"{base_11b}_{color_suffix}"
-
-
-def _match_title_keyword(text: str) -> str | None:
-    """按 _TITLE_TYPE_TO_11B_BASE 提取标题命中的类型关键词。
+def _resolve_title_keyword(text: str) -> str | None:
+    """按 _TITLE_TYPE_TO_11B_BASE 提取文本命中的类型关键词。
 
     与 _resolve_from_title 共用同一份关键词表与排除规则（同源同语义），
     保证"标题类型判定"与"标题兜底图标"口径一致。
 
     Args:
-        text: 标题与副标题合并后的文本。
+        text: 待匹配文本（标题或副标题）。
 
     Returns:
         命中的类型关键词；无命中返回 None。
     """
+    if not text:
+        return None
     for keyword, _ in _TITLE_TYPE_TO_11B_BASE:
         if keyword not in text:
             continue
@@ -730,6 +696,95 @@ def _match_title_keyword(text: str) -> str | None:
             continue
         return keyword
     return None
+
+
+def _resolve_title_type_base(text: str) -> str | None:
+    """提取文本命中的灾害类型基础码（不含颜色）。
+
+    复用 _resolve_title_keyword 的关键词表与排除规则，只返回类型部分，
+    便于「类型取自标题、颜色另取或继承编码」的场景复用。
+
+    Args:
+        text: 待匹配文本（标题或副标题）。
+
+    Returns:
+        命中的 11B 基础码（如 "11B03"）；无命中返回 None。
+    """
+    keyword = _resolve_title_keyword(text)
+    if not keyword:
+        return None
+    return _TITLE_TYPE_TO_11B_BASE_DICT.get(keyword)
+
+
+def _resolve_title_color_suffix(text: str) -> str | None:
+    """提取文本中的颜色后缀（不含类型）。
+
+    Args:
+        text: 待匹配文本（标题或副标题）。
+
+    Returns:
+        颜色后缀（"red"/"orange"/"yellow"/"blue"）；无命中返回 None。
+    """
+    if not text:
+        return None
+    for keyword, suffix in _TITLE_COLOR_TO_SUFFIX:
+        if keyword in text:
+            return suffix
+    return None
+
+
+def _match_title_keyword(title: str, headline: str) -> str | None:
+    """按标题优先、副标题兜底的顺序提取类型关键词。
+
+    标题与副标题分别匹配，避免副标题中的类型关键词（如副标题提到"道路结冰"）
+    因关键词表顺序而抢占标题中的真实类型（如"暴雨"）。
+
+    Args:
+        title: 预警标题。
+        headline: 预警副标题。
+
+    Returns:
+        命中的类型关键词；均无命中返回 None。
+    """
+    return _resolve_title_keyword(title) or _resolve_title_keyword(headline)
+
+
+def _apply_title_type_fallback(
+    weather_type_code: str,
+    title: str,
+    headline: str,
+) -> str | None:
+    """按标题字面类型重建 11B 完整码，并继承编码自身颜色。
+
+    颜色优先从标题/副标题提取；标题未给出颜色词时，沿用原编码解析出的颜色，
+    确保纠偏只改类型、不丢颜色，使本地图标文件仍能按颜色命中。
+
+    类型与颜色分别解析：_resolve_from_title 在文本缺颜色词时会整体返回
+    None，不能用于只取类型的场景，否则「继承编码颜色」分支永远不可达。
+
+    Args:
+        weather_type_code: 原始气象预警编码。
+        title: 预警标题。
+        headline: 预警副标题。
+
+    Returns:
+        纠偏后的 11B 完整码；无法从标题识别类型或无法取得颜色时返回 None。
+    """
+    base_11b = _resolve_title_type_base(title) or _resolve_title_type_base(headline)
+    if not base_11b:
+        return None
+
+    color_suffix = _resolve_title_color_suffix(title) or _resolve_title_color_suffix(
+        headline
+    )
+    if not color_suffix:
+        # 标题未给出颜色词，继承原编码解析出的颜色
+        original = _resolve_pure_icon_code(weather_type_code, title, headline)
+        if original and "_" in original:
+            color_suffix = original.rsplit("_", 1)[-1]
+    if not color_suffix:
+        return None
+    return f"{base_11b}_{color_suffix}"
 
 
 def resolve_title_authoritative_icon_code(
@@ -773,8 +828,8 @@ def resolve_title_authoritative_icon_code(
     if canonical in combined:
         return None
 
-    # 3. 标题能明确匹配到另一个类型关键词
-    title_keyword = _match_title_keyword(combined)
+    # 3. 标题能明确匹配到另一个类型关键词（标题优先，副标题仅兜底）
+    title_keyword = _match_title_keyword(title, headline)
     if not title_keyword:
         return None
 
