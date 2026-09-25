@@ -8,7 +8,10 @@
 from __future__ import annotations
 
 from ....utils.severity_emoji import WEATHER_COLOR_LEVEL_EMOJI as COLOR_LEVEL_EMOJI
-from .weather_alarm_code_map import resolve_weather_icon_code
+from .weather_alarm_code_map import (
+    resolve_title_authoritative_icon_code,
+    resolve_weather_icon_code,
+)
 
 WEATHER_EMOJI_MAP = {
     # 一、国家级标准预警（14类）
@@ -253,6 +256,39 @@ def _resolve_emoji_from_code(texts) -> str | None:
     return None
 
 
+def _resolve_authoritative_emoji(texts) -> str | None:
+    """编码错标纠偏：编码与标题类型矛盾时，按标题类型取 Emoji。
+
+    Args:
+        texts: 待匹配文本序列（通常含标题、副标题与类型编码）。
+
+    Returns:
+        纠偏后的具体类型 Emoji；无需纠偏或标题类型无专属图标时返回 None。
+    """
+    code = ""
+    title = ""
+    headline = ""
+    for item in texts:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        # 编码类文本全部跳过，不参与标题层提取，避免编码串被当成标题误匹配。
+        if text.startswith("p") or text.startswith("11B") or text.startswith("11E"):
+            if not code:
+                code = text
+            continue
+        if not title:
+            title = text
+        elif not headline:
+            headline = text
+    if not code or not (title or headline):
+        return None
+    fixed = resolve_title_authoritative_icon_code(code, title, headline)
+    if not fixed:
+        return None
+    return _WEATHER_11B_BASE_TO_EMOJI.get(fixed.split("_", 1)[0])
+
+
 def resolve_weather_color_emoji(*texts: str) -> str:
     """从文本中解析气象预警最终颜色并返回对应 Emoji（如 🔴🟠🟡🔵）。
 
@@ -288,6 +324,12 @@ def resolve_weather_emoji(*texts: str, default: str = "⛈️") -> str:
     Returns:
         匹配到的气象类型 Emoji；无匹配时返回 default。
     """
+    # 编码错标纠偏：上游类型位错标时，
+    # 编码类型与标题字面完全不沾边，改以标题类型取图标 Emoji。
+    authoritative = _resolve_authoritative_emoji(texts)
+    if authoritative:
+        return authoritative
+
     code_emoji = _resolve_emoji_from_code(texts)
     if code_emoji:
         return code_emoji
