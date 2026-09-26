@@ -112,6 +112,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         self,
         icon_url: str,
         weather_type_code: str,
+        title: str = "",
+        headline: str = "",
     ) -> list:
         """构建气象预警图标消息组件（本地优先）。
 
@@ -122,6 +124,8 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         Args:
             icon_url: 查询结果中的 icon_url（可能是本地静态 URL 或远程 URL）。
             weather_type_code: 气象预警类型编码，用于本地文件解析兜底。
+            title: 预警标题，供编码错标纠偏时以标题类型为准。
+            headline: 预警副标题，供编码错标纠偏时以标题类型为准。
 
         Returns:
             图标消息组件列表；解析失败时返回空列表（不阻断文本发送）。
@@ -144,9 +148,12 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                 os.path.basename(icon_url_str),
             )
         else:
-            # 先把 weather_type_code 统一解析为 11B 完整码（p 编码/紧凑码/标题兜底），
-            # 再按 11B 码映射本地文件；直接传 p 编码会导致本地文件永远找不到。
-            icon_code = resolve_weather_icon_code(weather_type_code)
+            # 先把 weather_type_code 统一解析为 11B 完整码（p 编码/紧凑码/标题兜底，
+            # 含上游编码错标纠偏），再按 11B 码映射本地文件；
+            # 直接传 p 编码会导致本地文件永远找不到。
+            icon_code = resolve_weather_icon_code(
+                weather_type_code, title=title, headline=headline
+            )
             if icon_code:
                 local_path = resolve_local_weather_icon_abs_path(icon_code)
 
@@ -528,7 +535,10 @@ class PluginQueryCommandService(CommandTelemetryMixin):
                                 [
                                     Comp.Plain(detail_text),
                                     *self._build_weather_icon_components(
-                                        icon_url, weather_type_code
+                                        icon_url,
+                                        weather_type_code,
+                                        title_text,
+                                        headline_text,
                                     ),
                                 ],
                             )

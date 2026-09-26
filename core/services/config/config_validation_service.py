@@ -1120,6 +1120,17 @@ class ConfigValidator:
         # 是否忽略 HTTPS 证书错误：TLS 安全控制，必须为布尔值。
         # 若手工配置为字符串 "false"，bool("false") 为 True 会错误启用证书忽略。
         ConfigValidator._ensure_bool(cfg, "browser_ignore_https_errors", False)
+        # 地图瓦片代理绕过开关：同样必须为布尔值，避免字符串导致误判。
+        ConfigValidator._ensure_bool(cfg, "browser_bypass_proxy_for_map_tiles", True)
+        # 额外代理绕过域名：必须为字符串，非字符串（如误填数组/对象）时回退为空。
+        bypass_domains_value = cfg.get("browser_proxy_bypass_domains", "")
+        if bypass_domains_value is None:
+            cfg["browser_proxy_bypass_domains"] = ""
+        elif not isinstance(bypass_domains_value, str):
+            logger.warning(
+                "[灾害预警] 配置警告: 额外代理绕过域名不是字符串，已重置为空。"
+            )
+            cfg["browser_proxy_bypass_domains"] = ""
 
         # 地图源校验（通用地图 / 台风路径图共用选项表）
         valid_source_ids = set(MAP_TILE_SOURCES.keys())

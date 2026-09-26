@@ -1019,6 +1019,18 @@
         "hint": "默认关闭。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败时，开启后可继续加载底图。注意这会信任自签/过期证书，存在安全风险，请谨慎使用",
         "default": false
       },
+      "browser_bypass_proxy_for_map_tiles": {
+        "description": "地图瓦片绕过代理直连（仅本地模式）",
+        "type": "bool",
+        "hint": "开启后本插件会让地图瓦片域名绕过代理直连",
+        "default": true
+      },
+      "browser_proxy_bypass_domains": {
+        "description": "额外绕过的域名（仅本地模式）",
+        "type": "string",
+        "hint": "可选。在默认地图域名基础上追加需要直连的域名，支持逗号或分号分隔。适用于自建瓦片代理等场景",
+        "default": ""
+      },
       "detailed_jma_intensity": {
         "description": "详细显示 JMA 区域震度",
         "type": "bool",

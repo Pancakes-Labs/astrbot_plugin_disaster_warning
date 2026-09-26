@@ -14,7 +14,7 @@ from jinja2 import Template
 
 from astrbot.api import logger
 
-from ....utils.map_tile_sources import get_tile_url_js
+from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
 
 
 class MapAttachmentBuilder:
@@ -95,6 +95,9 @@ class MapAttachmentBuilder:
                 "zoom_level": zoom_level,
                 "map_source": map_source,
                 "tile_url": get_tile_url_js(map_source),
+                # 带 {s} 占位符的源需要 Leaflet subdomains 选项配合，否则瓦片 URL 非法。
+                # 以逗号分隔字符串注入，模板侧用 split(',') 还原为数组：
+                "tile_subdomains_csv": ",".join(get_tile_subdomains(map_source)),
                 "leaflet_js_url": leaflet_js_url,
                 "leaflet_css_url": leaflet_css_url,
                 "map_render_helper_js": map_render_helper_js,
