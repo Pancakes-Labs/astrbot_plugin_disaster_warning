@@ -275,20 +275,6 @@ def build_proxy_bypass_list_arg(domains: Iterable[str]) -> str:
     )
 
 
-def _is_bare_dns_hostname(rule: str) -> bool:
-    """判断规则是否为「裸点分 DNS 主机名」。
-
-    即非通配（不含 *）、非前导点、非 IP 字面量，但含点的普通主机名。
-    此类规则在 Chromium 的 no_proxy 中按后缀匹配，需特殊处理。
-    """
-    text = str(rule or "").strip()
-    if not text or "*" in text or text.startswith("."):
-        return False
-    if _is_ip_literal(text):
-        return False
-    return "." in text
-
-
 def merge_no_proxy_into_env(
     env: dict[str, str],
     domains: Iterable[str],
@@ -296,10 +282,8 @@ def merge_no_proxy_into_env(
     """
     把绕过域名分别追加进 NO_PROXY 与 no_proxy（两个变量互不搬运已有值）。
 
-    每个变量都以自身原有规则为基准，仅追加本功能的地图瓦片域名。
-
-    新增的「裸点分 DNS 主机名」会被改写为子域通配形式。
-    两个机制配合即可同时覆盖本尊与子域，且不扩大放行范围。
+    每个变量都以自身原有规则为基准，仅追加本功能的地图瓦片域名，不会把
+    大写变量里已有的规则（例如 *）复制到小写变量，以免扩大放行范围。
 
     Args:
         env: 目标环境变量字典（通常为 dict(os.environ) 的拷贝），原地修改。
@@ -308,14 +292,9 @@ def merge_no_proxy_into_env(
     Returns:
         同一个 env 对象，便于链式使用
     """
-    additions: list[str] = []
-    for domain in domains:
-        token = str(domain or "").strip()
-        if not token:
-            continue
-        if _is_bare_dns_hostname(token):
-            token = f"*.{token}"
-        additions.append(token)
+    additions = [
+        str(domain or "").strip() for domain in domains if str(domain or "").strip()
+    ]
 
     for key in _NO_PROXY_ENV_KEYS:
         merged: list[str] = []
