@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import OrderedDict
+from datetime import datetime, timezone
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -18,10 +19,23 @@ from astrbot.core.desktop_runtime import is_desktop_managed_backend
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
+from ...core.services.paste.paste_client import (
+    format_expires_at,
+    get_paste_client,
+)
+from ...utils.log_sanitizer import sanitize_log_text
+from ...utils.runtime_log_collector import get_runtime_log_collector
 from ...utils.version import get_plugin_name, get_plugin_version
 from ..astrbot_restart import restart_astrbot_in_background
 from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
+
+# 日志导出行数边界与字节预算（自建 paste 服务端限制 2MB，预留头部与余量）。
+LOG_EXPORT_DEFAULT_COUNT = 500
+LOG_EXPORT_MAX_COUNT = 10000
+LOG_EXPORT_MAX_BYTES = 1_900_000
+# 运行日志导出的行过滤关键词：只导出本插件相关的运行日志行。
+RUNTIME_LOG_EXPORT_KEYWORD = "[灾害预警]"
 
 
 class PluginAdminCommandService(CommandTelemetryMixin):
@@ -969,7 +983,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             return
 
         try:
-            log_summary = self.plugin.disaster_service.message_logger.get_log_summary()
+            # build_summary 会同步读取全部日志文件（可达数百 MB），放入线程池执行，
+            # 避免阻塞事件循环。
+            log_summary = await asyncio.to_thread(
+                self.plugin.disaster_service.message_logger.get_log_summary
+            )
             if not log_summary["enabled"]:
                 yield event.plain_result(
                     "📋 原始消息日志功能未启用\n\n使用 /灾害预警日志开关 启用日志记录"
@@ -1013,6 +1031,166 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] 获取日志信息失败: {e}")
             yield event.plain_result(f"❌ 获取日志信息失败: {str(e)}")
+
+    async def handle_disaster_log_export(
+        self,
+        event,
+        count_str: str = None,
+        arg2: str = None,
+        arg1: str = None,
+    ):
+        """处理 /灾害预警日志导出：读取最近运行日志行，脱敏后上传生成链接。
+
+        支持可选 [debug] 参数导出 DEBUG 级别日志。
+        运行日志来自进程内 RuntimeLogCollector 捕获的控制台日志
+        （仅 [灾害预警] 相关行），结果仅以链接形式回复到原会话，
+        不把日志内容发到聊天消息中；上传失败仅提示原因，不做聊天
+        转发回退。导出为管理员显式动作，不随遥测开关联动。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 汇总传入的参数，支持如：
+        # /灾害预警日志导出
+        # /灾害预警日志导出 500
+        # /灾害预警日志导出 debug
+        # /灾害预警日志导出 500 debug
+        # /灾害预警日志导出 debug 500
+        tokens: list[str] = []
+        for val in (arg1, count_str, arg2):
+            if val is not None and str(val).strip():
+                tokens.extend(str(val).strip().split())
+
+        include_debug = False
+        requested_count_token: str | None = None
+
+        for token in tokens:
+            t_lower = token.lower()
+            if t_lower in ("debug", "-d", "--debug", "all"):
+                include_debug = True
+            elif requested_count_token is None:
+                requested_count_token = token
+            else:
+                # 出现多个非 debug 标识，保留第一个作为行数候选
+                pass
+
+        # 解析行数：默认 500，允许范围 1~10000，越界钳制并注明。
+        requested = LOG_EXPORT_DEFAULT_COUNT
+        clamped = False
+        if requested_count_token is not None:
+            try:
+                requested = int(requested_count_token)
+            except ValueError:
+                yield event.plain_result(
+                    "❌ 参数无效。\n\n"
+                    "📌 用法：/灾害预警日志导出 [数量] [debug]\n"
+                    "💡 例如：/灾害预警日志导出 500 debug（包含调试日志）\n"
+                    f"💡 数量范围 1~{LOG_EXPORT_MAX_COUNT}，"
+                    f"默认 {LOG_EXPORT_DEFAULT_COUNT}"
+                )
+                return
+
+        if requested < 1:
+            requested = 1
+            clamped = True
+        elif requested > LOG_EXPORT_MAX_COUNT:
+            requested = LOG_EXPORT_MAX_COUNT
+            clamped = True
+
+        debug_tip = "（含 DEBUG）" if include_debug else ""
+        yield event.plain_result(
+            f"📜 正在读取并上传最近 {requested} 行运行日志{debug_tip}，请稍候…"
+        )
+
+        try:
+            # 缓冲快照/过滤与整段脱敏均为 CPU 密集操作（文本量最大约 1.9MB），
+            # 放入线程池执行，避免阻塞事件循环（预警推送与 WebSocket 心跳共用该循环）。
+            lines, truncated_by_size = await asyncio.to_thread(
+                get_runtime_log_collector().get_recent_lines,
+                requested,
+                keyword=RUNTIME_LOG_EXPORT_KEYWORD,
+                include_debug=include_debug,
+                max_total_bytes=LOG_EXPORT_MAX_BYTES,
+            )
+            if not lines:
+                empty_tip = (
+                    "📋 暂无运行日志记录\n\n运行日志自插件本次启动开始累积，稍后再试。"
+                )
+                if not include_debug:
+                    empty_tip += "\n💡 如需查看调试日志，可尝试添加 debug 参数：/灾害预警日志导出 debug"
+                yield event.plain_result(empty_tip)
+                return
+
+            export_text = await asyncio.to_thread(
+                self._build_log_export_text,
+                lines,
+                truncated_by_size,
+                include_debug,
+            )
+            payload = await get_paste_client().upload_text(export_text)
+        except Exception as e:
+            # 失败仅提示原因（用户确认不做聊天转发回退），细节留服务端日志。
+            logger.warning(f"[灾害预警] 日志导出失败: {e}")
+            await self._track_command_feature(
+                "command_admin_action",
+                {"action": "log_export", "success": False},
+            )
+            yield event.plain_result(f"❌ 日志导出失败: {e}")
+            return
+
+        await self._track_command_feature(
+            "command_admin_action",
+            {
+                "action": "log_export",
+                "success": True,
+                "requested": requested,
+                "exported": len(lines),
+                "include_debug": include_debug,
+                "truncated_by_size": truncated_by_size,
+            },
+        )
+
+        size_kb = sum(len(line.encode("utf-8")) for line in lines) / 1024
+        level_desc = "含 DEBUG" if include_debug else "仅常规"
+        lines_out = [
+            "✅ 运行日志导出成功（内容已脱敏）",
+            f"📦 行数：{len(lines)} / 请求 {requested} 行（共 {size_kb:.1f} KB，{level_desc}）",
+            f"🔗 链接：{payload.get('url', '')}",
+        ]
+        expires_at = format_expires_at(payload.get("expires_at"))
+        if expires_at and expires_at != "未知":
+            lines_out.append(f"⏳ 过期时间：{expires_at}")
+        if clamped:
+            lines_out.append(f"ℹ️ 行数已钳制到允许范围 1~{LOG_EXPORT_MAX_COUNT}")
+        if truncated_by_size:
+            lines_out.append("⚠️ 已达到导出大小上限，仅包含最新可容纳的日志行")
+        elif len(lines) < requested:
+            lines_out.append(f"ℹ️ 当前缓冲共 {len(lines)} 行，不足请求的 {requested} 行")
+        yield event.plain_result("\n".join(lines_out))
+
+    @staticmethod
+    def _build_log_export_text(
+        lines: list[str],
+        truncated_by_size: bool,
+        include_debug: bool = False,
+    ) -> str:
+        """把运行日志行拼装为导出文本，并对整段内容脱敏。"""
+        generated_at = (
+            datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        )
+        level_desc = "全部（包含 DEBUG）" if include_debug else "INFO 及以上（不含 DEBUG）"
+        header = (
+            "=== 灾害预警插件运行日志导出 ===\n"
+            f"导出时间: {generated_at}\n"
+            f"插件版本: {get_plugin_version()}\n"
+            f"日志级别: {level_desc}\n"
+            f"日志行数: {len(lines)} 行（按时间升序，仅含 [灾害预警] 相关日志）\n"
+            f"大小截断: {'是（已达导出上限）' if truncated_by_size else '否'}\n"
+            "说明: 以下为本进程自启动以来的插件运行日志，已对凭据与本机路径脱敏。\n"
+        )
+        body = "\n".join(lines)
+        return sanitize_log_text(f"{header}\n{body}\n")
 
     async def handle_toggle_message_logging(self, event):
         """开启或关闭原始 WebSocket 日志记录器，切换运行配置。"""

@@ -46,9 +46,15 @@ class DisasterWarningPlugin(Star):
         self._admin_command_service = PluginAdminCommandService(self)
         self._query_command_service = PluginQueryCommandService(self)
 
+        # 构造阶段立即挂载运行日志收集器，确保整个生命周期的所有日志（含横幅 banner）完整录入
+        self._lifecycle_service.install_runtime_log_collector()
+
     async def initialize(self):
         """初始化插件"""
         try:
+            # 确保运行日志收集器已挂载（幂等，确保 banner 打印前收集器已生效）
+            self._lifecycle_service.install_runtime_log_collector()
+
             # 插件一重载即打印组织 ASCII art 横幅（bold_cyan 配色，终端不支持颜色时回退纯文本）。
             print_banner()
 
@@ -293,7 +299,7 @@ class DisasterWarningPlugin(Star):
                 "• /灾害预警推送开关 - 会话推送开关\n"
                 "• /灾害预警配置 查看 [全局|当前|<会话UMO>]\n"
                 "• /设置所在地 [纬度] [经度] [地名] [范围]\n"
-                "• /灾害预警日志 / 日志开关 / 日志清除\n"
+                "• /灾害预警日志 / 日志导出 [数量] / 日志开关 / 日志清除\n"
                 "• /服务器切换 - 查看/切换数据源主备服务器\n"
                 "• /重启AstrBot - 重启整个 AstrBot 进程\n"
                 "──────────────\n"
@@ -814,6 +820,19 @@ class DisasterWarningPlugin(Star):
     async def disaster_logs(self, event: AstrMessageEvent):
         """查看原始消息日志信息"""
         async for result in self._admin_command_service.handle_disaster_logs(event):
+            yield result
+
+    @filter.command("灾害预警日志导出", alias={"日志导出"})
+    async def disaster_log_export(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = None,
+        arg2: str = None,
+    ):
+        """导出最近运行日志（脱敏）并上传生成链接"""
+        async for result in self._admin_command_service.handle_disaster_log_export(
+            event, arg1=arg1, arg2=arg2
+        ):
             yield result
 
     @filter.command("灾害预警日志开关")

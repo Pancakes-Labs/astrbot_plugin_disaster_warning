@@ -15,10 +15,19 @@ from astrbot.api import logger
 
 from ..core.app.disaster_service import stop_disaster_service
 from ..core.services.config.config_validation_service import ConfigValidator
+from ..core.services.error_report.error_report_service import (
+    close_error_report_service,
+    configure_error_report_service,
+)
+from ..core.services.paste.paste_client import close_paste_client
 from ..core.services.telemetry.telemetry_service import TelemetryManager
 from ..core.services.telemetry.telemetry_utils import track_error_safely
 from ..utils.banner import print_stop_summary
 from ..utils.geolocation import close_geoip_session
+from ..utils.runtime_log_collector import (
+    install_runtime_log_collector,
+    uninstall_runtime_log_collector,
+)
 from ..utils.version import get_plugin_version
 
 
@@ -60,8 +69,18 @@ class PluginLifecycleService:
         except Exception as e:
             logger.error(f"[灾害预警] 配置校验失败: {e}")
 
+    def install_runtime_log_collector(self) -> None:
+        """挂载运行日志内存收集器（幂等），供日志导出命令读取最近的运行日志行。
+
+        放在 initialize 最前面执行，确保初始化阶段的日志也被捕获。
+        """
+        install_runtime_log_collector()
+
     def setup_telemetry(self) -> None:
         """初始化并注入遥测上报管理器。"""
+        # 错误报告自动上传与遥测同步装配（启用状态跟随遥测开关），
+        # 经 track_error_safely 统一挂钩后即可覆盖全部错误捕获点。
+        configure_error_report_service(dict(self.plugin.config), get_plugin_version())
         # 遥测初始化与主服务解耦，便于在生命周期阶段统一注入和关闭。
         self.plugin.telemetry = TelemetryManager(
             config=dict(self.plugin.config),
@@ -132,103 +151,130 @@ class PluginLifecycleService:
 
     async def shutdown_plugin_resources(self) -> None:
         """在插件卸载/关闭时，依次安全终止后台任务、连接会话与资源引用。"""
-        # 插件停机时按“服务任务 -> 主服务 -> 子资源”顺序清理，尽量降低悬挂任务与残留连接风险。
-        if self.plugin._service_task:
-            self.plugin._service_task.cancel()
-            try:
-                await self.plugin._service_task
-            except asyncio.CancelledError:
-                pass
-
-        await stop_disaster_service()
-
-        if (
-            self.plugin.disaster_service
-            and self.plugin.disaster_service.message_manager
-        ):
-            if hasattr(self.plugin.disaster_service.message_manager, "browser_manager"):
-                # 浏览器资源通常最重，优先回收，避免宿主退出后仍残留外部进程。
+        # 整个清理流程放入 try，确保任一步骤抛异常时，finally 中的运行日志收集器卸载仍会执行。
+        try:
+            # 插件停机时按“服务任务 -> 主服务 -> 子资源”顺序清理，尽量降低悬挂任务与残留连接风险。
+            if self.plugin._service_task:
+                self.plugin._service_task.cancel()
                 try:
-                    await self.plugin.disaster_service.message_manager.cleanup_browser()
-                except Exception as be:
-                    logger.debug(f"[灾害预警] 浏览器清理时出错（已忽略）: {be}")
-            try:
-                # 消息管理器内部的气象筛选器可能持有网络会话，需要显式关闭。
-                await (
-                    self.plugin.disaster_service.message_manager.weather_filter.close()
-                )
-            except Exception as wfe:
-                logger.debug(
-                    f"[灾害预警] 气象过滤器 session 关闭时出错（已忽略）: {wfe}"
-                )
+                    await self.plugin._service_task
+                except asyncio.CancelledError:
+                    pass
 
-        if (
-            self.plugin.disaster_service
-            and self.plugin.disaster_service.statistics_manager
-        ):
-            try:
-                # 统计模块中的地区解析器也可能缓存网络会话，停机时一并回收。
-                await self.plugin.disaster_service.statistics_manager._weather_region_resolver.close()
-            except Exception as wfe:
-                logger.debug(
-                    f"[灾害预警] 统计模块气象 session 关闭时出错（已忽略）: {wfe}"
-                )
+            await stop_disaster_service()
 
-        # 气象站查询服务（NMC + FAN 客户端）若已懒加载过，需显式关闭其 aiohttp 会话，
-        # 避免插件重载时残留未关闭连接导致会话泄漏。
-        weather_station_service = getattr(
-            self.plugin, "_weather_station_query_service", None
-        )
-        if weather_station_service is not None:
-            try:
-                await weather_station_service.close()
-            except Exception as wse:
-                logger.debug(
-                    f"[灾害预警] 气象站查询服务会话关闭时出错（已忽略）: {wse}"
-                )
-            finally:
-                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的服务实例
-                self.plugin._weather_station_query_service = None
+            if (
+                self.plugin.disaster_service
+                and self.plugin.disaster_service.message_manager
+            ):
+                if hasattr(
+                    self.plugin.disaster_service.message_manager, "browser_manager"
+                ):
+                    # 浏览器资源通常最重，优先回收，避免宿主退出后仍残留外部进程。
+                    try:
+                        await (
+                            self.plugin.disaster_service.message_manager.cleanup_browser()
+                        )
+                    except Exception as be:
+                        logger.debug(f"[灾害预警] 浏览器清理时出错（已忽略）: {be}")
+                try:
+                    # 消息管理器内部的气象筛选器可能持有网络会话，需要显式关闭。
+                    await (
+                        self.plugin.disaster_service.message_manager.weather_filter.close()
+                    )
+                except Exception as wfe:
+                    logger.debug(
+                        f"[灾害预警] 气象过滤器 session 关闭时出错（已忽略）: {wfe}"
+                    )
 
-        # 降水量预报客户端若已懒加载过，需显式关闭其 aiohttp 会话，
-        # 避免插件重载时残留未关闭连接导致会话泄漏。
-        precipitation_client = getattr(self.plugin, "_precipitation_client", None)
-        if precipitation_client is not None:
+            if (
+                self.plugin.disaster_service
+                and self.plugin.disaster_service.statistics_manager
+            ):
+                try:
+                    # 统计模块中的地区解析器也可能缓存网络会话，停机时一并回收。
+                    await self.plugin.disaster_service.statistics_manager._weather_region_resolver.close()
+                except Exception as wfe:
+                    logger.debug(
+                        f"[灾害预警] 统计模块气象 session 关闭时出错（已忽略）: {wfe}"
+                    )
+
+            # 气象站查询服务（NMC + FAN 客户端）若已懒加载过，需显式关闭其 aiohttp 会话，
+            # 避免插件重载时残留未关闭连接导致会话泄漏。
+            weather_station_service = getattr(
+                self.plugin, "_weather_station_query_service", None
+            )
+            if weather_station_service is not None:
+                try:
+                    await weather_station_service.close()
+                except Exception as wse:
+                    logger.debug(
+                        f"[灾害预警] 气象站查询服务会话关闭时出错（已忽略）: {wse}"
+                    )
+                finally:
+                    # 会话已关闭，清除懒加载引用，避免停机后残留已失效的服务实例
+                    self.plugin._weather_station_query_service = None
+
+            # 降水量预报客户端若已懒加载过，需显式关闭其 aiohttp 会话，
+            # 避免插件重载时残留未关闭连接导致会话泄漏。
+            precipitation_client = getattr(self.plugin, "_precipitation_client", None)
+            if precipitation_client is not None:
+                try:
+                    await precipitation_client.close()
+                except Exception as pce:
+                    logger.debug(
+                        f"[灾害预警] 降水量预报客户端会话关闭时出错（已忽略）: {pce}"
+                    )
+                finally:
+                    # 会话已关闭，清除懒加载引用，避免停机后残留已失效的客户端实例
+                    self.plugin._precipitation_client = None
+
+            if self.plugin.telemetry:
+                try:
+                    await self.plugin.telemetry.close()
+                except Exception as te:
+                    logger.debug(f"[灾害预警] 遥测会话关闭时出错（已忽略）: {te}")
+
+            # 错误报告服务与 paste 客户端各自独立回收，任一失败不影响后续清理。
             try:
-                await precipitation_client.close()
+                await close_error_report_service()
+            except Exception as ere:
+                logger.debug(f"[灾害预警] 关闭错误报告服务时出错（已忽略）: {ere}")
+            try:
+                await close_paste_client()
             except Exception as pce:
-                logger.debug(
-                    f"[灾害预警] 降水量预报客户端会话关闭时出错（已忽略）: {pce}"
-                )
-            finally:
-                # 会话已关闭，清除懒加载引用，避免停机后残留已失效的客户端实例
-                self.plugin._precipitation_client = None
+                logger.debug(f"[灾害预警] 关闭 Paste 客户端时出错（已忽略）: {pce}")
 
-        if self.plugin.telemetry:
+            if self.plugin.web_server:
+                # 最后停止管理端 Web 服务器，避免外部仍尝试进行网络交互
+                await self.plugin.web_server.stop()
+
+            # 兜底关闭 GeoIP 共享会话：close_geoip_session() 目前由 web_server.stop() 触发，
+            # 但为避免 web_admin 未启用或未来其他路径使用 GeoIP 时残留模块级会话，此处再兜底一次。
             try:
-                await self.plugin.telemetry.close()
-            except Exception as te:
-                logger.debug(f"[灾害预警] 遥测会话关闭时出错（已忽略）: {te}")
+                await close_geoip_session()
+            except Exception as geoip_err:
+                logger.debug(
+                    f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}"
+                )
 
-        if self.plugin.web_server:
-            # 最后停止管理端 Web 服务器，避免外部仍尝试进行网络交互
-            await self.plugin.web_server.stop()
-
-        # 兜底关闭 GeoIP 共享会话：close_geoip_session() 目前由 web_server.stop() 触发，
-        # 但为避免 web_admin 未启用或未来其他路径使用 GeoIP 时残留模块级会话，此处再兜底一次。
-        try:
-            await close_geoip_session()
-        except Exception as geoip_err:
-            logger.debug(f"[灾害预警] 关闭 GeoIP 会话时出错（已忽略）: {geoip_err}")
-
-        # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
-        # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。
-        # 该大屏原先在 DisasterServiceLifecycle.stop() 内打印，彼时浏览器与
-        # Web 管理端尚未回收（由本方法在 stop() 之后执行），会显示 ⚠️ 未完成。
-        try:
-            print_stop_summary(self.plugin.disaster_service)
-        except Exception as banner_err:
-            logger.debug(f"[灾害预警] 停止汇总大屏打印失败（已忽略）: {banner_err}")
+            # 所有资源（含浏览器、后台延迟检测与 Web 管理端）均已完成回收后，
+            # 才打印停止汇总大屏，确保面板上的回收状态与实际运行态一致。
+            # 该大屏原先在 DisasterServiceLifecycle.stop() 内打印，彼时浏览器与
+            # Web 管理端尚未回收（由本方法在 stop() 之后执行），会显示 ⚠️ 未完成。
+            try:
+                print_stop_summary(self.plugin.disaster_service)
+            except Exception as banner_err:
+                logger.debug(
+                    f"[灾害预警] 停止汇总大屏打印失败（已忽略）: {banner_err}"
+                )
+        finally:
+            # 必须放在 finally：前面任一 await（如 stop_disaster_service / web_server.stop）
+            # 抛异常时，此处仍会执行。否则旧 RuntimeLogCollector 注册的 Sink 及其 20000 行
+            # 缓冲会残留在 Loguru 中，控制台 Sink 的 _filter 补丁也不会被还原；插件重载时
+            # 新实例会再叠加一层 Sink 与过滤器包装，导致每次失败停机都多留一份资源。
+            # 放在 finally 中同时保证停止阶段日志不再写入已废弃的缓冲。
+            uninstall_runtime_log_collector()
 
     def handle_asyncio_exception(self, loop, context) -> None:
         """事件循环未处理异步异常拦截入口，判断来源若为本插件则执行遥测收集上报。"""
