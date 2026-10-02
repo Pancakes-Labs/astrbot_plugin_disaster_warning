@@ -18,7 +18,7 @@
 ### 🌐 Data Sources & Network (数据源与网络)
 
 - `OpenQuakeAPI` 现已更名为 `PancakesAPI` by @Aloys233 & @DBJD-CR in #234 #244
-- 新增 `Jian Project` 数据源，并完成前后端适配 by @Aloys233 & @DBJD-CR in #234 #235 #243
+- 新增 `Jian Project` 数据源，并完成前后端适配 by @Aloys233 & @DBJD-CR in #234 #235 #243 #245 #246
 - `PancakesAPI（OpenQuakeAPI）` 新增日本气象厅与 USGS 子数据源 by @Aloys233 in #234
 
 ### 💻 WebUI / Frontend (前端)
@@ -36,6 +36,7 @@
 ### ⚙️ Configuration (配置)
 
 - 新增 `地图瓦片绕过代理直连（仅本地模式）` 与 `额外绕过的域名（仅本地模式）` 配置项 by @DBJD-CR in #239
+- 优化了数据源配置的启用判定逻辑 by @DBJD-CR in #246
 
 ### 🛠️ Commands (指令系统)
 
