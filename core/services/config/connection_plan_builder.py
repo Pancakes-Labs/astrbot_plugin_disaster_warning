@@ -93,6 +93,7 @@ class ConnectionPlanBuilder:
         cls,
         config: dict[str, Any],
         fan_server_pref_override: str | None = None,
+        session_config_manager: Any | None = None,
     ) -> dict[str, dict[str, Any]]:
         """根据统一数据源目录与启用状态构建连接计划。
 
@@ -102,9 +103,17 @@ class ConnectionPlanBuilder:
                 传入时仅影响本次连接计划的 URL 顺序，不写入配置，
                 用于运行期临时切换（如 /服务器切换 指令）；
                 缺省时从配置读取持久化偏好。
+            session_config_manager: 可选的会话配置管理器；传入时复用它解析
+                「全局关、会话开」的子源，避免新建重复实例造成快照陈旧与并发覆盖。
         """
-        # 使用运行时查询服务拉取当前的物理数据源启用列表
-        runtime_query = SourceRuntimeQueryService(config)
+        if session_config_manager is not None:
+            cls._session_config_manager = session_config_manager
+        # 使用运行时查询服务拉取当前的物理数据源启用列表。
+        # 优先复用主服务注入的会话配置管理器，避免每次构建都新建独立实例。
+        runtime_query = SourceRuntimeQueryService(
+            config,
+            session_config_manager=getattr(cls, "_session_config_manager", None),
+        )
         connections: dict[str, dict[str, Any]] = {}
         fan_app_id, fan_api_key = cls._resolve_fan_studio_auth(config)
         jp_login_key = cls._resolve_jian_project_auth(config)

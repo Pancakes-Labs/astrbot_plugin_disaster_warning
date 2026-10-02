@@ -41,7 +41,11 @@ class EqscTyphoonPollService:
 
     def __init__(self, service):
         self.service = service
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 复用主服务的会话配置管理器。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
         self._task: asyncio.Task | None = None
         # 上一轮轮询中处于活跃态的台风 ID 集合。
         # 用于识别"上一轮活跃 → 本轮停编"的台风，放行一次以推送停编通知；

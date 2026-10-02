@@ -39,7 +39,11 @@ class EqscTsunamiPollService:
 
     def __init__(self, service):
         self.service = service
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 复用主服务的会话配置管理器。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
         self._task: asyncio.Task | None = None
         self._last_payload_fingerprint: str | None = None
         self._last_event_id: str | None = None

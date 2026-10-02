@@ -43,7 +43,11 @@ class EqscCencIntensityPollService:
 
     def __init__(self, service):
         self.service = service
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 复用主服务的会话配置管理器。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
         self._task: asyncio.Task | None = None
         # event_id -> list 侧指纹（magnitude|place_name）
         self._last_list_fingerprints: dict[str, str] = {}
