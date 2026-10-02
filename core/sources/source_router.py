@@ -157,9 +157,15 @@ def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
 def get_fan_studio_source_id(source_name: str) -> str | None:
     """根据 FAN Studio 来源名称解析统一数据源标识。"""
     source_ids = get_source_ids_by_provider_source_name((source_name or "").strip())
-    if not source_ids:
+    fan_source_ids = [
+        source_id
+        for source_id in source_ids
+        if (entry := SOURCE_CATALOG.get(source_id)) is not None
+        and entry.provider_family == ProviderFamily.FAN_STUDIO
+    ]
+    if not fan_source_ids:
         return None
-    return source_ids[0]
+    return fan_source_ids[0]
 
 
 def get_wolfx_source_id(message_type: str) -> str | None:
