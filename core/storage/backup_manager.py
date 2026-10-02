@@ -180,6 +180,26 @@ class BackupService:
             pass
 
     @staticmethod
+    def _remove_sqlite_sidecars(db_path) -> None:
+        """移除 WAL 模式的 -wal / -shm 附属文件。
+
+        数据库切到 WAL 后，未 checkpoint 的数据可能残留在 -wal 中。
+        覆盖还原 events.db 前必须清掉旧附属文件，避免 SQLite 打开新库时
+        被旧 WAL 内容污染。
+        """
+        try:
+            base_name = db_path.name
+        except Exception:
+            return
+        for suffix in ("-wal", "-shm"):
+            try:
+                sidecar = db_path.with_name(base_name + suffix)
+                if sidecar.exists():
+                    os.remove(sidecar)
+            except Exception:
+                pass
+
+    @staticmethod
     def _rollback_files(temp_backups: list, created_files: list) -> None:
         """回滚文件：
         1. 把 .bak 快照替换回原路径（仅针对还原前已存在的文件）；
@@ -312,6 +332,9 @@ class BackupService:
             if db_mgr and has_db_in_zip:
                 logger.info("[灾害预警] 正在断开当前数据库连接...")
                 await db_mgr.close()
+                # 关闭连接会 checkpoint 主库，但仍清理残留附属文件，
+                # 避免随后覆盖 events.db 时被旧 -wal 内容污染。
+                self._remove_sqlite_sidecars(self.db_path)
 
             # 备份当前本地数据作为 .bak 回滚文件（只备份需要覆盖的文件），
             # 同时记录“还原前原本不存在”的路径，供失败时删除新文件实现真正回滚。
