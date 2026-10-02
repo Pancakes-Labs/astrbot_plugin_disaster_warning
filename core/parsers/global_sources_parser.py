@@ -729,6 +729,9 @@ class UsgsEarthquakeJianProjectParser(BaseParser):
 
             latitude = safe_float_convert(msg_data.get("latitude")) or 0.0
             longitude = safe_float_convert(msg_data.get("longitude")) or 0.0
+            # 缺省/非法坐标回退为 (0, 0)
+            if latitude == 0 and longitude == 0:
+                return None
             raw_place_name = str(msg_data.get("placeName") or "").strip()
             info_type = str(msg_data.get("infoTypeName") or "").strip()
 
