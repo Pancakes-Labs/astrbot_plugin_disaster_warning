@@ -9,6 +9,8 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from astrbot.api import logger
+
 from ...sources.display_registry import (
     CONNECTION_DISPLAY_NAMES,
     CONNECTION_GROUP_ALIAS,
@@ -38,11 +40,31 @@ class SourceRuntimeQueryService:
         # 会话差异配置管理器：用于解析「全局关、会话开」这类子源启用态。
         # 缺省时不立即构造，真正需要会话级判定时再惰性创建，避免高频路径做多余文件 IO。
         self._session_config_manager = session_config_manager
-        # 会话感知启用态缓存：{(source_id, 时间桶): bool}。
-        # 接入/解析路径调用频繁，而「某会话是否覆写某子源」仅在配置保存时变化，
-        # 用短 TTL 缓存把每消息 O(会话数) 的配置解析降为近似 O(1)。
-        self._session_active_cache: dict[tuple[str, int], bool] = {}
+        # 会话感知启用态缓存：{(source_id, 配置版本, 时间桶): bool}。
+        # 接入/解析路径调用频繁，而「某会话是否覆写某子源」仅在配置保存时变化；
+        # 键同时纳入配置版本号（写入即失效）与时间桶（TTL 兜底），
+        # 使会话覆写保存后立即生效，无需等待 TTL 过期。
+        self._session_active_cache: dict[tuple[str, int, int], bool] = {}
         self._session_active_ttl = 5.0
+        # 是否已向会话配置管理器注册变更监听器（避免重复注册）。
+        self._change_listener_attached = False
+
+    def _invalidate_session_active_cache(self) -> None:
+        """清空会话启用态缓存（会话覆写写入后调用，保证立即生效）。"""
+        self._session_active_cache.clear()
+
+    def _attach_change_listener(self, manager) -> None:
+        """向会话配置管理器注册变更监听器（幂等）。"""
+        if self._change_listener_attached:
+            return
+        add_listener = getattr(manager, "add_change_listener", None)
+        if not callable(add_listener):
+            return
+        try:
+            add_listener(self._invalidate_session_active_cache)
+            self._change_listener_attached = True
+        except Exception as e:
+            logger.debug(f"[灾害预警] 注册会话配置变更监听器失败: {e}")
 
     def _data_sources_config(self) -> dict[str, Any]:
         """获取数据源配置总表。"""
@@ -52,6 +74,8 @@ class SourceRuntimeQueryService:
         """惰性获取会话差异配置管理器。"""
         manager = self._session_config_manager
         if manager is not None:
+            if manager:
+                self._attach_change_listener(manager)
             return manager or None
         try:
             # 延迟导入：避免查询层与存储层在模块加载期形成循环依赖。
@@ -62,6 +86,8 @@ class SourceRuntimeQueryService:
             # 不可用时标记为 False，避免每条消息反复重试创建。
             manager = False
         self._session_config_manager = manager
+        if manager:
+            self._attach_change_listener(manager)
         return manager or None
 
     @staticmethod
@@ -113,14 +139,15 @@ class SourceRuntimeQueryService:
         if self.is_source_enabled(source_id):
             return True
 
+        manager = self._get_session_config_manager()
+        change_version = int(getattr(manager, "change_version", 0) or 0)
         bucket = int(time.monotonic() / self._session_active_ttl)
-        cache_key = (entry.source_id, bucket)
+        cache_key = (entry.source_id, change_version, bucket)
         cached = self._session_active_cache.get(cache_key)
         if cached is not None:
             return cached
 
         result = False
-        manager = self._get_session_config_manager()
         if manager is not None:
             try:
                 known_sessions = manager.list_all_known_sessions()
@@ -133,6 +160,10 @@ class SourceRuntimeQueryService:
                 except Exception:
                     continue
                 if not isinstance(effective, dict):
+                    continue
+                # 会话级推送总开关关闭时，该会话不会接收任何推送，
+                # 不应仅因其残留的子源覆写而让数据源持续接入。
+                if effective.get("push_enabled", True) is False:
                     continue
                 data_sources = effective.get("data_sources")
                 if not isinstance(data_sources, dict):
