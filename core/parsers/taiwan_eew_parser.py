@@ -358,6 +358,15 @@ class CwaEewJianProjectParser(BaseParser):
                 "is_final": False,
             }
 
+            # Jian Project CWA 载荷以 maxIntensity / epiIntensity 承载最大震度，
+            # 写入 scale 供震度过滤规则判定（与 FAN Studio CWA 解析口径一致）。
+            max_intensity = (
+                msg_data.get("maxIntensity")
+                if msg_data.get("maxIntensity") is not None
+                else msg_data.get("epiIntensity")
+            )
+            scale = ScaleConverter.parse_jma_cwa_scale(max_intensity)
+
             domain_event = EarthquakeEvent(
                 occurred_at=occurred_at,
                 latitude=latitude,
@@ -365,6 +374,7 @@ class CwaEewJianProjectParser(BaseParser):
                 place_name=place_name,
                 magnitude=magnitude,
                 depth=depth,
+                scale=scale,
                 metadata=dict(metadata),
             )
 
