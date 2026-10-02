@@ -509,7 +509,12 @@ class SimulationBuilder:
             or "p2p" in step.source_id
         ):
             scale = _safe_int(params.get("scale"), None)
-            if scale is not None:
+            # cwa_jianproject 的 CwaEewJianProjectParser 不产出震度；schema 不暴露该字段，
+            # 但构建器不会按 schema 重新校验入参，故此处显式排除，避免 params 被注入后误写。
+            if (
+                scale is not None
+                and source_entry.source_id != "cwa_jianproject"
+            ):
                 if "p2p" in step.source_id:
                     # P2P 源使用业务档位值（10=震度1 … 70=震度7），需转换为规范震度。
                     # 对齐真实解析链路 ScaleConverter.convert_p2p_scale。
@@ -894,18 +899,30 @@ class SimulationBuilder:
             extra["shakemap_uri"] = shakemap_uri
 
         # USGS 报告源：补详情 URL 与状态。
-        if source_entry.source_id == "usgs_fanstudio":
-            url = str(params.get("url") or "").strip()
+        # usgs_jianproject / usgs_pancakes 为 USGS 测定的 Jian Project / PancakesAPI 版本，
+        # 共用同一展示链路（usgs_report），故透传各自真实解析器会产出的元数据。
+        if source_entry.source_id in (
+            "usgs_fanstudio",
+            "usgs_jianproject",
+            "usgs_pancakes",
+        ):
+            # url 仅对真实解析器会输出该字段的来源透传（FAN / Pancakes）；
+            # UsgsEarthquakeJianProjectParser 不读取/产出 url，透传会引入真实链路不可能出现的元数据。
+            if source_entry.source_id in ("usgs_fanstudio", "usgs_pancakes"):
+                url = str(params.get("url") or "").strip()
+                if url:
+                    extra["url"] = url
+                    extra["event_url"] = url
             status = str(params.get("status") or "").strip()
-            if url:
-                extra["url"] = url
-                extra["event_url"] = url
             if status:
                 extra["status"] = status
                 extra["info_type"] = status
+            magnitude_type = str(params.get("magnitude_type") or "").strip()
+            if magnitude_type:
+                extra["magnitude_type"] = magnitude_type
 
         # CENC 报告源：补信息类型与名称。
-        if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx"):
+        if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx", "cenc_jianproject"):
             info_type_name = str(params.get("info_type_name") or "地震测定").strip()
             name_by_info = str(params.get("name_by_info") or "").strip()
             if info_type_name:
@@ -914,11 +931,14 @@ class SimulationBuilder:
                 extra["info_type"] = info_type_name
             if name_by_info:
                 extra["name_by_info"] = name_by_info
-            # 最大烈度：Wolfx cenc_eqlist 文档含 intensity；展示链路统一消费
-            intensity = _safe_float(params.get("intensity"), None)
-            if intensity is not None:
-                extra["intensity"] = intensity
-                domain_event.intensity = intensity
+            # 最大烈度：仅对真实解析器会产出 intensity 的来源透传
+            # （Wolfx cenc_eqlist 含 intensity）；cenc_jianproject 不产出，透传会引入
+            # 真实链路不会出现的烈度。即便 params 被注入 intensity 也按来源忽略。
+            if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx"):
+                intensity = _safe_float(params.get("intensity"), None)
+                if intensity is not None:
+                    extra["intensity"] = intensity
+                    domain_event.intensity = intensity
 
         # CWA EEW 源：影响区域 locationDesc → impact_area（CwaEewPresenter 展示“影响区域”）。
         if source_entry.source_id in ("cwa_fanstudio", "cwa_wolfx"):
@@ -955,6 +975,27 @@ class SimulationBuilder:
                         for p in points
                         if str(p.get("addr") or "").strip()
                     ]
+
+        # JMA 地震情报源（PancakesAPI jma_eqlist）：补电文类型 / 标题 / 发布状态。
+        # 取消判定与 info_type 回退严格对齐 JmaEqlistPancakesParser：
+        #   - status == "取消" 或 infoType == "取消" 视为取消报（即使未勾选布尔开关）
+        #   - infoType 为空时回退到 telegram
+        if source_entry.source_id == "jma_eqlist_pancakes":
+            for key in ("telegram", "headline", "status"):
+                value = str(params.get(key) or "").strip()
+                if value:
+                    extra[key] = value
+
+            info_type = str(params.get("info_type") or "").strip()
+            telegram = str(params.get("telegram") or "").strip()
+            effective_info_type = info_type or telegram
+            if effective_info_type:
+                extra["info_type"] = effective_info_type
+
+            status = str(params.get("status") or "").strip()
+            if status == "取消" or info_type == "取消":
+                extra["is_cancel"] = True
+                domain_event.metadata["is_cancel"] = True
 
         # CEA 地震预警源：补预估烈度 epiIntensity。
         if source_entry.source_id in ("cea_fanstudio", "cea_pr_fanstudio", "cea_wolfx"):
@@ -1065,6 +1106,7 @@ class SimulationBuilder:
         map_urls = _parse_json_dict(params.get("map_urls"))
         # 中国海啸源按等级生成默认预报区，避免空数组导致展示空白。
         # 字段名对齐 TsunamiAlertPresenter 读取逻辑（name / warningLevel / estimatedArrivalTime / maxWaveHeight）。
+        # 仅 FAN /tsunami 有结构化预报区；Jian Project 的 nmefc-tsunami 载荷不含，故不生成。
         if not forecasts and source_entry.source_id == "china_tsunami_fanstudio":
             forecasts = [
                 {
@@ -1154,7 +1196,10 @@ class SimulationBuilder:
             map_urls = normalized_map_urls
 
         # 发布机构按数据源对齐真实链路：
-        if source_entry.source_id == "china_tsunami_fanstudio":
+        if source_entry.source_id in (
+            "china_tsunami_fanstudio",
+            "china_tsunami_jianproject",
+        ):
             org_unit = "自然资源部海啸预警中心"
         elif source_entry.source_id in ("jma_tsunami_p2p", "jma_tsunami_eqsc"):
             org_unit = "日本气象厅"
