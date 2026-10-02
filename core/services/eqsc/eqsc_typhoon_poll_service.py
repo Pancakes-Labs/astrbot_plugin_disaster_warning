@@ -69,8 +69,8 @@ class EqscTyphoonPollService:
         return self._task is not None and not self._task.done()
 
     def is_enabled(self) -> bool:
-        """数据源是否启用。"""
-        return self._source_runtime_query.is_source_enabled(self.SOURCE_ID)
+        """轮询是否需要运行（组总闸 + 全局或任一会话需要台风）。"""
+        return self._source_runtime_query.is_source_active(self.SOURCE_ID)
 
     def _eqsc_config(self) -> dict[str, Any]:
         data_sources = self.service.config.get("data_sources", {})

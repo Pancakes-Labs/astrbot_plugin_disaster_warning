@@ -145,13 +145,30 @@ class SourceMessageRouter:
 
     def _is_source_routable(self, source_id: str, source_label: str) -> bool:
         config_key = _resolve_config_key(source_id)
-        # 校验：1. 数据源是否在当前配置中被启用
-        if not self._source_runtime_query.is_source_enabled(source_id):
+        source_entry = get_source_entry(source_id)
+        config_group = source_entry.config_group if source_entry is not None else ""
+
+        # 校验 1：分组总闸（「批量闸刀」）。
+        # 组闸关闭＝整组停用（任何会话都无法突破），属静态配置态，
+        # 降为 DEBUG 避免高频子源逐条刷屏。
+        if not self._source_runtime_query.is_group_enabled(source_id):
             logger.debug(
-                f"[灾害预警] 数据源 {config_key} ({source_label}) 未启用，忽略"
+                f"[灾害预警] 数据源分组 {config_group or source_id} "
+                f"({source_label}) 已停用，忽略"
             )
             return False
-        # 校验：2. 相应的消息解析器是否存在，避免解析抛错
+
+        # 校验 2：全局或任一会话是否真的需要该子源。
+        # 子源级开关语义为「会话默认值」，会被会话覆写；
+        # 仅当「全局关且无任何会话覆写开启」时才跳过解析，避免无谓开销。
+        if not self._source_runtime_query.is_source_active(source_id):
+            logger.debug(
+                f"[灾害预警] 数据源 {config_key} ({source_label}) 未启用"
+                f"（全局 {config_group}.{config_key} 关闭且无会话覆写开启），忽略"
+            )
+            return False
+
+        # 校验 3：相应的消息解析器是否存在，避免解析抛错
         if not self._has_parser(source_id):
             logger.warning(
                 f"[灾害预警] 未找到解析器: {source_id}",

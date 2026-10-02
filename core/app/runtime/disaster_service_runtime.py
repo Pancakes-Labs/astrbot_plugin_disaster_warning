@@ -30,7 +30,11 @@ class DisasterServiceRuntimeService:
         # 保留主服务引用，运行期任务需要读取连接计划、消息管理器、解析器与运行标志位。
         self.service = service
         # 查询服务用于判断某个数据源是否启用，避免对已禁用源继续做解析与事件投递。
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 注入会话配置管理器，使「全局关、会话开」的子源也被正确判定为需接入。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
 
     async def establish_websocket_connections(self) -> None:
         """建立 WebSocket 连接。"""
@@ -140,7 +144,7 @@ class DisasterServiceRuntimeService:
                                 self.service.earthquake_list_service.update_earthquake_list(
                                     "cenc", cenc_data
                                 )
-                                if self._source_runtime_query.is_source_enabled(
+                                if self._source_runtime_query.is_source_active(
                                     "cenc_wolfx"
                                 ):
                                     # 这里将 HTTP 返回结果重新整理为解析器可接受的消息内容，
@@ -169,7 +173,7 @@ class DisasterServiceRuntimeService:
                                 self.service.earthquake_list_service.update_earthquake_list(
                                     "jma", jma_data
                                 )
-                                if self._source_runtime_query.is_source_enabled(
+                                if self._source_runtime_query.is_source_active(
                                     "jma_wolfx_info"
                                 ):
                                     event = self.service.parse_event(

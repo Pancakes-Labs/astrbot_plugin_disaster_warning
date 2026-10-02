@@ -116,8 +116,10 @@ class ConnectionPlanBuilder:
         fan_auth_warned = False
         jp_auth_warned = False
 
-        # 只为当前已启用的数据源生成连接计划，避免创建无效连接占位。
-        enabled_source_ids = runtime_query.get_enabled_source_ids()
+        # 只为「组级总闸开启且全局或任一会话需要」的子源生成连接计划，
+        # 避免为完全无会话需要的数据源创建无效连接占位；
+        # 同时保证「全局关、会话开」的子源仍会建立连接，不漏采集。
+        enabled_source_ids = runtime_query.get_active_source_ids()
         enabled_entries = [
             SOURCE_CATALOG[source_id]
             for source_id in enabled_source_ids

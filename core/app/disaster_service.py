@@ -132,8 +132,10 @@ class DisasterWarningService:
         self.statistics_manager = StatisticsManager(config)  # 灾害事件统计管理器
         self._telemetry: TelemetryManager | None = None  # 遥测服务管理器
         self.session_config_manager = SessionConfigManager(config)  # 临时会话配置管理器
+        # 注入会话差异配置管理器
+        # 使「全局关、会话开」的子源也能被判定为需接入，同时保持组级开关语义。
         self.source_runtime_query = SourceRuntimeQueryService(
-            config
+            config, session_config_manager=self.session_config_manager
         )  # 数据源运行时查询辅助服务
 
         # WebSocket 管理器与消息推送管理器属于核心基础设施，需在初始化阶段提前装配。

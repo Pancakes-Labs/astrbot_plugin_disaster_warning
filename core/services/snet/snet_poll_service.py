@@ -64,7 +64,8 @@ class SnetPollService:
         return self._task is not None and not self._task.done()
 
     def is_enabled(self) -> bool:
-        return self._source_runtime_query.is_source_enabled(self.SOURCE_ID)
+        """轮询是否需要运行（组总闸 + 全局或任一会话需要）。"""
+        return self._source_runtime_query.is_source_active(self.SOURCE_ID)
 
     def _resolve_interval(self) -> int:
         data_sources = self.service.config.get("data_sources", {})
