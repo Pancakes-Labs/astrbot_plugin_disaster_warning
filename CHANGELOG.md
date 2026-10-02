@@ -18,7 +18,7 @@
 ### 🌐 Data Sources & Network (数据源与网络)
 
 - `OpenQuakeAPI` 现已更名为 `PancakesAPI` by @Aloys233 & @DBJD-CR in #234 #244
-- 新增 `Jian Project` 数据源，并完成前后端适配 by @Aloys233 & @DBJD-CR in #234 #235 #243 #245 #246
+- 新增 `Jian Project` 数据源，并完成前后端适配 by @Aloys233 & @DBJD-CR in #234 #235 #243 #245 #246 #247
 - `PancakesAPI（OpenQuakeAPI）` 新增日本气象厅与 USGS 子数据源 by @Aloys233 in #234
 
 ### 💻 WebUI / Frontend (前端)
@@ -28,7 +28,7 @@
 ### 🐛 Bug Fixes (修复)
 
 - 改善了地图瓦片子域名处理，修复台风地图加载重试时可能丢失原有查询参数的问题 by @DBJD-CR in #239
-- 修复了代理环境下地图底图空白的问题 by @DBJD-CR in #239
+- 修复了代理环境下地图底图可能空白的问题 by @DBJD-CR in #239
 - 修复了 FAN 侧的无名低压编号无法被正确解析的问题 by @DBJD-CR in #241
 - 修复了部分指令会误触发一次 LLM 回复的问题 by @DBJD-CR in #242
 - 修复了 `/snet` 指令部分等级的调试指令无法正常使用的问题 by @DBJD-CR in #242
@@ -36,12 +36,12 @@
 ### ⚙️ Configuration (配置)
 
 - 新增 `地图瓦片绕过代理直连（仅本地模式）` 与 `额外绕过的域名（仅本地模式）` 配置项 by @DBJD-CR in #239
-- 优化了数据源配置的启用判定逻辑 by @DBJD-CR in #246
+- 优化了数据源配置的启用判定逻辑 by @DBJD-CR in #247
 
 ### 🛠️ Commands (指令系统)
 
 - 新增 `/设置所在地` 指令，支持通过指令设置本地监控的经纬度、地名与生效范围 by @DBJD-CR in #237
-- 新增 `/灾害预警日志导出` 指令，支持通过指令导出插件运行日志并自动生成分享链接 by @Aloys233 in #240
+- 新增 `/灾害预警日志导出` 指令，支持通过指令导出插件运行日志并自动生成分享链接 by @Aloys233 @DBJD-CR in #240 #247
 
 ### 📚 Documentation (文档)
 
