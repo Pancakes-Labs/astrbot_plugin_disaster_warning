@@ -440,9 +440,13 @@ class WebSocketManager:
             )
             raise
         except Exception as e:
-            # 非预期类型错误，上报异常遥测
-            logger.error(f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {e}")
-            logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            # 非预期类型错误，脱敏并上报异常遥测。
+            safe_error = _redact_access_token(str(e))
+            safe_traceback = _redact_access_token(traceback.format_exc())
+            logger.error(
+                f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {safe_error}"
+            )
+            logger.debug(f"[灾害预警] 异常堆栈: {safe_traceback}")
             # 统一 best-effort 封装上报连接错误（内部自带启用检查与异常吞噬，
             # 不会中断后续配额策略与重连调度）。
             await track_error_safely(
@@ -452,7 +456,7 @@ class WebSocketManager:
                 log_context="连接错误遥测",
             )
             await self._apply_fan_quota_policy_on_error(name, e)
-            self._handle_connection_error(name, uri, headers, e)
+            self._handle_connection_error(name, uri, headers, safe_error)
         finally:
             # 会话退出后做一次幂等清理，防止已关闭 socket / 心跳任务残留占位
             await self._cleanup_closed_connection(name, websocket)
