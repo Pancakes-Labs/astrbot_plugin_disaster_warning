@@ -1038,6 +1038,14 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
             return
 
+        # 日志导出可能包含运行凭据与内部状态，仅允许在私聊中触发，
+        # 避免群聊场景下导出的链接被非管理员成员获取。
+        if not event.is_private_chat():
+            yield event.plain_result(
+                "🔒 出于安全考虑，运行日志导出仅支持私聊会话，请在私聊中重新执行本命令。"
+            )
+            return
+
         # 解析行数：默认 500，允许范围 1~10000，越界钳制并注明。
         requested = LOG_EXPORT_DEFAULT_COUNT
         clamped = False
