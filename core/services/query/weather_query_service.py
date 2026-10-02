@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ....utils.china_regions import extract_province_from_adcode, province_short
 from ....utils.time_converter import TimeConverter
 from ...message.presenters.weather_alarm_code_map import (
     build_weather_icon_url,
@@ -407,8 +408,20 @@ async def query_weather_alarm_data(
         haystack = f"{title_text} {headline_text}"
 
         # 行政区域地名碰撞过滤
-        if location_keyword and location_keyword not in haystack:
-            continue
+        if location_keyword:
+            matched_geo = location_keyword in haystack
+            if not matched_geo:
+                # 尝试通过预警 ID 前缀区划代码推导省份
+                item_prov = extract_province_from_adcode(
+                    item.get("real_event_id") or item.get("unique_id")
+                )
+                if item_prov and (
+                    location_keyword == item_prov
+                    or province_short(location_keyword) == item_prov
+                ):
+                    matched_geo = True
+            if not matched_geo:
+                continue
 
         detected_type = detect_weather_type(title_text, weather_type_code)
         detected_color = detect_weather_color(level_text, title_text)

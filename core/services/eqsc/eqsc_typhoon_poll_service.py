@@ -25,7 +25,7 @@ from ...domain.typhoon import (
     to_float,
 )
 from ...network.http.eqsc_token_manager import EqscTokenManager
-from ...network.http.eqsc_typhoon_client import EqscTyphoonClient
+from ...network.http.eqsc_typhoon_client import LOOKUP_ERROR, EqscTyphoonClient
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -534,8 +534,10 @@ class EqscTyphoonPollService:
             return []
 
         # 轮询侧强制绕过短缓存，确保按间隔拿到最新列表。
-        typhoon_list = await client.fetch_typhoon_list(use_cache=False)
-        if not isinstance(typhoon_list, list):
+        # 与「接口正常但确实无活跃台风」的 empty 区分处理。
+        typhoon_list, status = await client.fetch_typhoon_list(use_cache=False)
+        if not isinstance(typhoon_list, list) or status == LOOKUP_ERROR:
+            # 抓取失败：直接返回，不调用 _filter_active_items。
             self._consecutive_failures += 1
             self._notify_silence_fetch_completed(success=False)
             return []

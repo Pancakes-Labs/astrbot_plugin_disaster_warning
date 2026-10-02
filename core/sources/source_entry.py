@@ -28,6 +28,7 @@ class ProviderFamily(Enum):
     GLOBAL_QUAKE = "global_quake"  # Global Quake 自建或公共服务器
     EQSC = "eqsc"  # EQSC HTTP API（海啸/台风/火山等富化数据源）
     DIRECT_HTTP = "direct_http"  # 直连 HTTP 轮询源（如 NIED S-Net / MSIL 瓦片）
+    JIAN_PROJECT = "jian_project"  # Jian Project WebSocket 聚合源
 
 
 class FusionRole(Enum):

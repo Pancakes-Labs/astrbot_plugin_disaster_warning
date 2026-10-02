@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..sources.source_catalog import get_source_entry
+from ..sources.source_catalog import get_legacy_group_names, get_source_entry
 from .base_rule import BaseRule, RuleContext
 from .rule_result import RuleDecision
 
@@ -16,6 +16,21 @@ class SourceEnabledRule(BaseRule):
     """运行时数据源开关规则。"""
 
     rule_name = "source_rule"
+
+    @staticmethod
+    def _resolve_group_config(
+        data_sources_cfg: dict[str, Any], config_group: str
+    ) -> dict[str, Any]:
+        """合并规范组名与历史别名组名的配置。"""
+        merged: dict[str, Any] = {}
+        for legacy in get_legacy_group_names(config_group):
+            legacy_cfg = data_sources_cfg.get(legacy)
+            if isinstance(legacy_cfg, dict):
+                merged.update(legacy_cfg)
+        canonical_cfg = data_sources_cfg.get(config_group)
+        if isinstance(canonical_cfg, dict):
+            merged.update(canonical_cfg)
+        return merged
 
     @staticmethod
     def _is_enabled_in_data_sources(
@@ -32,9 +47,9 @@ class SourceEnabledRule(BaseRule):
         if not isinstance(data_sources_cfg, dict):
             return False, "数据源配置无效"
 
-        group_cfg = data_sources_cfg.get(source_entry.config_group, {})
-        if not isinstance(group_cfg, dict):
-            group_cfg = {}
+        group_cfg = SourceEnabledRule._resolve_group_config(
+            data_sources_cfg, source_entry.config_group
+        )
 
         # 分组总开关：缺省 False
         if not bool(group_cfg.get("enabled", False)):
@@ -42,7 +57,7 @@ class SourceEnabledRule(BaseRule):
 
         # 组内子源开关：缺省 False。
         # 单源组（S-Net）的 config_key 可能与分组开关同为 "enabled"；
-        # OpenQuakeAPI / Fan / Wolfx / P2P / EQSC 等则检查独立子键。
+        # PancakesAPI / Fan / Wolfx / P2P / EQSC 等则检查独立子键。
         if not bool(group_cfg.get(source_entry.config_key, False)):
             return False, f"已禁用数据源 {source_id}"
 

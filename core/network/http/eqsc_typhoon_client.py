@@ -15,9 +15,20 @@ from astrbot.api import logger
 from .eqsc_http_client import EqscHttpClient
 from .eqsc_token_manager import EqscTokenManager
 
+# 台风查询结果状态（随查询调用返回，不落实例字段）：
+# - hit：成功拿到数据；
+# - empty：接口正常返回但未命中（编号不存在 / 列表为空），属确定结果，不应重试；
+# - error：鉴权失败、服务器错误或网络异常等可恢复故障，应继续重试。
+LOOKUP_HIT = "hit"
+LOOKUP_EMPTY = "empty"
+LOOKUP_ERROR = "error"
+
 
 class EqscTyphoonClient(EqscHttpClient):
-    """EQSC 台风数据 HTTP 客户端。"""
+    """EQSC 台风数据 HTTP 客户端。
+
+    查询方法统一返回 (数据, 状态) 二元组，状态随单次调用返回字段。
+    """
 
     def __init__(
         self,
@@ -61,7 +72,7 @@ class EqscTyphoonClient(EqscHttpClient):
         access_token: str | None = None,
         *,
         use_cache: bool = True,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, str]:
         """按台风 ID 查询台风详细数据。
 
         EQSC 的台风 ID 格式为 4 位（年份后2位+编号2位），
@@ -74,18 +85,24 @@ class EqscTyphoonClient(EqscHttpClient):
             use_cache: 为 False 时强制绕过详情缓存（查询指令侧使用）。
 
         Returns:
-            台风数据字典，或 None 表示查询失败/未找到。
+            (台风数据, 状态) 二元组：
+
+            - (data, "hit")：查询成功；
+            - (None, "empty")：EQSC 正常返回但无该编号
+              （EQSC 以 HTTP 500 表示「编号不存在」，属确定未命中）；
+            - (None, "error")：鉴权失败、服务器错误或网络异常，可重试。
         """
         # 检查缓存
         if use_cache:
             cached = self._cache.get(typhoon_id)
             if cached and self._is_cache_valid(cached[1]):
-                return cached[0]
+                return cached[0], LOOKUP_HIT
 
         # 获取 AccessToken
         access_token = await self._resolve_access_token(access_token)
         if not access_token:
-            return None
+            # 无可用令牌属通道级异常，交由上层走重试 / 熔断逻辑
+            return None, LOOKUP_ERROR
 
         try:
             url = f"{self._base_url}/typhoonNMC.json"
@@ -94,50 +111,80 @@ class EqscTyphoonClient(EqscHttpClient):
                 access_token=access_token,
                 params={"id": typhoon_id},
                 log_label=f"EQSC 查询台风 {typhoon_id}",
+                # EQSC 以 HTTP 500 表示「编号不存在」，仅该状态码降级为 INFO；
+                # 其余失败（401/403、429、502/503 等）仍保持 WARNING，
+                # 避免把真实服务故障静默成低级别日志。
+                info_status_codes={500},
             )
             if status != 200 or not isinstance(data, dict):
-                return None
+                # 500 语义为「未命中」；其余非 200（鉴权 / 服务器错误）
+                # 保留 error 语义，交由上层继续退避重试。
+                if status == 500:
+                    return None, LOOKUP_EMPTY
+                return None, LOOKUP_ERROR
 
             # 解析响应：{"typhoon": [{...}]}
             typhoon_list = data.get("typhoon", []) if isinstance(data, dict) else []
+            # 非列表视为无效响应（上游异常 / 结构变更），保留可重试语义，
+            # 避免把错误结构当作命中缓存后污染下游解析。
+            if not isinstance(typhoon_list, list):
+                logger.warning(
+                    f"[灾害预警] EQSC 台风 {typhoon_id} 响应格式异常："
+                    f"typhoon 字段非列表（{type(typhoon_list).__name__}）"
+                )
+                return None, LOOKUP_ERROR
             if not typhoon_list:
                 logger.debug(f"[灾害预警] EQSC 台风 {typhoon_id} 未找到匹配数据")
-                return None
+                return None, LOOKUP_EMPTY
 
-            # 取第一个匹配的台风
-            typhoon_data = typhoon_list[0]
+            # 取第一个字典元素作为台风数据；列表元素类型不符同样按无效响应处理。
+            typhoon_data = next(
+                (item for item in typhoon_list if isinstance(item, dict)), None
+            )
+            if typhoon_data is None:
+                logger.warning(
+                    f"[灾害预警] EQSC 台风 {typhoon_id} 响应格式异常：未含有效台风对象"
+                )
+                return None, LOOKUP_ERROR
             # 写入缓存
             self._cache[typhoon_id] = (typhoon_data, time.time() + self._cache_ttl)
-            return typhoon_data
+            return typhoon_data, LOOKUP_HIT
 
         except Exception as e:
             logger.error(
                 f"[灾害预警] EQSC 查询台风 {typhoon_id} 异常: "
                 f"{type(e).__name__}: {str(e) or repr(e)}"
             )
-            return None
+            return None, LOOKUP_ERROR
 
     async def fetch_typhoon_list(
         self,
         access_token: str | None = None,
         *,
         use_cache: bool = True,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str]:
         """查询 EQSC 台风列表（无参，至多约 20 个最新台风，含历史）。
 
         注意：该接口并非严格“仅活跃台风”，实际常返回最新历史编报集合。
 
         Args:
+            access_token: 可复用的 AccessToken；若未提供则内部自行获取。
             use_cache: 为 False 时强制绕过列表缓存（轮询侧使用）。
+
+        Returns:
+            (台风列表, 状态) 二元组：列表非空为 hit，空列表为 empty
+            （接口正常但无数据），鉴权 / 网络 / 服务器错误为 error。
         """
         # 检查缓存
         if use_cache and self._list_cache and self._is_cache_valid(self._list_cache[1]):
-            return self._list_cache[0]
+            cached_list = self._list_cache[0]
+            # 列表接口成功返回（含空列表）均视为通道正常：空列表为 empty。
+            return cached_list, (LOOKUP_HIT if cached_list else LOOKUP_EMPTY)
 
         # 获取 AccessToken
         access_token = await self._resolve_access_token(access_token)
         if not access_token:
-            return []
+            return [], LOOKUP_ERROR
 
         try:
             url = f"{self._base_url}/typhoonNMC.json"
@@ -147,12 +194,22 @@ class EqscTyphoonClient(EqscHttpClient):
                 log_label="EQSC 查询台风列表",
             )
             if status != 200 or not isinstance(data, dict):
-                return []
+                # 列表接口异常：标记为 error，供上层区分网络故障与编号未命中。
+                return [], LOOKUP_ERROR
 
             typhoon_list = data.get("typhoon", []) if isinstance(data, dict) else []
+            # 非列表视为无效响应：返回 error 语义而非把它当成空列表，
+            # 以免上层将服务异常误判为「未命中」而提前放弃重试。
+            if not isinstance(typhoon_list, list):
+                logger.warning(
+                    "[灾害预警] EQSC 台风列表响应格式异常：typhoon 字段非列表"
+                    f"（{type(typhoon_list).__name__}）"
+                )
+                return [], LOOKUP_ERROR
             # 写入缓存
             self._list_cache = (typhoon_list, time.time() + self._cache_ttl)
-            return typhoon_list
+            # 接口调用成功：列表非空为 hit，空列表为 empty（通道正常但无数据）。
+            return typhoon_list, (LOOKUP_HIT if typhoon_list else LOOKUP_EMPTY)
 
         except Exception as e:
             error_name = type(e).__name__
@@ -169,7 +226,7 @@ class EqscTyphoonClient(EqscHttpClient):
                 logger.error(
                     f"[灾害预警] EQSC 查询台风列表异常: {error_name}: {str(e) or repr(e)}"
                 )
-            return []
+            return [], LOOKUP_ERROR
 
     def find_typhoon_by_name(
         self,
@@ -199,4 +256,9 @@ class EqscTyphoonClient(EqscHttpClient):
         return None
 
 
-__all__ = ["EqscTyphoonClient"]
+__all__ = [
+    "LOOKUP_EMPTY",
+    "LOOKUP_ERROR",
+    "LOOKUP_HIT",
+    "EqscTyphoonClient",
+]

@@ -3,15 +3,16 @@ const { useMemo, useState, useCallback } = React;
 
 /**
  * 连接状态网格组件 (ConnectionsGrid)
- * 显示主流数据源（FAN Studio / P2P / Wolfx / OpenQuakeAPI）与 HTTP 辅助通道
- * EQSC、NIED S-Net 的实时连接情况、TCP 延迟、重试次数以及启用的子数据源明细。
+ * 显示主流数据源（FAN Studio / P2P / Wolfx / PancakesAPI / Jian Project）与 HTTP 辅助通道
+ * （EQSC API、NIED S-Net）的实时连接状态、协议信息及子源分布。
  *
- * 布局：
- * - 第 1 列：FAN Studio（可翻转：正面主通道 / 背面 CENC 烈度速报独立 WS）
- * - 第 2 列：P2P + NIED S-Net 上下堆叠（connection-stack）
- * - 第 3 列：Wolfx
- * - 第 4 列：OpenQuakeAPI + EQSC API 上下堆叠
- *
+ * 布局策略：
+ * - 大屏（>= 1024px）：固定 5 列均匀分布
+ * - - 第 1 列：FAN Studio（卡片背面为烈度速报独立 WS）
+ * - - 第 2 列：P2P 地震情报 + NIED S-Net 上下堆叠
+ * - - 第 3 列：Wolfx
+ * - - 第 4 列：Jian Project
+ * - - 第 5 列：PancakesAPI + EQSC API 上下堆叠（EQSC 为 HTTP 轮询模式）
  * 延迟评级：
  * - < 150ms  fast (绿色)
  * - < 460ms  medium (黄色)
@@ -241,19 +242,38 @@ function ConnectionsGrid() {
             },
             {
                 id: 'gq',
-                displayName: 'OpenQuakeAPI',
+                displayName: 'PancakesAPI',
                 matcher: (key) => {
                     const k = String(key || '').toLowerCase();
-                    // OpenQuakeAPI 连接组 key 为 openquake_api；兼容历史 global_quake / gq
+                    // PancakesAPI 连接组 key 为 pancakes_api；兼容历史 openquake_api / global_quake / gq
                     return (
-                        k === 'openquake_api'
+                        k === 'pancakes_api'
+                        || k === 'openquake_api'
                         || k === 'global_quake'
                         || k === 'gq'
+                        || k.includes('pancakes')
                         || k.includes('openquake')
                         || k.includes('global_quake')
                     ) && !k.includes('eqsc');
                 },
                 compact: true,
+            },
+            {
+                id: 'jian_project',
+                displayName: 'Jian Project',
+                matcher: (key) => {
+                    const k = String(key || '').toLowerCase().trim();
+                    // 后端连接表以展示名 "Jian Project"（含空格）为键，
+                    // 而 catalog 连接组键为 "jian_project_all"（含下划线）。
+                    // 这里归一化空格 / 下划线 / 连字符后再匹配，避免两种形态失配。
+                    const normalized = k.replace(/[\s_-]+/g, '');
+                    return (
+                        normalized === 'jianprojectall'
+                        || normalized === 'jianproject'
+                        || normalized.includes('jianproject')
+                        || k.includes('sismotide')
+                    );
+                },
             },
             {
                 id: 'eqsc',
@@ -306,18 +326,27 @@ function ConnectionsGrid() {
             };
         }
 
-        normalized[0] = {
-            ...normalized[0],
+        // 按 id 建立展示模型索引：列布局直接按 id 取用，
+        // 避免与 targets 数组下标耦合（新增数据源时下标漂移会静默丢卡片）。
+        const connById = {};
+        normalized.forEach((conn) => {
+            connById[conn.id] = conn;
+        });
+
+        connById.fan = {
+            ...connById.fan,
             flippable: true,
             flipSide: intensityConn,
         };
 
-        // 第 2 列：P2P 上 + S-Net 下；第 4 列：GQ 上 + EQSC 下
+        // 第 1 列 FAN；第 2 列 P2P + S-Net；第 3 列 Wolfx；
+        // 第 4 列 Jian Project；第 5 列 PancakesAPI + EQSC
         return [
-            { type: 'single', items: [normalized[0]] },
-            { type: 'stack', items: [normalized[1], normalized[2]] },
-            { type: 'single', items: [normalized[3]] },
-            { type: 'stack', items: [normalized[4], normalized[5]] },
+            { type: 'single', items: [connById.fan] },
+            { type: 'stack', items: [connById.p2p, connById.snet] },
+            { type: 'single', items: [connById.wolfx] },
+            { type: 'single', items: [connById.jian_project] },
+            { type: 'stack', items: [connById.gq, connById.eqsc] },
         ];
     }, [connections, isFanPrimaryConnectionKey, isFanIntensityConnectionKey, INTENSITY_SUB_SOURCE_KEYS]);
 
@@ -366,7 +395,6 @@ function ConnectionsGrid() {
                 sa_fanstudio: '美国 ShakeAlert 地震预警',
                 fssn_cmt_fanstudio: 'FSSN 矩心矩张量解 (CMT)',
                 china_weather_fanstudio: '中国气象局: 气象预警',
-                china_weather_openquake: '中国气象局: 气象预警',
                 china_tsunami_fanstudio: '自然资源部海啸预警中心',
                 jma_fanstudio: '日本气象厅: 紧急地震速报',
             },
@@ -391,10 +419,23 @@ function ConnectionsGrid() {
                 japan_jma_earthquake: '日本气象厅地震情报',
                 china_cenc_earthquake: '中国地震台网地震测定',
             },
+            PancakesAPI: {
+                global_quake: 'Global Quake',
+                japan_jma_eew: '日本气象厅: 紧急地震速报',
+                jma_pancakes: '日本气象厅: 紧急地震速报',
+                japan_jma_earthquake: '日本气象厅: 地震情报',
+                jma_eqlist_pancakes: '日本气象厅: 地震情报',
+                usgs_earthquake: '美国地质调查局 (USGS)',
+                usgs_pancakes: '美国地质调查局 (USGS)',
+            },
             OpenQuakeAPI: {
                 global_quake: 'Global Quake',
-                china_weather_alarm: '中国气象局: 气象预警',
-                china_weather_openquake: '中国气象局: 气象预警',
+                japan_jma_eew: '日本气象厅: 紧急地震速报',
+                jma_pancakes: '日本气象厅: 紧急地震速报',
+                japan_jma_earthquake: '日本气象厅: 地震情报',
+                jma_eqlist_pancakes: '日本气象厅: 地震情报',
+                usgs_earthquake: '美国地质调查局 (USGS)',
+                usgs_pancakes: '美国地质调查局 (USGS)',
             },
             'EQSC API': {
                 china_typhoon: '中国气象局：实时活跃台风',
@@ -404,6 +445,22 @@ function ConnectionsGrid() {
                 // EQSC HTTP 轮询的 CENC 烈度速报（与 FAN 独立 WS 并列）
                 china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
                 cenc_ir_eqsc: '中国地震台网 (CENC) 烈度速报',
+            },
+            'Jian Project': {
+                china_earthquake_warning: '中国地震预警网 (CEA)',
+                taiwan_cwa_earthquake: '台湾中央气象署: 强震即时警报',
+                japan_jma_eew: '日本气象厅: 紧急地震速报',
+                china_weather_alarm: '中国气象局: 气象预警',
+                china_tsunami: '自然资源部海啸预警中心',
+                china_cenc_earthquake: '中国地震台网 (CENC)',
+                usgs_earthquake: '美国地质调查局 (USGS)',
+                cea_jianproject: '中国地震预警网 (CEA)',
+                cwa_jianproject: '台湾中央气象署: 强震即时警报',
+                jma_jianproject: '日本气象厅: 紧急地震速报',
+                china_weather_jianproject: '中国气象局: 气象预警',
+                china_tsunami_jianproject: '自然资源部海啸预警中心',
+                cenc_jianproject: '中国地震台网 (CENC)',
+                usgs_jianproject: '美国地质调查局 (USGS)',
             },
         };
 
@@ -671,7 +728,7 @@ function ConnectionsGrid() {
         );
     };
 
-    // 骨架屏：第 1/3 列单卡，第 2/4 列双卡堆叠（P2P+S-Net / GQ+EQSC）
+    // 骨架屏：第 1/3/4 列单卡，第 2/5 列双卡堆叠（P2P+S-Net / PancakesAPI+EQSC）
     if (!dataLoaded) {
         return (
             <div className="connections-grid status-connections-grid">
@@ -693,6 +750,14 @@ function ConnectionsGrid() {
                             <div className="skeleton status-skeleton-subtitle status-skeleton-subtitle--short"></div>
                         </div>
                     ))}
+                </div>
+                <div className="status-connection-skeleton-card">
+                    <div className="status-skeleton-row">
+                        <div className="skeleton status-skeleton-title"></div>
+                        <div className="skeleton status-skeleton-badge"></div>
+                    </div>
+                    <div className="skeleton status-skeleton-subtitle"></div>
+                    <div className="skeleton status-skeleton-subtitle status-skeleton-subtitle--short"></div>
                 </div>
                 <div className="status-connection-skeleton-card">
                     <div className="status-skeleton-row">

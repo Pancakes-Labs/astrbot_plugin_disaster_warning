@@ -72,9 +72,10 @@ _FAMILY_LABELS: dict[ProviderFamily, str] = {
     ProviderFamily.FAN_STUDIO: "FAN Studio",
     ProviderFamily.P2P: "P2P",
     ProviderFamily.WOLFX: "Wolfx",
-    ProviderFamily.GLOBAL_QUAKE: "OpenQuakeAPI",
+    ProviderFamily.GLOBAL_QUAKE: "PancakesAPI",
     ProviderFamily.EQSC: "EQSC",
     ProviderFamily.DIRECT_HTTP: "直连 HTTP",
+    ProviderFamily.JIAN_PROJECT: "Jian Project",
 }
 
 # 提供方家族 -> 组内排序权重（数值越大越靠后）。
@@ -85,6 +86,7 @@ _FAMILY_SORT_RANK: dict[ProviderFamily, int] = {
     ProviderFamily.GLOBAL_QUAKE: 3,
     ProviderFamily.EQSC: 4,
     ProviderFamily.DIRECT_HTTP: 5,
+    ProviderFamily.JIAN_PROJECT: 6,
 }
 
 # 具备真实"报数/报次"语义的报次策略。
@@ -575,7 +577,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
     # - cwa_fanstudio_report：FAN /cwa 示例（屏東縣近海）
     # - jma_fanstudio / jma_wolfx：FAN /jma 示例（能登半島沖 M5.0）
     # - jma_p2p：P2P v2 EEW(556) 示例（宗谷地方北部）
-    # - global_quake：OpenQuakeAPI 示例（日本关东地区 M6.5）
+    # - global_quake：PancakesAPI 示例（日本关东地区 M6.5）
     # - cenc_fanstudio / cenc_wolfx：FAN /cenc 示例（堪察加东岸附近海域）
     # - cenc_ir_fanstudio：FAN /cenc-ir 示例（新疆吐鲁番市托克逊县）
     # - cenc_ir_eqsc：EQSC intensityReportCENC 示例（青海海西州都兰县）
@@ -1863,31 +1865,16 @@ def _build_tsunami_fields(source_id: str) -> list[dict[str, Any]]:
 
 
 def _build_weather_fields(source_id: str) -> list[dict[str, Any]]:
-    """按气象源特征推导参数字段。
-
-    默认值逐源对齐 docs 文档示例
-    """
-    is_openquake = source_id == "china_weather_openquake"
-    title_default = (
-        "江苏省徐州市铜山区发布强对流黄色预警"
-        if is_openquake
-        else "靖远县气象台继续发布雷雨大风黄色预警信号"
-    )
-    headline_default = (
-        "铜山区气象台发布强对流黄色预警[Ⅲ级/较重]"
-        if is_openquake
-        else "靖远县气象台继续发布雷雨大风黄色预警信号"
-    )
+    """按气象源特征推导参数字段。"""
+    title_default = "靖远县气象台继续发布雷雨大风黄色预警信号"
+    headline_default = "靖远县气象台继续发布雷雨大风黄色预警信号"
     description_default = (
-        "铜山区气象台2026年07月29日12时41分发布强对流黄色预警信号：预计今天午后到上半夜我区部分镇（街道）将出现雷电，并伴有短时强降水、局地7-9级雷暴大风等强对流天气，区应急、水务、气象联合提醒加强防范。"
-        if is_openquake
-        else "靖远县气象台2026年07月10日02时32分继续发布雷雨大风黄色预警信号：预计6小时内，我县部分乡镇可能受雷雨大风影响，阵风可达7级以上，并伴有短时强降水，请注意防范。"
+        "靖远县气象台2026年07月10日02时32分继续发布雷雨大风黄色预警信号："
+        "预计6小时内，我县部分乡镇可能受雷雨大风影响，阵风可达7级以上，并伴有短时强降水，请注意防范。"
     )
-    # 预警编码：FAN 用紧凑 11B 编码（11B2002）；OQ 透传 CMA 原 type 编码（p0000003）。
-    code_default = "p0000003" if is_openquake else "11B2002"
-    # 经纬度：FAN 文档示例（靖远县 36.5623, 104.67786）；OQ 文档示例（铜山区 34.1929, 117.1839）。
-    lat_default = 34.1929 if is_openquake else 36.5623
-    lon_default = 117.1839 if is_openquake else 104.67786
+    code_default = "11B2002"
+    lat_default = 36.5623
+    lon_default = 104.67786
 
     fields: list[dict[str, Any]] = [
         _text(

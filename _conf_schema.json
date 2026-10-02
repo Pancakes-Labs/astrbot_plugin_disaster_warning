@@ -138,6 +138,67 @@
           }
         }
       },
+      "jian_project": {
+        "description": "Jian Project WebSocket 数据源",
+        "type": "object",
+        "hint": "Jian Project 聚合 WebSocket 数据源。需配置登录密钥或长期 Token",
+        "items": {
+          "enabled": {
+            "description": "启用 Jian Project 数据源",
+            "type": "bool",
+            "default": false,
+            "hint": "启用后将连接 Jian Project WebSocket。需配置下方登录密钥，否则会跳过建连"
+          },
+          "login_key": {
+            "description": "Jian Project 登录密钥",
+            "type": "string",
+            "default": "",
+            "hint": "在 https://auth.sismotide.top/ 输入 QQ 邮箱申请登录密钥（邮件送达，以 lk_ 开头，5分钟有效一次性）。填入后插件会自动换取长期 Token 并持久化保存"
+          },
+          "china_earthquake_warning": {
+            "description": "中国地震预警网（CEA）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收中国地震预警网地震预警信息"
+          },
+          "taiwan_cwa_earthquake": {
+            "description": "台湾中央气象署（CWA EEW）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收台湾中央气象署强震即时警报"
+          },
+          "japan_jma_eew": {
+            "description": "日本气象厅（JMA EEW）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收日本气象厅紧急地震速报"
+          },
+          "china_weather_alarm": {
+            "description": "中国气象局（气象预警）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收中国气象局气象预警信息"
+          },
+          "china_tsunami": {
+            "description": "自然资源部海啸预警中心（海啸预警）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收自然资源部海啸预警中心海啸预警信息"
+          },
+          "china_cenc_earthquake": {
+            "description": "中国地震台网（CENC 地震测定）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收中国地震台网地震测定信息"
+          },
+          "usgs_earthquake": {
+            "description": "美国地质调查局（USGS 地震测定）",
+            "type": "bool",
+            "default": true,
+            "hint": "通过 Jian Project WebSocket 接收 USGS 地震测定信息"
+          }
+        }
+      },
       "p2p_earthquake": {
         "description": "P2P 地震情報 WebSocket 数据源",
         "type": "object",
@@ -210,28 +271,40 @@
           }
         }
       },
-      "openquake_api": {
-        "description": "OpenQuakeAPI 数据源",
+      "pancakes_api": {
+        "description": "PancakesAPI 数据源",
         "type": "object",
-        "hint": "OpenQuakeAPI 连接组数据源总开关",
+        "hint": "PancakesAPI 连接组数据源总开关",
         "items": {
           "enabled": {
-            "description": "启用 OpenQuakeAPI 数据源",
+            "description": "启用 PancakesAPI 数据源",
             "type": "bool",
             "default": true,
-            "hint": "控制 OpenQuakeAPI 通道是否启用。关闭后所有 OpenQuakeAPI 子源均不可用"
+            "hint": "控制 PancakesAPI 通道是否启用。关闭后所有 PancakesAPI 子源均不可用"
           },
           "global_quake": {
             "description": "Global Quake",
             "type": "bool",
             "default": true,
-            "hint": "通过 OpenQuakeAPI 获取 Global Quake 全球地震实时数据（由全球测站实时测算，精度有限）"
+            "hint": "通过 PancakesAPI 获取 Global Quake 全球地震实时数据（由全球测站实时测算，精度有限）"
           },
-          "china_weather_alarm": {
-            "description": "中国气象局：气象预警",
+          "japan_jma_eew": {
+            "description": "日本気象庁：緊急地震速報",
             "type": "bool",
-            "default": true,
-            "hint": "通过 OpenQuakeAPI 接收中国气象局气象预警信息"
+            "default": false,
+            "hint": "通过 PancakesAPI 接收日本气象厅紧急地震速报"
+          },
+          "japan_jma_earthquake": {
+            "description": "日本気象庁：地震情報",
+            "type": "bool",
+            "default": false,
+            "hint": "通过 PancakesAPI 接收日本气象厅地震情报列表"
+          },
+          "usgs_earthquake": {
+            "description": "美国地质调查局（USGS 地震测定）",
+            "type": "bool",
+            "default": false,
+            "hint": "通过 PancakesAPI 接收美国地质调查局 (USGS) 地震测定数据"
           }
         }
       },
@@ -485,35 +558,35 @@
     }
   },
   "earthquake_filters": {
-  "description": "🔍 地震信息过滤配置",
-  "type": "object",
-  "hint": "根据不同数据源类型使用不同的过滤器和全局关键词过滤",
-  "items": {
-    "keyword_filter": {
-      "description": "关键词过滤器",
-      "type": "object",
-      "hint": "关键词填写应以 省州市区/都道府县 的级别填写，请勿填写国家/地区名",
-      "items": {
-        "enabled": {
-          "description": "启用关键词过滤器",
-          "type": "bool",
-          "default": false
-        },
-        "blacklist": {
-          "description": "黑名单关键词",
-          "type": "list",
-          "hint": "包含这些关键词的地震信息将被过滤，每行一个",
-          "default": []
-        },
-        "whitelist": {
-          "description": "白名单关键词",
-          "type": "list",
-          "hint": "包含这些关键词的地震信息才会被推送，每行一个",
-          "default": []
+    "description": "🔍 地震信息过滤配置",
+    "type": "object",
+    "hint": "根据不同数据源类型使用不同的过滤器和全局关键词过滤",
+    "items": {
+      "keyword_filter": {
+        "description": "关键词过滤器",
+        "type": "object",
+        "hint": "关键词填写应以 省州市区/都道府县 的级别填写，请勿填写国家/地区名",
+        "items": {
+          "enabled": {
+            "description": "启用关键词过滤器",
+            "type": "bool",
+            "default": false
+          },
+          "blacklist": {
+            "description": "黑名单关键词",
+            "type": "list",
+            "hint": "包含这些关键词的地震信息将被过滤，每行一个",
+            "default": []
+          },
+          "whitelist": {
+            "description": "白名单关键词",
+            "type": "list",
+            "hint": "包含这些关键词的地震信息才会被推送，每行一个",
+            "default": []
+          }
         }
-      }
-    },
-    "intensity_filter": {
+      },
+      "intensity_filter": {
         "description": "基于震级和烈度的地震过滤器",
         "type": "object",
         "hint": "启用后按震级与烈度筛选推送。可选择组合方式为 AND (全部满足) 或 OR (任一满足，默认)",
@@ -526,10 +599,7 @@
           "combine_mode": {
             "description": "条件组合方式",
             "type": "string",
-            "options": [
-              "all",
-              "any"
-            ],
+            "options": ["all", "any"],
             "default": "any",
             "hint": "any：满足任一条件即推送（OR）；all：全部条件都满足才推送（AND）"
           },
@@ -570,10 +640,7 @@
           "combine_mode": {
             "description": "条件组合方式",
             "type": "string",
-            "options": [
-              "all",
-              "any"
-            ],
+            "options": ["all", "any"],
             "default": "any",
             "hint": "any：满足任一条件即推送（OR）；all：全部条件都满足才推送（AND）"
           },
@@ -637,10 +704,7 @@
           "combine_mode": {
             "description": "条件组合方式",
             "type": "string",
-            "options": [
-              "all",
-              "any"
-            ],
+            "options": ["all", "any"],
             "default": "any",
             "hint": "仅在配置了最小触发测站数时生效。any：测站数达标即可推送（支持震度偏低但站数多）；all：测站数与最大震度都要达标。注意：一旦配置了最小触发测站数，测站数始终是硬门槛，不会被最大震度单独放行。"
           },
@@ -692,10 +756,7 @@
           "combine_mode": {
             "description": "条件组合方式",
             "type": "string",
-            "options": [
-              "all",
-              "any"
-            ],
+            "options": ["all", "any"],
             "default": "any",
             "hint": "any：满足任一条件即推送（OR）；all：全部条件都满足才推送（AND）"
           },
@@ -931,10 +992,7 @@
       "playwright_mode": {
         "description": "Playwright 运行模式",
         "type": "string",
-        "options": [
-          "local",
-          "remote"
-        ],
+        "options": ["local", "remote"],
         "default": "local",
         "hint": "local: 使用本地浏览器（需安装 playwright）；remote: 连接远程 Playwright 服务（无需本地安装浏览器）"
       },
@@ -960,6 +1018,18 @@
         "type": "bool",
         "hint": "默认关闭。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败时，开启后可继续加载底图。注意这会信任自签/过期证书，存在安全风险，请谨慎使用",
         "default": false
+      },
+      "browser_bypass_proxy_for_map_tiles": {
+        "description": "地图瓦片绕过代理直连（仅本地模式）",
+        "type": "bool",
+        "hint": "开启后本插件会让地图瓦片域名绕过代理直连",
+        "default": true
+      },
+      "browser_proxy_bypass_domains": {
+        "description": "额外绕过的域名（仅本地模式）",
+        "type": "string",
+        "hint": "可选。在默认地图域名基础上追加需要直连的域名，支持逗号或分号分隔。适用于自建瓦片代理等场景",
+        "default": ""
       },
       "detailed_jma_intensity": {
         "description": "详细显示 JMA 区域震度",
@@ -996,19 +1066,12 @@
         "type": "string",
         "hint": "选择使用的卡片模板。Aurora：极光主题，浅色背景；DarkNight：暗夜主题，深色背景",
         "default": "Aurora",
-        "options": [
-          "Aurora",
-          "DarkNight"
-        ]
+        "options": ["Aurora", "DarkNight"]
       },
       "emoji_filter_mode": {
         "description": "推送文本 Emoji 过滤",
         "type": "string",
-        "options": [
-          "默认",
-          "简洁",
-          "关闭"
-        ],
+        "options": ["默认", "简洁", "关闭"],
         "default": "默认",
         "hint": "仅作用于预警推送链路中的推送文本，不影响插件指令回复等其他场景。默认：保留全部 emoji ；简洁：仅保留用于指示烈度/震度的方形/圆形图标，以及气象预警颜色等级等描述严重性的指示图标；关闭：不输出任何 emoji"
       }
@@ -1039,13 +1102,7 @@
           "min_color_level": {
             "description": "最低预警级别",
             "type": "string",
-            "options": [
-              "白色",
-              "蓝色",
-              "黄色",
-              "橙色",
-              "红色"
-            ],
+            "options": ["白色", "蓝色", "黄色", "橙色", "红色"],
             "default": "白色",
             "hint": "只推送等于或高于此级别的预警。级别排序：白色 < 蓝色 < 黄色 < 橙色 < 红色"
           }
@@ -1095,13 +1152,7 @@
           "min_level": {
             "description": "最低警报级别",
             "type": "string",
-            "options": [
-              "信息",
-              "蓝色",
-              "黄色",
-              "橙色",
-              "红色"
-            ],
+            "options": ["信息", "蓝色", "黄色", "橙色", "红色"],
             "default": "信息",
             "hint": "只推送等于或高于此级别的海啸。级别排序：信息 < 蓝色 < 黄色 < 橙色 < 红色"
           }
@@ -1121,12 +1172,7 @@
           "min_level": {
             "description": "最低警报级别",
             "type": "string",
-            "options": [
-              "若干海面变动",
-              "海啸注意报",
-              "海啸警报",
-              "大海啸警报"
-            ],
+            "options": ["若干海面变动", "海啸注意报", "海啸警报", "大海啸警报"],
             "default": "若干海面变动",
             "hint": "只推送等于或高于此级别的海啸。级别排序：若干海面变动 < 海啸注意报 < 海啸警报 < 大海啸警报"
           }
@@ -1224,10 +1270,7 @@
           "combine_mode": {
             "description": "基础条件组合方式",
             "type": "string",
-            "options": [
-              "all",
-              "any"
-            ],
+            "options": ["all", "any"],
             "default": "any",
             "hint": "all：强度/气压/风速/风力全部满足才通过；any：上述已配置条件满足任一即可。距离与预报逼近不在此组合内"
           },
@@ -1492,20 +1535,14 @@
       "log_mode": {
         "description": "插件日志输出选项",
         "type": "string",
-        "options": [
-          "全量",
-          "简洁"
-        ],
+        "options": ["全量", "简洁"],
         "default": "全量",
         "hint": "全量模式下输出所有数据接收、解析、去重和推送日志；简洁模式下会根据降级行为设置，降级或屏蔽高频的事件流日志"
       },
       "log_downgrade_behavior": {
         "description": "简洁模式日志处理行为",
         "type": "string",
-        "options": [
-          "降级为DEBUG",
-          "完全屏蔽"
-        ],
+        "options": ["降级为DEBUG", "完全屏蔽"],
         "default": "降级为DEBUG",
         "hint": "仅在日志输出选项为“简洁”时生效。降级为DEBUG：事件流日志均以 DEBUG 级别在 AstrBot 控制台输出；完全屏蔽：彻底过滤除 ERROR 外的事件流日志，不论 AstrBot 控制台为什么级别均不输出"
       },
@@ -1598,11 +1635,7 @@
         "items": {
           "type": "string"
         },
-        "default": [
-          "heartbeat",
-          "ping",
-          "pong"
-        ]
+        "default": ["heartbeat", "ping", "pong"]
       },
       "filter_p2p_areas_messages": {
         "description": "是否过滤 P2P 节点状态消息",

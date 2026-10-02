@@ -82,8 +82,11 @@ class BaseParser:
         # 绑定 done 回调吞噬结果，避免 "Task exception was never retrieved" 噪音
         task.add_done_callback(lambda _t: None)
 
-    def decode_message(self, message: str | bytes) -> Any:
+    def decode_message(self, message: Any) -> Any:
         """解码原始消息。"""
+        # 如果已经完成结构化反序列化（例如来自聚合路由的字典/列表载荷），直接透传返回
+        if isinstance(message, (dict, list)):
+            return message
         # 如果是 bytes 类型的二进制数据则直接返回，供 protobuf 等特异解析器处理
         if isinstance(message, bytes):
             return message
@@ -133,7 +136,7 @@ class BaseParser:
         # 天气预警支持 headline 回退为 title 的归一化（见 weather_parser），
         # 若用 title/description 的缺失比例判定心跳，会误过滤"仅有 headline"
         # 的有效 CMA 预警；因此天气源放宽为任一展示字段有值即视为有效消息。
-        if self.source_id in ("china_weather_fanstudio", "china_weather_openquake"):
+        if self.source_id.startswith("china_weather"):
             if not isinstance(msg_data, dict):
                 return True
             display_values = [
@@ -163,7 +166,7 @@ class BaseParser:
             "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
             "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
             "china_weather_fanstudio": ["title", "description"],
-            "china_weather_openquake": ["title", "description"],
+            "china_weather_jianproject": ["title", "description"],
         }
 
         if self.source_id in critical_fields:

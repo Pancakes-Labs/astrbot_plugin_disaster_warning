@@ -245,6 +245,18 @@ class PushExecutionService:
                                 "browser_ignore_https_errors", False
                             )
                         ),
+                        # 代理绕过同样影响底图加载结果，一并纳入缓存键。
+                        "browser_bypass_proxy_for_map_tiles": bool(
+                            message_format_config.get(
+                                "browser_bypass_proxy_for_map_tiles", True
+                            )
+                        ),
+                        "browser_proxy_bypass_domains": str(
+                            message_format_config.get(
+                                "browser_proxy_bypass_domains", ""
+                            )
+                            or ""
+                        ),
                         "use_global_quake_card": message_format_config.get(
                             "use_global_quake_card", False
                         ),

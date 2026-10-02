@@ -17,7 +17,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Image
 
-from ....utils.map_tile_sources import get_tile_url_js
+from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
 from ..presenters.global_quake_display_context import GlobalQuakeDisplayContextBuilder
 
 
@@ -55,6 +55,9 @@ class GlobalQuakeCardBuilder:
             map_source = message_format_config.get("map_source", "PetalMap矢量图亮")
             context["map_source"] = map_source
             context["tile_url"] = get_tile_url_js(map_source)
+            # 带 {s} 占位符的源需要 Leaflet subdomains 选项配合，否则瓦片 URL 非法。
+            # 以逗号分隔字符串注入，模板侧用 split(',') 还原为数组：
+            context["tile_subdomains_csv"] = ",".join(get_tile_subdomains(map_source))
 
             template_name = message_format_config.get("global_quake_template", "Aurora")
             resources_dir = os.path.join(self.plugin_root, "resources")

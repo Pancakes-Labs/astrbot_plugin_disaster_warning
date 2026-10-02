@@ -19,7 +19,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ....core.services.telemetry.telemetry_utils import track_error_safely
-from ....utils.map_tile_sources import get_tile_url_js
+from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
 from ....utils.time_converter import TimeConverter
 from ....utils.version import get_plugin_version
 from ...domain.event_models import TyphoonEvent
@@ -594,6 +594,8 @@ class TyphoonMapRenderer:
         map_source: str,
     ) -> dict[str, Any]:
         """组装模板 bootstrap JSON（面板 + 轨迹 + 视野 + 瓦片）。"""
+        # 归一化地图源：URL 与 subdomains 必须基于同一个解析结果，
+        resolved_map_source = map_source or DEFAULT_MAP_SOURCE
         latest = history[-1]
         prev = history[-2] if len(history) >= 2 else None
 
@@ -718,7 +720,10 @@ class TyphoonMapRenderer:
             "chart_winds": chart_winds,
             "chart_pressures": chart_press,
             "chart_times": chart_times,
-            "tile_url": get_tile_url_js(map_source or DEFAULT_MAP_SOURCE),
+            # 高德等带 {s} 子域占位符的源：必须同时提供 subdomains，
+            # 否则 Leaflet 会原样保留 {s} 导致每张瓦片 ERR_INVALID_URL（地图纯黑）。
+            "tile_url": get_tile_url_js(resolved_map_source),
+            "tile_subdomains": get_tile_subdomains(resolved_map_source),
             "wind_radii": wind_radii,
             "forecast_rows": _build_table_rows(future, limit=12),
             "history_rows": _build_table_rows(history, reverse=True),

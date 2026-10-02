@@ -217,7 +217,7 @@ class MessageJsonFormatterService:
         "server": "服务器",
         "port": "端口",
         "status_code": "状态码",
-        # 🌐 协议/封装层字段 (Global Quake / OpenQuakeAPI / Fan Studio)
+        # 🌐 协议/封装层字段 (Global Quake / PancakesAPI / Fan Studio)
         "timestampMs": "时间戳(毫秒)",
         "payload": "数据载荷",
         "protobuf": "Protobuf格式",

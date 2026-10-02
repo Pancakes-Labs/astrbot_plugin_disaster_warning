@@ -152,17 +152,17 @@
    ========================================================================== */
 .status-connections-grid {
     display: grid;
-    /* 固定 4 列：第 2 列 P2P+S-Net，第 4 列 GQ+EQSC 上下堆叠 */
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* 固定 5 列：第 2 列 P2P+S-Net，第 5 列 PancakesAPI+EQSC 上下堆叠 */
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 16px;
     align-items: stretch;
 }
 
 .status-connections-grid.connections-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-/* 堆叠列：P2P+S-Net / GQ+EQSC 共享高度 */
+/* 堆叠列：P2P+S-Net / PancakesAPI+EQSC 共享高度 */
 .connection-stack {
     display: flex;
     flex-direction: column;
@@ -1645,8 +1645,76 @@ body.dark-theme .connection-health-tooltip {
 }
 
 .connection-health-error {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 18px 16px;
+    border-radius: 10px;
+    background: rgba(197, 48, 48, 0.06);
     color: #c53030;
+    opacity: 0.95;
+}
+
+.connection-health-error__title {
+    font-weight: 700 !important;
+    color: #c53030;
+}
+
+.connection-health-error__message {
+    color: #b23b3b;
+    opacity: 0.85;
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.connection-health-error__retry {
+    margin-top: 4px;
+    max-width: 200px;
+}
+
+body.dark-theme .connection-health-error {
+    background: rgba(229, 115, 115, 0.12);
+    color: #ffb4ab;
+}
+
+body.dark-theme .connection-health-error__title {
+    color: #ffb4ab;
+}
+
+body.dark-theme .connection-health-error__message {
+    color: #ffd7d3;
     opacity: 0.9;
+}
+
+.connection-health-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 18px 16px;
+    border-radius: 10px;
+    background: rgba(103, 80, 164, 0.06);
+}
+
+.connection-health-empty__title {
+    font-weight: 700 !important;
+    color: var(--md-sys-color-on-surface);
+}
+
+.connection-health-empty__message {
+    opacity: 0.7;
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.connection-health-empty__retry {
+    margin-top: 4px;
+    max-width: 200px;
+}
+
+body.dark-theme .connection-health-empty {
+    background: rgba(208, 188, 255, 0.1);
 }
 
 .connection-health-skeleton {

@@ -6,10 +6,17 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
+from ...utils.china_regions import (
+    extract_province_from_adcode,
+    province_short,
+    resolve_province_from_text,
+)
+from ...utils.converters import safe_float_convert
 from ...utils.plugin_logger import plugin_logger
+from ...utils.time_converter import TimeConverter
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, WeatherEvent
 from ..domain.event_payload import SourcePayload
@@ -20,7 +27,7 @@ from .base_parser import BaseParser
 class WeatherAlarmParser(BaseParser):
     """中国气象局气象预警解析器。
 
-    支持 FAN Studio 扁平载荷与 OpenQuakeAPI RealtimeEvent 包装格式。
+    支持 FAN Studio、Jian Project 等气象数据源载荷格式。
     构造时按 source_id 区分数据源，各源维护独立的短窗去重队列，
     跨源不去重。
     """
@@ -37,7 +44,7 @@ class WeatherAlarmParser(BaseParser):
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
         """解析中国气象局气象预警数据。"""
         try:
-            # OpenQuakeAPI RealtimeEvent 解包：外层有 source/type/action/payload
+            # PancakesAPI RealtimeEvent 解包：外层有 source/type/action/payload
             # 返回 (payload, is_realtime)；is_realtime=True 表示已确认是 RealtimeEvent
             # 但被丢弃（如 action=remove / 非 weather 类型），此时不再回退到
             # FAN Studio 扁平载荷提取，避免把 RealtimeEvent 外层当扁平预警误处理。
@@ -127,6 +134,24 @@ class WeatherAlarmParser(BaseParser):
                 or ""
             ).strip()
 
+            # 解析并规范化地理归属（省份、城市、区县、adcode）
+            raw_province = str(msg_data.get("province") or "").strip()
+            raw_city = str(msg_data.get("city") or "").strip()
+            raw_district = str(msg_data.get("district") or "").strip()
+            raw_adcode = str(msg_data.get("adcode") or "").strip()
+
+            province = None
+            if raw_province:
+                province = province_short(raw_province)
+            if not province and raw_adcode:
+                province = extract_province_from_adcode(raw_adcode)
+            if not province and id_str:
+                province = extract_province_from_adcode(id_str)
+            if not province and title:
+                province = resolve_province_from_text(title)
+            if not province and headline:
+                province = resolve_province_from_text(headline)
+
             # 整合元数据
             metadata = {
                 "issue_time": issue_time,
@@ -135,6 +160,10 @@ class WeatherAlarmParser(BaseParser):
                 "type": weather_code,
                 "alert_code": weather_code,
                 "code": weather_code,
+                "province": province or "",
+                "city": raw_city,
+                "district": raw_district,
+                "adcode": raw_adcode,
                 "longitude": msg_data.get("longitude"),
                 "latitude": msg_data.get("latitude"),
                 "title": title,
@@ -235,7 +264,7 @@ class WeatherAlarmParser(BaseParser):
     def _extract_realtime_payload(
         self, data: dict[str, Any]
     ) -> tuple[dict[str, Any] | None, bool] | None:
-        """解包 OpenQuakeAPI RealtimeEvent 外层结构。
+        """解包 PancakesAPI RealtimeEvent 外层结构。
 
         RealtimeEvent 格式：
             {source, type, action, timestampMs, payload: {...}}
@@ -269,3 +298,170 @@ class WeatherAlarmParser(BaseParser):
         if not isinstance(payload, dict):
             return None, True
         return payload, True
+
+
+class WeatherAlarmJianProjectParser(BaseParser):
+    """中国气象局气象预警解析器 - Jian Project。"""
+
+    def __init__(
+        self, message_logger=None, source_id: str = "china_weather_jianproject"
+    ):
+        super().__init__(source_id, message_logger)
+        self._processed_weather_ids: dict[str, float] = {}
+        self._WEATHER_DEDUPE_WINDOW_SECONDS = 600
+        self._WEATHER_DEDUPE_MAX_ENTRIES = 512
+
+    def _is_weather_duplicate(self, weather_id: str) -> bool:
+        """判断预警 id 是否处于短窗去重窗口内。"""
+        if not weather_id:
+            return False
+        now = datetime.now(timezone.utc).timestamp()
+        cutoff = now - self._WEATHER_DEDUPE_WINDOW_SECONDS
+        self._processed_weather_ids = {
+            k: t for k, t in self._processed_weather_ids.items() if t > cutoff
+        }
+        return weather_id in self._processed_weather_ids
+
+    def _remember_weather_id(self, weather_id: str) -> None:
+        """登记预警 id 的处理时间，并控制缓存容量。"""
+        if not weather_id:
+            return
+        self._processed_weather_ids[weather_id] = datetime.now(timezone.utc).timestamp()
+        if len(self._processed_weather_ids) >= self._WEATHER_DEDUPE_MAX_ENTRIES:
+            oldest_key = min(
+                self._processed_weather_ids, key=self._processed_weather_ids.get
+            )
+            self._processed_weather_ids.pop(oldest_key, None)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            weather_id = str(msg_data.get("id") or "").strip()
+            if not weather_id:
+                return None
+
+            if self._is_weather_duplicate(weather_id):
+                plugin_logger.info(
+                    f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
+                    is_event_linked=True,
+                    event_stream="weather_alarm",
+                )
+                return None
+
+            title = str(msg_data.get("title") or "").strip()
+            headline = str(msg_data.get("headline") or "").strip() or title
+            description = str(msg_data.get("description") or "").strip()
+
+            if not title and not headline and not description:
+                return None
+
+            origin_time_raw = msg_data.get("originTime")
+            issue_time = TimeConverter.parse_datetime(origin_time_raw) or datetime.now(
+                timezone.utc
+            )
+            relieve_time = TimeConverter.parse_datetime(msg_data.get("relieveTime"))
+            weather_code = str(msg_data.get("type") or "").strip()
+
+            raw_province = str(msg_data.get("province") or "").strip()
+            raw_city = str(msg_data.get("city") or "").strip()
+            raw_district = str(msg_data.get("district") or "").strip()
+            raw_adcode = str(msg_data.get("adcode") or "").strip()
+
+            province = None
+            if raw_province:
+                province = province_short(raw_province)
+            if not province and raw_adcode:
+                province = extract_province_from_adcode(raw_adcode)
+            if not province and weather_id:
+                province = extract_province_from_adcode(weather_id)
+            if not province and title:
+                province = resolve_province_from_text(title)
+            if not province and headline:
+                province = resolve_province_from_text(headline)
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "issue_time": issue_time,
+                "relieve_time": relieve_time,
+                "weather_type": weather_code,
+                "weather_code": weather_code,
+                "type": weather_code,
+                "province": province or "",
+                "city": raw_city,
+                "district": raw_district,
+                "adcode": raw_adcode,
+                "longitude": safe_float_convert(msg_data.get("longitude")),
+                "latitude": safe_float_convert(msg_data.get("latitude")),
+                "title": title,
+                "headline": headline,
+                "description": description,
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_weather",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "weather",
+            }
+
+            domain_event = WeatherEvent(
+                title=title,
+                headline=headline,
+                effective_at=issue_time,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=weather_id,
+                source_id=self.source_id,
+                event_type="weather_alarm",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_weather",
+                published_at=issue_time,
+                attributes={
+                    "parser_name": self.source_entry.parser_name
+                    if self.source_entry
+                    else "weather_alarm_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "china_weather_alarm",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="weather",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+
+            # 加入防重去噪队列中：仅在事件装配成功后登记，
+            # 避免后续字段缺失等原因导致解析丢弃时污染短窗去重窗口（补发内容会被误判为重复）
+            self._remember_weather_id(weather_id)
+
+            plugin_logger.info(
+                f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 时间: {issue_time}",
+                is_event_linked=True,
+                event_stream="weather_alarm",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(f"[灾害预警] {self.source_id} 解析气象数据失败: {exc}")
+            return None

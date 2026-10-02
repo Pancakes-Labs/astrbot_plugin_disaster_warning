@@ -64,6 +64,9 @@ class SessionConfigManager:
         ("message_format", "browser_pool_size"),
         # 是否忽略 HTTPS 证书错误是浏览器启动级配置（context 全局创建），不允许会话级覆写
         ("message_format", "browser_ignore_https_errors"),
+        # 代理绕过是浏览器启动级配置（launch 参数 + 子进程 env），不允许会话级覆写
+        ("message_format", "browser_bypass_proxy_for_map_tiles"),
+        ("message_format", "browser_proxy_bypass_domains"),
     )
 
     def __init__(self, default_config_ref: dict[str, Any]):
@@ -100,6 +103,7 @@ class SessionConfigManager:
                             str(k): v for k, v in data.items() if isinstance(v, dict)
                         }
                         self._restore_legacy_weather_fields_from_full_configs()
+                        self._finalize_loaded_overrides()
                         return
             except Exception as e:
                 logger.warning(f"[灾害预警] 读取会话差异配置失败，将使用空配置: {e}")
@@ -126,6 +130,43 @@ class SessionConfigManager:
                 )
             except Exception as e:
                 logger.warning(f"[灾害预警] 迁移旧会话配置失败: {e}")
+
+        self._finalize_loaded_overrides()
+
+    def _finalize_loaded_overrides(self) -> None:
+        """加载后统一执行兼容迁移，并把产生的变化持久化。"""
+        if self._migrate_legacy_data_source_group_names():
+            self._save()
+
+    def _migrate_legacy_data_source_group_names(self) -> bool:
+        """把会话 override 中残留的旧数据源组名迁移到当前规范组名。"""
+        # 延迟导入：避免存储层在模块加载期与数据源目录形成潜在循环依赖。
+        from ..sources.source_catalog import CONFIG_GROUP_ALIASES
+
+        changed = False
+        for override in self._overrides.values():
+            if not isinstance(override, dict):
+                continue
+            data_sources = override.get("data_sources")
+            if not isinstance(data_sources, dict):
+                continue
+            for legacy, canonical in CONFIG_GROUP_ALIASES.items():
+                if legacy not in data_sources:
+                    continue
+                legacy_cfg = data_sources.pop(legacy)
+                changed = True
+                if not isinstance(legacy_cfg, dict):
+                    continue
+                existing = data_sources.get(canonical)
+                if isinstance(existing, dict):
+                    merged = copy.deepcopy(legacy_cfg)
+                    merged.update(existing)
+                    data_sources[canonical] = merged
+                else:
+                    data_sources[canonical] = legacy_cfg
+        if changed:
+            logger.info("[灾害预警] 已迁移会话配置中的旧数据源组名")
+        return changed
 
     def _save(self) -> None:
         """以临时文件替换方式保存差异补丁，尽量降低写入中断风险。"""

@@ -27,6 +27,7 @@ from ...sources.display_registry import (
     CONNECTION_DISPLAY_NAMES,
     CONNECTION_GROUP_ORDER,
     DISPLAY_NAME_ALIASES,
+    LEGACY_CONNECTION_GROUP_KEYS,
 )
 from ...storage.connection_health_repository import ConnectionHealthRepository
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
@@ -99,6 +100,10 @@ class ConnectionHealthService:
         # group_key -> 运行态边沿追踪
         self._trackers: dict[str, dict[str, Any]] = {}
         self._last_purge_at: float = 0.0
+        # 历史连接组 key 归并只需在进程内成功执行一次
+        self._legacy_migrated = False
+        # 健康写入串行锁，懒创建以兼容无运行中事件循环的构造时机。
+        self._write_lock: asyncio.Lock | None = None
         self._display_tz = "UTC+8"
         # 完整 Statuspage 历史载荷短 TTL 缓存，降低管理端轮询对 DB 的压力
         self._history_cache: dict[str, Any] | None = None
@@ -124,6 +129,11 @@ class ConnectionHealthService:
         if self._running:
             return
         self._running = True
+        # 更名兼容：先把历史连接组归并到规范 key，再回填事故。
+        try:
+            await self._migrate_legacy_group_keys()
+        except Exception as exc:
+            logger.warning(f"[灾害预警] 连接健康历史分组归并失败: {exc}")
         # 启动时从 DB 回填未关闭事故，避免进程重启后 tracker 丢失导致重复开单。
         try:
             await self._hydrate_open_incidents()
@@ -158,6 +168,55 @@ class ConnectionHealthService:
             except Exception as exc:
                 logger.warning(f"[灾害预警] 连接健康采样停止时异常: {exc}")
         logger.debug("[灾害预警] 连接健康采样服务已停止")
+
+    def _get_write_lock(self) -> asyncio.Lock:
+        """懒创建健康写入串行锁（避免构造期强绑事件循环）。"""
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
+        return self._write_lock
+
+    async def _migrate_legacy_group_keys(self, *, allow_runtime: bool = True) -> None:
+        """把历史连接组 key 的健康数据归并到当前规范 key。
+
+        Args:
+            allow_runtime: 是否允许在采样已运行时执行迁移。启动路径传 True；
+                前端首屏查询的补做路径传 False，避免与周期采样交错。
+        """
+        if self._legacy_migrated:
+            return
+        # 采样任务已启动后不再做运行期迁移：迁移持写锁期间虽与采样互斥，
+        # 但让「迁移只在启动阶段完成」语义更简单，运行期补做窗口由启动覆盖。
+        if not allow_runtime and self._task is not None:
+            return
+        aliases = LEGACY_CONNECTION_GROUP_KEYS
+        if not aliases:
+            self._legacy_migrated = True
+            return
+        repo = self._ensure_repo()
+        if repo is None:
+            # DB 尚未就绪，保留标记为未迁移，下次启动再试。
+            return
+
+        # 迁移期间持有写锁：与采样/事故推进互斥，保证其多语句事务不会被
+        # 外部 commit() 提前提交、也不会被外部 rollback() 撤销。
+        async with self._get_write_lock():
+            # 双重检查：等待锁期间首个调用者可能已完成迁移。
+            if self._legacy_migrated:
+                return
+            migrated = await repo.migrate_legacy_group_keys(aliases)
+            self._legacy_migrated = True
+
+        if any(int(v or 0) > 0 for v in migrated.values()):
+            # 归并后历史缓存失效，避免仍返回旧 key 聚合。
+            self._history_cache = None
+            self._history_cache_key = ""
+            self._history_cache_at = 0.0
+            logger.info(
+                "[灾害预警] 已归并历史连接组健康数据: "
+                f"采样 {migrated.get('samples', 0)} 条 / "
+                f"日聚合 {migrated.get('days', 0)} 天 / "
+                f"事故 {migrated.get('incidents', 0)} 条"
+            )
 
     async def _hydrate_open_incidents(self) -> None:
         """从数据库恢复各连接组未关闭事故到内存 tracker。"""
@@ -543,6 +602,9 @@ class ConnectionHealthService:
 
         components = self._build_live_components()
         samples: list[dict[str, Any]] = []
+        # 待写入集合：日聚合与事故推进需与迁移共用写锁，延迟到锁内统一执行。
+        pending_days: list[dict[str, Any]] = []
+        pending_comps: list[dict[str, Any]] = []
 
         for comp in components:
             group_key = comp["group_key"]
@@ -593,30 +655,38 @@ class ConnectionHealthService:
                 "sample_count": 1,
                 "updated_at": ts,
             }
-            try:
-                await repo.upsert_day_aggregate(day_row)
-            except Exception as exc:
-                logger.debug(f"[灾害预警] 日聚合写入失败 {group_key}: {exc}")
+            pending_days.append(day_row)
+            pending_comps.append(comp)
+
+        # 全部 DB 写入收敛到写锁内串行执行：与迁移互斥，避免一方 commit()
+        # 提前提交他方多语句事务、或 rollback() 撤销他方未提交的写入。
+        async with self._get_write_lock():
+            for day_row, comp in zip(pending_days, pending_comps):
+                agg_key = str(day_row.get("group_key") or "")
+                try:
+                    await repo.upsert_day_aggregate(day_row)
+                except Exception as exc:
+                    logger.debug(f"[灾害预警] 日聚合写入失败 {agg_key}: {exc}")
+
+                try:
+                    await self._advance_incident(repo, comp, now)
+                except Exception as exc:
+                    logger.debug(f"[灾害预警] 事故状态推进失败 {agg_key}: {exc}")
 
             try:
-                await self._advance_incident(repo, comp, now)
+                await repo.insert_samples_batch(samples)
             except Exception as exc:
-                logger.debug(f"[灾害预警] 事故状态推进失败 {group_key}: {exc}")
+                logger.warning(f"[灾害预警] 健康采样批量写入失败: {exc}")
 
-        try:
-            await repo.insert_samples_batch(samples)
-        except Exception as exc:
-            logger.warning(f"[灾害预警] 健康采样批量写入失败: {exc}")
-
-        # 每天最多清理一次旧数据
-        try:
-            mono = asyncio.get_running_loop().time()
-            if mono - self._last_purge_at > 86400:
-                await repo.purge_old_samples(keep_days=14)
-                await repo.purge_old_days(keep_days=180)
-                self._last_purge_at = mono
-        except Exception:
-            pass
+            # 每天最多清理一次旧数据
+            try:
+                mono = asyncio.get_running_loop().time()
+                if mono - self._last_purge_at > 86400:
+                    await repo.purge_old_samples(keep_days=14)
+                    await repo.purge_old_days(keep_days=180)
+                    self._last_purge_at = mono
+            except Exception:
+                pass
 
         return components
 
@@ -903,6 +973,12 @@ class ConnectionHealthService:
         if not use_history_cache:
             repo = self._ensure_repo()
             if repo is not None:
+                # 兜底：仅在采样尚未开始（启动阶段 DB 未就绪）时补做一次归并；
+                # 采样已运行时不再重试，避免把运行期写入卷入迁移事务。
+                try:
+                    await self._migrate_legacy_group_keys(allow_runtime=False)
+                except Exception as exc:
+                    logger.warning(f"[灾害预警] 连接健康历史分组归并失败: {exc}")
                 try:
                     day_rows = await repo.list_day_aggregates(
                         days=days,

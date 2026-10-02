@@ -58,7 +58,7 @@ from ..services.query.eew_query_state_service import EEWQueryStateService
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
 from ..services.snet.snet_poll_service import SnetPollService
 from ..services.telemetry.telemetry_utils import track_error_safely
-from ..sources.source_catalog import SOURCE_CATALOG
+from ..sources.source_catalog import SOURCE_CATALOG, get_legacy_group_names
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
 from ..storage.source_compat import normalize_source_name
@@ -81,6 +81,7 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
 
     与 SourceRuntimeQueryService.is_source_enabled / SourceEnabledRule 对齐：
     缺省为 False（opt-in），避免新源（如 S-Net）在配置缺失时被误判为开启。
+    同时兼容历史组名（如 openquake_api / global_quake → pancakes_api）。
     """
     if not isinstance(data_sources, dict):
         return False
@@ -89,10 +90,15 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
     if source_entry is None:
         return False
 
-    # 获取数据源组配置，如果组被禁用，则该数据源禁用
-    group_cfg = data_sources.get(source_entry.config_group, {})
-    if not isinstance(group_cfg, dict):
-        return False
+    # 获取数据源组配置（合并历史别名组名，规范组名优先），组被禁用则该数据源禁用
+    group_cfg: dict[str, Any] = {}
+    for legacy in get_legacy_group_names(source_entry.config_group):
+        legacy_cfg = data_sources.get(legacy)
+        if isinstance(legacy_cfg, dict):
+            group_cfg.update(legacy_cfg)
+    canonical_cfg = data_sources.get(source_entry.config_group)
+    if isinstance(canonical_cfg, dict):
+        group_cfg.update(canonical_cfg)
 
     if not bool(group_cfg.get("enabled", False)):
         return False

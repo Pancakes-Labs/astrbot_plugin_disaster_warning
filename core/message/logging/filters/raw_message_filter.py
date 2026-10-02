@@ -44,17 +44,21 @@ class RawMessageFilter:
         self._is_connection_status_message = is_connection_status_message
         self._try_parse_binary_message = try_parse_binary_message
 
-    def _check_openquake_api_type(self, data: dict[str, Any], source_id: str) -> str:
-        """OpenQuakeAPI 聚合连接仅保留 earthquake（GQ）与 weather（CMA 气象）业务类型。
+    def _check_pancakes_api_type(self, data: dict[str, Any], source_id: str) -> str:
+        """检查 PancakesAPI 消息业务类型，非支持类型直接返回过滤原因。
 
         字符串与字典两个入口共用该检查，避免字符串形式的 tsunami/station/status
         消息绕过过滤而增大日志存储与处理压力。
         """
-        if "global_quake" in source_id.lower() or "openquake" in source_id.lower():
+        s_id = source_id.lower()
+        if "global_quake" in s_id or "openquake" in s_id or "pancakes" in s_id:
             inner_type = str(data.get("type") or "").lower()
             if inner_type not in ("earthquake", "weather"):
-                return f"OpenQuakeAPI 非地震/气象业务JSON消息过滤: {inner_type}"
+                return f"PancakesAPI 非地震/气象业务JSON消息过滤: {inner_type}"
         return ""
+
+    # 向后兼容别名
+    _check_openquake_api_type = _check_pancakes_api_type
 
     def should_filter_message(self, payload_data: Any, source_id: str = "") -> str:
         """判断是否应该过滤该消息，返回过滤原因。"""
@@ -74,21 +78,22 @@ class RawMessageFilter:
                 )
                 # 只有当二进制解析成功且确实是结构化 dict 时，我们才继续交给 common 过滤器
                 if isinstance(parsed_binary, dict):
-                    # OpenQuakeAPI 聚合连接的二进制负载同样先做业务类型检查
+                    # PancakesAPI 聚合连接的二进制负载同样先做业务类型检查
                     # （earthquake 与 weather 均属支持的业务类型，保留放行；
                     # tsunami/station/status 等其余类型直接过滤），
                     # 与字符串/字典入口保持一致，避免二进制天气消息被误过滤。
-                    reason = self._check_openquake_api_type(parsed_binary, source_id)
+                    reason = self._check_pancakes_api_type(parsed_binary, source_id)
                     if reason:
                         return reason
                     inner_type = str(parsed_binary.get("type") or "").lower()
-                    # 非 OpenQuake 来源的二进制包（解析器仅对 global_quake/openquake
+                    # 非 Pancakes/OpenQuake 来源的二进制包（解析器仅对 global_quake/pancakes/openquake
                     # 来源生效，此处为防御）仅保留 earthquake 业务类型，
                     # status/heartbeat/ping/pong 等直接过滤。
                     if (
                         inner_type != "earthquake"
                         and "global_quake" not in source_id.lower()
                         and "openquake" not in source_id.lower()
+                        and "pancakes" not in source_id.lower()
                     ):
                         return f"非地震业务的二进制消息过滤: {inner_type}"
                     return self.should_filter_message(parsed_binary, source_id)
@@ -96,7 +101,7 @@ class RawMessageFilter:
                     # 对于无法成功解析出业务数据的二进制包（比如非地震业务的心跳握手或状态广播），选择不过滤直接拦截不记日志
                     return "未识别或不需要记录的二进制数据帧"
             if isinstance(payload_data, dict):
-                reason = self._check_openquake_api_type(payload_data, source_id)
+                reason = self._check_pancakes_api_type(payload_data, source_id)
                 if reason:
                     return reason
                 return self._handle_dict_message(payload_data, source_id)
@@ -115,9 +120,9 @@ class RawMessageFilter:
             )
             return ""
 
-        # 字符串入口同样执行 OpenQuakeAPI 业务类型检查，
+        # 字符串入口同样执行 PancakesAPI 业务类型检查，
         # 与字典入口保持一致，避免 tsunami/station/status 等字符串消息绕过过滤。
-        reason = self._check_openquake_api_type(data, source_id)
+        reason = self._check_pancakes_api_type(data, source_id)
         if reason:
             return reason
 

@@ -118,11 +118,19 @@ class ConnectionHealthRepository:
         ratio = 1.0 - (min(monitored, max(0.0, outage)) / monitored)
         return max(0.0, min(1.0, ratio))
 
-    async def upsert_day_aggregate(self, day_row: dict[str, Any]) -> None:
+    async def upsert_day_aggregate(
+        self, day_row: dict[str, Any], *, commit: bool = True
+    ) -> None:
         """按 (group_key, day) 原子累加日聚合分钟数。
 
         minutes_* 使用 REAL，支持亚分钟采样；冲突更新在 SQL 端完成，
         避免 SELECT + 写回的竞态丢更新。
+
+        Args:
+            day_row: 日聚合数据。
+            commit: 是否在本条写入后立即提交。默认 True 保持采样主流程语义；
+                迁移等需要跨多条语句保证一致性的场景应传 False，
+                由调用方在所有写入完成后统一提交或回滚。
         """
         connection = await self._connection()
         group_key = str(day_row.get("group_key") or "").strip()
@@ -232,7 +240,195 @@ class ConnectionHealthRepository:
                 updated_at,
             ),
         )
-        await connection.commit()
+        if commit:
+            await connection.commit()
+
+    async def migrate_legacy_group_keys(
+        self,
+        aliases: dict[str, str] | None = None,
+    ) -> dict[str, int]:
+        """把历史连接组 key 的健康数据归并到规范 key。
+
+        Args:
+            aliases: 历史 key -> 规范 key 映射；空值或自映射项自动忽略。
+
+        Returns:
+            各表实际迁移行数 {"samples": int, "days": int, "incidents": int}。
+        """
+        alias_map: dict[str, str] = {}
+        for legacy, canonical in (aliases or {}).items():
+            legacy_key = str(legacy or "").strip()
+            canonical_key = str(canonical or "").strip()
+            if legacy_key and canonical_key and legacy_key != canonical_key:
+                alias_map[legacy_key] = canonical_key
+
+        result = {"samples": 0, "days": 0, "incidents": 0}
+        if not alias_map:
+            return result
+
+        connection = await self._connection()
+        cursor = await connection.cursor()
+        try:
+            for legacy_key, canonical_key in alias_map.items():
+                # 0) 先收口可能并存的两条未关闭事故，避免归并后较早那条永久悬空。
+                await self._merge_conflicting_open_incidents(
+                    cursor, legacy_key, canonical_key
+                )
+
+                # 1) 原始采样与通道事故均无 (group_key, day) 主键约束，
+                #    改写归属即可，不存在行冲突。
+                await cursor.execute(
+                    "UPDATE connection_health_samples SET group_key = ?"
+                    " WHERE group_key = ?",
+                    (canonical_key, legacy_key),
+                )
+                result["samples"] += max(0, int(cursor.rowcount or 0))
+                await cursor.execute(
+                    "UPDATE connection_incidents SET group_key = ? WHERE group_key = ?",
+                    (canonical_key, legacy_key),
+                )
+                result["incidents"] += max(0, int(cursor.rowcount or 0))
+
+                # 2) 日聚合同一天可能已有规范 key 行，必须走累加 upsert 合并。
+                await cursor.execute(
+                    """
+                    SELECT day, minutes_monitored, minutes_major, minutes_partial,
+                           minutes_degraded, worst_state, sample_count
+                    FROM connection_health_days
+                    WHERE group_key = ?
+                    """,
+                    (legacy_key,),
+                )
+                legacy_days = [
+                    self._row_to_dict(row) for row in await cursor.fetchall()
+                ]
+
+                for row in legacy_days:
+                    day = str(row.get("day") or "").strip()
+                    if not day:
+                        continue
+                    # commit=False：日聚合累加与随后的旧行清理必须同事务，
+                    # 否则「已累加未删除」被中断后重试会重复计数。
+                    await self.upsert_day_aggregate(
+                        {
+                            "group_key": canonical_key,
+                            "day": day,
+                            "minutes_monitored": row.get("minutes_monitored") or 0,
+                            "minutes_major": row.get("minutes_major") or 0,
+                            "minutes_partial": row.get("minutes_partial") or 0,
+                            "minutes_degraded": row.get("minutes_degraded") or 0,
+                            # upsert 内按严重度 CASE 取更差者，透传历史状态即可。
+                            "worst_state": row.get("worst_state") or "not_monitored",
+                            "sample_count": int(row.get("sample_count") or 0),
+                            # 传 None 让 upsert 回退 CURRENT_TIMESTAMP，
+                            # 避免用旧行的 updated_at 覆盖规范 key 上更新的时间戳。
+                            "updated_at": None,
+                        },
+                        commit=False,
+                    )
+                    result["days"] += 1
+
+                # 3) 清理旧 key 日聚合，保证重复执行幂等。
+                if legacy_days:
+                    await cursor.execute(
+                        "DELETE FROM connection_health_days WHERE group_key = ?",
+                        (legacy_key,),
+                    )
+
+            # 三张表的归属改写、累加与旧行清理在单一事务内提交：
+            # 任一步失败或进程中断则整体回滚，重试仍从干净状态开始。
+            await connection.commit()
+        except Exception:
+            try:
+                await connection.rollback()
+            except Exception:
+                pass
+            raise
+
+        return result
+
+    @staticmethod
+    async def _merge_conflicting_open_incidents(
+        cursor,
+        legacy_key: str,
+        canonical_key: str,
+    ) -> None:
+        """迁移前收口同一物理通道并存的两条未关闭事故。"""
+        await cursor.execute(
+            """
+            SELECT id, started_at, timeline_json
+            FROM connection_incidents
+            WHERE group_key = ?
+              AND status != 'resolved'
+              AND ended_at IS NULL
+            ORDER BY started_at DESC
+            """,
+            (legacy_key,),
+        )
+        legacy_opens = [
+            ConnectionHealthRepository._row_to_dict(row)
+            for row in await cursor.fetchall()
+        ]
+        if not legacy_opens:
+            return
+
+        await cursor.execute(
+            """
+            SELECT started_at
+            FROM connection_incidents
+            WHERE group_key = ?
+              AND status != 'resolved'
+              AND ended_at IS NULL
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (canonical_key,),
+        )
+        canonical_row = await cursor.fetchone()
+        if canonical_row is None:
+            return
+        canonical_started = str(
+            ConnectionHealthRepository._row_to_dict(canonical_row).get("started_at")
+            or ""
+        )
+
+        for incident in legacy_opens:
+            incident_id = int(incident.get("id") or 0)
+            if not incident_id:
+                continue
+            legacy_started = str(incident.get("started_at") or "")
+            # 取两条中较晚的起点作为结束时刻：ISO 字符串可字典序比较，
+            # 既保证 duration 非负，也不会把结束时间钉在真实起点之前。
+            ended_at = max(legacy_started, canonical_started) or legacy_started
+
+            timeline: list[dict[str, Any]] = []
+            raw_timeline = incident.get("timeline_json")
+            if raw_timeline:
+                try:
+                    parsed = json.loads(raw_timeline)
+                    if isinstance(parsed, list):
+                        timeline = parsed
+                except Exception:
+                    timeline = []
+            timeline.append(
+                {
+                    "at": ended_at,
+                    "status": "resolved",
+                    "message": "历史通道更名归并：已合并到同名物理通道事故",
+                }
+            )
+
+            await cursor.execute(
+                """
+                UPDATE connection_incidents
+                SET status = 'resolved',
+                    ended_at = ?,
+                    timeline_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (ended_at, json.dumps(timeline, ensure_ascii=False), incident_id),
+            )
 
     async def recompute_all_uptime_ratios(self) -> int:
         """用分钟字段重算全部日聚合 uptime_ratio，修复历史整除错误。"""

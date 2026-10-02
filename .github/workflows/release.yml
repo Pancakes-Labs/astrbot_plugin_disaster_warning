@@ -101,6 +101,46 @@ jobs:
             exit 1
           fi
 
+          # 防线一：用 Node 的 V8 解析器以“经典脚本”模式逐文件校验，
+          # 从根本上消除漏报（动态 import("x") 与注释中的 import 均不会被误伤）。
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const vm = require('vm');
+          const root = 'admin/js';
+          const files = [];
+          (function walk(dir) {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.name.endsWith('.js')) files.push(full);
+            }
+          })(root);
+          let failed = 0;
+          for (const file of files) {
+            try {
+              new vm.Script(fs.readFileSync(file, 'utf8'), { filename: file });
+            } catch (err) {
+              const first = String(err.message).split('\n')[0];
+              console.error('::error file=' + file + '::经典脚本解析失败，疑似残留 ESM import/export：' + first);
+              failed++;
+            }
+          }
+          if (failed > 0) {
+            console.error('WebUI 编译产物中有 ' + failed + '/' + files.length + ' 个文件无法作为经典脚本解析');
+            process.exit(1);
+          }
+          console.log('WebUI 经典脚本校验通过：' + files.length + ' 个文件全部可解析');
+          NODE
+
+          # 防线二：显式拦截 react/jsx-runtime 与 react/jsx-dev-runtime 说明符，
+          # 它们是 @babel/preset-react automatic runtime 的产物特征，无法在经典 <script> 下运行。
+          if grep -R -n -E '"(react/jsx-runtime|react/jsx-dev-runtime)"' admin/js --include='*.js' >/dev/null; then
+            echo "::error::WebUI 编译产物引用了 react/jsx-runtime，说明使用了 automatic runtime，需改回 classic runtime"
+            grep -R -n -E '"(react/jsx-runtime|react/jsx-dev-runtime)"' admin/js --include='*.js' | head -n 20
+            exit 1
+          fi
+
           popd
 
           mkdir -p "${GITHUB_WORKSPACE}/dist"

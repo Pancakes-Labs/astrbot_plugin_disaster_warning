@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from ...utils.china_regions import province_short
 from ..domain.event_models import WeatherEvent
 from ..domain.event_payload import SourcePayload
 from .base_rule import BaseRule, RuleContext
@@ -101,20 +102,44 @@ class WeatherRule(BaseRule):
             or ""
         )
 
-        # 白名单关键词校验：要求标题或灾害描述正文中必须命中省市等地区关键词
+        # 白名单关键词校验：要求标题、灾害描述正文或解析出的地区归属中命中关键词
         if keywords:
             title_hits = [keyword for keyword in keywords if keyword in title_text]
             headline_hits = [
                 keyword for keyword in keywords if keyword in headline_text
             ]
-            if not title_hits and not headline_hits:
+
+            province_val = str(
+                metadata.get("province") or payload.get("province") or ""
+            ).strip()
+            city_val = str(metadata.get("city") or payload.get("city") or "").strip()
+            district_val = str(
+                metadata.get("district") or payload.get("district") or ""
+            ).strip()
+            geo_text = f"{province_val} {city_val} {district_val}".strip()
+
+            geo_hits = [
+                keyword
+                for keyword in keywords
+                if (geo_text and keyword in geo_text)
+                or (
+                    province_val
+                    and (
+                        keyword == province_val
+                        or keyword == province_short(province_val)
+                    )
+                )
+            ]
+
+            if not title_hits and not headline_hits and not geo_hits:
                 return RuleDecision.reject(
                     reason="气象关键词白名单过滤",
-                    detail="标题和正文均未命中关键词白名单",
+                    detail="标题、正文与地区归属均未命中关键词白名单",
                     context={
                         "keywords": keywords,
                         "title_hits": title_hits,
                         "headline_hits": headline_hits,
+                        "geo_hits": geo_hits,
                     },
                 )
 

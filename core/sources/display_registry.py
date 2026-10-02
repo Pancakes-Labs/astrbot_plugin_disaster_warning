@@ -8,6 +8,7 @@
   · CONNECTION_DISPLAY_NAMES  物理连接组展示名表（连接组 key -> 展示名）
   · CONNECTION_GROUP_ORDER    连接组展示顺序
   · CONNECTION_GROUP_ALIAS    提供方家族 -> 连接组 key
+  · LEGACY_CONNECTION_GROUP_KEYS  历史连接组 key -> 规范 key（更名兼容）
   · DISPLAY_NAME_ALIASES      展示名 -> 连接组 key 的反向别名（历史兼容）
 
 - 场景投影层：banner / 离线通知 / 管理命令 / 前端子源列表等场景会在事实
@@ -77,9 +78,11 @@ SOURCE_ALIAS_MAP: dict[str, str] = {
     "sa": "sa_fanstudio",
     "shakealert": "sa_fanstudio",
     "china_weather_alarm": "china_weather_fanstudio",
-    "openquake_cma": "china_weather_openquake",
-    "cma_weather": "china_weather_openquake",
-    "cma": "china_weather_openquake",
+    "pancakes_jma_eew": "jma_pancakes",
+    "pancakes_jma": "jma_pancakes",
+    "pancakes_jma_eqlist": "jma_eqlist_pancakes",
+    "pancakes_eqlist": "jma_eqlist_pancakes",
+    "pancakes_usgs": "usgs_pancakes",
     "china_tsunami": "china_tsunami_fanstudio",
     "japan_jma_eew": "jma_p2p",
     "japan_jma_earthquake": "jma_p2p_info",
@@ -118,6 +121,13 @@ SOURCE_ALIAS_MAP: dict[str, str] = {
     "日本气象厅: 海啸予报 - EQSC": "jma_tsunami_eqsc",
     "日本气象厅：海啸预报 - EQSC": "jma_tsunami_eqsc",
     "日本气象厅: 海啸预报 - EQSC": "jma_tsunami_eqsc",
+    "jian_project_cea": "cea_jianproject",
+    "jian_project_cwa": "cwa_jianproject",
+    "jian_project_jma": "jma_jianproject",
+    "jian_project_weather": "china_weather_jianproject",
+    "jian_project_tsunami": "china_tsunami_jianproject",
+    "jian_project_cenc": "cenc_jianproject",
+    "jian_project_usgs": "usgs_jianproject",
 }
 
 # ---------------------------------------------------------------------------
@@ -139,7 +149,6 @@ SOURCE_DISPLAY_MAP: dict[str, str] = {
     "sa_fanstudio": "美国 ShakeAlert 地震预警",
     "jma_fanstudio": "日本气象厅: 紧急地震速报 - Fan",
     "china_weather_fanstudio": "中国气象局: 气象预警 - Fan",
-    "china_weather_openquake": "中国气象局: 气象预警 - OQ",
     "china_tsunami_fanstudio": "自然资源部海啸预警中心",
     # 贡献榜默认中性名：实时通道不强制带后缀
     "typhoon_fanstudio": "中国气象局：实时活跃台风",
@@ -161,6 +170,16 @@ SOURCE_DISPLAY_MAP: dict[str, str] = {
     "kma_earthquake": "韩国气象厅 (KMA)",
     "emsc_earthquake": "欧洲地中海地震中心 (EMSC)",
     "gfz_earthquake": "德国地学研究中心 (GFZ)",
+    "cea_jianproject": "中国地震预警网 (CEA) - Jian",
+    "cwa_jianproject": "台湾中央气象署: 强震即时警报 - Jian",
+    "jma_jianproject": "日本气象厅: 紧急地震速报 - Jian",
+    "china_weather_jianproject": "中国气象局: 气象预警 - Jian",
+    "china_tsunami_jianproject": "自然资源部海啸预警中心 - Jian",
+    "cenc_jianproject": "中国地震台网 (CENC) - Jian",
+    "usgs_jianproject": "美国地质调查局 (USGS) - Jian",
+    "jma_pancakes": "日本气象厅: 紧急地震速报 - Pancakes",
+    "jma_eqlist_pancakes": "日本气象厅: 地震情报 - Pancakes",
+    "usgs_pancakes": "美国地质调查局 (USGS) - Pancakes",
     "unknown": "未知来源",
 }
 
@@ -173,7 +192,9 @@ CONNECTION_DISPLAY_NAMES: dict[str, str] = {
     "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
     "p2p_main": "P2P地震情報",
     "wolfx_all": "Wolfx",
-    "openquake_api": "OpenQuakeAPI",
+    "pancakes_api": "PancakesAPI",
+    "openquake_api": "PancakesAPI",
+    "jian_project_all": "Jian Project",
     "snet_msil": "NIED S-Net",
     "eqsc": "EQSC API",
 }
@@ -196,7 +217,8 @@ CONNECTION_GROUP_ORDER: tuple[str, ...] = (
     "fan_studio_cenc_ir",
     "p2p_main",
     "wolfx_all",
-    "openquake_api",
+    "pancakes_api",
+    "jian_project_all",
     "snet_msil",
     "eqsc",
 )
@@ -211,12 +233,31 @@ CONNECTION_GROUP_ALIAS: dict[str, str] = {
     ProviderFamily.FAN_STUDIO.value: "fan_studio_all",
     ProviderFamily.P2P.value: "p2p_main",
     ProviderFamily.WOLFX.value: "wolfx_all",
-    ProviderFamily.GLOBAL_QUAKE.value: "openquake_api",
+    ProviderFamily.GLOBAL_QUAKE.value: "pancakes_api",
+    ProviderFamily.JIAN_PROJECT.value: "jian_project_all",
     ProviderFamily.DIRECT_HTTP.value: "snet_msil",
 }
 
 # ---------------------------------------------------------------------------
-# 7. 展示名 -> 连接组 key 的反向别名（历史兼容）
+# 7. 历史连接组 key -> 规范 key（更名兼容）
+# ---------------------------------------------------------------------------
+# 连接组曾多次更名（Global Quake → OpenQuakeAPI → PancakesAPI）。连接健康
+# 采样 / 日聚合 / 通道事故三张表均以 group_key 为落库维度，更名后若只按新
+# key 读写，旧 key 下的历史可用性会与规范 key 割裂，前端「通道健康」面板
+# 表现为整条 90 天条带从零重新统计、Past Incidents 也一并丢失。
+#
+# 此表用于存储层把历史 key 归并到当前规范 key，仅在同名物理通道改名时使用；
+# 归并后旧 key 行会被清理，重复执行无副作用（幂等）。
+LEGACY_CONNECTION_GROUP_KEYS: dict[str, str] = {
+    # OpenQuakeAPI → PancakesAPI 更名
+    "openquake_api": "pancakes_api",
+    # 更早期的 Global Quake 组名（先迁为 openquake_api，再迁为 pancakes_api），
+    # 一并折叠，覆盖跨多个版本升级的用户。
+    "global_quake": "pancakes_api",
+}
+
+# ---------------------------------------------------------------------------
+# 8. 展示名 -> 连接组 key 的反向别名（历史兼容）
 # ---------------------------------------------------------------------------
 # ConnectionsPayloadBuilder / SourceRuntimeQuery 可能使用的展示名别名，
 # 包含历史上出现过的括号/空格写法，用于把展示名归一化回连接组 key。
@@ -227,7 +268,14 @@ DISPLAY_NAME_ALIASES: dict[str, str] = {
     "Fan Studio（烈度速报）": "fan_studio_cenc_ir",
     "P2P地震情報": "p2p_main",
     "Wolfx": "wolfx_all",
-    "OpenQuakeAPI": "openquake_api",
+    "PancakesAPI": "pancakes_api",
+    "OpenQuakeAPI": "pancakes_api",
+    "openquake_api": "pancakes_api",
+    "pancakes_api": "pancakes_api",
+    "Jian Project": "jian_project_all",
+    "Jian Project WebSocket数据源": "jian_project_all",
+    "jian_project": "jian_project_all",
+    "jian_project_all": "jian_project_all",
     "NIED S-Net": "snet_msil",
     "EQSC API": "eqsc",
 }
@@ -239,6 +287,7 @@ __all__ = [
     "CONNECTION_DISPLAY_NAMES",
     "CONNECTION_GROUP_ORDER",
     "CONNECTION_GROUP_ALIAS",
+    "LEGACY_CONNECTION_GROUP_KEYS",
     "DISPLAY_NAME_ALIASES",
     "ACTIVE_SERVER_LABELS",
 ]

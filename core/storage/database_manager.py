@@ -667,7 +667,7 @@ class DatabaseManager:
     # 避免每天 3000+ 条的气象预警在报次表中无限堆积重复快照。
     _WEATHER_DEDUPE_SOURCES = frozenset(
         {
-            "china_weather_openquake",
+            "china_weather_jianproject",
             "china_weather_fanstudio",
             "weather_alarm",
         }

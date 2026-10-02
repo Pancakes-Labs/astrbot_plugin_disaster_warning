@@ -139,7 +139,7 @@ def _matches_payload_rule(payload: dict[str, Any], entry: SourceEntry) -> bool:
 def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
     """按提供方家族导出名称到数据源标识的映射。"""
     result: dict[str, str] = {}
-    # FAN Studio / OpenQuakeAPI 主要按来源名映射，Wolfx 主要按消息类型映射
+    # FAN Studio / PancakesAPI 主要按来源名映射，Wolfx 主要按消息类型映射
     for source_id in get_source_ids_by_family(provider_family):
         entry = SOURCE_CATALOG[source_id]
         if provider_family in (
@@ -170,8 +170,8 @@ def get_wolfx_source_id(message_type: str) -> str | None:
     return source_ids[0]
 
 
-def get_openquake_source_id(source_name: str | None) -> str | None:
-    """根据 OpenQuakeAPI RealtimeEvent.source 解析统一数据源标识。
+def get_pancakes_source_id(source_name: str | None) -> str | None:
+    """根据 PancakesAPI RealtimeEvent.source 解析统一数据源标识。
 
     /ws/all 聚合推送会保留原始 source（gq / nmefc / nmefc-wave / nmefc-surge / cma）。
     当前已接入 Global Quake（gq）与中国气象局气象预警（cma）；
@@ -202,6 +202,10 @@ def get_openquake_source_id(source_name: str | None) -> str | None:
     ):
         return name
     return None
+
+
+# 向后兼容旧函数名
+get_openquake_source_id = get_pancakes_source_id
 
 
 def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
@@ -315,7 +319,57 @@ def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
 # 预构建常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
 FAN_STUDIO_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.FAN_STUDIO)
 WOLFX_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.WOLFX)
-# OpenQuake 聚合路由走 get_openquake_source_id()，不预构建未使用的 registry
+# Pancakes 聚合路由走 get_pancakes_source_id()，不预构建未使用的 registry
+
+
+def get_jian_project_source_id(source_name: str | None) -> str | None:
+    """根据 Jian Project 消息的 type 解析统一数据源标识。"""
+    name = str(source_name or "").strip().lower()
+    if not name:
+        return None
+    for source_id in get_source_ids_by_family(ProviderFamily.JIAN_PROJECT):
+        entry = SOURCE_CATALOG[source_id]
+        aliases = {
+            str(item or "").strip().lower()
+            for item in (entry.provider_source_names or ())
+        }
+        aliases.update(
+            str(item or "").strip().lower() for item in (entry.provider_aliases or ())
+        )
+        aliases.add(str(entry.source_id or "").strip().lower())
+        if name in aliases:
+            return source_id
+    return None
+
+
+def route_jian_project_message(data: dict[str, Any]) -> list[RoutedMessage]:
+    """统一解析 Jian Project 消息并返回路由结果列表。
+
+    仅提取 7 大核心数据源：
+    cea, cwa-eew, jma-eew, weather, nmefc-tsunami, cenc, usgs。
+    """
+    if not isinstance(data, dict):
+        return []
+
+    msg_type = str(data.get("type") or "").strip().lower()
+    if not msg_type or msg_type in ("heartbeat", "all", "pong"):
+        return []
+
+    source_id = get_jian_project_source_id(msg_type)
+    if not source_id:
+        return []
+
+    # 提取内部 Data 负载；若不为 dict 则直接透传 data
+    raw_payload = data.get("Data")
+    payload = raw_payload if isinstance(raw_payload, dict) else data
+
+    return [
+        RoutedMessage(
+            source_name=msg_type,
+            source_id=source_id,
+            payload=payload,
+        )
+    ]
 
 
 __all__ = [
@@ -325,8 +379,11 @@ __all__ = [
     "detect_fan_studio_source_entry",
     "detect_fan_studio_source_id",
     "get_fan_studio_source_id",
+    "get_jian_project_source_id",
     "get_openquake_source_id",
+    "get_pancakes_source_id",
     "get_provider_source_map",
     "get_wolfx_source_id",
     "route_fan_studio_message",
+    "route_jian_project_message",
 ]

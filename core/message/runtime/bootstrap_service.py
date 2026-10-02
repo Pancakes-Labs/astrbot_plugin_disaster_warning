@@ -80,12 +80,23 @@ class MessageManagerBootstrapService:
         # 仅本地模式生效：部分瓦片源（如 FAN Studio）证书过期时，
         # 开启后可继续加载底图；会信任自签/过期证书，默认关闭。
         ignore_https_errors = bool(msg_config.get("browser_ignore_https_errors", False))
+        # 代理绕过（默认开启）：进程带 ALL_PROXY / HTTPS_PROXY 时，Chromium 会继承
+        # 这些变量去请求瓦片；代理无法转发瓦片域名时会返回 ERR_EMPTY_RESPONSE，
+        # 表现为地图底图整体空白。开启后地图瓦片域名直连。
+        bypass_proxy_for_map_tiles = bool(
+            msg_config.get("browser_bypass_proxy_for_map_tiles", True)
+        )
+        proxy_bypass_domains = str(
+            msg_config.get("browser_proxy_bypass_domains", "") or ""
+        )
         self.manager.browser_manager = BrowserManager(
             pool_size=pool_size,
             telemetry=telemetry,
             mode=playwright_mode,
             server_url=playwright_server_url,
             ignore_https_errors=ignore_https_errors,
+            bypass_proxy_for_map_tiles=bypass_proxy_for_map_tiles,
+            proxy_bypass_domains=proxy_bypass_domains,
         )
 
         # 只有本地浏览器模式且确实需要图形渲染时才后台预热，

@@ -20,7 +20,9 @@ class SourceHealthMonitor:
         "fan_studio_cenc_ir": "ws.fanstudio.tech",
         "p2p_main": "api.p2pquake.net",
         "wolfx_all": "ws-api.wolfx.jp",
+        "pancakes_api": "api.aloys23.link",
         "openquake_api": "api.aloys23.link",
+        "jian_project_all": "api.sismotide.top",
         # EQSC 为 HTTP 辅助通道，默认探测官方主机；可被 host_overrides 覆盖
         "eqsc": "equake.top",
         # S-Net：MSIL 瓦片源（TCP 443 探测连通性）
@@ -33,7 +35,9 @@ class SourceHealthMonitor:
         "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
         "p2p_main": "P2P地震情報",
         "wolfx_all": "Wolfx",
-        "openquake_api": "OpenQuakeAPI",
+        "pancakes_api": "PancakesAPI",
+        "openquake_api": "PancakesAPI",
+        "jian_project_all": "Jian Project",
         "eqsc": "EQSC API",
         "snet_msil": "NIED S-Net",
     }

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import OrderedDict
+from datetime import datetime, timezone
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -18,10 +19,23 @@ from astrbot.core.desktop_runtime import is_desktop_managed_backend
 
 from ...core.app.services import quoted_plain_result
 from ...core.app.services.eqsc_channel_service import EqscChannelService
+from ...core.services.paste.paste_client import (
+    format_expires_at,
+    get_paste_client,
+)
+from ...utils.log_sanitizer import sanitize_log_text
+from ...utils.runtime_log_collector import get_runtime_log_collector
 from ...utils.version import get_plugin_name, get_plugin_version
 from ..astrbot_restart import restart_astrbot_in_background
 from .forward_helper import build_forward_nodes, send_forward_blocks
 from .telemetry_mixin import CommandTelemetryMixin
+
+# 日志导出行数边界与字节预算（自建 paste 服务端限制 2MB，预留头部与余量）。
+LOG_EXPORT_DEFAULT_COUNT = 500
+LOG_EXPORT_MAX_COUNT = 10000
+LOG_EXPORT_MAX_BYTES = 1_900_000
+# 运行日志导出的行过滤关键词：只导出本插件相关的运行日志行。
+RUNTIME_LOG_EXPORT_KEYWORD = "[灾害预警]"
 
 
 class PluginAdminCommandService(CommandTelemetryMixin):
@@ -566,15 +580,17 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     ("fan_studio_cenc_ir", "FAN Studio 烈度速报"),
                     ("p2p_main", "P2P地震情報"),
                     ("wolfx_all", "Wolfx"),
-                    ("openquake_api", "OpenQuakeAPI"),
+                    ("pancakes_api", "PancakesAPI"),
+                    ("jian_project_all", "Jian Project"),
                 ]
             )
             source_group_label_map = OrderedDict(
                 [
                     ("fan_studio", "FAN Studio"),
+                    ("jian_project", "Jian Project"),
                     ("p2p_earthquake", "P2P地震情報"),
                     ("wolfx", "Wolfx"),
-                    ("openquake_api", "OpenQuakeAPI"),
+                    ("pancakes_api", "PancakesAPI"),
                     ("eqsc", "EQSC API"),
                     ("snet", "NIED S-Net"),
                 ]
@@ -621,9 +637,23 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "japan_jma_earthquake": "日本气象厅地震情报",
                     "china_cenc_earthquake": "中国地震台网地震测定",
                 },
-                "OpenQuakeAPI": {
+                "PancakesAPI": {
                     "global_quake": "Global Quake",
+                    "japan_jma_eew": "日本气象厅: 紧急地震速报",
+                    "jma_pancakes": "日本气象厅: 紧急地震速报",
+                    "japan_jma_earthquake": "日本气象厅: 地震情报",
+                    "jma_eqlist_pancakes": "日本气象厅: 地震情报",
+                    "usgs_earthquake": "美国地质调查局 (USGS)",
+                    "usgs_pancakes": "美国地质调查局 (USGS)",
+                },
+                "Jian Project": {
+                    "china_earthquake_warning": "中国地震预警网 (CEA)",
+                    "taiwan_cwa_earthquake": "台湾中央气象署: 强震即时警报",
+                    "japan_jma_eew": "日本气象厅: 紧急地震速报",
                     "china_weather_alarm": "中国气象局: 气象预警",
+                    "china_tsunami": "自然资源部海啸预警中心",
+                    "china_cenc_earthquake": "中国地震台网 (CENC)",
+                    "usgs_earthquake": "美国地质调查局 (USGS)",
                 },
                 "EQSC API": {
                     "typhoon": "中国气象局：实时活跃台风",
@@ -769,7 +799,12 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     if gk:
                         group_enabled_map[gk] = bool(conn_info.get("enabled", False))
 
+            rendered_connection_names: set[str] = set()
             for conn_name, display_name in connection_label_map.items():
+                # 同一展示名最多渲染一行，避免历史别名残留造成重复条目。
+                if display_name in rendered_connection_names:
+                    continue
+                rendered_connection_names.add(display_name)
                 detail = conn_details.get(conn_name, {})
                 connected = bool(detail.get("connected", False))
                 is_enabled = group_enabled_map.get(conn_name, False)
@@ -942,7 +977,11 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             return
 
         try:
-            log_summary = self.plugin.disaster_service.message_logger.get_log_summary()
+            # build_summary 会同步读取全部日志文件（可达数百 MB），放入线程池执行，
+            # 避免阻塞事件循环。
+            log_summary = await asyncio.to_thread(
+                self.plugin.disaster_service.message_logger.get_log_summary
+            )
             if not log_summary["enabled"]:
                 yield event.plain_result(
                     "📋 原始消息日志功能未启用\n\n使用 /灾害预警日志开关 启用日志记录"
@@ -986,6 +1025,118 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] 获取日志信息失败: {e}")
             yield event.plain_result(f"❌ 获取日志信息失败: {str(e)}")
+
+    async def handle_disaster_log_export(self, event, count_str: str = None):
+        """处理 /灾害预警日志导出：读取最近运行日志行，脱敏后上传生成链接。
+
+        运行日志来自进程内 RuntimeLogCollector 捕获的控制台日志
+        （INFO 及以上，仅 [灾害预警] 相关行），结果仅以链接形式回复到原会话，
+        不把日志内容发到聊天消息中；上传失败仅提示原因，不做聊天
+        转发回退。导出为管理员显式动作，不随遥测开关联动。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        # 解析行数：默认 500，允许范围 1~10000，越界钳制并注明。
+        requested = LOG_EXPORT_DEFAULT_COUNT
+        clamped = False
+        if count_str is not None and str(count_str).strip():
+            try:
+                requested = int(str(count_str).strip())
+            except ValueError:
+                yield event.plain_result(
+                    "❌ 行数参数无效。\n\n"
+                    "📌 用法：/灾害预警日志导出 [数量]\n"
+                    f"💡 数量范围 1~{LOG_EXPORT_MAX_COUNT}，"
+                    f"默认 {LOG_EXPORT_DEFAULT_COUNT}"
+                )
+                return
+
+        if requested < 1:
+            requested = 1
+            clamped = True
+        elif requested > LOG_EXPORT_MAX_COUNT:
+            requested = LOG_EXPORT_MAX_COUNT
+            clamped = True
+
+        yield event.plain_result(
+            f"📜 正在读取并上传最近 {requested} 行运行日志，请稍候…"
+        )
+
+        try:
+            # 缓冲快照/过滤与整段脱敏均为 CPU 密集操作（文本量最大约 1.9MB），
+            # 放入线程池执行，避免阻塞事件循环（预警推送与 WebSocket 心跳共用该循环）。
+            lines, truncated_by_size = await asyncio.to_thread(
+                get_runtime_log_collector().get_recent_lines,
+                requested,
+                keyword=RUNTIME_LOG_EXPORT_KEYWORD,
+                max_total_bytes=LOG_EXPORT_MAX_BYTES,
+            )
+            if not lines:
+                yield event.plain_result(
+                    "📋 暂无运行日志记录\n\n运行日志自插件本次启动开始累积，稍后再试。"
+                )
+                return
+
+            export_text = await asyncio.to_thread(
+                self._build_log_export_text, lines, truncated_by_size
+            )
+            payload = await get_paste_client().upload_text(export_text)
+        except Exception as e:
+            # 失败仅提示原因（用户确认不做聊天转发回退），细节留服务端日志。
+            logger.warning(f"[灾害预警] 日志导出失败: {e}")
+            await self._track_command_feature(
+                "command_admin_action",
+                {"action": "log_export", "success": False},
+            )
+            yield event.plain_result(f"❌ 日志导出失败: {e}")
+            return
+
+        await self._track_command_feature(
+            "command_admin_action",
+            {
+                "action": "log_export",
+                "success": True,
+                "requested": requested,
+                "exported": len(lines),
+                "truncated_by_size": truncated_by_size,
+            },
+        )
+
+        size_kb = sum(len(line.encode("utf-8")) for line in lines) / 1024
+        lines_out = [
+            "✅ 运行日志导出成功（内容已脱敏）",
+            f"📦 行数：{len(lines)} / 请求 {requested} 行（共 {size_kb:.1f} KB）",
+            f"🔗 链接：{payload.get('url', '')}",
+        ]
+        expires_at = format_expires_at(payload.get("expires_at"))
+        if expires_at and expires_at != "未知":
+            lines_out.append(f"⏳ 过期时间：{expires_at}")
+        if clamped:
+            lines_out.append(f"ℹ️ 行数已钳制到允许范围 1~{LOG_EXPORT_MAX_COUNT}")
+        if truncated_by_size:
+            lines_out.append("⚠️ 已达到导出大小上限，仅包含最新可容纳的日志行")
+        elif len(lines) < requested:
+            lines_out.append(f"ℹ️ 当前缓冲共 {len(lines)} 行，不足请求的 {requested} 行")
+        yield event.plain_result("\n".join(lines_out))
+
+    @staticmethod
+    def _build_log_export_text(lines: list[str], truncated_by_size: bool) -> str:
+        """把运行日志行拼装为导出文本，并对整段内容脱敏。"""
+        generated_at = (
+            datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        )
+        header = (
+            "=== 灾害预警插件运行日志导出 ===\n"
+            f"导出时间: {generated_at}\n"
+            f"插件版本: {get_plugin_version()}\n"
+            f"日志行数: {len(lines)} 行（按时间升序，仅含 [灾害预警] 相关日志）\n"
+            f"大小截断: {'是（已达导出上限）' if truncated_by_size else '否'}\n"
+            "说明: 以下为本进程自启动以来的插件运行日志，已对凭据与本机路径脱敏。\n"
+        )
+        body = "\n".join(lines)
+        return sanitize_log_text(f"{header}\n{body}\n")
 
     async def handle_toggle_message_logging(self, event):
         """开启或关闭原始 WebSocket 日志记录器，切换运行配置。"""
@@ -1128,6 +1279,202 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         except Exception as e:
             logger.error(f"[灾害预警] 切换推送状态失败: {e}")
             yield event.plain_result(f"❌ 切换推送状态失败: {str(e)}")
+
+    @staticmethod
+    def _build_set_location_usage(reason: str = "") -> str:
+        """构造 /设置所在地 的用法提示（可附带解析失败原因）。"""
+        lines: list[str] = []
+        if reason:
+            lines.append(f"❌ 参数解析失败：{reason}")
+            lines.append("")
+        lines.extend(
+            [
+                "📍 /设置所在地 [纬度] [经度] [自定义地名] [生效范围]",
+                "",
+                "• 纬度、经度、地名至少要提供一项，其余参数均可留空；",
+                "  未提供的项沿用原值，不会被清空",
+                "• 两个坐标按「纬度 经度」顺序识别；",
+                "  只填一个时，绝对值大于 90 的自动判定为经度",
+                "• 生效范围：全局（默认）/ 当前会话 / 直接填写会话 UMO",
+                "",
+                "单独修改数值可用键值对写法消除歧义：",
+                "  /设置所在地 lat=39.9042",
+                "  /设置所在地 lon=116.4074 地名=北京",
+                "",
+                "示例：",
+                "  /设置所在地 39.9042 116.4074 北京",
+                "  /设置所在地 39.9042 116.4074 北京 当前会话",
+                "  /设置所在地 116.4074",
+                "  /设置所在地 139.7 35.7 东京 aiocqhttp:GroupMessage:123456",
+            ]
+        )
+        return "\n".join(lines)
+
+    async def handle_set_location(
+        self,
+        event,
+        arg1: str = None,
+        arg2: str = None,
+        arg3: str = None,
+        arg4: str = None,
+    ):
+        """处理 /设置所在地：写入本地监控经纬度、地名与生效范围。
+
+        采用增量更新语义，参数解析分两阶段：先确定生效范围，再按该范围读取当前生效的
+        local_monitoring 作为消歧上下文，从而准确支持“只修正其中一个坐标”。
+        """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
+
+        support = self.plugin._command_support_service
+        raw_args = [arg1, arg2, arg3, arg4]
+
+        # 阶段一：先确定生效范围与目标会话，参数错误在此提前拦截。
+        scope_probe = support.parse_set_location_args(raw_args)
+        if scope_probe.get("error"):
+            yield event.plain_result(
+                self._build_set_location_usage(scope_probe["error"])
+            )
+            return
+
+        scope = scope_probe["scope"]
+        scope_target = scope_probe["scope_target"]
+        is_global = scope == support.LOCATION_SCOPE_GLOBAL
+
+        mgr = self._get_session_config_manager()
+        if is_global:
+            session_umo = ""
+            raw_lm = self.plugin.config.get("local_monitoring")
+            existing_lm = dict(raw_lm) if isinstance(raw_lm, dict) else {}
+        else:
+            session_umo = (
+                scope_target
+                if scope == support.LOCATION_SCOPE_SESSION
+                else event.unified_msg_origin
+            )
+            if mgr is None or not session_umo:
+                yield event.plain_result(
+                    "❌ 无法写入会话级配置：会话配置管理器或目标会话不可用"
+                )
+                return
+            probe_effective = mgr.get_effective_config(session_umo)
+            raw_lm = probe_effective.get("local_monitoring")
+            existing_lm = dict(raw_lm) if isinstance(raw_lm, dict) else {}
+
+        # 阶段二：带上消歧上下文重新解析，正确识别“只修正其中一个坐标”。
+        parsed = support.parse_set_location_args(raw_args, existing_lm=existing_lm)
+        if parsed.get("error"):
+            yield event.plain_result(self._build_set_location_usage(parsed["error"]))
+            return
+
+        latitude = parsed["latitude"]
+        longitude = parsed["longitude"]
+        place_name = parsed["place_name"]
+
+        # 组装增量更新字段：仅覆盖本次显式提供的项。
+        updates: dict = {}
+        if latitude is not None:
+            updates["latitude"] = latitude
+        if longitude is not None:
+            updates["longitude"] = longitude
+        if place_name:
+            updates["place_name"] = place_name
+        # 仅当「本次写入了坐标」且「合并后的经纬度同时齐备」时才开启本地监控。
+        # 若只有一个坐标就置 enabled=True，距离与烈度将按赤道/本初子午线的虚假位置参与过滤，
+        # 静默污染本地预估结果，而配置面板上看不出任何异常。
+        if latitude is not None or longitude is not None:
+            merged_lat = updates.get("latitude", existing_lm.get("latitude"))
+            merged_lon = updates.get("longitude", existing_lm.get("longitude"))
+            if merged_lat is not None and merged_lon is not None:
+                updates["enabled"] = True
+
+        # 组装“本次变更”摘要，让用户明确知道哪几项被改写。
+        changed: list[str] = []
+        if latitude is not None:
+            changed.append(f"纬度→{latitude}")
+        if longitude is not None:
+            changed.append(f"经度→{longitude}")
+        if place_name:
+            changed.append(f"地名→{place_name}")
+
+        try:
+            if is_global:
+                current_lm = dict(existing_lm)
+                current_lm.update(updates)
+                self.plugin.config["local_monitoring"] = current_lm
+                # 全局配置落盘；session_config_manager 的 default_config_ref
+                # 持有同一 config 引用，写入后无需重载即可实时生效。
+                self.plugin.config.save_config()
+                final_lm = current_lm
+                scope_desc = "全局（所有会话）"
+            else:
+                # 会话补丁同样执行增量更新，保留该会话已有的其他覆写字段。
+                override = mgr.get_override(session_umo)
+                if not isinstance(override, dict):
+                    override = {}
+                session_lm = override.get("local_monitoring")
+                if not isinstance(session_lm, dict):
+                    session_lm = {}
+                session_lm.update(updates)
+                override["local_monitoring"] = session_lm
+                mgr.set_override(session_umo, override)
+
+                # 回读合并后的生效配置作为展示基准（未覆盖项来自全局默认值）。
+                effective = mgr.get_effective_config(session_umo)
+                merged_lm = effective.get("local_monitoring")
+                final_lm = merged_lm if isinstance(merged_lm, dict) else session_lm
+                scope_desc = mgr.get_session_log_str(session_umo)
+
+            lines = ["✅ 本地监控位置已更新", ""]
+            lines.append(f"📐 生效范围：{scope_desc}")
+            if changed:
+                lines.append(f"🔧 本次变更：{'、'.join(changed)}")
+            lines.append(f"• 纬度：{final_lm.get('latitude')}")
+            lines.append(f"• 经度：{final_lm.get('longitude')}")
+            lines.append(f"• 地名：{final_lm.get('place_name') or '本地'}")
+            lines.append(
+                f"• 本地监控：{'已开启' if final_lm.get('enabled') else '未开启'}"
+            )
+
+            if parsed.get("ambiguous"):
+                lines.append("")
+                lines.append(
+                    "💡 只填了一个数值，无法判断是纬度还是经度，已暂按纬度处理。"
+                )
+                lines.append("   若想修正经度，请用显式写法：/设置所在地 lon=116.4074")
+            if parsed.get("swapped"):
+                lines.append("")
+                lines.append("ℹ️ 检测到经纬度顺序疑似颠倒，已自动纠正为「纬度 经度」")
+            if final_lm.get("latitude") is None or final_lm.get("longitude") is None:
+                lines.append("")
+                lines.append(
+                    "⚠️ 本地监控需经纬度同时齐备才会开启，本次未开启。"
+                    "请补齐另一个坐标后再试。"
+                )
+
+            # 遥测仅上报布尔型是否存在坐标，不上报具体经纬度与地名，避免位置隐私外泄。
+            await self._track_command_feature(
+                "command_admin_action",
+                {
+                    "action": "set_location",
+                    "success": True,
+                    "scope": scope,
+                    "has_latitude": latitude is not None,
+                    "has_longitude": longitude is not None,
+                    "has_place_name": bool(place_name),
+                },
+            )
+            yield event.plain_result("\n".join(lines))
+            logger.info(
+                f"[灾害预警] 本地监控位置已更新（范围：{scope_desc}）："
+                f"纬度={final_lm.get('latitude')} 经度={final_lm.get('longitude')} "
+                f"地名={final_lm.get('place_name') or '本地'}"
+            )
+        except Exception as e:
+            logger.error(f"[灾害预警] 设置所在地失败: {e}")
+            await self._track_command_error(e, "set_location")
+            yield event.plain_result(f"❌ 设置所在地失败: {str(e)}")
 
     async def handle_disaster_config(
         self, event, action: str = None, target: str = None

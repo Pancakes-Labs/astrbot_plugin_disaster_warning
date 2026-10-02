@@ -12,6 +12,9 @@ import json
 from astrbot.api import logger
 
 from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
+from ...network.websocket.jian_project_connection_policy import (
+    attach_jian_project_auth_from_plan,
+)
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -68,7 +71,9 @@ class DisasterServiceRuntimeService:
                 "fan_studio",
                 "p2p",
                 "wolfx",
+                "pancakes_api",
                 "openquake_api",
+                "jian_project",
             ]:
                 # 这份连接附加信息会一路传入连接管理器，作为连接状态展示、重连通知、
                 # 管理端查询等场景的上下文信息。
@@ -82,6 +87,8 @@ class DisasterServiceRuntimeService:
                 }
                 # FAN Studio 鉴权凭证随连接上下文传递，供建连后发送 auth 包。
                 attach_fan_auth_from_plan(connection_info, conn_config)
+                # Jian Project 鉴权凭证随连接上下文传递，供建连前换取 Access Token。
+                attach_jian_project_auth_from_plan(connection_info, conn_config)
 
                 # 异步建连后台任务
                 task = asyncio.create_task(

@@ -1,6 +1,6 @@
 """
 全球地震源解析器。
-负责解析 OpenQuakeAPI (Global Quake)、美国地质调查局与美国 ShakeAlert 来源的全球地震数据，
+负责解析 PancakesAPI (Global Quake)、美国地质调查局与美国 ShakeAlert 来源的全球地震数据，
 并统一为领域事件。
 """
 
@@ -10,9 +10,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from ...models.websocket_message_pb2 import MessageAction, MessageType, WsMessage
 from ...utils.converters import ScaleConverter, safe_float_convert
 from ...utils.plugin_logger import plugin_logger
+from ...utils.time_converter import TimeConverter
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EarthquakeEvent, EventEnvelope
 from ..domain.event_payload import SourcePayload
@@ -23,10 +23,9 @@ from .base_parser import BaseParser
 
 
 class GlobalQuakeParser(BaseParser):
-    """OpenQuakeAPI / Global Quake 解析器。
+    """PancakesAPI / Global Quake 解析器。
 
-    上游当前以 JSON RealtimeEvent 为主（source/type/action/timestampMs/payload），
-    同时保留对历史 protobuf 二进制帧的兼容解析。
+    上游当前以 JSON RealtimeEvent 为主（source/type/action/timestampMs/payload）。
     """
 
     def __init__(self, message_logger=None):
@@ -44,7 +43,7 @@ class GlobalQuakeParser(BaseParser):
 
     @staticmethod
     def _extract_realtime_payload(data: dict[str, Any]) -> dict[str, Any]:
-        """提取 OpenQuakeAPI RealtimeEvent 的业务载荷。
+        """提取 PancakesAPI RealtimeEvent 的业务载荷。
 
         新协议优先使用 payload；兼容历史 data/Data 包装与无包装扁平结构。
         某个包装键存在但不是 dict 时继续尝试后续候选键，避免误丢合法载荷。
@@ -73,37 +72,19 @@ class GlobalQuakeParser(BaseParser):
 
     def parse_payload(self, payload):
         """解析 Global Quake 载荷。"""
-        if isinstance(payload, bytes):
-            return self._parse_protobuf_message(payload)
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                payload = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
         if isinstance(payload, str):
             return self._parse_json_message(payload)
         if isinstance(payload, dict):
             return self._parse_earthquake_data(payload)
         return None
 
-    def _parse_protobuf_message(self, message: bytes) -> EventEnvelope | None:
-        """解析二进制格式消息（历史兼容）。"""
-        try:
-            ws_msg = WsMessage()
-            ws_msg.ParseFromString(message)
-
-            # 二进制通道会混发地震、心跳和状态消息，这里只把地震消息送入正式解析链
-            if ws_msg.type == MessageType.EARTHQUAKE:
-                # 适配新 API 中的 CANCELLED (取消报) 动作
-                if ws_msg.action == MessageAction.CANCELLED:
-                    return self._parse_earthquake_removal_protobuf(ws_msg)
-                return self._parse_earthquake_protobuf(ws_msg)
-            if ws_msg.type == MessageType.HEARTBEAT:
-                return None
-            if ws_msg.type == MessageType.STATUS:
-                return None
-            return None
-        except Exception as exc:
-            plugin_logger.error(f"[灾害预警] {self.source_id} Protobuf 解析失败: {exc}")
-            return None
-
     def _parse_json_message(self, message: str) -> EventEnvelope | None:
-        """解析 OpenQuakeAPI JSON 实时事件。"""
+        """解析 PancakesAPI JSON 实时事件。"""
         try:
             data = json.loads(message)
             if not isinstance(data, dict):
@@ -191,35 +172,6 @@ class GlobalQuakeParser(BaseParser):
         )
         return envelope
 
-    def _parse_earthquake_removal_protobuf(
-        self, ws_msg: WsMessage
-    ) -> EventEnvelope | None:
-        """解析 Protobuf 二进制取消地震消息。"""
-        try:
-            removal_data = ws_msg.earthquake_removal_data
-            event_id = str(removal_data.id or "")
-            if not event_id:
-                return None
-
-            source_entry = get_source_entry(self.source_id)
-            raw_payload = {"protobuf": True, "id": event_id, "is_cancel": True}
-            envelope = self._build_removal_envelope(
-                event_id, raw_payload, source_entry, "protobuf"
-            )
-
-            plugin_logger.info(
-                f"[灾害预警] Global Quake 收到地震取消广播：事件编号 {event_id}",
-                is_event_linked=True,
-                event_stream="global_quake",
-                is_silent_window=True,
-            )
-            return envelope
-        except Exception as exc:
-            plugin_logger.error(
-                f"[灾害预警] {self.source_id} 解析 Protobuf 取消消息失败: {exc}"
-            )
-            return None
-
     def _parse_earthquake_removal_json(
         self, data: dict[str, Any]
     ) -> EventEnvelope | None:
@@ -248,167 +200,8 @@ class GlobalQuakeParser(BaseParser):
             )
             return None
 
-    def _parse_earthquake_protobuf(self, ws_msg: WsMessage) -> EventEnvelope | None:
-        """解析二进制地震数据。"""
-        try:
-            eq_data = ws_msg.earthquake_data
-
-            # 上游异常时可能持续推送 lat=0/lon=0 的伪事件，直接丢弃避免入库污染。
-            if self._is_invalid_zero_coordinate(eq_data.latitude, eq_data.longitude):
-                plugin_logger.debug(
-                    f"[灾害预警] {self.source_id} 忽略经纬度为 0 的脏数据 "
-                    f"（事件编号 {getattr(eq_data, 'id', '')}）"
-                )
-                return None
-
-            # 震源时间优先使用标准时间字符串，缺失时再回退到毫秒时间戳。
-            shock_time = None
-            if eq_data.origin_time_iso:
-                shock_time = self._parse_datetime(eq_data.origin_time_iso)
-            elif eq_data.origin_time_ms:
-                shock_time = datetime.fromtimestamp(
-                    eq_data.origin_time_ms / 1000, tz=timezone.utc
-                )
-
-            # 解析罗马数字格式的最大烈度
-            intensity = ScaleConverter.convert_roman_intensity(eq_data.intensity)
-            magnitude = round(eq_data.magnitude, 1) if eq_data.magnitude else None
-            depth = round(eq_data.depth, 1) if eq_data.depth is not None else None
-
-            # 全球震中地点优先翻译为适合中文展示的地名，必要时保留原始英文地名
-            place_name = region_service.translate_place_name(
-                eq_data.region,
-                eq_data.latitude,
-                eq_data.longitude,
-                fallback_to_original=True,
-            )
-
-            # 获取测站数量统计
-            station_count = None
-            if eq_data.HasField("station_count"):
-                station_count = {
-                    "total": eq_data.station_count.total,
-                    "selected": eq_data.station_count.selected,
-                    "used": eq_data.station_count.used,
-                    "matching": eq_data.station_count.matching,
-                }
-
-            # 获取定位精度质量
-            quality_data = None
-            if eq_data.HasField("quality"):
-                quality_data = {
-                    "err_origin": eq_data.quality.err_origin,
-                    "err_depth": eq_data.quality.err_depth,
-                    "err_ns": eq_data.quality.err_ns,
-                    "err_ew": eq_data.quality.err_ew,
-                    "pct": eq_data.quality.pct,
-                    "stations": eq_data.quality.stations,
-                }
-
-            raw_payload = {
-                "protobuf": True,
-                "id": eq_data.id,
-                "data": {"quality": quality_data} if quality_data else {},
-            }
-
-            # 获取版本报次
-            raw_report_num = eq_data.revision_id or 1
-            try:
-                report_num = int(raw_report_num)
-            except (TypeError, ValueError):
-                report_num = 1
-            if report_num <= 0:
-                report_num = 1
-
-            source_entry = get_source_entry(self.source_id)
-
-            # 判断是否为归档报/结束报
-            is_archived = ws_msg.action == MessageAction.ARCHIVED
-
-            metadata = {
-                "source_family": "global_quake",
-                "source_enum": source_entry.source_enum if source_entry else "",
-                "source_type": source_entry.source_type.value
-                if source_entry
-                else "earthquake_warning",
-                "max_pga": eq_data.max_pga if eq_data.max_pga else None,
-                "stations": station_count,
-                "report_num": report_num,
-                "quality": quality_data,
-                "is_final": is_archived,  # 归档报视为最终报
-            }
-            event_id = str(eq_data.id or "")
-
-            # 实例化地震领域事件
-            domain_event = EarthquakeEvent(
-                occurred_at=shock_time or datetime.now(timezone.utc),
-                latitude=eq_data.latitude,
-                longitude=eq_data.longitude,
-                depth=depth,
-                magnitude=magnitude,
-                intensity=intensity,
-                place_name=place_name,
-                metadata=dict(metadata),
-            )
-
-            # 构造身份标识
-            identity = EventIdentity(
-                event_id=event_id,
-                source_id=self.source_id,
-                event_type="earthquake",
-                provider_family=source_entry.provider_family.value
-                if source_entry
-                else "global_quake",
-                source_enum=source_entry.source_enum if source_entry else "",
-                report_num=report_num,
-                published_at=shock_time,
-                is_final=is_archived,
-                aliases=tuple(
-                    item for item in (str(eq_data.id or "").strip(),) if item
-                ),
-                attributes={
-                    "parser_name": self.source_entry.parser_name
-                    if self.source_entry
-                    else "",
-                    "config_key": source_entry.config_key if source_entry else "",
-                },
-            )
-
-            # 包装并返回统一包裹层
-            envelope = EventEnvelope(
-                identity=identity,
-                event=domain_event,
-                received_at=datetime.now(timezone.utc),
-                payload=SourcePayload(
-                    source_id=self.source_id,
-                    provider_family=source_entry.provider_family.value
-                    if source_entry
-                    else "global_quake",
-                    message_type="protobuf",
-                    raw=raw_payload,
-                    attributes=dict(metadata),
-                ),
-                metadata=metadata,
-            )
-
-            plugin_logger.info(
-                f"[灾害预警] Global Quake地震解析成功: {domain_event.place_name} "
-                f"(M {domain_event.magnitude or 0.0:.1f}), 烈度: {eq_data.intensity}, "
-                f"时间: {domain_event.occurred_at}",
-                is_event_linked=True,
-                event_stream="global_quake",
-                is_silent_window=True,
-            )
-
-            return envelope
-        except Exception as exc:
-            plugin_logger.error(
-                f"[灾害预警] {self.source_id} 解析 Protobuf 地震数据失败: {exc}"
-            )
-            return None
-
     def _parse_earthquake_data(self, data: dict[str, Any]) -> EventEnvelope | None:
-        """解析 OpenQuakeAPI / Global Quake JSON 地震数据。"""
+        """解析 PancakesAPI / Global Quake JSON 地震数据。"""
         try:
             eq_data = self._extract_realtime_payload(data)
             if not eq_data:
@@ -904,4 +697,263 @@ class ShakeAlertEewParser(BaseParser):
             return envelope
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 解析数据失败: {exc}")
+            return None
+
+
+class UsgsEarthquakeJianProjectParser(BaseParser):
+    """美国地质调查局 (USGS) 地震测定解析器 - Jian Project。"""
+
+    def __init__(self, message_logger=None, source_id: str = "usgs_jianproject"):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            event_id = str(msg_data.get("id") or "").strip()
+            if not event_id:
+                return None
+
+            occurred_at = TimeConverter.parse_datetime(
+                msg_data.get("originTime")
+            ) or datetime.now(timezone.utc)
+            magnitude = safe_float_convert(msg_data.get("magnitude"))
+            if magnitude is not None:
+                magnitude = round(magnitude, 1)
+
+            depth = safe_float_convert(msg_data.get("depth"))
+            if depth is not None:
+                depth = round(depth, 1)
+
+            latitude = safe_float_convert(msg_data.get("latitude")) or 0.0
+            longitude = safe_float_convert(msg_data.get("longitude")) or 0.0
+            raw_place_name = str(msg_data.get("placeName") or "").strip()
+            info_type = str(msg_data.get("infoTypeName") or "").strip()
+
+            # 翻译英文地名为中文
+            place_name = region_service.translate_place_name(
+                raw_place_name,
+                latitude,
+                longitude,
+                fallback_to_original=True,
+            )
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_usgs",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "earthquake_info",
+                "event_id": event_id,
+                "info_type": info_type,
+            }
+
+            domain_event = EarthquakeEvent(
+                occurred_at=occurred_at,
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="earthquake",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_usgs",
+                published_at=occurred_at,
+                aliases=(event_id,),
+                attributes={
+                    "parser_name": self.source_entry.parser_name
+                    if self.source_entry
+                    else "global_report_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "usgs_earthquake",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="usgs",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+
+            plugin_logger.info(
+                f"[灾害预警] USGS 地震测定解析成功: {domain_event.place_name} (M {domain_event.magnitude})",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(
+                f"[灾害预警] {self.source_id} 解析 USGS 数据失败: {exc}"
+            )
+            return None
+
+
+class UsgsPancakesParser(BaseParser):
+    """美国地质调查局 (USGS) 地震测定解析器 - PancakesAPI。"""
+
+    def __init__(self, message_logger=None, source_id: str = "usgs_pancakes"):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            # RealtimeEvent 包装解包逻辑与 Global Quake 同源，直接复用其载荷提取
+            msg_data = GlobalQuakeParser._extract_realtime_payload(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            event_id = str(msg_data.get("eventId") or msg_data.get("id") or "").strip()
+            if not event_id:
+                return None
+
+            magnitude = safe_float_convert(msg_data.get("magnitude"))
+            if magnitude is not None:
+                magnitude = round(magnitude, 1)
+
+            depth = safe_float_convert(msg_data.get("depth"))
+            if depth is not None:
+                depth = round(depth, 1)
+
+            latitude = safe_float_convert(msg_data.get("latitude")) or 0.0
+            longitude = safe_float_convert(msg_data.get("longitude")) or 0.0
+            # Pancakes 地震载荷用 region 承载震中地名；placeName 仅作历史形态兜底
+            raw_place_name = str(
+                msg_data.get("region")
+                or msg_data.get("placeName")
+                or msg_data.get("place_name")
+                or ""
+            ).strip()
+            info_type = str(
+                msg_data.get("infoType") or msg_data.get("infoTypeName") or ""
+            ).strip()
+            magnitude_type = str(msg_data.get("magnitudeType") or "").strip()
+            url = str(msg_data.get("url") or "").strip()
+
+            # 地名中英翻译
+            place_name = region_service.translate_place_name(
+                raw_place_name,
+                latitude,
+                longitude,
+                fallback_to_original=True,
+            )
+
+            origin_time_raw = (
+                msg_data.get("originTimeMs")
+                or msg_data.get("originTimeIso")
+                or msg_data.get("originTime")
+            )
+            occurred_at = TimeConverter.parse_datetime(origin_time_raw) or datetime.now(
+                timezone.utc
+            )
+
+            # 发布时间取最近更新时间 lastUpdateMs；updatedTime* 仅作历史形态兜底
+            updated_time_raw = (
+                msg_data.get("lastUpdateMs")
+                or msg_data.get("updatedTimeMs")
+                or msg_data.get("updatedTimeIso")
+                or msg_data.get("updatedTime")
+            )
+            published_at = TimeConverter.parse_datetime(updated_time_raw) or occurred_at
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "source_family": "global_quake",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "pancakes_usgs",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "earthquake_info",
+                "event_id": event_id,
+                "info_type": info_type,
+                "magnitude_type": magnitude_type,
+                "url": url,
+                "origin_place_en": raw_place_name,
+            }
+
+            domain_event = EarthquakeEvent(
+                occurred_at=occurred_at,
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="earthquake",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "global_quake",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "pancakes_usgs",
+                published_at=published_at,
+                aliases=(event_id,),
+                attributes={
+                    "parser_name": self.source_entry.parser_name
+                    if self.source_entry
+                    else "usgs_pancakes_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "usgs_earthquake",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "global_quake",
+                    message_type="usgs",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+
+            plugin_logger.info(
+                f"[灾害预警] USGS 地震测定 (Pancakes) 解析成功: {domain_event.place_name} (M {domain_event.magnitude})",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(
+                f"[灾害预警] {self.source_id} 解析 USGS 数据失败: {exc}"
+            )
             return None

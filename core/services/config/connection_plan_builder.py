@@ -14,6 +14,9 @@ from ...network.websocket.fan_studio_connection_policy import (
     ServerPreference,
     resolve_server_urls,
 )
+from ...network.websocket.jian_project_connection_policy import (
+    jian_project_auth_service,
+)
 from ...sources.source_catalog import SOURCE_CATALOG
 from ...sources.source_entry import SourceEntry
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
@@ -62,6 +65,17 @@ class ConnectionPlanBuilder:
         api_key = str(fan_cfg.get("api_key") or "").strip()
         return app_id, api_key
 
+    @staticmethod
+    def _resolve_jian_project_auth(config: dict[str, Any]) -> str:
+        """从全局配置解析 Jian Project 鉴权凭证（登录密钥 lk_ 或长期 Token rt_）。"""
+        data_sources = config.get("data_sources")
+        jp_cfg: dict[str, Any] = {}
+        if isinstance(data_sources, dict):
+            raw = data_sources.get("jian_project")
+            if isinstance(raw, dict):
+                jp_cfg = raw
+        return str(jp_cfg.get("login_key") or "").strip()
+
     @classmethod
     def _resolve_fan_server_preference(cls, config: dict[str, Any]) -> str:
         """从全局配置解析 FAN Studio 服务器偏好。"""
@@ -93,12 +107,14 @@ class ConnectionPlanBuilder:
         runtime_query = SourceRuntimeQueryService(config)
         connections: dict[str, dict[str, Any]] = {}
         fan_app_id, fan_api_key = cls._resolve_fan_studio_auth(config)
+        jp_login_key = cls._resolve_jian_project_auth(config)
         fan_server_pref = (
             ServerPreference.normalize(fan_server_pref_override)
             if fan_server_pref_override
             else cls._resolve_fan_server_preference(config)
         )
         fan_auth_warned = False
+        jp_auth_warned = False
 
         # 只为当前已启用的数据源生成连接计划，避免创建无效连接占位。
         enabled_source_ids = runtime_query.get_enabled_source_ids()
@@ -144,6 +160,20 @@ class ConnectionPlanBuilder:
                 # 记录原始 URL（供切换时恢复）
                 plan["original_url"] = original_url
                 plan["original_backup"] = original_backup
+
+            # Jian Project 连接必须携带凭证或本地有持久化凭证，否则跳过建连计划。
+            if group_key == "jian_project_all" or group_key.startswith("jian_project"):
+                has_stored_token = jian_project_auth_service.has_valid_token()
+                if not jp_login_key and not has_stored_token:
+                    if not jp_auth_warned:
+                        logger.warning(
+                            "[灾害预警] Jian Project 相关数据源已启用，但未配置登录密钥 (lk_...) 或长期 Token (rt_...)，已跳过 Jian Project 连接。"
+                            "请前往 https://auth.sismotide.top/ 申请。"
+                        )
+                        jp_auth_warned = True
+                    continue
+                if jp_login_key:
+                    plan["credential"] = jp_login_key
 
             connections[group_key] = plan
 
