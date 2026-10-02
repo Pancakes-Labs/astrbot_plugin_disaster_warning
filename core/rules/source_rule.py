@@ -82,7 +82,8 @@ class SourceEnabledRule(BaseRule):
         - 组开 + 全局子源关 + 会话显式 true → 推送（会话覆写子源默认值）
         - 组开 + 全局子源关 + 会话未覆写 → 不推送（继承全局 false）
 
-        采集/轮询只看组级总闸；本规则只决定“该会话是否推送”。
+        采集/轮询依赖组级总闸，以及全局或任一会话对具体子源的需求；
+        本规则只决定“该会话是否推送”。
         """
         # 单元测试模拟发震，直接通过，绕开全局数据源开关限制
         if context.runtime_config.get("__simulation_bypass_regular_filters", False):
