@@ -91,6 +91,9 @@ class DatabaseManager:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self.connection = await aiosqlite.connect(str(self.db_path))
             self.connection.row_factory = aiosqlite.Row
+            # 连接级并发 PRAGMA：busy_timeout 让写锁竞争排队等待而非直接报
+            # "database is locked"；WAL 提升读写并发（读不阻塞写、写不阻塞读）。
+            await self._apply_connection_pragmas(self.connection)
 
             cursor = await self.connection.cursor()
             await self._ensure_schema(cursor)
@@ -107,6 +110,24 @@ class DatabaseManager:
         if self.connection is None:
             raise RuntimeError("数据库连接尚未建立")
         return self.connection
+
+    @staticmethod
+    async def _apply_connection_pragmas(connection: aiosqlite.Connection) -> None:
+        """为连接设置并发相关 PRAGMA，缓解多连接下的 "database is locked"。
+
+        - busy_timeout：写锁被占用时等待重试，而不是立即抛出 OperationalError。
+        - journal_mode=WAL：库文件级持久设置，后续所有连接自动沿用，
+          读操作不再阻塞写、写不再阻塞读，显著降低同库多连接的锁冲突。
+        """
+        busy_timeout_ms = 8000
+        try:
+            await connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+        except Exception:
+            pass
+        try:
+            await connection.execute("PRAGMA journal_mode = WAL")
+        except Exception:
+            pass
 
     async def _ensure_schema(self, cursor):
         """检测并补齐数据表字段，再创建表和索引。"""

@@ -284,6 +284,12 @@ class ConnectionHealthRepository:
         connection = await aiosqlite.connect(str(db_path))
         connection.row_factory = aiosqlite.Row
         try:
+            # 独立连接同样需要 busy_timeout：BEGIN IMMEDIATE 抢写锁时，
+            # 若共享连接正在提交，应排队等待而不是抛 "database is locked"。
+            try:
+                await connection.execute("PRAGMA busy_timeout = 8000")
+            except Exception:
+                pass
             # BEGIN IMMEDIATE 立即获取写锁：并发写入方只能排队等待，
             # 迁移期间不会被外部 commit/rollback 干扰，也不会出现
             # 「已累加未删除」被中断后重试导致重复计数的窗口。
