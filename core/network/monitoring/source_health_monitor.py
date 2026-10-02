@@ -21,7 +21,6 @@ class SourceHealthMonitor:
         "p2p_main": "api.p2pquake.net",
         "wolfx_all": "ws-api.wolfx.jp",
         "pancakes_api": "api.aloys23.link",
-        "openquake_api": "api.aloys23.link",
         "jian_project_all": "api.sismotide.top",
         # EQSC 为 HTTP 辅助通道，默认探测官方主机；可被 host_overrides 覆盖
         "eqsc": "equake.top",
@@ -36,7 +35,6 @@ class SourceHealthMonitor:
         "p2p_main": "P2P地震情報",
         "wolfx_all": "Wolfx",
         "pancakes_api": "PancakesAPI",
-        "openquake_api": "PancakesAPI",
         "jian_project_all": "Jian Project",
         "eqsc": "EQSC API",
         "snet_msil": "NIED S-Net",
