@@ -66,16 +66,23 @@ class SourceEnabledRule(BaseRule):
     def evaluate(self, context: RuleContext) -> RuleDecision:
         """检查当前事件对应的数据源是否允许推送到该会话。
 
-        推送判定 = 全局总闸 AND 会话生效配置：
-        1. 全局 data_sources 必须开启（采集/轮询总闸；全局关则任何会话都不推）
-        2. 会话生效配置（全局默认 + 会话 override）也必须开启
+        推送判定 = 全局「组级闸刀」AND 会话生效配置：
+        1. 全局仅校验分组开关（批量闸刀；关组则任何会话都不推）
+        2. 会话生效配置（全局默认 + 会话 override）校验具体子源开关
+
+        设计取舍（组级 = 批量闸刀，子源级 = 会话默认值）：
+        - 组级开关是「一次性停用整组」的粗粒度开关，用于批量关停。
+        - 子源级开关是「会话默认值」：全局值决定未覆写会话的默认行为，
+          会话可覆写，因此「全局关 + 会话显式 true」应放行该会话。
 
         因此：
-        - 全局开 + 会话未覆写 → 继承全局，可推送
-        - 全局开 + 会话显式 false → 不推送
-        - 全局关 + 会话显式 true → 仍不推送（会话不能突破全局总闸）
+        - 组关 → 不推送
+        - 组开 + 全局子源开 + 会话未覆写 → 继承全局，可推送
+        - 组开 + 全局子源开 + 会话显式 false → 不推送
+        - 组开 + 全局子源关 + 会话显式 true → 推送（会话覆写子源默认值）
+        - 组开 + 全局子源关 + 会话未覆写 → 不推送（继承全局 false）
 
-        采集/轮询只看全局；本规则只决定“该会话是否推送”。
+        采集/轮询只看组级总闸；本规则只决定“该会话是否推送”。
         """
         # 单元测试模拟发震，直接通过，绕开全局数据源开关限制
         if context.runtime_config.get("__simulation_bypass_regular_filters", False):
@@ -94,21 +101,19 @@ class SourceEnabledRule(BaseRule):
 
         session_label = context.session_id or "global"
 
-        # 1) 全局总闸：policy_state.global_data_sources 由推送侧注入
+        # 1) 全局总闸：仅校验组级开关，不校验子源级开关。
         policy_state = (
             context.policy_state if isinstance(context.policy_state, dict) else {}
         )
         global_data_sources = policy_state.get("global_data_sources")
-        if global_data_sources is not None:
-            global_enabled, global_detail = self._is_enabled_in_data_sources(
-                source_id,
-                global_data_sources,
-                source_entry=source_entry,
+        if isinstance(global_data_sources, dict):
+            global_group_cfg = self._resolve_group_config(
+                global_data_sources, source_entry.config_group
             )
-            if not global_enabled:
+            if not bool(global_group_cfg.get("enabled", False)):
                 return RuleDecision.reject(
                     reason="会话数据源开关关闭",
-                    detail=f"全局配置{global_detail}",
+                    detail=f"全局配置已禁用数据源分组 {source_entry.config_group}",
                     context={"source_id": source_id},
                 )
 
