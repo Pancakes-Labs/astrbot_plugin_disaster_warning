@@ -38,6 +38,14 @@ class DisasterServiceRuntimeService:
 
     async def establish_websocket_connections(self) -> None:
         """建立 WebSocket 连接。"""
+        await self.connect_connections(list(self.service.connections.keys()))
+
+    async def connect_connections(self, names: list[str]) -> None:
+        """为指定连接名建立 WebSocket 连接。
+
+        启动时传入全部连接名；会话覆写等运行期变更后仅传入新增连接名，
+        避免对已建连的通道重复创建任务。
+        """
         logger.debug(
             f"[灾害预警] 开始建立WebSocket连接，当前任务数: {len(self.service.connection_tasks)}"
         )
@@ -56,7 +64,11 @@ class DisasterServiceRuntimeService:
                 logger.error(f"[灾害预警] WebSocket 连接任务 {name} 异常终止: {e}")
 
         # FAN Studio 先主后次：优先启动 /all，再启动独立次要通道。
-        ordered_items = list(self.service.connections.items())
+        ordered_items = [
+            (conn_name, self.service.connections[conn_name])
+            for conn_name in names
+            if conn_name in self.service.connections
+        ]
         ordered_items.sort(
             key=lambda item: (
                 0
