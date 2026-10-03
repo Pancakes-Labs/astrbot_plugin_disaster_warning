@@ -124,9 +124,17 @@ class DatabaseManager:
         except Exception:
             pass
         try:
-            await connection.execute("PRAGMA journal_mode = WAL")
-        except Exception:
-            pass
+            cursor = await connection.execute("PRAGMA journal_mode = WAL")
+            row = await cursor.fetchone()
+            actual_mode = str(row[0]).strip().lower() if row else ""
+            if actual_mode != "wal":
+                # 显式告警便于排障
+                logger.warning(
+                    f"[灾害预警] 数据库未能切换到 WAL 模式（当前: {actual_mode or '未知'}），"
+                    "并发读写与在线备份一致性可能受影响。"
+                )
+        except Exception as e:
+            logger.debug(f"[灾害预警] 设置 WAL 日志模式失败: {e}")
 
     async def _ensure_schema(self, cursor):
         """检测并补齐数据表字段，再创建表和索引。"""
