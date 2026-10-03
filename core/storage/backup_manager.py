@@ -2,6 +2,7 @@
 备份与还原服务层
 """
 
+import asyncio
 import io
 import json
 import os
@@ -72,9 +73,22 @@ class BackupService:
     # ------------------------------------------------------------------
     # 导出
     # ------------------------------------------------------------------
-    def export_full_backup(self, targets: list[str] = None) -> io.BytesIO:
+    async def export_full_backup(self, targets: list[str] = None) -> io.BytesIO:
+        """导出备份与数据库维护操作服务级串行化。"""
+        db_lock = (
+            getattr(self.disaster_service, "db_maintenance_lock", None)
+            if self.disaster_service
+            else None
+        )
+        if db_lock is None:
+            return await asyncio.to_thread(self._export_full_backup_locked, targets)
+        async with db_lock:
+            # 打包为阻塞同步 IO，放入线程池避免阻塞事件循环。
+            return await asyncio.to_thread(self._export_full_backup_locked, targets)
+
+    def _export_full_backup_locked(self, targets: list[str] = None) -> io.BytesIO:
         """
-        打包指定数据为 ZIP 字节流。支持选择部分备份。
+        打包指定数据为 ZIP 字节流，支持选择部分备份。
         :param targets: 允许传入 _SUPPORTED_TARGETS 的子集。如果为 None 则默认打包全部。
                         传入未知目标会记录警告，且在全部目标无效时抛出异常。
         """
