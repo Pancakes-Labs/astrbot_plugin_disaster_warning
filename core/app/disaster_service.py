@@ -135,6 +135,8 @@ class DisasterWarningService:
         # 会话运行期联动：覆写保存后重建连接计划并启停轮询，避免变更只在下次启动生效。
         self._source_reconcile_task: asyncio.Task[None] | None = None
         self.session_config_manager.add_change_listener(self._on_session_config_changed)
+        # 数据库维护互斥锁
+        self.db_maintenance_lock = asyncio.Lock()
         # 注入会话差异配置管理器
         # 使「全局关、会话开」的子源也能被判定为需接入，同时保持组级开关语义。
         self.source_runtime_query = SourceRuntimeQueryService(

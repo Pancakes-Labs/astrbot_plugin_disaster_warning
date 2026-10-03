@@ -279,8 +279,20 @@ class BackupService:
             logger.warning(f"[灾害预警] 重新加载日志统计失败: {e}")
 
     async def import_full_backup(self, zip_bytes: bytes) -> tuple[bool, str]:
+        """从 ZIP 字节包还原备份（与启动期健康迁移服务级串行化）。"""
+        db_lock = (
+            getattr(self.disaster_service, "db_maintenance_lock", None)
+            if self.disaster_service
+            else None
+        )
+        if db_lock is None:
+            return await self._import_full_backup_locked(zip_bytes)
+        async with db_lock:
+            return await self._import_full_backup_locked(zip_bytes)
+
+    async def _import_full_backup_locked(self, zip_bytes: bytes) -> tuple[bool, str]:
         """
-        从 ZIP 字节包还原备份。
+        从 ZIP 字节包还原备份（调用方须已持有 db_maintenance_lock）。
         包含完整的数据库和配置文件替换，为了安全性，在替换前进行当前数据的备份。
         只覆盖 ZIP 包中包含的文件，未包含的文件不会被清除或覆盖。
         """
