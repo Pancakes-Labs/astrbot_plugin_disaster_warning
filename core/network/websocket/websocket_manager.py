@@ -5,6 +5,7 @@ WebSocket 连接管理器。
 """
 
 import asyncio
+import re
 import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -31,6 +32,16 @@ from .jian_project_connection_policy import (
 from .websocket_dispatch_service import WebSocketDispatchService
 from .websocket_reconnect_service import WebSocketReconnectService
 from .websocket_runtime_service import WebSocketRuntimeService
+
+# 记录与上报前统一剥离令牌值，避免写入运行日志、管理端响应或事件元数据（CWE-532）。
+_ACCESS_TOKEN_QUERY_RE = re.compile(r"(?i)([?&]key=)[^&\s\"']+")
+
+
+def _redact_access_token(text: str) -> str:
+    """把文本中的 Jian Project 访问令牌查询参数值替换为 ***。"""
+    if not text:
+        return text
+    return _ACCESS_TOKEN_QUERY_RE.sub(r"\1***", text)
 
 
 class WebSocketManager:
@@ -393,9 +404,12 @@ class WebSocketManager:
             # 常见网络错误或握手超时，走重试容灾逻辑
             if is_jian_project_connection(name):
                 jian_project_auth_service.invalidate_token()
-            logger.warning(f"[灾害预警] 连接中断或失败 {name}: {e}")
+            # 握手异常文本可能内嵌含令牌的 connect_uri，先脱敏再记录/上抛，
+            # 避免短期访问令牌经日志、管理端通知或遥测外泄（CWE-532）。
+            safe_error = _redact_access_token(str(e))
+            logger.warning(f"[灾害预警] 连接中断或失败 {name}: {safe_error}")
             await self._apply_fan_quota_policy_on_error(name, e)
-            self._handle_connection_error(name, uri, headers, e)
+            self._handle_connection_error(name, uri, headers, safe_error)
 
         except asyncio.CancelledError:
             # 主动关闭或插件卸载引发的任务取消，清理局部资源后正常退出。
@@ -426,9 +440,13 @@ class WebSocketManager:
             )
             raise
         except Exception as e:
-            # 非预期类型错误，上报异常遥测
-            logger.error(f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {e}")
-            logger.debug(f"[灾害预警] 异常堆栈: {traceback.format_exc()}")
+            # 非预期类型错误，脱敏并上报异常遥测。
+            safe_error = _redact_access_token(str(e))
+            safe_traceback = _redact_access_token(traceback.format_exc())
+            logger.error(
+                f"[灾害预警] 未知连接错误 {name}: {type(e).__name__} - {safe_error}"
+            )
+            logger.debug(f"[灾害预警] 异常堆栈: {safe_traceback}")
             # 统一 best-effort 封装上报连接错误（内部自带启用检查与异常吞噬，
             # 不会中断后续配额策略与重连调度）。
             await track_error_safely(
@@ -438,7 +456,7 @@ class WebSocketManager:
                 log_context="连接错误遥测",
             )
             await self._apply_fan_quota_policy_on_error(name, e)
-            self._handle_connection_error(name, uri, headers, e)
+            self._handle_connection_error(name, uri, headers, safe_error)
         finally:
             # 会话退出后做一次幂等清理，防止已关闭 socket / 心跳任务残留占位
             await self._cleanup_closed_connection(name, websocket)
@@ -689,7 +707,7 @@ class WebSocketManager:
             )
 
     def _handle_connection_error(
-        self, name: str, uri: str, headers: dict | None, error: Exception
+        self, name: str, uri: str, headers: dict | None, error: Exception | str
     ):
         """统一分发连接错误处理。"""
         # 若该连接正处于"手动重连待确认"状态，说明管理员主动触发的重连已失败：
@@ -707,7 +725,7 @@ class WebSocketManager:
                 self.emit_reconnect_result(
                     connection_name=name,
                     success=False,
-                    message=f"重连失败: {error}",
+                    message=f"重连失败: {_redact_access_token(str(error))}",
                     stage="failed",
                     request_id=attempt_id.rsplit(":", 1)[0],
                     attempt_id=attempt_id,

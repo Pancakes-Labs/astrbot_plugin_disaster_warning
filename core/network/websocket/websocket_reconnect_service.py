@@ -43,7 +43,7 @@ class WebSocketReconnectService:
         self.manager = manager
 
     def handle_connection_error(
-        self, name: str, uri: str, headers: dict | None, error: Exception
+        self, name: str, uri: str, headers: dict | None, error: Exception | str
     ) -> None:
         """统一处理连接错误。"""
         # 先摘掉活跃连接映射，并异步关闭底层句柄，避免旧连接继续占用上游配额
@@ -142,7 +142,7 @@ class WebSocketReconnectService:
         )
         self.manager.reconnect_tasks[name] = reconnect_task
 
-    def is_critical_error(self, error: Exception) -> bool:
+    def is_critical_error(self, error: Exception | str) -> bool:
         """判断是否为需要直接进入兜底重连的关键错误。"""
         error_msg = str(error).lower()
         # 授权拒绝错误，或由业务层主动认定的不可瞬时重试的关闭帧

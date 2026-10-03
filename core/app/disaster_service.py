@@ -132,8 +132,15 @@ class DisasterWarningService:
         self.statistics_manager = StatisticsManager(config)  # 灾害事件统计管理器
         self._telemetry: TelemetryManager | None = None  # 遥测服务管理器
         self.session_config_manager = SessionConfigManager(config)  # 临时会话配置管理器
+        # 会话运行期联动：覆写保存后重建连接计划并启停轮询，避免变更只在下次启动生效。
+        self._source_reconcile_task: asyncio.Task[None] | None = None
+        self.session_config_manager.add_change_listener(self._on_session_config_changed)
+        # 数据库维护互斥锁
+        self.db_maintenance_lock = asyncio.Lock()
+        # 注入会话差异配置管理器
+        # 使「全局关、会话开」的子源也能被判定为需接入，同时保持组级开关语义。
         self.source_runtime_query = SourceRuntimeQueryService(
-            config
+            config, session_config_manager=self.session_config_manager
         )  # 数据源运行时查询辅助服务
 
         # WebSocket 管理器与消息推送管理器属于核心基础设施，需在初始化阶段提前装配。
@@ -507,7 +514,84 @@ class DisasterWarningService:
 
     def _configure_connections(self):
         """根据数据源配置生成连接计划。"""
-        self.connections = ConnectionPlanBuilder.build(self.config)
+        self.connections = ConnectionPlanBuilder.build(
+            self.config,
+            session_config_manager=self.session_config_manager,
+        )
+
+    def _on_session_config_changed(self) -> None:
+        """会话覆写写入后的运行期联动入口（同步，调度防抖后台任务）。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 无运行中事件循环（如纯同步调用场景）：跳过联动，变更于下次启动生效。
+            return
+        task = self._source_reconcile_task
+        if task is not None and not task.done():
+            # 防抖：连续多次保存只执行最后一次重算。
+            task.cancel()
+        self._source_reconcile_task = loop.create_task(
+            self._reconcile_runtime_sources(), name="dw_source_reconcile"
+        )
+
+    async def _reconcile_runtime_sources(self) -> None:
+        """按当前配置重建连接计划，并启停各轮询服务。"""
+        try:
+            await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
+        if not getattr(self, "running", False):
+            return
+
+        try:
+            new_connections = ConnectionPlanBuilder.build(
+                self.config,
+                session_config_manager=self.session_config_manager,
+            )
+        except Exception as e:
+            logger.debug(f"[灾害预警] 会话变更后重建连接计划失败: {e}")
+            return
+
+        # 1) 断开已不再需要的连接（例如某会话关闭了其唯一需求方）。
+        for conn_name in list(self.connections.keys()):
+            if conn_name in new_connections:
+                continue
+            try:
+                await self.ws_manager.disconnect(conn_name)
+            except Exception as e:
+                logger.debug(
+                    f"[灾害预警] 会话变更后断开 {conn_name} 失败（已忽略）: {e}"
+                )
+            self.connections.pop(conn_name, None)
+
+        # 2) 为新增连接建连（仅增量，避免重复建连）。
+        added: list[str] = []
+        for conn_name, conn_config in new_connections.items():
+            if conn_name not in self.connections:
+                self.connections[conn_name] = conn_config
+                added.append(conn_name)
+        if added:
+            try:
+                await self.runtime_service.connect_connections(added)
+            except Exception as e:
+                logger.debug(f"[灾害预警] 会话变更后新增建连失败（已忽略）: {e}")
+
+        # 3) 轮询服务按需启停：覆盖「启动时未启用、之后被会话开启」的场景。
+        for poll in (
+            getattr(self, "snet_poll_service", None),
+            getattr(self, "eqsc_tsunami_poll_service", None),
+            getattr(self, "eqsc_typhoon_poll_service", None),
+            getattr(self, "eqsc_cenc_intensity_poll_service", None),
+        ):
+            if poll is None:
+                continue
+            try:
+                if poll.is_enabled() and not poll.running:
+                    await poll.start()
+                elif not poll.is_enabled() and poll.running:
+                    await poll.stop()
+            except Exception as e:
+                logger.debug(f"[灾害预警] 会话变更后轮询启停联动失败（已忽略）: {e}")
 
     async def start(self, *, defer_silence_arm: bool = False) -> None:
         """启动服务。

@@ -197,14 +197,22 @@ class ConnectionHealthService:
             # DB 尚未就绪，保留标记为未迁移，下次启动再试。
             return
 
-        # 迁移期间持有写锁：与采样/事故推进互斥，保证其多语句事务不会被
-        # 外部 commit() 提前提交、也不会被外部 rollback() 撤销。
-        async with self._get_write_lock():
-            # 双重检查：等待锁期间首个调用者可能已完成迁移。
-            if self._legacy_migrated:
-                return
-            migrated = await repo.migrate_legacy_group_keys(aliases)
-            self._legacy_migrated = True
+        # 与全量还原互斥
+        db_lock = getattr(self.service, "db_maintenance_lock", None)
+        if db_lock is not None:
+            await db_lock.acquire()
+        try:
+            # 迁移期间持有写锁：与采样/事故推进互斥，保证其多语句事务不会被
+            # 外部 commit() 提前提交、也不会被外部 rollback() 撤销。
+            async with self._get_write_lock():
+                # 双重检查：等待锁期间首个调用者可能已完成迁移。
+                if self._legacy_migrated:
+                    return
+                migrated = await repo.migrate_legacy_group_keys(aliases)
+                self._legacy_migrated = True
+        finally:
+            if db_lock is not None:
+                db_lock.release()
 
         if any(int(v or 0) > 0 for v in migrated.values()):
             # 归并后历史缓存失效，避免仍返回旧 key 聚合。

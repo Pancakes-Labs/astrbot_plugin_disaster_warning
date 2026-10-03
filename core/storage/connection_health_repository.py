@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import aiosqlite
+
 from astrbot.api import logger
 
 
@@ -119,7 +121,11 @@ class ConnectionHealthRepository:
         return max(0.0, min(1.0, ratio))
 
     async def upsert_day_aggregate(
-        self, day_row: dict[str, Any], *, commit: bool = True
+        self,
+        day_row: dict[str, Any],
+        *,
+        commit: bool = True,
+        connection: aiosqlite.Connection | None = None,
     ) -> None:
         """按 (group_key, day) 原子累加日聚合分钟数。
 
@@ -131,8 +137,11 @@ class ConnectionHealthRepository:
             commit: 是否在本条写入后立即提交。默认 True 保持采样主流程语义；
                 迁移等需要跨多条语句保证一致性的场景应传 False，
                 由调用方在所有写入完成后统一提交或回滚。
+            connection: 可选的显式连接；迁移等需要在独立连接上串联事务的
+                场景传入，避免与共享连接上的其他写入方互相干扰。缺省复用
+                DatabaseManager 的共享连接。
         """
-        connection = await self._connection()
+        connection = connection if connection is not None else await self._connection()
         group_key = str(day_row.get("group_key") or "").strip()
         day = str(day_row.get("day") or "").strip()
         if not group_key or not day:
@@ -249,6 +258,8 @@ class ConnectionHealthRepository:
     ) -> dict[str, int]:
         """把历史连接组 key 的健康数据归并到规范 key。
 
+        迁移在独立连接上以 BEGIN IMMEDIATE 显式开启写事务执行。
+
         Args:
             aliases: 历史 key -> 规范 key 映射；空值或自映射项自动忽略。
 
@@ -266,9 +277,24 @@ class ConnectionHealthRepository:
         if not alias_map:
             return result
 
-        connection = await self._connection()
-        cursor = await connection.cursor()
+        db_path = getattr(self.db, "db_path", None)
+        if db_path is None:
+            raise RuntimeError("数据库路径不可用，无法执行独立连接的迁移")
+
+        connection = await aiosqlite.connect(str(db_path))
+        connection.row_factory = aiosqlite.Row
         try:
+            # 独立连接同样需要 busy_timeout：BEGIN IMMEDIATE 抢写锁时，
+            # 若共享连接正在提交，应排队等待而不是抛 "database is locked"。
+            try:
+                await connection.execute("PRAGMA busy_timeout = 8000")
+            except Exception:
+                pass
+            # BEGIN IMMEDIATE 立即获取写锁：并发写入方只能排队等待，
+            # 迁移期间不会被外部 commit/rollback 干扰，也不会出现
+            # 「已累加未删除」被中断后重试导致重复计数的窗口。
+            await connection.execute("BEGIN IMMEDIATE")
+            cursor = await connection.cursor()
             for legacy_key, canonical_key in alias_map.items():
                 # 0) 先收口可能并存的两条未关闭事故，避免归并后较早那条永久悬空。
                 await self._merge_conflicting_open_incidents(
@@ -307,8 +333,7 @@ class ConnectionHealthRepository:
                     day = str(row.get("day") or "").strip()
                     if not day:
                         continue
-                    # commit=False：日聚合累加与随后的旧行清理必须同事务，
-                    # 否则「已累加未删除」被中断后重试会重复计数。
+                    # 日聚合累加与随后的旧行清理必须同处本迁移的独立事务
                     await self.upsert_day_aggregate(
                         {
                             "group_key": canonical_key,
@@ -325,6 +350,7 @@ class ConnectionHealthRepository:
                             "updated_at": None,
                         },
                         commit=False,
+                        connection=connection,
                     )
                     result["days"] += 1
 
@@ -344,6 +370,11 @@ class ConnectionHealthRepository:
             except Exception:
                 pass
             raise
+        finally:
+            try:
+                await connection.close()
+            except Exception:
+                pass
 
         return result
 

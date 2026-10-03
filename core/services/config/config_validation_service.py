@@ -1417,10 +1417,11 @@ class ConfigValidator:
             # CMA 气象预警已从 PancakesAPI 移除，清理遗留键
             pc_cfg.pop("china_weather_alarm", None)
 
+            # JMA EEW / JMA 地震情报 / USGS 为新增子源，schema 默认均为关闭。
             for sub_key in ("japan_jma_eew", "japan_jma_earthquake", "usgs_earthquake"):
                 if sub_key not in pc_cfg:
-                    pc_cfg[sub_key] = bool(pc_cfg.get("enabled", True))
-                ConfigValidator._ensure_bool(pc_cfg, sub_key, True)
+                    pc_cfg[sub_key] = False
+                ConfigValidator._ensure_bool(pc_cfg, sub_key, False)
 
         # S-Net 轮询间隔校验
         snet_cfg = cfg.get("snet")

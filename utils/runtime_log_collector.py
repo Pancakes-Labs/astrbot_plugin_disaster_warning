@@ -222,7 +222,8 @@ class RuntimeLogCollector:
 
     def install(self, *, level: int = DEFAULT_CAPTURE_LEVEL) -> None:
         """挂载收集器（优先挂载到 Loguru，若不可用则回退到标准 logging，幂等）。"""
-        self.uninstall()
+        if self.installed:
+            return
 
         # 1. 尝试向 Loguru 注册 Sink（AstrBot 所有控制台日志的实际终点）
         try:
