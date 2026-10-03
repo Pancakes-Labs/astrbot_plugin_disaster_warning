@@ -119,9 +119,8 @@ class DatabaseManager:
         - journal_mode=WAL：库文件级持久设置，后续所有连接自动沿用，
           读操作不再阻塞写、写不再阻塞读，显著降低同库多连接的锁冲突。
         """
-        busy_timeout_ms = 8000
         try:
-            await connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+            await connection.execute("PRAGMA busy_timeout = 8000")
         except Exception:
             pass
         try:
