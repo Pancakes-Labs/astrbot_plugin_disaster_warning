@@ -1126,6 +1126,9 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
         """展示日本地震情报，可根据配置展开显示每个具体观测点的详细震度。"""
         merged_options = _resolve_options(display_context, options)
         rendered = cls.format_message(display_context, merged_options)
+        # 取消报的渲染结果已是完整终态，不再追加观测点或备注
+        if display_context.is_cancel:
+            return rendered
         if not _is_earthquake_view(display_context):
             return rendered
 
