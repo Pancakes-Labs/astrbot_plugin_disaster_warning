@@ -9,8 +9,6 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from astrbot.api import logger
-
 from ...sources.display_registry import (
     CONNECTION_DISPLAY_NAMES,
     CONNECTION_GROUP_ALIAS,
@@ -46,25 +44,6 @@ class SourceRuntimeQueryService:
         # 使会话覆写保存后立即生效，无需等待 TTL 过期。
         self._session_active_cache: dict[tuple[str, int, int], bool] = {}
         self._session_active_ttl = 5.0
-        # 是否已向会话配置管理器注册变更监听器（避免重复注册）。
-        self._change_listener_attached = False
-
-    def _invalidate_session_active_cache(self) -> None:
-        """清空会话启用态缓存（会话覆写写入后调用，保证立即生效）。"""
-        self._session_active_cache.clear()
-
-    def _attach_change_listener(self, manager) -> None:
-        """向会话配置管理器注册变更监听器（幂等）。"""
-        if self._change_listener_attached:
-            return
-        add_listener = getattr(manager, "add_change_listener", None)
-        if not callable(add_listener):
-            return
-        try:
-            add_listener(self._invalidate_session_active_cache)
-            self._change_listener_attached = True
-        except Exception as e:
-            logger.debug(f"[灾害预警] 注册会话配置变更监听器失败: {e}")
 
     def _data_sources_config(self) -> dict[str, Any]:
         """获取数据源配置总表。"""
@@ -74,8 +53,6 @@ class SourceRuntimeQueryService:
         """惰性获取会话差异配置管理器。"""
         manager = self._session_config_manager
         if manager is not None:
-            if manager:
-                self._attach_change_listener(manager)
             return manager or None
         try:
             # 延迟导入：避免查询层与存储层在模块加载期形成循环依赖。
@@ -86,8 +63,6 @@ class SourceRuntimeQueryService:
             # 不可用时标记为 False，避免每条消息反复重试创建。
             manager = False
         self._session_config_manager = manager
-        if manager:
-            self._attach_change_listener(manager)
         return manager or None
 
     @staticmethod
