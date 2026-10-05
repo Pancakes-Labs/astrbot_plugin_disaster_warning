@@ -61,7 +61,20 @@ jobs:
           mkdir -p "${BABEL_TOOLS_DIR}"
           pushd "${BABEL_TOOLS_DIR}"
           npm init -y >/dev/null 2>&1
-          npm install --no-save @babel/core @babel/cli @babel/preset-react @babel/plugin-transform-block-scoping
+
+          # 关键修复：固定 Babel 7 主版本，并显式声明 preset-react 使用 classic runtime。
+          npm install --no-save \
+            @babel/core@^7 \
+            @babel/cli@^7 \
+            @babel/preset-react@^7 \
+            @babel/plugin-transform-block-scoping@^7
+
+          cat > babel.config.json <<'BABEL_CONFIG'
+          {
+            "presets": [["@babel/preset-react", { "runtime": "classic" }]],
+            "plugins": ["@babel/plugin-transform-block-scoping"]
+          }
+          BABEL_CONFIG
           popd
 
           # 说明：
@@ -74,8 +87,7 @@ jobs:
           "${BABEL_TOOLS_DIR}/node_modules/.bin/babel" admin/js \
             --extensions ".js,.jsx" \
             --out-dir "${BUILD_JS_DIR}" \
-            --presets @babel/preset-react \
-            --plugins @babel/plugin-transform-block-scoping \
+            --config-file "${BABEL_TOOLS_DIR}/babel.config.json" \
             --no-babelrc
 
           rm -rf admin/js
