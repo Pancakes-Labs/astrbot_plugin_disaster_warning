@@ -311,6 +311,15 @@ class CeaEewJianProjectParser(BaseParser):
                 "is_final": False,
             }
 
+            # Jian Project CEA 载荷以 epiIntensity 承载预估烈度，
+            # 写入 intensity 供强度过滤规则（combine_mode=all/any）判定。
+            # 先转换再回退：首选字段为空字符串时转换结果为 None，此时才使用备用字段，
+            intensity = safe_float_convert(msg_data.get("epiIntensity"))
+            if intensity is None:
+                intensity = safe_float_convert(msg_data.get("intensity"))
+            if intensity is not None:
+                intensity = round(intensity, 1)
+
             domain_event = EarthquakeEvent(
                 occurred_at=occurred_at,
                 latitude=latitude,
@@ -318,6 +327,7 @@ class CeaEewJianProjectParser(BaseParser):
                 place_name=place_name,
                 magnitude=magnitude,
                 depth=depth,
+                intensity=intensity,
                 province=province,
                 metadata=dict(metadata),
             )

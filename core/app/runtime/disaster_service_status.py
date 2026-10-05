@@ -29,7 +29,10 @@ class DisasterServiceStatusService:
         # 仅在主服务尚未注入时再本地兜底构造。
         self._source_runtime_query = getattr(
             service, "source_runtime_query", None
-        ) or SourceRuntimeQueryService(service.config)
+        ) or SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
 
     def get_service_status(self) -> dict[str, Any]:
         """获取服务状态。"""

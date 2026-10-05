@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from typing import Any
+
+from astrbot.api import logger
 
 from ...sources.display_registry import (
     CONNECTION_DISPLAY_NAMES,
@@ -27,17 +30,71 @@ from ..config.config_service import ConfigAccessor
 class SourceRuntimeQueryService:
     """基于统一数据源目录的运行态查询服务。"""
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        session_config_manager: Any | None = None,
+    ):
         # 封装底层配置访问器
         self.config_accessor = ConfigAccessor(config or {})
+        # 会话差异配置管理器：用于解析「全局关、会话开」这类子源启用态。
+        # 缺省时不立即构造，真正需要会话级判定时再惰性创建，避免高频路径做多余文件 IO。
+        self._session_config_manager = session_config_manager
+        # 会话感知启用态缓存：{(source_id, 配置版本, 时间桶): bool}。
+        # 接入/解析路径调用频繁，而「某会话是否覆写某子源」仅在配置保存时变化；
+        # 键同时纳入配置版本号（写入即失效）与时间桶（TTL 兜底），
+        # 使会话覆写保存后立即生效，无需等待 TTL 过期。
+        self._session_active_cache: dict[tuple[str, int, int], bool] = {}
+        self._session_active_ttl = 5.0
+        # 是否已向会话配置管理器注册变更监听器（避免重复注册）。
+        self._change_listener_attached = False
+
+    def _invalidate_session_active_cache(self) -> None:
+        """清空会话启用态缓存（会话覆写写入后调用，保证立即生效）。"""
+        self._session_active_cache.clear()
+
+    def _attach_change_listener(self, manager) -> None:
+        """向会话配置管理器注册变更监听器（幂等）。"""
+        if self._change_listener_attached:
+            return
+        add_listener = getattr(manager, "add_change_listener", None)
+        if not callable(add_listener):
+            return
+        try:
+            add_listener(self._invalidate_session_active_cache)
+            self._change_listener_attached = True
+        except Exception as e:
+            logger.debug(f"[灾害预警] 注册会话配置变更监听器失败: {e}")
 
     def _data_sources_config(self) -> dict[str, Any]:
         """获取数据源配置总表。"""
         return self.config_accessor.data_sources_config()
 
-    def _group_config(self, config_group: str) -> dict[str, Any]:
-        """获取指定数据源分组的配置，兼容历史组名。"""
-        data_sources = self._data_sources_config()
+    def _get_session_config_manager(self):
+        """惰性获取会话差异配置管理器。"""
+        manager = self._session_config_manager
+        if manager is not None:
+            if manager:
+                self._attach_change_listener(manager)
+            return manager or None
+        try:
+            # 延迟导入：避免查询层与存储层在模块加载期形成循环依赖。
+            from ...storage.session_config_manager import SessionConfigManager
+
+            manager = SessionConfigManager(self.config_accessor.config)
+        except Exception:
+            # 不可用时标记为 False，避免每条消息反复重试创建。
+            manager = False
+        self._session_config_manager = manager
+        if manager:
+            self._attach_change_listener(manager)
+        return manager or None
+
+    @staticmethod
+    def _resolve_group_config_from(
+        data_sources: dict[str, Any], config_group: str
+    ) -> dict[str, Any]:
+        """从给定数据源配置中合并规范组名与历史别名组名。"""
         merged: dict[str, Any] = {}
         for legacy in get_legacy_group_names(config_group):
             legacy_cfg = data_sources.get(legacy)
@@ -47,6 +104,103 @@ class SourceRuntimeQueryService:
         if isinstance(canonical_cfg, dict):
             merged.update(canonical_cfg)
         return merged
+
+    def _group_config(self, config_group: str) -> dict[str, Any]:
+        """获取指定数据源分组的配置，兼容历史组名。"""
+        return self._resolve_group_config_from(
+            self._data_sources_config(), config_group
+        )
+
+    def is_group_enabled(self, source_id: str) -> bool:
+        """判断数据源所属分组总闸是否开启（忽略子源级开关）。
+
+        组级开关是「批量闸刀」：关闭后整组的采集与推送一并停止，
+        用于一次性停用组内全部子源，而不必逐个关闭子源开关。
+
+        接入层只应依赖本方法做「整组是否放行」判定，
+        子源级开关交由推送阶段按会话判定。
+        """
+        entry = SOURCE_CATALOG.get((source_id or "").strip())
+        if entry is None:
+            return False
+        return bool(self._group_config(entry.config_group).get("enabled", False))
+
+    def is_source_enabled_any_session(self, source_id: str) -> bool:
+        """判断子源是否在全局或任一会话生效配置中被启用。
+
+        子源级开关语义为「会话默认值」：全局值决定未覆写会话的默认行为，
+        会话可覆写。因此「全局关 + 会话开」应视为有效启用（该会话需要它），
+        与 is_source_enabled（只读全局）区分开。
+        """
+        entry = SOURCE_CATALOG.get((source_id or "").strip())
+        if entry is None:
+            return False
+        # 全局已启用属最常见路径，无需求解会话覆写。
+        if self.is_source_enabled(source_id):
+            return True
+
+        manager = self._get_session_config_manager()
+        change_version = int(getattr(manager, "change_version", 0) or 0)
+        bucket = int(time.monotonic() / self._session_active_ttl)
+        cache_key = (entry.source_id, change_version, bucket)
+        cached = self._session_active_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        result = False
+        if manager is not None:
+            try:
+                known_sessions = manager.list_all_known_sessions()
+            except Exception:
+                # 会话管理器不可用时按「无会话需求」保守降级，避免接入判定抛异常。
+                known_sessions = []
+            for umo in known_sessions:
+                try:
+                    effective = manager.get_effective_config(umo)
+                except Exception:
+                    continue
+                if not isinstance(effective, dict):
+                    continue
+                # 会话级推送总开关关闭时，该会话不会接收任何推送，
+                # 不应仅因其残留的子源覆写而让数据源持续接入。
+                if effective.get("push_enabled", True) is False:
+                    continue
+                data_sources = effective.get("data_sources")
+                if not isinstance(data_sources, dict):
+                    continue
+                group_cfg = self._resolve_group_config_from(
+                    data_sources, entry.config_group
+                )
+                # 会话需同时开启组开关与子源开关，才算「该会话需要此子源」。
+                if bool(group_cfg.get("enabled", False)) and bool(
+                    group_cfg.get(entry.config_key, False)
+                ):
+                    result = True
+                    break
+
+        # 仅保留近期时间桶，避免缓存随运行时长无界增长。
+        if len(self._session_active_cache) > 256:
+            self._session_active_cache.clear()
+        self._session_active_cache[cache_key] = result
+        return result
+
+    def is_source_active(self, source_id: str) -> bool:
+        """判断子源当前是否需要被接入（建立连接 / 启动轮询）。
+
+        条件 = 组级总闸开启（批量闸刀）且 全局或任一会话需要该子源。
+        这样「全局关、会话开」的子源仍会建立连接，不会因会话级意图而漏采集。
+        """
+        if not self.is_group_enabled(source_id):
+            return False
+        return self.is_source_enabled_any_session(source_id)
+
+    def get_active_source_ids(self) -> list[str]:
+        """获取当前需要接入的具体数据源 ID 列表（建连计划口径）。"""
+        return [
+            source_id
+            for source_id in SOURCE_CATALOG
+            if self.is_source_active(source_id)
+        ]
 
     def is_source_enabled(self, source_id: str) -> bool:
         """判断指定数据源是否在当前配置中启用。"""
