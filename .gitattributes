@@ -1,3 +1,0 @@
-# Protocol Buffers 生成的文件标记
-# 这样 GitHub 会知道它是自动生成的，不会在 diff 中显示过多细节
-models/*_pb2.py linguist-generated=true

@@ -36,7 +36,9 @@ class DisasterServiceNoticeService:
         # cenc_ir_fanstudio 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
         "cenc_ir_fanstudio": "fan_studio_cenc_ir",
         "wolfx_mixed": "wolfx_all",
-        "openquake_mixed": "openquake_api",
+        "pancakes_mixed": "pancakes_api",
+        "openquake_mixed": "pancakes_api",
+        "jian_project_mixed": "jian_project_all",
         "jma_p2p": "p2p_main",
         "jma_p2p_info": "p2p_main",
         "jma_tsunami_p2p": "p2p_main",

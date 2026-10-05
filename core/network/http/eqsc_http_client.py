@@ -235,16 +235,23 @@ class EqscHttpClient:
         params: dict[str, Any] | None = None,
         log_label: str,
         allow_retry_on_auth_error: bool = True,
+        info_status_codes: set[int] | None = None,
     ) -> tuple[int, Any, str]:
         """发送 EQSC GET 请求，返回 (status, json_or_none, raw_text)。
 
         遇到 401/403 时会强制刷新 AccessToken 并重试一次。
         成功响应会同步写入原始消息日志。
+
+        Args:
+            info_status_codes: 「已知未命中」状态码集合（默认空集）。命中集合内的
+                状态码降级为 INFO 日志，其余失败仍记 WARNING。
         """
         session = await self._ensure_session()
         current_token = access_token
         last_status = 0
         last_text = ""
+        # 仅显式声明的「未命中」状态码降级 INFO，其余（含非法值 / None）保持 WARNING。
+        quiet_status_codes = info_status_codes or set()
 
         for attempt in range(2):
             headers = {"Authorization": f"Bearer {current_token}"}
@@ -294,7 +301,12 @@ class EqscHttpClient:
                             continue
                     return response.status, None, last_text
 
-                logger.warning(
+                failure_log = (
+                    logger.info
+                    if response.status in quiet_status_codes
+                    else logger.warning
+                )
+                failure_log(
                     f"[灾害预警] {log_label} 失败: HTTP {response.status}"
                     + (f"；响应: {last_text[:160]}" if last_text else "")
                 )

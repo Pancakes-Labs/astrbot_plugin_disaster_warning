@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD024 -->
 <!-- markdownlint-disable MD028 -->
 <!-- markdownlint-disable MD029 -->
 <!-- markdownlint-disable MD033 -->
@@ -95,11 +96,11 @@
 > [!TIP]
 > 本项目的相关开发数据 (持续更新中)：
 >
-> 开发时长：累计 173 天（主插件部分）
+> 开发时长：累计 181 天（主插件部分）
 >
-> 累计工时：约 769 小时（主插件部分）
+> 累计工时：约 777 小时（主插件部分）
 >
-> Tokens Used：4,671,632,327
+> Tokens Used：4,753,202,402
 
 ## ✨ 功能特性
 
@@ -133,7 +134,7 @@
 2. **安装依赖**: 本插件的核心依赖大多已包含在 AstrBot 的默认依赖中，且在插件下载安装时会自动安装插件所需的依赖，通常无需额外安装。如果你的环境中确实缺少相关依赖，请安装：
 
    ```bash
-   pip install python-dateutil jinja2 playwright tzdata fastapi uvicorn protobuf
+   pip install python-dateutil jinja2 playwright tzdata fastapi uvicorn
    # Python < 3.11 额外安装
    pip install "tomli>=2.0.1; python_version < '3.11'"
    ```
@@ -167,14 +168,30 @@ EQSC API 需要鉴权，否则无法正常获取数据。
 3. 如果你发现令牌没法选中复制，可以使用文字提取工具或截图丢给 AI 让它帮你识别一下。注意令牌是**不包含换行**的。
 4. 在插件配置中的 `📡数据源配置` → `⚙️ EQSC API 数据源` 中找到 `EQSC 访问令牌 (RefreshToken)` 配置项，填入你的令牌，并确认已打开 `启用 EQSC 数据源` 的开关。
 
+### Jian Project 登录密钥获取
+
+Jian Project 聚合数据源需要鉴权，未配置有效凭证时会直接跳过建连（该通道下的 7 个子源均不可用）。
+
+**登录密钥获取流程：**
+
+1. 打开 [Jian Project 鉴权页](https://auth.sismotide.top/) 。
+2. 填写 **QQ 邮箱**（仅支持 QQ 邮箱域名），勾选个人信息处理说明后提交申请。登录密钥（以 `lk_` 开头）会通过邮件送达，**5 分钟有效且仅能使用一次**，请及时填写。
+3. 如果该邮箱已有未过期的长期 Token，需在网页上勾选「覆盖先前 Token」后再申请，否则会返回 `token_exists`。
+4. 在插件配置中的 `📡数据源配置` → `Jian Project WebSocket 数据源` 中填写 `Jian Project 登录密钥`，并确认已打开 `启用 Jian Project 数据源` 的开关。
+
+插件会自动用登录密钥向鉴权服务换取长期 Token（以 `rt_` 开头，有效期约 180 天）并持久化保存至本地，后续启动无需重复申请；也可以直接在该配置项中填写已有的 `rt_` 长期 Token。握手时使用的短期访问令牌（`at_`）由插件自动换取并在到期前刷新，无需手动维护。
+
+> [!NOTE]
+> 同一长期 Token 默认最多支持 3 条并发连接，超出会返回 `conn_limit`；长期 Token 到期或失效后，需要重新按上方流程申请登录密钥。
+
 ---
 
 > [!TIP]
-> 插件已自动处理各 WebSocket 通道的鉴权数据包发送与轮询令牌刷新，你只需在配置中填写 `FAN Studio API Key` 和 `EQSC 访问令牌 (RefreshToken)` 并重载插件即可。
+> 插件已自动处理各 WebSocket 通道的鉴权数据包发送与轮询令牌刷新，你只需在配置中填写 `FAN Studio API Key`、`EQSC 访问令牌 (RefreshToken)` 和 `Jian Project 登录密钥` 并重载插件即可。
 > EQSC 访问令牌具有有效期，到期后需要自行按上方流程重新刷新令牌并更新插件配置。
 
 > [!IMPORTANT]
-> `FAN Studio API Key` 与 `EQSC 访问令牌 (RefreshToken)` 均属于敏感凭据，可长期用于换取数据访问权限。请妥善保管，**切勿**提交到公开仓库、聊天记录或截图分享中。
+> `FAN Studio API Key`、`EQSC 访问令牌 (RefreshToken)` 与 `Jian Project 登录密钥/长期 Token` 均属于敏感凭据，可长期用于换取数据访问权限。请妥善保管，**切勿**提交到公开仓库、聊天记录或截图分享中。
 
 ### 📬 推送会话列表
 
@@ -832,6 +849,8 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
     然后在宿主机或其他服务器上运行：`npx playwright run-server --port 3000 --host 0.0.0.0`
 
+  - **代理环境**：如果宿主机/容器设置了代理环境变量（`ALL_PROXY`、`HTTPS_PROXY`、`http_proxy` 等），本地模式下的 Chromium 会继承这些变量，并可能把地图瓦片请求也发往代理。代理无法正确转发瓦片域名时会导致**地图底图整体空白**而卡片其他内容正常。插件默认会为地图瓦片域名配置代理绕过，无需手动处理；如使用自建瓦片服务，可通过 `额外绕过的域名（仅本地模式）` 追加。
+
 - **存储空间 (Storage)**：
   - 生成的图片文件会临时存储在插件数据目录下的 `temp` 文件夹中。
   - 插件内置了自动清理机制，会每隔 **24 小时** 自动清理 **3 小时前** 生成的图片，且如果文件过多也会自动提前清理，无需担心占用过多磁盘空间，但仍建议预留 200MB 左右的空间。
@@ -896,58 +915,101 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 ### 🌍 多数据源支持
 
-插件支持六大数据源和多达 27 个可自由选择启用的子数据源，覆盖全球的预警信息发布平台：
+插件支持七大数据源和多达 36 个可自由选择启用的子数据源，覆盖全球的预警信息发布平台：
 
-- **中国地震预警网地震预警** (FAN Studio / Wolfx) - 实时地震预警信息。
+- **中国地震预警网地震预警** (FAN Studio / Wolfx / Jian Project) - 实时地震预警信息。
 - **中国地震预警网地震预警 (省级)** (FAN Studio) - 省级地震预警网。
-- **中国地震台网地震测定** (FAN Studio / Wolfx) - 正式地震测定信息。
+- **中国地震台网地震测定** (FAN Studio / Wolfx / Jian Project) - 正式地震测定信息。
 - **中国地震台网烈度速报** (FAN Studio / EQSC) - 详细的地震烈度说明。
 - **FSSN 矩心矩张量解 (CMT)** (FAN Studio) - 包含节面参数等信息的地震报告。
-- **台湾中央气象署强震即时警报** (FAN Studio / Wolfx) - 台湾地区地震预警。
+- **台湾中央气象署强震即时警报** (FAN Studio / Wolfx / Jian Project) - 台湾地区地震预警。
 - **台湾中央气象署地震报告** (FAN Studio) - 台湾地区正式地震报告。
-- **日本气象厅紧急地震速报** (P2P / Wolfx / FAN Studio) - 日本紧急地震速报。
-- **日本气象厅地震情报** (P2P / Wolfx) - 详细地震情报。
-- **USGS地震测定** (FAN Studio) - 美国地质调查局地震信息。
+- **日本气象厅紧急地震速报** (FAN Studio / P2P / Wolfx / PancakesAPI / Jian Project) - 日本紧急地震速报。
+- **日本气象厅地震情报** (P2P / Wolfx / PancakesAPI) - 详细地震情报。
+- **USGS地震测定** (FAN Studio / PancakesAPI / Jian Project) - 美国地质调查局地震信息。
 - **美国 ShakeAlert 地震预警** (FAN Studio) - 美国西海岸 ShakeAlert 实时地震预警。
-- **Global Quake** (OpenQuakeAPI) - 全球地震测站实时计算推送 (精度有限)。
-- **中国气象局气象预警** (FAN Studio / OpenQuakeAPI) - 气象灾害预警信息。
+- **Global Quake** (PancakesAPI) - 全球地震测站实时计算推送 (精度有限)。
+- **中国气象局气象预警** (FAN Studio / Jian Project) - 气象灾害预警信息。
 - **中国气象局实时活跃台风** (FAN Studio / EQSC) - 活跃台风信息。
-- **自然资源部海啸预警中心** (FAN Studio) - 海啸预警信息。
+- **自然资源部海啸预警中心** (FAN Studio / Jian Project) - 海啸预警信息。
 - **日本气象厅海啸预报** (P2P / EQSC) - 日本海啸预报信息。
-- **Global Quake 全球地震** (OpenQuakeAPI) - 全球地震预警信息。
+- **Global Quake 全球地震** (PancakesAPI) - 全球地震预警信息。
 - **日本国土交通省 MSIL 强震动信息** - 日本海沟 S-Net 海底震度计。
 
 ### 📋 状态表格一览
 
-| 数据源 | 提供者 | 类型 | 状态 |
-| :--- | :--- | :--- | :--- |
-| 中国地震预警网 | FAN Studio | 地震预警 | ✅ |
-| 中国地震预警网 (省级) | FAN Studio | 地震预警 | ✅ |
-| 中国地震预警网 | Wolfx | 地震预警 | ✅ |
-| 中国地震台网 | FAN Studio | 地震情报 | ✅ |
-| 中国地震台网 | Wolfx | 地震情报 | ✅ |
-| 中国地震台网烈度速报 | FAN Studio | 地震情报 | ✅ |
-| 中国地震台网烈度速报 | EQSC | 地震情报 | ✅ |
-| FSSN 矩心矩张量解 (CMT) | FAN Studio | 地震情报 | ✅ |
-| 台湾中央气象署 | FAN Studio | 地震预警 | ✅ |
-| 台湾中央气象署 | Wolfx | 地震预警 | ✅ |
-| 台湾中央气象署地震报告 | FAN Studio | 地震情报 | ✅ |
-| 日本气象厅紧急地震速报 | FAN Studio | 地震预警 | ✅ |
-| 日本气象厅紧急地震速报 | P2P | 地震预警 | ✅ |
-| 日本气象厅紧急地震速报 | Wolfx | 地震预警 | ✅ |
-| 日本气象厅地震情报 | P2P | 地震情报 | ✅ |
-| 日本气象厅地震情报 | Wolfx | 地震情报 | ✅ |
-| 美国地质调查局 (USGS) | FAN Studio | 地震情报 | ✅ |
-| 美国 ShakeAlert 地震预警 | FAN Studio | 地震预警 | ✅ |
-| Global Quake | OpenQuakeAPI | 地震预警 | ✅ |
-| 自然资源部海啸预警中心 | FAN Studio | 海啸预警 | ✅ |
-| 日本气象厅津波予報 | P2P | 海啸预警 | ✅ |
-| 日本气象厅津波予報 | EQSC | 海啸预警 | ✅ |
-| 中国气象局气象预警 | FAN Studio | 气象预警 | ✅ |
-| 中国气象局气象预警 | OpenQuakeAPI | 气象预警 | ✅ |
-| 中国气象局实时活跃台风 | FAN Studio | 台风信息 | ✅ |
-| 中国气象局实时活跃台风 | EQSC | 台风信息 | ✅ |
-| S-Net 海底地震计 (MSIL) | 日本国土交通省 | 地震情报 | ✅ |
+> 下按数据源提供方分组，列出了每个数据源对应的数据类型与当前状态。
+
+#### 🔹 FAN Studio WebSocket
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| 中国地震预警网 | 地震预警 | ✅ |
+| 中国地震预警网（省级） | 地震预警 | ✅ |
+| 台湾中央气象署（地震预警） | 地震预警 | ✅ |
+| 台湾中央气象署（地震报告） | 地震情报 | ✅ |
+| 日本气象厅（紧急地震速报） | 地震预警 | ✅ |
+| 中国地震台网（地震情报） | 地震情报 | ✅ |
+| 中国地震台网（烈度速报） | 地震情报 | ✅ |
+| 美国地质调查局（USGS 地震测定） | 地震情报 | ✅ |
+| FSSN 矩心矩张量解 (CMT) | 地震情报 | ✅ |
+| 美国 ShakeAlert 地震预警 | 地震预警 | ✅ |
+| 自然资源部海啸预警中心 | 海啸预警 | ✅ |
+| 中国气象局（气象预警） | 气象预警 | ✅ |
+| 中国气象局（实时活跃台风） | 台风信息 | ✅ |
+
+#### 🔹 Jian Project WebSocket
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| 中国地震预警网 | 地震预警 | ✅ |
+| 台湾中央气象署（地震预警） | 地震预警 | ✅ |
+| 日本气象厅（紧急地震速报） | 地震预警 | ✅ |
+| 中国气象局（气象预警） | 气象预警 | ✅ |
+| 自然资源部海啸预警中心 | 海啸预警 | ✅ |
+| 中国地震台网（地震情报） | 地震情报 | ✅ |
+| 美国地质调查局（USGS 地震测定） | 地震情报 | ✅ |
+
+#### 🔹 P2P地震情報 WebSocket
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| 日本气象厅（紧急地震速报） | 地震预警 | ✅ |
+| 日本气象厅（地震情报） | 地震情报 | ✅ |
+| 日本气象厅（津波予報） | 海啸预警 | ✅ |
+
+#### 🔹 Wolfx API
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| 中国地震预警网 | 地震预警 | ✅ |
+| 台湾中央气象署（地震预警） | 地震预警 | ✅ |
+| 日本气象厅（紧急地震速报） | 地震预警 | ✅ |
+| 中国地震台网（地震情报） | 地震情报 | ✅ |
+| 日本气象厅（地震情报） | 地震情报 | ✅ |
+
+#### 🔹 PancakesAPI
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| Global Quake | 地震预警 | ✅ |
+| 日本气象厅（紧急地震速报） | 地震预警 | ✅ |
+| 日本气象厅（地震情报） | 地震情报 | ✅ |
+| 美国地质调查局（USGS 地震测定） | 地震情报 | ✅ |
+
+#### 🔹 EQSC API
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| 中国地震台网（烈度速报） | 地震情报 | ✅ |
+| 日本气象厅（津波予報） | 海啸预警 | ✅ |
+| 中国气象局（实时活跃台风） | 台风信息 | ✅ |
+
+#### 🔹 NIED S-Net 海底震度（直连 HTTP 轮询）
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| S-Net 海底地震计 (MSIL) | 地震情报 | ✅ |
 
 ✅ **正常**  
 ⚠️ **不稳定**  
@@ -955,28 +1017,31 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 🚧 **维护中**  
 🧪 **测试中**  
 
+> [!CAUTION]
+> FAN Studio API 将于 2026 年 12 月 31 日后全面停止 API 服务，所有接口下线。
+
 > [!TIP]
-> 其中 OpenQuakeAPI 为插件自建数据源，数据服务公开可用。详情请查看[OpenQuakeAPI文档](https://docs.aloys23.link/docs/openquake/overview)。
+> 其中 PancakesAPI 为插件自建数据源，数据服务公开可用。详情请查看[PancakesAPI文档](https://wiki.aloys23.link/wiki/PancakesAPI)。
 
 ### ⏰ 数据延迟
 
 根据不同数据源的数据处理时间、API 服务的收发耗时和插件处理耗时，信息推送会产生一定的延迟：
 
-- **中国地震预警网地震预警 (CEA)**：约 0.5-2s，台湾地区的预警可达 10 秒以上。
+- **中国地震预警网地震预警 (CEA)**：约 1-2.5s，台湾地区的预警可达 10 秒以上。另因技术原因或地域差异，首报往往在发震时间 5-15s 后才发出。
 - **台湾中央气象署地震预警 (CWA)**：首报推送延迟约 2-5s ，少数情况可达 10 秒以上，后续约 0.5s-2s ，启用融合策略可能增加 3-5s 不等。
 - **日本气象厅紧急地震速报 (JMA)**：约 0.5-2s。
 - **Global Quake 地震预警**：首报推送最快约 15-60s ，部分情况可达 3-5 分钟以上，后续约 0.5s-15s。
-- **中国地震台网地震测定 (CENC)**：约 0.5-2s，启用融合策略可能增加 2-10s 不等。
+- **中国地震台网地震测定 (CENC)**：约 1-3s，启用融合策略可能增加 2-10s 不等。
 - **中国地震台网烈度速报 (CENC)**：滞后约 75 分钟左右 (EQSC)。
 - **FSSN矩心矩张量解 (CMT)**：滞后约 90 分钟左右。
-- **台湾中央气象署地震报告 (CWA)**：约 0.5-2s。
+- **台湾中央气象署地震报告 (CWA)**：约 1-2s。
 - **日本气象厅地震情报 (JMA)**：约 0.5-2s。
-- **美国地质调查局地震测定 (USGS)**：约 0.5-15s。
+- **美国地质调查局地震测定 (USGS)**：约 1-15s。
 - **中国气象局气象预警 (CMA)**：约 3-15 分钟。
 - **中国气象局实时活跃台风 (CMA)**：约 10-30 分钟。
 - **各气象站数据、实况排行数据、AQI 数据、雷达数据等**：约 10-30 分钟。
   - 针对地震情报类型，开启地图瓦片渲染 / GQ 卡片还将额外增加数秒的延迟。
-  - 不同数据源间的**推送**延迟一般为 Fan = P2P ＜ Wolfx ＜ Global Quake，轮询源不计入此内。
+  - 不同数据源间的**推送**延迟一般为 Fan = Jian = P2P = Pancakes ＜ Wolfx，轮询源不计入此内。
 
 ## 📑 插件配置项详解
 
@@ -1079,13 +1144,31 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 - **日本气象厅地震情报 (`japan_jma_earthquake`)**: 接收 JMA 地震列表。
 - **中国地震台网地震测定 (`china_cenc_earthquake`)**: 接收 CENC 地震列表。
 
-#### 🔹 OpenQuakeAPI
+#### 🔹 PancakesAPI
 
-- **原理**: 连接到 OpenQuakeAPI 的 `/ws/all` 聚合端点，按 `source` 字段路由 Global Quake、中国气象局气象预警（CMA）等子源。
+- **原理**: 连接到 PancakesAPI 的 `/ws/all` 聚合端点，按 `source` 字段路由 Global Quake、JMA 紧急地震速报与情报、USGS 等子源。
 - **特点**: 在偏远地区或国际海域，由于官方机构反应时间较长，Global Quake 往往能最先提供初步数据，但震级和位置可能随报数更新而有较大波动。
-- **启用 (`enabled`)**: 控制 OpenQuakeAPI 通道是否启用。关闭后所有 OpenQuakeAPI 子源均不可用。
+- **启用 (`enabled`)**: 控制 PancakesAPI 通道是否启用。关闭后所有 PancakesAPI 子源均不可用。
 - **Global Quake (`global_quake`)**: 获取 Global Quake 全球地震实时数据（这些数据是由全球数千个测站通过算法实时计算得出的，精度有限）。
-- **中国气象局气象预警 (`china_weather_alarm`)**: 接收中国气象局气象预警信息。
+- **日本气象厅紧急地震速报 (`japan_jma_eew`)**: 接收日本气象厅紧急地震速报（JMA EEW）。
+- **日本气象厅地震情报 (`japan_jma_earthquake`)**: 接收日本气象厅地震情报列表（JMA EQLIST）。
+- **USGS 地震测定 (`usgs_earthquake`)**: 接收美国地质调查局 (USGS) 地震测定数据。
+
+#### 🔹 Jian Project WebSocket
+
+Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按协议一次性接入 7 路机构子源，是 FAN Studio 之外的第二套多机构聚合通道。
+
+> **鉴权说明**：Jian Project 需配置登录密钥（`lk_` 开头）或长期 Token（`rt_` 开头）才能建立连接，凭证获取方式见「[数据源鉴权引导](#data-source-auth-guide)」章节。
+
+- **启用 (`enabled`)**: 控制 Jian Project 通道是否启用。关闭后全部子源不可用；未配置有效凭证时同样会跳过建连。
+- **登录密钥 (`login_key`)**: 一次性登录密钥（`lk_` 开头，5 分钟有效）。插件会自动用它换取长期 Token（`rt_` 开头，有效期约 180 天）并持久化保存到本地，除更换账号外无需重复申请；也可直接填写 `rt_` 开头的长期 Token。同一长期 Token 默认最多支持 3 条并发连接。
+- **中国地震预警网（CEA）(`china_earthquake_warning`)**: 接收中国地震预警网地震预警。
+- **台湾中央气象署（CWA EEW）(`taiwan_cwa_earthquake`)**: 接收台湾中央气象署强震即时警报。
+- **日本气象厅（JMA EEW）(`japan_jma_eew`)**: 接收日本气象厅紧急地震速报。
+- **中国气象局（气象预警）(`china_weather_alarm`)**: 接收中国气象局下发的各类别、各等级气象灾害预警。
+- **自然资源部海啸预警中心（海啸预警）(`china_tsunami`)**: 接收权威的海啸预报与警报。
+- **中国地震台网（CENC 地震测定）(`china_cenc_earthquake`)**: 接收中国地震台网地震测定信息。
+- **美国地质调查局（USGS 地震测定）(`usgs_earthquake`)**: 接收美国地质调查局全球测定数据。
 
 #### 🔹 EQSC API
 
@@ -1353,6 +1436,16 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 - **忽略浏览器 HTTPS 证书错误 (`browser_ignore_https_errors`)**:
   - **默认值**: `false`
   - **说明**: 仅本地模式生效。当地图瓦片源（如 FAN Studio）证书过期导致底图加载失败（控制台出现 `ERR_CERT_DATE_INVALID`）时，开启后可继续加载底图；注意这会信任自签/过期证书，存在安全风险，请谨慎使用。
+- **地图瓦片绕过代理直连（仅本地模式） (`browser_bypass_proxy_for_map_tiles`)**:
+  - **默认值**: `true`
+  - **说明**: 仅本地模式生效。若 AstrBot 进程带有代理环境变量（如 systemd 单元、容器编排注入的 `ALL_PROXY`、`HTTPS_PROXY`，或 sing-box / clash 等工具注入的小写 `http_proxy`），Playwright 启动的 Chromium 会继承这些变量，并尝试经代理去请求地图瓦片。当代理无法正确转发瓦片域名时，浏览器表现为**地图底图整体空白**（卡片文字、标记正常）。
+  - 开启本项后，插件会在启动 Chromium 时同时设置两处：
+    1. `--proxy-bypass-list=...` 启动参数；
+    2. 子进程环境变量中的 `NO_PROXY` **与** `no_proxy`
+  - 默认直连域名为 `*.autonavi.com`、`*.amap.com`、`*.fanstudio.tech`（覆盖全部内置瓦片源）。仅在浏览器启动/重建时读取，切换后需重新加载插件生效。
+- **额外绕过的域名（仅本地模式） (`browser_proxy_bypass_domains`)**:
+  - **默认值**: `""`（空）
+  - **说明**: 可选。在默认地图域名基础上追加需要绕过代理直连的域名，支持逗号或分号分隔，适用于自建瓦片代理等场景。例如：`tiles.example.com, *.mycdn.net`。
 
 ```json
 "message_format": {
@@ -1370,7 +1463,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
   "global_quake_template": "Aurora",           // GQ 卡片视觉主题
   "emoji_filter_mode": "默认",                 // 推送文本 Emoji 过滤：默认/简洁/关闭
   "browser_pool_size": 2,                      // 浏览器页面池大小 (默认2)
-  "browser_ignore_https_errors": false         // 是否忽略瓦片源 HTTPS 证书错误（默认关闭）
+  "browser_ignore_https_errors": false,        // 是否忽略瓦片源 HTTPS 证书错误（默认关闭）
+  "browser_bypass_proxy_for_map_tiles": true,  // 地图瓦片绕过代理直连（默认开启）
+  "browser_proxy_bypass_domains": ""           // 额外绕过的域名，逗号/分号分隔（可选）
 }
 ```
 
@@ -1703,7 +1798,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 | `/灾害预警统计清除` | - | 清除所有统计信息 **(仅管理员)** |
 | `/灾害预警推送开关` | - | 开启或关闭当前会话的推送 **(仅管理员)** |
 | `/灾害预警配置 查看 全局/当前/<会话UMO>` | - | 查看会话配置信息 **(仅管理员)** |
+| `/设置所在地 [纬度] [经度] [地名] [范围]` | - | 修改本地监控的经纬度与地名 **(仅管理员)** |
 | `/灾害预警日志` | - | 查看原始消息日志统计摘要 **(仅管理员)** |
+| `/灾害预警日志导出 [数量]` | `/日志导出` | 导出最近运行日志并上传生成分享链接 **(仅管理员)** |
 | `/灾害预警日志开关` | - | 开关原始消息日志记录 **(仅管理员)** |
 | `/灾害预警日志清除` | - | 清除所有原始消息日志 **(仅管理员)** |
 | `/服务器切换 [数据源] [主服务器\|备用服务器]` | - | 查看/切换数据源主备服务器 **(仅管理员)** |
@@ -1959,7 +2056,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 # --- 模拟气象预警事件 ---
 # 格式：/灾害预警模拟 <标题> <正文> [预警编码] [数据源]
-/灾害预警模拟 暴雨红色预警 预计未来3小时降雨量将达100毫米以上 11B0304 china_weather_openquake
+/灾害预警模拟 暴雨红色预警 预计未来3小时降雨量将达100毫米以上 11B0304 china_weather_fanstudio
 
 # --- 模拟台风事件 ---
 # 格式：/灾害预警模拟 <编号> <名称> [强度] [数据源]
@@ -1984,6 +2081,23 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 # 查询平台 default 中群聊 123456789 的配置
 /灾害预警配置 查看 default:GroupMessage:123456789
 
+# 设置本地监控位置（经纬度 / 地名 / 生效范围）
+# 格式：/设置所在地 [纬度] [经度] [自定义地名] [生效范围]
+# 纬度、经度、地名至少要提供一项；未提供的项沿用原值，不会被清空
+# 生效范围：全局（默认）/ 当前会话 / 直接填写会话 UMO
+# 1. 设置全局位置，并自动开启本地监控
+/设置所在地 39.9042 116.4074 北京
+# 2. 仅对当前会话生效
+/设置所在地 39.9042 116.4074 北京 当前会话
+# 3. 只提供一个数值（绝对值 > 90，判定为经度）
+/设置所在地 116.4074
+# 4. 只修正经度（键值对写法，保留原纬度与地名）
+/设置所在地 lon=117.0
+# 5. 只修改地名
+/设置所在地 地名=上海市浦东新区
+# 6. 对指定会话生效
+/设置所在地 39.9 116.4 aiocqhttp:GroupMessage:123456789
+
 # ============================================================
 # 可用数据源ID参考:
 # ============================================================
@@ -1992,25 +2106,32 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 # cea_fanstudio      (中国地震预警网地震预警 - FAN)
 # cea_pr_fanstudio   (中国地震预警网地震预警 (省级) - FAN)
 # cea_wolfx          (中国地震预警网地震预警 - Wolfx)
+# cea_jianproject    (中国地震预警网地震预警 - Jian Project)
 # cenc_fanstudio     (中国地震台网地震情报 - FAN)
 # cenc_wolfx         (中国地震台网地震情报 - Wolfx)
+# cenc_jianproject   (中国地震台网地震测定 - Jian Project)
 # cenc_ir_fanstudio  (中国地震台网烈度速报 - FAN)
 # cenc_ir_eqsc       (中国地震台网烈度速报 - EQSC)
 # china_weather_fanstudio (中国气象局气象预警 - FAN)
-# china_weather_openquake (中国气象局气象预警 - OpenQuakeAPI)
+# china_weather_jianproject (中国气象局气象预警 - Jian Project)
 # china_tsunami_fanstudio (自然资源部海啸预警中心 - FAN)
+# china_tsunami_jianproject (自然资源部海啸预警中心 - Jian Project)
 #
 # 中国台湾:
 # cwa_fanstudio      (台湾中央气象署地震预警 - FAN)
 # cwa_wolfx          (台湾中央气象署地震预警 - Wolfx)
+# cwa_jianproject    (台湾中央气象署地震预警 - Jian Project)
 # cwa_fanstudio_report (台湾中央气象署地震报告 - FAN)
 #
 # 日本:
 # jma_fanstudio      (日本气象厅紧急地震速报 - FAN)
 # jma_p2p            (日本气象厅紧急地震速报 - P2P)
 # jma_wolfx          (日本气象厅紧急地震速报 - Wolfx)
+# jma_pancakes       (日本气象厅紧急地震速报 - PancakesAPI)
+# jma_jianproject    (日本气象厅紧急地震速报 - Jian Project)
 # jma_p2p_info       (日本气象厅地震情报 - P2P)
 # jma_wolfx_info     (日本气象厅地震情报 - Wolfx)
+# jma_eqlist_pancakes (日本气象厅地震情报 - PancakesAPI)
 # jma_tsunami_eqsc   (日本气象厅津波予報 - EQSC)
 # jma_tsunami_p2p    (日本气象厅津波予報 - P2P)
 # snet_msil          (S-Net 海底地震计 - MSIL 直连)
@@ -2021,8 +2142,10 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 #
 # 国际/全球:
 # usgs_fanstudio     (美国地质调查局 USGS - FAN)
+# usgs_pancakes      (美国地质调查局 USGS - PancakesAPI)
+# usgs_jianproject   (美国地质调查局 USGS - Jian Project)
 # sa_fanstudio       (美国 ShakeAlert 地震预警 - FAN)
-# global_quake       (Global Quake - OQ)
+# global_quake       (Global Quake - PancakesAPI)
 # fssn_cmt_fanstudio (FSSN 矩心矩张量解 CMT - FAN)
 ```
 
@@ -2366,10 +2489,6 @@ AstrBot/
          │
          ├─ docs/                              # 上游接口文档与本地 API 规范
          │
-         ├─ models/                                 # Protobuf 消息模型目录
-         │   ├─ websocket_message.proto             # Protobuf 消息定义文件
-         │   └─ websocket_message_pb2.py            # Protobuf 生成的 Python 代码
-         │
          ├─ plugin/                            # 插件装配与命令服务目录
          │   ├─ __init__.py
          │   ├─ plugin_command_support_service.py   # 插件命令辅助服务
@@ -2413,8 +2532,10 @@ AstrBot/
              ├─ converters.py                  # 数据类型转换工具
              ├─ emoji_filter.py                # Emoji 过滤工具
              ├─ geolocation.py                 # IP 地理定位工具
+             ├─ log_sanitizer.py               # 共享日志脱敏工具
              ├─ map_tile_sources.py            # 地图瓦片源定义
              ├─ plugin_logger.py               # 插件日志工具
+             ├─ runtime_log_collector.py       # 运行日志收集器
              ├─ severity_emoji.py              # 灾害等级 Emoji 映射
              ├─ text_format_utils.py           # 文本格式化工具
              ├─ time_converter.py              # 时间格式转换工具
@@ -2431,7 +2552,7 @@ AstrBot/
 > - [FAN Studio TileMap API](https://tilemap.fanstudio.tech/)
 > - [Wolfx 防灾(防災) 实用类 免费API接口](https://wolfx.jp/zh/docs/open-api)
 > - [EQSC API 文档中心](https://equake.top/apidocs)
-> - [OpenQuakeAPI](https://docs.aloys23.link/docs/openquake/overview)
+> - [PancakesAPI](https://wiki.aloys23.link/wiki/PancakesAPI)
 > - [緊急地震速報で使われる距離減衰式による震度計算](https://qiita.com/soshi1822/items/f5fd9ccf6830d834abc4)
 
 ## 💾 数据持久化与存储
@@ -3022,7 +3143,7 @@ graph TB
 
 后端采用**全异步、分层解耦**的架构，自下而上划分为十大协作层，对应上方后端架构图：
 
-- **1. 宿主与外部输入**：AstrBot 框架作为宿主加载插件，用户与管理员通过聊天命令交互；上游数据源经 **WebSocket 长连接**（FAN Studio / P2P / Wolfx / OpenQuakeAPI）与 **HTTP 轮询**（EQSC、S-Net MSIL、NMC 气象等）持续供给数据；Web 管理端由浏览器访问。
+- **1. 宿主与外部输入**：AstrBot 框架作为宿主加载插件，用户与管理员通过聊天命令交互；上游数据源经 **WebSocket 长连接**（FAN Studio / Jian Project / P2P / Wolfx / PancakesAPI）与 **HTTP 轮询**（EQSC、S-Net MSIL、NMC 气象等）持续供给数据；Web 管理端由浏览器访问。
 - **2. 插件入口层**：`main.py` 保持精简壳职责，将生命周期与命令实现下沉到 `plugin/` 子服务。生命周期服务负责配置修正、管理员同步、遥测注入与 asyncio 异常托管；管理命令与查询命令服务分别实现运维指令与业务查询指令；Web 管理端装配入口负责 FastAPI 服务与实时广播通道的启动。
 - **3. 应用编排层（核心服务）**：核心服务门面（`DisasterWarningService`）持有配置、上下文与共享运行状态，统一装配消息、统计、缓存、查询等基础能力。统一事件流水线将**推送 → 统计 → 管理端广播**串接为固定顺序；EQSC 通道服务统一管理鉴权、熔断与令牌保活，台风数据富化与历史数据库重建服务基于该通道工作。
 - **4. 领域模型与数据源注册层**：`domain/` 定义统一事件信封（地震 / 海啸 / 气象 / 台风）与展示模型、事件上下文与标识（去重指纹基础）；`sources/` 维护数据源目录、条目、机构目录与路由映射，是"配置 → 连接 → 解析 → 展示"全链路的注册中心。
@@ -3136,6 +3257,7 @@ graph TB
 > 3. **内核安装**：Playwright 需要手动安装浏览器内核。请在终端执行 `playwright install chromium`（下载耗时可能较长）。
 > 4. **网络限制**：检查机器人所在网络环境是否可以正常访问所选的地图瓦片源。
 > 5. **证书过期**：上游瓦片源的证书可能过期，可以开启 `忽略浏览器 HTTPS 证书错误（仅本地模式）` 的配置项，或等待上游证书续期即可恢复。
+> 6. **代理干扰**：若服务器配置了代理，Chromium 会继承并尝试经代理请求瓦片，代理无法转发时地图只剩空白底图。请保持 `地图瓦片绕过代理直连（仅本地模式）` 开启（默认即为开启），必要时用 `额外绕过的域名（仅本地模式）` 追加你的自建瓦片域名。
 
 </details>
 
@@ -3420,7 +3542,7 @@ GNU Affero General Public License v3.0 - 详见 [LICENSE](LICENSE) 文件。
 - [Wolfx](https://wolfx.jp/zh/docs/open-api) - 提供地震 API 服务。
 - [EQSC API](https://equake.top/) - 提供高质量的灾害数据。
 - [Global Quake](https://globalquake.net/) - 提供全球地震监测。
-- [Aloys233](https://github.com/Aloys233) - 为插件提供 OpenQuakeAPI 数据服务、提供遥测数据收集与通知服务，参与了多项重要插件功能如 WebUI 的开发。
+- [Aloys233](https://github.com/Aloys233) - 为插件提供 PancakesAPI 数据服务、提供遥测数据收集与通知服务，参与了多项重要插件功能如 WebUI 的开发。
 - [ZeroStar645](https://github.com/ZeroStar645) - 指出了插件在 ARV 计算和震源球绘制上的缺陷，并提供了相关的绘制代码与 JMA 计测震度相关的计算公式。
 
 ## 📚 推荐阅读

@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD024 -->
 <!-- markdownlint-disable MD036 -->
 <!-- markdownlint-disable MD051 -->
-# OpenQuakeAPI
+# PancakesAPI
 
 **Base URL**: `wss://api.aloys23.link`
 
@@ -19,11 +19,12 @@ wss://api.aloys23.link/{path}
 
 | 路径 | 数据源 | 说明 |
 | --- | --- | --- |
-| `/ws/quake/gq` | GlobalQuake | 全球地震实时数据 |
-| `/ws/tsunami/nmefc` | NMEFC | 海啸预警 |
-| `/ws/tsunami/nmefc-wave` | NMEFC | 海浪警报 |
-| `/ws/tsunami/nmefc-surge` | NMEFC | 风暴潮警报 |
-| `/ws/all` | 全部 | 所有数据源的聚合推送 |
+| `/api/v1/alert/ws/quake/gq` | GlobalQuake | 全球地震实时数据 |
+| `/api/v1/alert/ws/quake/usgs` | USGS | 美国地质调查局地震测定 |
+| `/api/v1/alert/ws/quake/jma_eew` | JMA EEW | 日本气象厅紧急地震速报 |
+| `/api/v1/alert/ws/quake/jma_eqlist` | JMA EQLIST | 日本气象厅地震速报列表 |
+| `/api/v1/alert/ws/weather/cma` | CMA | 中国气象局气象预警 |
+| `/api/v1/alert/ws/all` | 全部 | 所有数据源的聚合推送 |
 
 ## 事件通用格式
 

@@ -29,7 +29,10 @@ class DisasterServiceStatusService:
         # 仅在主服务尚未注入时再本地兜底构造。
         self._source_runtime_query = getattr(
             service, "source_runtime_query", None
-        ) or SourceRuntimeQueryService(service.config)
+        ) or SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
 
     def get_service_status(self) -> dict[str, Any]:
         """获取服务状态。"""
@@ -56,7 +59,12 @@ class DisasterServiceStatusService:
             message_logger_enabled=self.service.message_logger.enabled
             if self.service.message_logger
             else False,
-            openquake_connected=bool(metrics.get("openquake_connected")),
+            pancakes_connected=bool(
+                metrics.get("pancakes_connected", metrics.get("openquake_connected"))
+            ),
+            openquake_connected=bool(
+                metrics.get("pancakes_connected", metrics.get("openquake_connected"))
+            ),
         )
         # total_connections 已由 runtime snapshot 按 catalog 期望通道统计
         # （含 EQSC / S-Net / 已停用通道），此处不再二次累加。

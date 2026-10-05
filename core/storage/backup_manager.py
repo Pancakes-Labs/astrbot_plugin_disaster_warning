@@ -2,6 +2,7 @@
 备份与还原服务层
 """
 
+import asyncio
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 
 from astrbot.api import logger
@@ -68,13 +70,71 @@ class BackupService:
         self.db_path = self.storage_dir / "events.db"
         self.session_file = self.storage_dir / "session_overrides.json"
         self.stats_file = self.storage_dir / "statistics.json"
+        # 导出用单线程池与在途线程引用：用于协程取消时等待打包线程结束。
+        self._backup_executor: ThreadPoolExecutor | None = None
+        self._pending_thread_futures: list[Future] = []
 
     # ------------------------------------------------------------------
     # 导出
     # ------------------------------------------------------------------
-    def export_full_backup(self, targets: list[str] = None) -> io.BytesIO:
+    async def export_full_backup(self, targets: list[str] = None) -> io.BytesIO:
+        """导出备份与数据库维护操作服务级串行化。"""
+        db_lock = (
+            getattr(self.disaster_service, "db_maintenance_lock", None)
+            if self.disaster_service
+            else None
+        )
+        if db_lock is None:
+            return await self._run_backup_in_executor(targets)
+        await db_lock.acquire()
+        try:
+            return await self._run_backup_in_executor(targets)
+        except asyncio.CancelledError:
+            # 等待底层线程真正结束后再由 finally 释放锁。
+            await self._drain_backup_executor()
+            raise
+        except BaseException:
+            await self._drain_backup_executor()
+            raise
+        finally:
+            # 用 finally 保证成功 return 与异常路径都能释放锁。
+            db_lock.release()
+
+    async def _run_backup_in_executor(self, targets: list[str] = None) -> io.BytesIO:
+        """在线程池中执行阻塞打包。
+
+        使用自管理的 ThreadPoolExecutor 而非 asyncio.to_thread，以便持有
+        concurrent Future 引用，在协程被取消时可靠地等待工作线程结束。
         """
-        打包指定数据为 ZIP 字节流。支持选择部分备份。
+        if self._backup_executor is None:
+            # 单线程池：保证同一时刻只有一个备份线程读取数据库文件。
+            self._backup_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="dw_backup"
+            )
+        concurrent_future = self._backup_executor.submit(
+            self._export_full_backup_locked, targets
+        )
+        try:
+            return await asyncio.wrap_future(concurrent_future)
+        except asyncio.CancelledError:
+            self._pending_thread_futures.append(concurrent_future)
+            raise
+
+    async def _drain_backup_executor(self) -> None:
+        """等待所有在途打包线程结束（含被取消但仍在运行的线程）。"""
+        pending = [f for f in self._pending_thread_futures if not f.done()]
+        self._pending_thread_futures = [
+            f for f in self._pending_thread_futures if not f.done()
+        ]
+        if not pending:
+            return
+        await asyncio.gather(
+            *(asyncio.wrap_future(f) for f in pending), return_exceptions=True
+        )
+
+    def _export_full_backup_locked(self, targets: list[str] = None) -> io.BytesIO:
+        """
+        打包指定数据为 ZIP 字节流，支持选择部分备份。
         :param targets: 允许传入 _SUPPORTED_TARGETS 的子集。如果为 None 则默认打包全部。
                         传入未知目标会记录警告，且在全部目标无效时抛出异常。
         """
@@ -180,6 +240,32 @@ class BackupService:
             pass
 
     @staticmethod
+    def _remove_sqlite_sidecars(db_path) -> list[str]:
+        """移除 WAL 模式的 -wal / -shm 附属文件，返回删除失败的路径列表。
+
+        数据库切到 WAL 后，未 checkpoint 的数据可能残留在 -wal 中。
+        覆盖还原 events.db 前必须清掉旧附属文件，避免 SQLite 打开新库时
+        被旧 WAL 内容污染。删除失败必须上报调用方：若仍继续覆盖主库，
+        会造成「新主库 + 旧附属文件」并存的损坏状态。
+        """
+        try:
+            base_name = db_path.name
+        except Exception as e:
+            logger.error(f"[灾害预警] 无法解析数据库附属文件路径: {e}")
+            return [str(db_path)]
+        failed: list[str] = []
+        for suffix in ("-wal", "-shm"):
+            sidecar = db_path.with_name(base_name + suffix)
+            try:
+                if not sidecar.exists():
+                    continue
+                os.remove(sidecar)
+            except Exception as e:
+                logger.error(f"[灾害预警] 删除数据库附属文件失败 {sidecar}: {e}")
+                failed.append(str(sidecar))
+        return failed
+
+    @staticmethod
     def _rollback_files(temp_backups: list, created_files: list) -> None:
         """回滚文件：
         1. 把 .bak 快照替换回原路径（仅针对还原前已存在的文件）；
@@ -259,8 +345,20 @@ class BackupService:
             logger.warning(f"[灾害预警] 重新加载日志统计失败: {e}")
 
     async def import_full_backup(self, zip_bytes: bytes) -> tuple[bool, str]:
+        """从 ZIP 字节包还原备份（与启动期健康迁移服务级串行化）。"""
+        db_lock = (
+            getattr(self.disaster_service, "db_maintenance_lock", None)
+            if self.disaster_service
+            else None
+        )
+        if db_lock is None:
+            return await self._import_full_backup_locked(zip_bytes)
+        async with db_lock:
+            return await self._import_full_backup_locked(zip_bytes)
+
+    async def _import_full_backup_locked(self, zip_bytes: bytes) -> tuple[bool, str]:
         """
-        从 ZIP 字节包还原备份。
+        从 ZIP 字节包还原备份（调用方须已持有 db_maintenance_lock）。
         包含完整的数据库和配置文件替换，为了安全性，在替换前进行当前数据的备份。
         只覆盖 ZIP 包中包含的文件，未包含的文件不会被清除或覆盖。
         """
@@ -312,6 +410,24 @@ class BackupService:
             if db_mgr and has_db_in_zip:
                 logger.info("[灾害预警] 正在断开当前数据库连接...")
                 await db_mgr.close()
+                # 关闭连接会 checkpoint 主库，但仍清理残留附属文件，
+                # 避免随后覆盖 events.db 时被旧 -wal 内容污染。
+                failed_sidecars = self._remove_sqlite_sidecars(self.db_path)
+                if failed_sidecars:
+                    # 中止还原并恢复数据库连接。
+                    logger.error(
+                        "[灾害预警] 附属文件删除失败，为避免数据库损坏已中止还原: "
+                        + "、".join(failed_sidecars)
+                    )
+                    try:
+                        await db_mgr.initialize()
+                    except Exception as init_err:
+                        logger.error(f"[灾害预警] 恢复数据库连接失败: {init_err}")
+                    return (
+                        False,
+                        "无法删除数据库附属文件（-wal/-shm），已中止还原以避免数据损坏: "
+                        + "、".join(failed_sidecars),
+                    )
 
             # 备份当前本地数据作为 .bak 回滚文件（只备份需要覆盖的文件），
             # 同时记录“还原前原本不存在”的路径，供失败时删除新文件实现真正回滚。

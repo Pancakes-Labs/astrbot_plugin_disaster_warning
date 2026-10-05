@@ -1198,7 +1198,7 @@ body.dark-theme .btn-action:hover {
 /* 灾害数据源连接网格容器 */
 .connections-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 16px;
     width: 100%;
     align-items: stretch;
@@ -1337,7 +1337,7 @@ body.dark-theme .btn-action:hover {
         gap: 12px;
     }
 
-    /* 中屏：堆叠列（P2P+S-Net / GQ+EQSC）仍占一格，避免变成多卡散落 */
+    /* 中屏：堆叠列（P2P+S-Net / PancakesAPI+EQSC）仍占一格，避免变成多卡散落 */
     .connections-grid .connection-stack {
         gap: 10px;
     }

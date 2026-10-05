@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...utils.plugin_logger import plugin_logger
 from ..domain.event_models import EarthquakeEvent
 from ..services.snet.snet_filter_constants import (
     count_triggered_stations,
@@ -19,11 +20,30 @@ from ..sources.source_catalog import get_source_entry
 from .base_rule import BaseRule, RuleContext
 from .rule_result import RuleDecision
 
+# 强度模式别名归一化：把目录中出现的同义写法收敛到规则实际消费的规范值。
+# 未归一化的未知取值会落到 evaluate 末尾的兜底分支被直接放行，
+# 导致 min_magnitude / min_scale / min_intensity 等过滤配置对该数据源失效
+# （Pancakes 子源曾误用 shindo / mmi，M1.5 小震因此绕过全部过滤直接推送）。
+_INTENSITY_MODE_ALIASES: dict[str, str] = {
+    "shindo": "scale",  # 日本震度制式，与 scale 同义
+    "seismic_scale": "scale",
+    "mmi": "magnitude",  # USGS MMI 无烈度阈值可用，按震级过滤
+    "mag": "magnitude",
+}
+
+# 规则链实际消费的规范强度模式；"none" / "" 表示该灾种无强度过滤语义。
+_KNOWN_INTENSITY_MODES: frozenset[str] = frozenset(
+    {"intensity", "scale", "snet_shindo", "magnitude", "none", ""}
+)
+
 
 class EarthquakeThresholdRule(BaseRule):
     """按数据源强度模式选择过滤策略。"""
 
     rule_name = "intensity_rule"
+
+    # 已告警过的 (source_id, intensity_mode) 组合，避免同源未知模式逐条刷屏。
+    _warned_unknown_modes: set[tuple[str, str]] = set()
 
     @staticmethod
     def _combine_checks(
@@ -150,6 +170,8 @@ class EarthquakeThresholdRule(BaseRule):
             .strip()
             .lower()
         )
+        # 归一化同义写法，避免未知取值落到兜底分支被静默放行。
+        intensity_mode = _INTENSITY_MODE_ALIASES.get(intensity_mode, intensity_mode)
 
         # 单元测试或模拟发震场景，支持强制绕过常规数值过滤
         if context.runtime_config.get("__simulation_bypass_regular_filters", False):
@@ -361,5 +383,20 @@ class EarthquakeThresholdRule(BaseRule):
                     )
             return RuleDecision.accept(reason="震级规则通过")
 
-        # 其他未配置强度模式的数据源默认直接通过
+        # 其他未配置强度模式的数据源默认直接通过。
+        # 但若目录配置了既非空、又不在规范集合内的未知模式，说明该源可能误配，这里做一次性告警。
+        if intensity_mode not in _KNOWN_INTENSITY_MODES:
+            self._warn_unknown_intensity_mode(source_id, intensity_mode)
         return RuleDecision.accept(reason="无需强度过滤")
+
+    @classmethod
+    def _warn_unknown_intensity_mode(cls, source_id: str, intensity_mode: str) -> None:
+        """对未知强度模式做去重告警，避免同源逐条刷屏。"""
+        key = (source_id, intensity_mode)
+        if key in cls._warned_unknown_modes:
+            return
+        cls._warned_unknown_modes.add(key)
+        plugin_logger.warning(
+            f"[灾害预警] 数据源 {source_id} 配置了未识别的强度模式 "
+            f"'{intensity_mode}'，强度过滤将被跳过；请检查数据源目录配置"
+        )

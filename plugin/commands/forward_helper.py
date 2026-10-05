@@ -208,6 +208,14 @@ async def send_forward_blocks(
     if not batches:
         return False
 
+    # 合并转发是插件主动发送，若调用方随后直接 return（不 yield 结果），
+    # 会误触发默认 LLM 回退。发送前先标记 call_llm=True 阻止默认 LLM 请求，
+    # 避免后续批次发送异常时漏标记。
+    try:
+        event.should_call_llm(True)
+    except Exception as exc:
+        logger.debug(f"[灾害预警] 标记阻止默认 LLM 请求失败: {exc}")
+
     for nodes in batches:
         chain = MessageChain([nodes])
         await plugin.context.send_message(event.unified_msg_origin, chain)

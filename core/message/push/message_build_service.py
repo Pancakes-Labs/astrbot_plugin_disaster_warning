@@ -231,10 +231,7 @@ class MessageBuildService:
             return flags
 
         # 6. 气象预警图标（缺省开；有预警编码才附加）
-        if (
-            source_id.startswith("china_weather")
-            or source_id == "china_weather_openquake"
-        ):
+        if source_id.startswith("china_weather"):
             weather_cfg = (
                 cfg.get("weather_config")
                 if isinstance(cfg.get("weather_config"), dict)
@@ -370,6 +367,13 @@ class MessageBuildService:
             # 是否忽略 HTTPS 证书错误会直接影响底图能否加载，纳入缓存键避免切换后误用旧图。
             "ignore_https_errors": bool(
                 config.get("browser_ignore_https_errors", False)
+            ),
+            # 代理绕过直接影响底图能否加载，同样纳入缓存键避免复用旧空白图。
+            "bypass_proxy_for_map_tiles": bool(
+                config.get("browser_bypass_proxy_for_map_tiles", True)
+            ),
+            "proxy_bypass_domains": str(
+                config.get("browser_proxy_bypass_domains", "") or ""
             ),
             "event_caption": event_caption or "",
         }
@@ -530,6 +534,13 @@ class MessageBuildService:
             # 是否忽略 HTTPS 证书错误会直接影响底图能否加载，纳入缓存键避免切换后误用旧图。
             "ignore_https_errors": bool(
                 message_format_config.get("browser_ignore_https_errors", False)
+            ),
+            # 代理绕过直接影响底图能否加载，同样纳入缓存键避免复用旧空白图。
+            "bypass_proxy_for_map_tiles": bool(
+                message_format_config.get("browser_bypass_proxy_for_map_tiles", True)
+            ),
+            "proxy_bypass_domains": str(
+                message_format_config.get("browser_proxy_bypass_domains", "") or ""
             ),
             "timezone": display_timezone,
         }
@@ -1132,7 +1143,7 @@ class MessageBuildService:
 
         metadata = self._get_event_metadata(event)
         # 从多层元数据中提取气象预警类型编码。
-        # Fan Studio 格式如 11B20_yellow；OpenQuakeAPI CMA 格式如 p0002003。
+        # Fan Studio 格式如 11B20_yellow；PancakesAPI CMA 格式如 p0002003。
         raw_weather_code = (
             metadata.get("weather_code")
             or metadata.get("type")
@@ -1146,7 +1157,7 @@ class MessageBuildService:
         raw_weather_code = raw_weather_code.strip()
 
         # 统一解析为 Fan Studio 图标接口兼容的 11B 完整码。
-        # p 编码（OpenQuakeAPI CMA）会通过映射表转换为 11B 码；
+        # p 编码（PancakesAPI CMA）会通过映射表转换为 11B 码；
         # 已有 11B 码直接使用；无法映射的返回 None 走本地回退。
         title_text = getattr(domain_event, "title", "") or metadata.get("title", "")
         headline_text = getattr(domain_event, "headline", "") or metadata.get(

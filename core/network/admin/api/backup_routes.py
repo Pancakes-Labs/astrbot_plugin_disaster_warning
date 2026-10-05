@@ -20,7 +20,7 @@ def register_backup_routes(app, *, disaster_service):
     backup_service = BackupService(disaster_service)
 
     @app.get("/api/backup/export")
-    def export_backup(
+    async def export_backup(
         targets: str = Query(
             None,
             description="需要备份的部分，以逗号分隔",
@@ -32,7 +32,8 @@ def register_backup_routes(app, *, disaster_service):
             if targets:
                 target_list = [t.strip() for t in targets.split(",") if t.strip()]
 
-            zip_buffer = backup_service.export_full_backup(target_list)
+            # 导出已纳入数据库维护锁（与还原/启动迁移串行化）。
+            zip_buffer = await backup_service.export_full_backup(target_list)
             headers = {
                 "Content-Disposition": "attachment; filename=disaster_warning_backup.zip"
             }

@@ -25,7 +25,7 @@ from ...domain.typhoon import (
     to_float,
 )
 from ...network.http.eqsc_token_manager import EqscTokenManager
-from ...network.http.eqsc_typhoon_client import EqscTyphoonClient
+from ...network.http.eqsc_typhoon_client import LOOKUP_ERROR, EqscTyphoonClient
 from ..query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -41,7 +41,11 @@ class EqscTyphoonPollService:
 
     def __init__(self, service):
         self.service = service
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 复用主服务的会话配置管理器。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
         self._task: asyncio.Task | None = None
         # 上一轮轮询中处于活跃态的台风 ID 集合。
         # 用于识别"上一轮活跃 → 本轮停编"的台风，放行一次以推送停编通知；
@@ -69,8 +73,8 @@ class EqscTyphoonPollService:
         return self._task is not None and not self._task.done()
 
     def is_enabled(self) -> bool:
-        """数据源是否启用。"""
-        return self._source_runtime_query.is_source_enabled(self.SOURCE_ID)
+        """轮询是否需要运行（组总闸 + 全局或任一会话需要台风）。"""
+        return self._source_runtime_query.is_source_active(self.SOURCE_ID)
 
     def _eqsc_config(self) -> dict[str, Any]:
         data_sources = self.service.config.get("data_sources", {})
@@ -534,8 +538,10 @@ class EqscTyphoonPollService:
             return []
 
         # 轮询侧强制绕过短缓存，确保按间隔拿到最新列表。
-        typhoon_list = await client.fetch_typhoon_list(use_cache=False)
-        if not isinstance(typhoon_list, list):
+        # 与「接口正常但确实无活跃台风」的 empty 区分处理。
+        typhoon_list, status = await client.fetch_typhoon_list(use_cache=False)
+        if not isinstance(typhoon_list, list) or status == LOOKUP_ERROR:
+            # 抓取失败：直接返回，不调用 _filter_active_items。
             self._consecutive_failures += 1
             self._notify_silence_fetch_completed(success=False)
             return []

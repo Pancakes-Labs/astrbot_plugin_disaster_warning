@@ -104,7 +104,7 @@
 感谢所有为灾害预警插件做出任何形式贡献的个人、团体，包括但不限于：
 
 - [@Soulter](https://github.com/Soulter) - "创世神"，伟大无需多言。感谢他提供了一个这么好的平台，以及对 AstrBot 的持续维护。
-- [@Aloys233](https://github.com/Aloys233) - 为插件提供 OpenQuakeAPI 数据服务、提供遥测数据收集与通知服务，参与了多项重要插件功能如 WebUI 的开发。
+- [@Aloys233](https://github.com/Aloys233) - 为插件提供 PancakesAPI 数据服务、提供遥测数据收集与通知服务，参与了多项重要插件功能如 WebUI 的开发。
 - [@ZeroStar645](https://github.com/ZeroStar645) - 指出了插件在 ARV 计算和震源球绘制上的缺陷，并提供了相关的绘制代码与 JMA 计测震度相关的计算公式。
 - 所有为本插件提供外部 API 服务或文件支持的项目。
 - 所有为灾害预警插件提供建议和反馈的朋友。
@@ -132,6 +132,7 @@
 - @GLM 5.2
 - @DeepSeek V3.2
 - @DeepSeek V4 Flash 0731
+- @DeepSeek V4.1 Flash
 - @coderabbitai[bot]
 - @sourcery-ai[bot]
 - @qodo-free-for-open-source-projects[bot]

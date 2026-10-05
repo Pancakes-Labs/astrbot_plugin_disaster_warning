@@ -10,6 +10,7 @@ from datetime import datetime
 
 from astrbot.api import logger
 
+from ....utils.china_regions import province_short
 from ...domain.event_models import (
     EarthquakeEvent,
     EventEnvelope,
@@ -197,30 +198,44 @@ class StatsRuleService:
         title_text = getattr(data, "title", "") or getattr(data, "headline", "") or ""
         headline_text = getattr(data, "headline", "") or ""
 
-        direct_region = self.manager._weather_region_resolver.extract_province(
-            title_text
+        # 优先从事件自身元数据中读取上游已解析的省份与区划代码
+        event_metadata = (
+            getattr(data, "metadata", None)
+            if isinstance(getattr(data, "metadata", None), dict)
+            else {}
         )
-        if direct_region:
-            region = direct_region
-        else:
-            region = await self.manager._weather_region_resolver.extract_province_with_fallback(
-                title_text, headline_text
+        meta_province = event_metadata.get("province")
+        meta_adcode = event_metadata.get("adcode")
+
+        region = None
+        if meta_province:
+            region = province_short(str(meta_province).strip())
+
+        if not region:
+            direct_region = self.manager._weather_region_resolver.extract_province(
+                title_text
             )
-            if not region:
-                # 提取到的地名（可能为空）：供日志区分
-                # “headline 中根本提不出地名”与“地名存在但外部查询失败”两种场景。
-                place_name = (
-                    self.manager._weather_region_resolver._extract_place_from_headline(
-                        headline_text
-                    )
+            if direct_region:
+                region = direct_region
+            else:
+                region = await self.manager._weather_region_resolver.extract_province_with_fallback(
+                    title_text, headline_text, adcode=meta_adcode
                 )
-                # 返回 context 字典（而非 (False, context) 元组）：
-                # 调用方通过“返回值非 True”判断失败，避免对 True/False 做身份比较。
-                return {
-                    "place_name": place_name or "",
-                    "title_text": title_text,
-                    "headline_text": headline_text,
-                }
+
+        if not region:
+            # 提取到的地名（可能为空）：供日志区分
+            place_name = (
+                self.manager._weather_region_resolver._extract_place_from_headline(
+                    headline_text
+                )
+            )
+            return {
+                "place_name": place_name or "",
+                "title_text": title_text,
+                "headline_text": headline_text,
+            }
+
+        region = province_short(region)
 
         level = "未知"
         # 颜色级别通过标题关键词匹配，统一映射成带符号的展示文本。

@@ -6,6 +6,7 @@
 避免原始数据日志无限膨胀或充斥无意义噪声。
 """
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,6 @@ from .logging.formatters.message_json_formatter_service import (
     MessageJsonFormatterService,
 )
 from .logging.formatters.message_readable_log_service import MessageReadableLogService
-from .logging.parsers.global_quake_protobuf_parser import GlobalQuakeProtobufParser
 from .logging.stores.log_file_store import LogFileStore
 from .logging.stores.log_stats_repository import LogStatsRepository
 from .logging.stores.raw_message_logging_service import RawMessageLoggingService
@@ -115,9 +115,6 @@ class MessageLogger:
         self._json_formatter_service = MessageJsonFormatterService(self)
         self._readable_log_service = MessageReadableLogService(self)
         self._log_dedup_service = MessageLogDedupService(self)
-        self._protobuf_parser = GlobalQuakeProtobufParser(
-            self._log_helper_service.format_binary_timestamp
-        )
         self._raw_message_filter = RawMessageFilter(
             enabled=self.enabled,
             filter_heartbeat=self.filter_heartbeat,
@@ -187,19 +184,15 @@ class MessageLogger:
         message_type: str,
         connection_info: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """尝试解析二进制消息（目前支持 GlobalQuake protobuf）"""
-        binary_data = bytes(data)
-        conn_type = (connection_info or {}).get("connection_type", "")
-        if message_type != "websocket_message" and conn_type != "websocket":
-            return None
-        if "global_quake" not in source.lower() and "openquake" not in source.lower():
-            return None
-
+        """尝试解析二进制消息（UTF-8 JSON）。"""
         try:
-            return self._protobuf_parser.parse(binary_data)
-        except Exception as e:
-            logger.debug(f"[灾害预警] 二进制消息解析失败，回退为摘要模式: {e}")
-            return None
+            text = bytes(data).decode("utf-8")
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        return None
 
     def _format_json_data(self, data: dict[str, Any], indent: int = 0) -> str:
         """递归格式化字典数据，提升日志可读性。"""

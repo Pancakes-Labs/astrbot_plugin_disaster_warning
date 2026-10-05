@@ -30,12 +30,36 @@ def is_eqsc_placeholder_id(typhoon_id: object) -> bool:
     return bool(_PLACEHOLDER_ID_FORMAT.match(_clean_id(typhoon_id)))
 
 
+# FAN Studio 标准年份前缀：19xx / 20xx。仅此类纯数字编号才按
+# 「年份后 2 位 + 编号末 2 位」重组，避免把任意长数字（如 99999）
+# 误当作带年份前缀的正式编号而产出错误结果。
+_YEAR_PREFIX_RE = re.compile(r"^(?:19|20)\d{2}")
+
+
 def to_eqsc_id(typhoon_id: object) -> str:
-    """将 4/6 位编号转换为 EQSC 4 位形式。"""
+    """转换为 EQSC 4 位编号（年份后 2 位 + 编号 2 位）。
+
+    覆盖 FAN Studio 台风 id 的三种形态：
+
+    - 标准 6 位编号（202624）：年份后 2 位 + 编号末 2 位 -> 2624；
+    - 无名热带低压的 8 位编号（20260027，4 位编号 0027 拼 4 位年份）
+      同样按年份后 2 位 + 编号末 2 位 -> 2627。
+    - 其余长度或非正式编号体系退回末 4 位 / 原样返回。
+
+    仅对以标准年份前缀开头的 6 位 / 8 位 纯数字编号启用重组，
+    其余长度与其它编号体系保持原「取末 4 位 / 原样」行为，避免改变既有编号约定下的查询目标。
+    """
     text = _clean_id(typhoon_id)
     if not text:
         return ""
-    if len(text) >= 4 and text.isdigit():
+    if not text.isdigit():
+        return text
+    # 年份前缀恒为首 4 位，故年份后 2 位固定落在 text[2:4]，
+    # 该写法对 6 位（202624）与 8 位（20260027）输入同时成立。
+    # 长度精确限定为 6 / 8，避免把 7 位等非标准长度也纳入重组。
+    if len(text) in (6, 8) and _YEAR_PREFIX_RE.match(text):
+        return f"{text[2:4]}{text[-2:]}"
+    if len(text) >= 4:
         return text[-4:]
     return text
 

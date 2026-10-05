@@ -90,7 +90,12 @@ class RealtimePayloadBuilder:
             message_logger_enabled=self.disaster_service.message_logger.enabled
             if getattr(self.disaster_service, "message_logger", None)
             else False,
-            openquake_connected=bool(metrics.get("openquake_connected")),
+            pancakes_connected=bool(
+                metrics.get("pancakes_connected", metrics.get("openquake_connected"))
+            ),
+            openquake_connected=bool(
+                metrics.get("pancakes_connected", metrics.get("openquake_connected"))
+            ),
         )
         # total_connections 已在 snapshot 内按期望通道统计，避免 EQSC/S-Net 重复累加。
         return snapshot

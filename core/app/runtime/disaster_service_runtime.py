@@ -12,6 +12,9 @@ import json
 from astrbot.api import logger
 
 from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
+from ...network.websocket.jian_project_connection_policy import (
+    attach_jian_project_auth_from_plan,
+)
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
 
 
@@ -27,10 +30,22 @@ class DisasterServiceRuntimeService:
         # 保留主服务引用，运行期任务需要读取连接计划、消息管理器、解析器与运行标志位。
         self.service = service
         # 查询服务用于判断某个数据源是否启用，避免对已禁用源继续做解析与事件投递。
-        self._source_runtime_query = SourceRuntimeQueryService(service.config)
+        # 注入会话配置管理器，使「全局关、会话开」的子源也被正确判定为需接入。
+        self._source_runtime_query = SourceRuntimeQueryService(
+            service.config,
+            session_config_manager=getattr(service, "session_config_manager", None),
+        )
 
     async def establish_websocket_connections(self) -> None:
         """建立 WebSocket 连接。"""
+        await self.connect_connections(list(self.service.connections.keys()))
+
+    async def connect_connections(self, names: list[str]) -> None:
+        """为指定连接名建立 WebSocket 连接。
+
+        启动时传入全部连接名；会话覆写等运行期变更后仅传入新增连接名，
+        避免对已建连的通道重复创建任务。
+        """
         logger.debug(
             f"[灾害预警] 开始建立WebSocket连接，当前任务数: {len(self.service.connection_tasks)}"
         )
@@ -49,7 +64,11 @@ class DisasterServiceRuntimeService:
                 logger.error(f"[灾害预警] WebSocket 连接任务 {name} 异常终止: {e}")
 
         # FAN Studio 先主后次：优先启动 /all，再启动独立次要通道。
-        ordered_items = list(self.service.connections.items())
+        ordered_items = [
+            (conn_name, self.service.connections[conn_name])
+            for conn_name in names
+            if conn_name in self.service.connections
+        ]
         ordered_items.sort(
             key=lambda item: (
                 0
@@ -68,7 +87,9 @@ class DisasterServiceRuntimeService:
                 "fan_studio",
                 "p2p",
                 "wolfx",
+                "pancakes_api",
                 "openquake_api",
+                "jian_project",
             ]:
                 # 这份连接附加信息会一路传入连接管理器，作为连接状态展示、重连通知、
                 # 管理端查询等场景的上下文信息。
@@ -82,6 +103,8 @@ class DisasterServiceRuntimeService:
                 }
                 # FAN Studio 鉴权凭证随连接上下文传递，供建连后发送 auth 包。
                 attach_fan_auth_from_plan(connection_info, conn_config)
+                # Jian Project 鉴权凭证随连接上下文传递，供建连前换取 Access Token。
+                attach_jian_project_auth_from_plan(connection_info, conn_config)
 
                 # 异步建连后台任务
                 task = asyncio.create_task(
@@ -133,7 +156,7 @@ class DisasterServiceRuntimeService:
                                 self.service.earthquake_list_service.update_earthquake_list(
                                     "cenc", cenc_data
                                 )
-                                if self._source_runtime_query.is_source_enabled(
+                                if self._source_runtime_query.is_source_active(
                                     "cenc_wolfx"
                                 ):
                                     # 这里将 HTTP 返回结果重新整理为解析器可接受的消息内容，
@@ -162,7 +185,7 @@ class DisasterServiceRuntimeService:
                                 self.service.earthquake_list_service.update_earthquake_list(
                                     "jma", jma_data
                                 )
-                                if self._source_runtime_query.is_source_enabled(
+                                if self._source_runtime_query.is_source_active(
                                     "jma_wolfx_info"
                                 ):
                                     event = self.service.parse_event(

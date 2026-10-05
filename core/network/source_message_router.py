@@ -16,10 +16,11 @@ from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import get_source_entry, get_source_ids_by_dispatch_family
 from ..sources.source_entry import ProviderFamily
 from ..sources.source_router import (
-    get_openquake_source_id,
+    get_pancakes_source_id,
     get_provider_source_map,
     get_wolfx_source_id,
     route_fan_studio_message,
+    route_jian_project_message,
 )
 from .websocket.websocket_manager import WebSocketManager
 
@@ -94,7 +95,9 @@ class SourceMessageRouter:
         ws_manager.register_handler("fan_studio", self._create_fan_studio_handler())
         ws_manager.register_handler("p2p", self._create_p2p_handler())
         ws_manager.register_handler("wolfx", self._create_wolfx_handler())
-        ws_manager.register_handler("openquake_api", self._create_openquake_handler())
+        ws_manager.register_handler("pancakes_api", self._create_pancakes_handler())
+        ws_manager.register_handler("openquake_api", self._create_pancakes_handler())
+        ws_manager.register_handler("jian_project", self._create_jian_project_handler())
 
     async def _dispatch_event(
         self,
@@ -142,13 +145,30 @@ class SourceMessageRouter:
 
     def _is_source_routable(self, source_id: str, source_label: str) -> bool:
         config_key = _resolve_config_key(source_id)
-        # 校验：1. 数据源是否在当前配置中被启用
-        if not self._source_runtime_query.is_source_enabled(source_id):
+        source_entry = get_source_entry(source_id)
+        config_group = source_entry.config_group if source_entry is not None else ""
+
+        # 校验 1：分组总闸（「批量闸刀」）。
+        # 组闸关闭＝整组停用（任何会话都无法突破），属静态配置态，
+        # 降为 DEBUG 避免高频子源逐条刷屏。
+        if not self._source_runtime_query.is_group_enabled(source_id):
             logger.debug(
-                f"[灾害预警] 数据源 {config_key} ({source_label}) 未启用，忽略"
+                f"[灾害预警] 数据源分组 {config_group or source_id} "
+                f"({source_label}) 已停用，忽略"
             )
             return False
-        # 校验：2. 相应的消息解析器是否存在，避免解析抛错
+
+        # 校验 2：全局或任一会话是否真的需要该子源。
+        # 子源级开关语义为「会话默认值」，会被会话覆写；
+        # 仅当「全局关且无任何会话覆写开启」时才跳过解析，避免无谓开销。
+        if not self._source_runtime_query.is_source_active(source_id):
+            logger.debug(
+                f"[灾害预警] 数据源 {config_key} ({source_label}) 未启用"
+                f"（全局 {config_group}.{config_key} 关闭且无会话覆写开启），忽略"
+            )
+            return False
+
+        # 校验 3：相应的消息解析器是否存在，避免解析抛错
         if not self._has_parser(source_id):
             logger.warning(
                 f"[灾害预警] 未找到解析器: {source_id}",
@@ -611,18 +631,16 @@ class SourceMessageRouter:
 
         return wolfx_handler
 
-    def _create_openquake_handler(self):
-        """创建 OpenQuakeAPI 聚合连接的消息处理器。
+    def _create_pancakes_handler(self):
+        """创建 PancakesAPI 聚合连接的消息处理器。
 
         连接挂在全量端点后，按 RealtimeEvent.source 分发到已注册子源；
-        当前仅接入 Global Quake（gq），其余 source 先忽略以便后续继续接入。
+        当前已接入 Global Quake（gq）与中国气象局气象预警（cma），其余 source 先忽略以便后续继续接入。
         """
 
-        async def openquake_handler(
-            message, connection_name=None, connection_info=None
-        ):
+        async def pancakes_handler(message, connection_name=None, connection_info=None):
             self._log_received_message(
-                "OpenQuakeAPI",
+                "PancakesAPI",
                 message,
                 connection_name=connection_name,
                 connection_info=connection_info,
@@ -630,35 +648,25 @@ class SourceMessageRouter:
 
             # 任意入站帧都可推进静默门闩（含状态/心跳类），避免无震时干等 first_payload_timeout
             self._note_connection_bootstrap(
-                connection_name, kind="openquake_first_payload"
+                connection_name, kind="pancakes_first_payload"
             )
 
             try:
-                # 历史 protobuf 二进制帧仍按 Global Quake 路径处理
                 if isinstance(message, (bytes, bytearray)):
-                    if not self._is_source_routable("global_quake", "global_quake"):
+                    try:
+                        raw_text = message.decode("utf-8")
+                    except UnicodeDecodeError:
                         return
-                    await self._parse_and_dispatch(
-                        source_id="global_quake",
-                        source_label="global_quake",
-                        parser_input=message,
-                        connection_name=connection_name,
-                        connection_info=connection_info,
-                        source_channel="gq",
-                        parser_log_label="Global Quake",
-                    )
-                    return
-
-                raw_text = message if isinstance(message, str) else None
-                if raw_text is None:
-                    # 非文本/非二进制消息为混流常态，不逐一记录
+                elif isinstance(message, str):
+                    raw_text = message
+                else:
                     return
 
                 try:
                     data = json.loads(raw_text)
                 except json.JSONDecodeError as error:
                     plugin_logger.error(
-                        f"[灾害预警] OpenQuakeAPI JSON 解析失败: {error}"
+                        f"[灾害预警] PancakesAPI JSON 解析失败: {error}"
                     )
                     return
 
@@ -678,7 +686,7 @@ class SourceMessageRouter:
                 }:
                     return
 
-                source_id = get_openquake_source_id(source_name)
+                source_id = get_pancakes_source_id(source_name)
                 if source_id is None:
                     return
 
@@ -699,7 +707,7 @@ class SourceMessageRouter:
                     connection_info.get("uri") if connection_info else "未知地址"
                 )
                 plugin_logger.error(
-                    f"[灾害预警] OpenQuakeAPI 处理器处理来自 "
+                    f"[灾害预警] PancakesAPI 处理器处理来自 "
                     f"{connection_name or '未知连接'} 的消息失败，"
                     f"连接地址为 {connection_uri}，错误为 {error}",
                     exc_info=True,
@@ -707,10 +715,106 @@ class SourceMessageRouter:
                 # 异常遥测
                 await self._track_router_error(
                     error,
-                    module="core.source_message_router.openquake_handler",
+                    module="core.source_message_router.pancakes_handler",
                 )
 
-        return openquake_handler
+        return pancakes_handler
+
+    # 向后兼容别名
+    _create_openquake_handler = _create_pancakes_handler
+
+    def _create_jian_project_handler(self):
+        """创建 Jian Project 连接的消息处理器。"""
+
+        async def jian_project_handler(
+            message, connection_name=None, connection_info=None
+        ):
+            self._log_received_message(
+                "Jian Project",
+                message,
+                connection_name=connection_name,
+                connection_info=connection_info,
+            )
+
+            try:
+                try:
+                    data = json.loads(message)
+                except json.JSONDecodeError as error:
+                    plugin_logger.error(
+                        f"[灾害预警] Jian Project JSON解析失败: {error}"
+                    )
+                    return None
+
+                if not isinstance(data, dict):
+                    return None
+
+                msg_type = str(data.get("type") or "").strip().lower()
+
+                # 心跳包：直接过滤
+                if msg_type in ("heartbeat", "pong"):
+                    return None
+
+                # 首帧全量快照包：通知静默协调器，并直接丢弃，不作为新灾害报警推送
+                if msg_type == "all":
+                    coordinator = getattr(self.service, "startup_silence", None)
+                    if coordinator is not None:
+                        try:
+                            coordinator.note_bootstrap_payload(
+                                connection_name=connection_name,
+                                kind="jian_project_initial_all",
+                            )
+                        except Exception as exc:
+                            plugin_logger.debug(
+                                f"[灾害预警] Jian Project initial_all 通知静默协调器失败: {exc}"
+                            )
+                    return None
+
+                # 路由增量单源消息
+                routed_messages = route_jian_project_message(data)
+                if not routed_messages:
+                    return None
+
+                for item in routed_messages:
+                    source_label = item.source_name
+                    source_id = item.source_id
+                    payload = item.payload
+
+                    if not self._is_source_routable(source_id, source_label):
+                        continue
+
+                    plugin_logger.info(
+                        f"[灾害预警] 处理 {source_label} 数据 ({_resolve_config_key(source_id)})",
+                        is_event_linked=True,
+                        event_stream=self._resolve_stream_by_source_id(source_id),
+                        is_silent_window=True,
+                    )
+                    await self._parse_and_dispatch(
+                        source_id=source_id,
+                        source_label=source_label,
+                        parser_input=payload,
+                        connection_name=connection_name,
+                        connection_info=connection_info,
+                        source_channel=source_label,
+                    )
+
+                return None
+            except Exception as error:
+                connection_uri = (
+                    connection_info.get("uri") if connection_info else "未知地址"
+                )
+                plugin_logger.error(
+                    f"[灾害预警] Jian Project 处理器处理来自 "
+                    f"{connection_name or '未知连接'} 的消息失败，"
+                    f"连接地址为 {connection_uri}，错误为 {error}",
+                    exc_info=True,
+                )
+                await self._track_router_error(
+                    error,
+                    module="core.source_message_router.jian_project_handler",
+                )
+                return None
+
+        return jian_project_handler
 
 
 __all__ = ["SourceMessageRouter"]

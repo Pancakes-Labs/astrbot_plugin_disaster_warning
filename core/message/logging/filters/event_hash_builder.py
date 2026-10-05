@@ -85,7 +85,7 @@ class EventHashBuilder:
         if event_id:
             hash_parts.append(f"eid:{event_id}")
 
-            # OpenQuake/GQ 使用 revisionId；其他 EEW 使用 updates/ReportNum/Serial。
+            # Pancakes/GQ 使用 revisionId；其他 EEW 使用 updates/ReportNum/Serial。
             # 严格查找第一个非 None 且非空字符串的字段，确保 0 (如第 0 报或 revisionId 0) 作为有效标识被保留
             report_num_keys = [
                 "updates",

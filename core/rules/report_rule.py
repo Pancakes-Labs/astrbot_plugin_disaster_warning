@@ -5,17 +5,31 @@
 
 from __future__ import annotations
 
+from ...utils.plugin_logger import plugin_logger
 from ..domain.event_models import EarthquakeEvent
 from ..services.identity.event_identity import resolve_report_num
 from ..sources.source_catalog import get_source_entry
 from .base_rule import BaseRule, RuleContext
 from .rule_result import RuleDecision
 
+# 报次策略别名归一化：把目录中出现的同义写法收敛到规则实际消费的策略。
+_REPORT_POLICY_ALIASES: dict[str, str] = {
+    "eew": "jma",  # 日本 EEW 多报次语义，与 jma 策略一致
+}
+
+# 规则链实际消费的规范报次策略。
+_KNOWN_REPORT_POLICIES: frozenset[str] = frozenset(
+    {"none", "jma", "global_quake", "cea_cwa", ""}
+)
+
 
 class ReportRule(BaseRule):
     """原生报次规则。"""
 
     rule_name = "report_rule"
+
+    # 已告警过的 (source_id, report_policy) 组合，避免同源未知策略逐条刷屏。
+    _warned_unknown_policies: set[tuple[str, str]] = set()
 
     def evaluate(self, context: RuleContext) -> RuleDecision:
         """根据来源报次策略决定当前事件是否应被推送。"""
@@ -34,6 +48,8 @@ class ReportRule(BaseRule):
             .strip()
             .lower()
         )
+        # 归一化同义写法，避免未知策略沿用默认间隔绕过报次限频。
+        report_policy = _REPORT_POLICY_ALIASES.get(report_policy, report_policy)
         if report_policy == "none":
             return RuleDecision.accept(reason="当前数据源无报数控制")
 
@@ -60,6 +76,10 @@ class ReportRule(BaseRule):
         # 策略 3：中国与台湾预警，当前策略仍不把 is_final 用于报数放行
         elif report_policy == "cea_cwa":
             supports_final = False
+        # 未知策略会沿用默认 push_every_n（cea_cwa_report_n），
+        # 绕过该源应有的报次限频配置，因此做一次性告警提示误配。
+        elif report_policy not in _KNOWN_REPORT_POLICIES:
+            self._warn_unknown_report_policy(context.source_id, report_policy)
 
         final_report_always_push = bool(
             push_config.get("final_report_always_push", True)
@@ -136,4 +156,16 @@ class ReportRule(BaseRule):
                 "report_num": report_num,
                 "push_every_n": push_every_n,
             },
+        )
+
+    @classmethod
+    def _warn_unknown_report_policy(cls, source_id: str, report_policy: str) -> None:
+        """对未知报次策略做去重告警，避免同源逐条刷屏。"""
+        key = (source_id, report_policy)
+        if key in cls._warned_unknown_policies:
+            return
+        cls._warned_unknown_policies.add(key)
+        plugin_logger.warning(
+            f"[灾害预警] 数据源 {source_id} 配置了未识别的报次策略 "
+            f"'{report_policy}'，将沿用默认报次间隔；请检查数据源目录配置"
         )

@@ -8,8 +8,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ...utils.china_regions import resolve_province_full, strip_province_prefix
 from ...utils.converters import safe_float_convert
 from ...utils.plugin_logger import plugin_logger
+from ...utils.time_converter import TimeConverter
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EarthquakeEvent, EventEnvelope
 from ..domain.event_payload import SourcePayload
@@ -250,6 +252,131 @@ class CEAEEWWolfxParser(BaseParser):
                 is_silent_window=True,
             )
 
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(f"[灾害预警] {self.source_id} 解析数据失败: {exc}")
+            return None
+
+
+class CeaEewJianProjectParser(BaseParser):
+    """中国地震预警网 (CEA) 预警解析器 - Jian Project。"""
+
+    def __init__(self, message_logger=None, source_id: str = "cea_jianproject"):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            event_id = str(msg_data.get("id") or "").strip()
+            if not event_id:
+                return None
+
+            raw_report_num = msg_data.get("number", 1)
+            try:
+                report_num = int(raw_report_num)
+            except (TypeError, ValueError):
+                report_num = 1
+            if report_num <= 0:
+                report_num = 1
+
+            occurred_at = TimeConverter.parse_datetime(msg_data.get("originTime"))
+            if not occurred_at:
+                occurred_at = datetime.now(timezone.utc)
+
+            latitude = safe_float_convert(msg_data.get("latitude"))
+            longitude = safe_float_convert(msg_data.get("longitude"))
+            depth = safe_float_convert(msg_data.get("depth"))
+            magnitude = safe_float_convert(msg_data.get("magnitude"))
+            place_name = str(msg_data.get("placeName") or "").strip()
+
+            province_hint, _ = strip_province_prefix(place_name)
+            province = resolve_province_full(province_hint) if province_hint else None
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_cea",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "earthquake_warning",
+                "event_id": event_id,
+                "province": province,
+                "report_num": report_num,
+                "updates": report_num,
+                "is_final": False,
+            }
+
+            # Jian Project CEA 载荷以 epiIntensity 承载预估烈度，
+            # 写入 intensity 供强度过滤规则（combine_mode=all/any）判定。
+            # 先转换再回退：首选字段为空字符串时转换结果为 None，此时才使用备用字段，
+            intensity = safe_float_convert(msg_data.get("epiIntensity"))
+            if intensity is None:
+                intensity = safe_float_convert(msg_data.get("intensity"))
+            if intensity is not None:
+                intensity = round(intensity, 1)
+
+            domain_event = EarthquakeEvent(
+                occurred_at=occurred_at,
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
+                intensity=intensity,
+                province=province,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="earthquake_warning",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_cea",
+                report_num=report_num,
+                published_at=occurred_at,
+                aliases=(event_id,),
+                attributes={
+                    "parser_name": self.source_entry.parser_name
+                    if self.source_entry
+                    else "china_eew_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "china_earthquake_warning",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="cea",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+
+            plugin_logger.info(
+                f"[灾害预警] CEA 地震预警 (Jian Project) 解析成功: {domain_event.place_name} (M {domain_event.magnitude}) 第{report_num}报",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
+            )
             return envelope
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 解析数据失败: {exc}")

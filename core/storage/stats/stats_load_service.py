@@ -379,11 +379,15 @@ class StatsLoadService:
                 break
         weather_types[weather_type] += 1
 
+        event_id_str = str(
+            event.get("real_event_id") or event.get("unique_id") or ""
+        ).strip()
         region = self.manager._weather_region_resolver.extract_province(combined_text)
         if not region and allow_fallback:
             region = await self.manager._weather_region_resolver.extract_province_with_fallback(
                 title_text,
                 " ".join(item for item in (headline_text, detail_text) if item),
+                event_id=event_id_str,
             )
         if region:
             weather_regions[region] += 1

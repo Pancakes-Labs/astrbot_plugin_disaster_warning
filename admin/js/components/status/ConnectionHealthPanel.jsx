@@ -17,12 +17,37 @@ function ConnectionHealthPanel() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [retrying, setRetrying] = useState(false);
     const [hoverTip, setHoverTip] = useState(null);
     const tipRef = useRef(null);
     const dataRef = useRef(null);
     const lastFullAtRef = useRef(0);
     // 条带 hover：记录当前命中的 day key，避免间隙抖动重复 setState
     const hoverKeyRef = useRef('');
+
+    /**
+     * 兜底：将浏览器/网络层抛出的英文异常文案（如 "Failed to fetch"）
+     * 归一化为中文可读提示，避免直接把原始报错暴露到界面上。
+     */
+    const normalizeErrorMessage = useCallback((raw) => {
+        const text = String(raw ?? '').trim();
+        if (!text) return '加载连接健康数据失败';
+        const lower = text.toLowerCase();
+        const isNetworkError = lower.includes('failed to fetch')
+            || lower.includes('networkerror')
+            || lower.includes('network request failed')
+            || lower.includes('load failed')
+            || lower.includes('err_connection')
+            || lower.includes('err_network')
+            || lower.includes('timeout')
+            || lower.includes('aborted');
+        if (isNetworkError) {
+            return '无法连接后端服务，请确认插件服务正在运行后重试';
+        }
+        // 已是中文文案则原样返回，否则统一收敛为通用提示
+        if (/[\u4e00-\u9fa5]/.test(text)) return text;
+        return '加载连接健康数据失败';
+    }, []);
 
     const LIVE_INTERVAL_MS = 15000;
     const FULL_INTERVAL_MS = 5 * 60 * 1000;
@@ -112,12 +137,24 @@ function ConnectionHealthPanel() {
         } catch (e) {
             console.error('[ConnectionHealthPanel] full load failed:', e);
             if (!dataRef.current) {
-                setError(e?.message || '加载连接健康数据失败');
+                setError(normalizeErrorMessage(e?.message));
             }
         } finally {
             setLoading(false);
         }
-    }, [statusApi]);
+    }, [statusApi, normalizeErrorMessage]);
+
+    // 错误态手动重试：清空错误并重新走一次 full 拉取
+    const handleRetry = useCallback(async () => {
+        setRetrying(true);
+        setError('');
+        setLoading(true);
+        try {
+            await loadFull({ silent: false });
+        } finally {
+            setRetrying(false);
+        }
+    }, [loadFull]);
 
     const loadLive = useCallback(async () => {
         if (!statusApi || typeof statusApi.getConnectionHealth !== 'function') {
@@ -429,9 +466,22 @@ function ConnectionHealthPanel() {
                     <div className="status-card-icon status-card-icon--service">📡</div>
                     <Typography variant="h6" className="status-card-title">通道健康</Typography>
                 </Box>
-                <Typography variant="body2" className="connection-health-error">
-                    {error}
-                </Typography>
+                <div className="connection-health-error" role="alert">
+                    <Typography variant="body2" className="connection-health-error__title">
+                        通道健康数据暂不可用
+                    </Typography>
+                    <Typography variant="body2" className="connection-health-error__message">
+                        {error}
+                    </Typography>
+                    <button
+                        type="button"
+                        className="btn-action connection-health-error__retry"
+                        onClick={handleRetry}
+                        disabled={retrying}
+                    >
+                        <span>{retrying ? '正在重试…' : '重新加载'}</span>
+                    </button>
+                </div>
             </div>
         );
     }
@@ -443,6 +493,34 @@ function ConnectionHealthPanel() {
     const legend = Array.isArray(data?.legend) ? data.legend : [];
     const updatedDisplay = overall.updated_at_display
         || formatDateTime(overall.updated_at);
+
+    // 空数据兜底：接口成功返回但无任何可展示内容时，给出引导而非空壳面板
+    if (components.length === 0 && !overall.label && incidentsByDay.length === 0) {
+        return (
+            <div className="card connection-health-panel">
+                <Box className="status-card-header status-card-header--compact">
+                    <div className="status-card-icon status-card-icon--service">📡</div>
+                    <Typography variant="h6" className="status-card-title">通道健康</Typography>
+                </Box>
+                <div className="connection-health-empty">
+                    <Typography variant="body2" className="connection-health-empty__title">
+                        暂无可用的通道健康数据
+                    </Typography>
+                    <Typography variant="body2" className="connection-health-empty__message">
+                        数据源监控尚未产生样本，或后端状态采集未就绪。
+                    </Typography>
+                    <button
+                        type="button"
+                        className="btn-action connection-health-empty__retry"
+                        onClick={handleRetry}
+                        disabled={retrying}
+                    >
+                        <span>{retrying ? '正在重试…' : '刷新数据'}</span>
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="card connection-health-panel">

@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from ...utils.converters import safe_float_convert
 from ...utils.plugin_logger import plugin_logger
 from ...utils.time_converter import TimeConverter
 from ..domain.event_identity import EventIdentity
@@ -680,4 +681,137 @@ class JmaTsunamiEqscParser(BaseParser):
             plugin_logger.error(
                 f"[灾害预警] {self.source_id} 解析 EQSC 海啸数据失败: {exc}"
             )
+            return None
+
+
+class ChinaTsunamiJianProjectParser(BaseParser):
+    """自然资源部海啸预警中心海啸解析器 - Jian Project。"""
+
+    def __init__(
+        self, message_logger=None, source_id: str = "china_tsunami_jianproject"
+    ):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            raw_event_id = str(msg_data.get("id") or "").strip()
+            title = str(msg_data.get("title") or msg_data.get("headline") or "").strip()
+            level = str(msg_data.get("level") or "").strip()
+
+            if not title and level:
+                title = f"海啸{level}警报"
+            if not title:
+                return None
+
+            origin_time_raw = str(msg_data.get("originTime") or "").strip()
+            issue_time = TimeConverter.parse_datetime(
+                msg_data.get("originTime")
+            ) or datetime.now(timezone.utc)
+
+            # 缺失 Event ID 时按报文特征（编号、标题、震中地名、发震时间）拼合回退 ID。
+            # 必须使用 originTime 原始字符串，不能用上面的 datetime.now 兜底值：
+            # 后者对同一海啸每次推送都会生成不同的秒级 ID，导致去重链无法命中、重复推送。
+            event_id = raw_event_id
+            if not event_id:
+                stable_parts = [
+                    str(msg_data.get("number") or "").strip(),
+                    title,
+                    str(msg_data.get("place") or "").strip(),
+                    origin_time_raw,
+                ]
+                stable_parts = [part for part in stable_parts if part]
+                event_id = (
+                    "tsunami_jian_" + "|".join(stable_parts)
+                    if stable_parts
+                    else "tsunami_jian_unknown"
+                )
+                plugin_logger.debug(
+                    f"[灾害预警] {self.source_id} 海啸消息缺少稳定id，已使用回退事件ID: {event_id}"
+                )
+
+            source_entry = get_source_entry(self.source_id)
+
+            metadata = {
+                "code": raw_event_id,
+                "title": title,
+                "level": level,
+                "headline": str(msg_data.get("headline") or "").strip(),
+                "number": msg_data.get("number", 1),
+                "latitude": safe_float_convert(msg_data.get("latitude")),
+                "longitude": safe_float_convert(msg_data.get("longitude")),
+                "depth": safe_float_convert(msg_data.get("depth")),
+                "magnitude": safe_float_convert(msg_data.get("magnitude")),
+                "place_name": str(msg_data.get("place") or "").strip(),
+                "org_unit": str(
+                    msg_data.get("orgUnit") or "自然资源部海啸预警中心"
+                ).strip(),
+                "description": str(msg_data.get("description") or "").strip(),
+                "details_url": str(msg_data.get("htmlUrl") or "").strip(),
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_tsunami",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "tsunami",
+            }
+
+            domain_event = TsunamiEvent(
+                title=title,
+                level=level,
+                issued_at=issue_time,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="tsunami",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_tsunami",
+                published_at=issue_time,
+                aliases=tuple(item for item in (raw_event_id,) if item),
+                attributes={
+                    "parser_name": self.source_entry.parser_name
+                    if self.source_entry
+                    else "china_tsunami_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "china_tsunami",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="nmefc-tsunami",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+
+            plugin_logger.info(
+                f"[灾害预警] 海啸预警解析成功: {domain_event.title}, 等级: {domain_event.level}",
+                is_event_linked=True,
+                event_stream="tsunami",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(f"[灾害预警] {self.source_id} 解析海啸数据失败: {exc}")
             return None

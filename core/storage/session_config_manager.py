@@ -58,12 +58,18 @@ class SessionConfigManager:
         ("data_sources", "eqsc", "poll_interval_seconds"),
         # FAN Studio 鉴权影响全局 WebSocket 建连，不允许会话级覆写。
         ("data_sources", "fan_studio", "api_key"),
+        # Jian Project 登录密钥（lk_/rt_）影响全局 WebSocket 建连，
+        # 且建连只读取全局配置；禁止会话级覆写。
+        ("data_sources", "jian_project", "login_key"),
         # FAN Studio 主备服务器偏好影响全局连接策略，不允许会话级覆写。
         ("data_sources", "fan_studio", "fan_server_preference"),
         # 浏览器页面池大小影响全局运行态，不允许会话级覆写。
         ("message_format", "browser_pool_size"),
         # 是否忽略 HTTPS 证书错误是浏览器启动级配置（context 全局创建），不允许会话级覆写
         ("message_format", "browser_ignore_https_errors"),
+        # 代理绕过是浏览器启动级配置（launch 参数 + 子进程 env），不允许会话级覆写
+        ("message_format", "browser_bypass_proxy_for_map_tiles"),
+        ("message_format", "browser_proxy_bypass_domains"),
     )
 
     def __init__(self, default_config_ref: dict[str, Any]):
@@ -78,7 +84,38 @@ class SessionConfigManager:
 
         self._overrides: dict[str, dict[str, Any]] = {}
         self._legacy_full_configs: dict[str, dict[str, Any]] = {}
+        # 变更监听器：供运行时查询服务等消费方在覆写写入后立即失效缓存。
+        self._change_listeners: list[Any] = []
+        # 配置版本号：每次覆写写入自增，可作为缓存键的一部分做精确失效。
+        self._change_version: int = 0
         self._load()
+
+    def add_change_listener(self, listener) -> None:
+        """注册配置变更监听器（幂等，重复注册同一监听器会被忽略）。"""
+        if listener is None or listener in self._change_listeners:
+            return
+        self._change_listeners.append(listener)
+
+    def remove_change_listener(self, listener) -> None:
+        """移除配置变更监听器。"""
+        try:
+            self._change_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    @property
+    def change_version(self) -> int:
+        """当前配置版本号（每次覆写写入自增）。"""
+        return self._change_version
+
+    def _notify_change(self) -> None:
+        """自增版本号并通知全部监听器；监听器异常不得影响写入主流程。"""
+        self._change_version += 1
+        for listener in list(self._change_listeners):
+            try:
+                listener()
+            except Exception as e:
+                logger.debug(f"[灾害预警] 会话配置变更监听器执行失败: {e}")
 
     def _ensure_storage_dir(self) -> None:
         """确保会话配置存储目录存在。"""
@@ -100,6 +137,7 @@ class SessionConfigManager:
                             str(k): v for k, v in data.items() if isinstance(v, dict)
                         }
                         self._restore_legacy_weather_fields_from_full_configs()
+                        self._finalize_loaded_overrides()
                         return
             except Exception as e:
                 logger.warning(f"[灾害预警] 读取会话差异配置失败，将使用空配置: {e}")
@@ -127,6 +165,43 @@ class SessionConfigManager:
             except Exception as e:
                 logger.warning(f"[灾害预警] 迁移旧会话配置失败: {e}")
 
+        self._finalize_loaded_overrides()
+
+    def _finalize_loaded_overrides(self) -> None:
+        """加载后统一执行兼容迁移，并把产生的变化持久化。"""
+        if self._migrate_legacy_data_source_group_names():
+            self._save()
+
+    def _migrate_legacy_data_source_group_names(self) -> bool:
+        """把会话 override 中残留的旧数据源组名迁移到当前规范组名。"""
+        # 延迟导入：避免存储层在模块加载期与数据源目录形成潜在循环依赖。
+        from ..sources.source_catalog import CONFIG_GROUP_ALIASES
+
+        changed = False
+        for override in self._overrides.values():
+            if not isinstance(override, dict):
+                continue
+            data_sources = override.get("data_sources")
+            if not isinstance(data_sources, dict):
+                continue
+            for legacy, canonical in CONFIG_GROUP_ALIASES.items():
+                if legacy not in data_sources:
+                    continue
+                legacy_cfg = data_sources.pop(legacy)
+                changed = True
+                if not isinstance(legacy_cfg, dict):
+                    continue
+                existing = data_sources.get(canonical)
+                if isinstance(existing, dict):
+                    merged = copy.deepcopy(legacy_cfg)
+                    merged.update(existing)
+                    data_sources[canonical] = merged
+                else:
+                    data_sources[canonical] = legacy_cfg
+        if changed:
+            logger.info("[灾害预警] 已迁移会话配置中的旧数据源组名")
+        return changed
+
     def _save(self) -> None:
         """以临时文件替换方式保存差异补丁，尽量降低写入中断风险。"""
         self._ensure_storage_dir()
@@ -145,6 +220,9 @@ class SessionConfigManager:
                     os.remove(temp_file)
                 except Exception:
                     pass
+            return
+        # 仅在真实写入成功后通知变更，避免写入失败时误让消费方失效缓存。
+        self._notify_change()
 
     def _load_legacy_full_configs(self) -> dict[str, dict[str, Any]]:
         """加载旧版全量配置字典。"""

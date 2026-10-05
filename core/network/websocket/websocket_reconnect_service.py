@@ -23,12 +23,27 @@ from .fan_studio_connection_policy import (
 class WebSocketReconnectService:
     """WebSocket 重连与离线通知服务。"""
 
+    # Jian Project 换票/发钥失败中「需人工重新申请凭证」的永久性错误标记。
+    # 这类错误短时爆破重试无意义，应直接进入兜底长周期（等待运维介入）。
+    _PERMANENT_CREDENTIAL_ERROR_MARKERS: tuple[str, ...] = (
+        "[4101]",  # 登录密钥无效或已使用 (invalid_login_key)
+        "[4102]",  # 登录密钥已过期 (expired_login_key)
+        "[4201]",  # 长期 Token 无效 (invalid_refresh_token)
+        "[4202]",  # 长期 Token 已过期 (expired_refresh_token)
+        "[4006]",  # 账号被封禁，无法发钥、换票或握手 (account_banned)
+        "invalid_login_key",
+        "expired_login_key",
+        "invalid_refresh_token",
+        "expired_refresh_token",
+        "account_banned",
+    )
+
     def __init__(self, manager):
         """保存管理器引用，供重连流程读写连接状态。"""
         self.manager = manager
 
     def handle_connection_error(
-        self, name: str, uri: str, headers: dict | None, error: Exception
+        self, name: str, uri: str, headers: dict | None, error: Exception | str
     ) -> None:
         """统一处理连接错误。"""
         # 先摘掉活跃连接映射，并异步关闭底层句柄，避免旧连接继续占用上游配额
@@ -127,11 +142,17 @@ class WebSocketReconnectService:
         )
         self.manager.reconnect_tasks[name] = reconnect_task
 
-    def is_critical_error(self, error: Exception) -> bool:
+    def is_critical_error(self, error: Exception | str) -> bool:
         """判断是否为需要直接进入兜底重连的关键错误。"""
         error_msg = str(error).lower()
         # 授权拒绝错误，或由业务层主动认定的不可瞬时重试的关闭帧
         if "401" in error_msg or "403" in error_msg:
+            return True
+        # Jian Project 凭证失效，需人工重新申请，短时 5 秒爆破重试无意义，
+        # 直接进入兜底周期，避免日志被每 5 秒一次的换票失败刷屏。
+        if any(
+            marker in error_msg for marker in self._PERMANENT_CREDENTIAL_ERROR_MARKERS
+        ):
             return True
         if "协议错误关闭（不重连）" in error_msg:
             return True

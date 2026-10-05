@@ -1048,6 +1048,12 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
 
         merged_options = dict(options or {})
         timezone = merged_options.get("timezone", "UTC+8")
+
+        # 取消报单独走极简格式，避免保留无效的震中与震级信息
+        # （与 JmaEewPresenter 的取消报处理保持一致）。
+        if data.is_cancel:
+            return "🚨[地震情报] [取消] 日本气象厅\n📝之前的地震情报已取消"
+
         info_type = cls._determine_info_type(data)
 
         revision_text = (
@@ -1120,6 +1126,9 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
         """展示日本地震情报，可根据配置展开显示每个具体观测点的详细震度。"""
         merged_options = _resolve_options(display_context, options)
         rendered = cls.format_message(display_context, merged_options)
+        # 取消报的渲染结果已是完整终态，不再追加观测点或备注
+        if display_context.is_cancel:
+            return rendered
         if not _is_earthquake_view(display_context):
             return rendered
 
