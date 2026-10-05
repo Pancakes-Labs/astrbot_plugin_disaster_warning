@@ -19,6 +19,8 @@ import aiohttp
 
 from astrbot.api import logger
 
+from ....utils.log_sanitizer import sanitize_log_text
+
 # 自建 LogPaste 服务上传端点。
 PASTE_ENDPOINT = "https://paste.aloys23.link/api/v1/pastes"
 
@@ -28,6 +30,26 @@ _UPLOAD_TIMEOUT_SECONDS = 15
 
 class PasteUploadError(Exception):
     """Paste 上传失败（网络异常、超时或服务端返回非 201）。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        detail: str = "",
+    ) -> None:
+        super().__init__(message)
+        # 服务端 HTTP 状态码（非 HTTP 错误时为 None）。
+        self.status = status
+        # 服务端响应正文片段等诊断信息，可能含敏感内容，仅供内部诊断使用。
+        self.detail = detail
+
+    def diagnostic(self) -> str:
+        """返回脱敏后的完整诊断文本，仅供服务端日志使用。"""
+        text = str(self)
+        if self.detail:
+            text = f"{text} | 响应片段: {self.detail}"
+        return sanitize_log_text(text)
 
 
 class PasteClient:
@@ -63,13 +85,17 @@ class PasteClient:
                 status = resp.status
                 raw_body = await resp.text()
                 if status != 201:
+                    # 响应正文可能含敏感诊断信息，仅存入 detail，
+                    # 不拼进 message，避免被日志导出等链路回显给用户。
                     raise PasteUploadError(
-                        f"服务端返回 HTTP {status}: {raw_body[:200]}"
+                        f"服务端返回 HTTP {status}",
+                        status=status,
+                        detail=raw_body[:200],
                     )
                 try:
                     payload = json.loads(raw_body)
                 except ValueError as e:
-                    raise PasteUploadError(f"响应 JSON 解析失败: {e}") from e
+                    raise PasteUploadError("响应 JSON 解析失败", detail=str(e)) from e
                 if not isinstance(payload, dict) or not payload.get("url"):
                     raise PasteUploadError("响应缺少 url 字段")
                 return payload

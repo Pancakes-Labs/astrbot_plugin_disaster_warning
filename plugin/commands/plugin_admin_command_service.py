@@ -1092,13 +1092,20 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             )
             payload = await get_paste_client().upload_text(export_text)
         except Exception as e:
-            # 失败仅提示原因（用户确认不做聊天转发回退），细节留服务端日志。
-            logger.warning(f"[灾害预警] 日志导出失败: {e}")
+            # 用户可见回复使用固定文案，绝不回显异常原文。
+            diagnostic = getattr(e, "diagnostic", None)
+            safe_detail = (
+                diagnostic() if callable(diagnostic) else sanitize_log_text(str(e))
+            )
+            logger.warning(f"[灾害预警] 日志导出失败: {safe_detail}")
             await self._track_command_feature(
                 "command_admin_action",
                 {"action": "log_export", "success": False},
             )
-            yield event.plain_result(f"❌ 日志导出失败: {e}")
+            yield event.plain_result(
+                "❌ 日志导出失败，请稍后重试。\n"
+                "若持续失败，可查看运行日志中的详细诊断信息。"
+            )
             return
 
         await self._track_command_feature(

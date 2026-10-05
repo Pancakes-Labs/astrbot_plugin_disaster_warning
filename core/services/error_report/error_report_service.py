@@ -91,7 +91,12 @@ class ErrorReportService:
             except Exception as e:
                 # 上传失败仅留调试日志，不影响主流程；
                 # 不记录冷却时间戳，下一条同类错误可立即重试。
-                logger.debug(f"[灾害预警] 错误报告上传失败（已忽略）: {e}")
+                # 优先使用异常的 diagnostic()（含脱敏后的服务端响应片段）。
+                diagnostic = getattr(e, "diagnostic", None)
+                safe_detail = (
+                    diagnostic() if callable(diagnostic) else sanitize_log_text(str(e))
+                )
+                logger.debug(f"[灾害预警] 错误报告上传失败（已忽略）: {safe_detail}")
                 return None
 
             url = str(payload.get("url") or "")
