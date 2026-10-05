@@ -1048,6 +1048,12 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
 
         merged_options = dict(options or {})
         timezone = merged_options.get("timezone", "UTC+8")
+
+        # 取消报单独走极简格式，避免保留无效的震中与震级信息
+        # （与 JmaEewPresenter 的取消报处理保持一致）。
+        if data.is_cancel:
+            return "🚨[地震情报] [取消] 日本气象厅\n📝之前的地震情报已取消"
+
         info_type = cls._determine_info_type(data)
 
         revision_text = (
