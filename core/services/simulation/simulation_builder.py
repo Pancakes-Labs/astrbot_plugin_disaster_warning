@@ -511,10 +511,7 @@ class SimulationBuilder:
             scale = _safe_int(params.get("scale"), None)
             # cwa_jianproject 的 CwaEewJianProjectParser 不产出震度；schema 不暴露该字段，
             # 但构建器不会按 schema 重新校验入参，故此处显式排除，避免 params 被注入后误写。
-            if (
-                scale is not None
-                and source_entry.source_id != "cwa_jianproject"
-            ):
+            if scale is not None and source_entry.source_id != "cwa_jianproject":
                 if "p2p" in step.source_id:
                     # P2P 源使用业务档位值（10=震度1 … 70=震度7），需转换为规范震度。
                     # 对齐真实解析链路 ScaleConverter.convert_p2p_scale。
@@ -922,7 +919,11 @@ class SimulationBuilder:
                 extra["magnitude_type"] = magnitude_type
 
         # CENC 报告源：补信息类型与名称。
-        if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx", "cenc_jianproject"):
+        if source_entry.source_id in (
+            "cenc_fanstudio",
+            "cenc_wolfx",
+            "cenc_jianproject",
+        ):
             info_type_name = str(params.get("info_type_name") or "地震测定").strip()
             name_by_info = str(params.get("name_by_info") or "").strip()
             if info_type_name:

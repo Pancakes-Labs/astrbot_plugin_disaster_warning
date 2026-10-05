@@ -620,11 +620,23 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
         "cwa_jianproject": ("宜蘭縣東部外海", 24.49, 122.38, 5.2, 60.0),
         "jma_jianproject": ("茨城県北部", 36.5, 140.6, 3.5, 70.0),
         "cenc_jianproject": ("青海海西州直辖区", 37.84, 95.62, 3.7, 10.0),
-        "usgs_jianproject": ("15 km N of Warner Springs, CA", 33.417, -116.639, 0.31, 6.45),
+        "usgs_jianproject": (
+            "15 km N of Warner Springs, CA",
+            33.417,
+            -116.639,
+            0.31,
+            6.45,
+        ),
         # PancakesAPI 地震子源：无独立示例，沿用同上游（JMA / USGS）文档示例
         "jma_pancakes": ("茨城県北部", 36.5, 140.6, 3.5, 70.0),
         "jma_eqlist_pancakes": ("熊本県熊本地方", 32.6, 130.7, 2.3, 10.0),
-        "usgs_pancakes": ("15 km N of Warner Springs, CA", 33.417, -116.639, 0.31, 6.45),
+        "usgs_pancakes": (
+            "15 km N of Warner Springs, CA",
+            33.417,
+            -116.639,
+            0.31,
+            6.45,
+        ),
     }
     _place_name, _lat, _lon, _mag, _depth = _source_base_defaults.get(
         source_id, ("四川甘孜州雅江县", 29.43, 101.09, 4.0, 8.0)
