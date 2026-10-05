@@ -1474,10 +1474,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 },
             )
             yield event.plain_result("\n".join(lines))
+            # 仅记录生效范围与发生变更的字段名，不记录精确经纬度与地名。
             logger.info(
                 f"[灾害预警] 本地监控位置已更新（范围：{scope_desc}）："
-                f"纬度={final_lm.get('latitude')} 经度={final_lm.get('longitude')} "
-                f"地名={final_lm.get('place_name') or '本地'}"
+                f"变更字段={sorted(updates.keys())}"
             )
         except Exception as e:
             logger.error(f"[灾害预警] 设置所在地失败: {e}")
