@@ -90,15 +90,14 @@ class BackupService:
         try:
             return await self._run_backup_in_executor(targets)
         except asyncio.CancelledError:
-            # 等待底层线程真正结束后再释放锁。
+            # 等待底层线程真正结束后再由 finally 释放锁。
             await self._drain_backup_executor()
-            db_lock.release()
             raise
         except BaseException:
             await self._drain_backup_executor()
-            db_lock.release()
             raise
-        else:
+        finally:
+            # 用 finally 保证成功 return 与异常路径都能释放锁。
             db_lock.release()
 
     async def _run_backup_in_executor(self, targets: list[str] = None) -> io.BytesIO:
