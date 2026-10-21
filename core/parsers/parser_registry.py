@@ -14,6 +14,7 @@ from .china_earthquake_parser import (
 )
 from .china_eew_parser import (
     CeaEewJianProjectParser,
+    CeaPrEewJianProjectParser,
     CEAEEWParser,
     CEAEEWPRParser,
     CEAEEWWolfxParser,
@@ -21,8 +22,10 @@ from .china_eew_parser import (
 from .china_intensity_report_eqsc_parser import CencIntensityReportEqscParser
 from .china_intensity_report_parser import CencIntensityReportParser
 from .fssn_cmt_parser import FssnCmtParser
+from .fssn_report_parser import FssnReportParser
 from .global_sources_parser import (
     GlobalQuakeParser,
+    ShakeAlertEewJianProjectParser,
     ShakeAlertEewParser,
     UsgsEarthquakeJianProjectParser,
     UsgsEarthquakeParser,
@@ -41,7 +44,7 @@ from .japan_eew_parser import (
     JmaEewWolfxParser,
 )
 from .snet_parser import SnetParser
-from .taiwan_earthquake_parser import CwaReportParser
+from .taiwan_earthquake_parser import CwaReportJianProjectParser, CwaReportParser
 from .taiwan_eew_parser import CwaEewJianProjectParser, CwaEewParser, CwaEewWolfxParser
 from .tsunami_parser import (
     ChinaTsunamiJianProjectParser,
@@ -75,6 +78,7 @@ PARSER_CLASS_BY_NAME = {
     "usgs_pancakes_parser": UsgsPancakesParser,
     "snet_parser": SnetParser,
     "fssn_cmt_parser": FssnCmtParser,
+    "fssn_report_parser": FssnReportParser,
 }
 
 
@@ -95,10 +99,9 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
     # 细化分派 1：中国地震预警，按数据源拆分为 FAN Studio、省级网、Wolfx 或 Jian Project 版本
     if entry.parser_name == "china_eew_parser":
         parser_class = {
-            "cea_fanstudio": CEAEEWParser,
-            "cea_pr_fanstudio": CEAEEWPRParser,
             "cea_wolfx": CEAEEWWolfxParser,
             "cea_jianproject": CeaEewJianProjectParser,
+            "cea_pr_jianproject": CeaPrEewJianProjectParser,
         }.get(source_id)
         if parser_class is None:
             return None
@@ -115,7 +118,6 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
     # 细化分派 3：日本地震预警，拆分为 FAN Studio、P2P、Wolfx 还是 Jian Project 接收版本
     if entry.parser_name == "japan_eew_parser":
         parser_class = {
-            "jma_fanstudio": JmaEewFanStudioParser,
             "jma_p2p": JmaEewP2PParser,
             "jma_wolfx": JmaEewWolfxParser,
             "jma_jianproject": JmaEewJianProjectParser,
@@ -137,7 +139,6 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
     # 细化分派 5：中国地震台网地震测定，拆分为 FAN Studio、Wolfx 还是 Jian Project 接收版本
     if entry.parser_name == "china_report_parser":
         parser_class = {
-            "cenc_fanstudio": CencEarthquakeParser,
             "cenc_wolfx": CencEarthquakeWolfxParser,
             "cenc_jianproject": CencEarthquakeJianProjectParser,
         }.get(source_id)
@@ -148,7 +149,6 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
     # 细化分派 6：台湾地震预警，拆分为 FAN Studio、Wolfx 还是 Jian Project 接收版本
     if entry.parser_name == "taiwan_eew_parser":
         parser_class = {
-            "cwa_fanstudio": CwaEewParser,
             "cwa_wolfx": CwaEewWolfxParser,
             "cwa_jianproject": CwaEewJianProjectParser,
         }.get(source_id)
@@ -160,6 +160,20 @@ def create_parser_for_source(source_id: str, *args, **kwargs):
     if entry.parser_name == "china_tsunami_parser":
         if source_id == "china_tsunami_jianproject":
             return ChinaTsunamiJianProjectParser(*args, **kwargs)
+        parser_class = resolve_parser_class(entry.parser_name)
+        return parser_class(*args, **kwargs) if parser_class else None
+
+    # 细化分派：台湾地震报告
+    if entry.parser_name == "taiwan_report_parser":
+        if source_id == "cwa_report_jianproject":
+            return CwaReportJianProjectParser(*args, **kwargs)
+        parser_class = resolve_parser_class(entry.parser_name)
+        return parser_class(*args, **kwargs) if parser_class else None
+
+    # 细化分派：ShakeAlert
+    if entry.parser_name == "shakealert_eew_parser":
+        if source_id == "sa_jianproject":
+            return ShakeAlertEewJianProjectParser(*args, **kwargs)
         parser_class = resolve_parser_class(entry.parser_name)
         return parser_class(*args, **kwargs) if parser_class else None
 

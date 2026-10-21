@@ -364,7 +364,7 @@ class EarthquakeThresholdRule(BaseRule):
 
         # 模式 5：仅依赖震级阈值的来源统一走这一分支（USGS / ShakeAlert 等）。
         if (
-            source_id in {"usgs_fanstudio", "sa_fanstudio"}
+            source_id in {"usgs_jianproject", "sa_jianproject", "usgs_fanstudio", "sa_fanstudio"}
             or intensity_mode == "magnitude"
         ):
             runtime_filter = policy_state.get("magnitude_filter") or {}

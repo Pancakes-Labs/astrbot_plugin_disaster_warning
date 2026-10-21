@@ -905,7 +905,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         lon: float = None,
         magnitude: float = None,
         depth: float = None,
-        source: str = "cea_fanstudio",
+        source: str = "cea_jianproject",
     ):
         """处理模拟灾害命令。
 

@@ -6,6 +6,23 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+## [Unreleased]
+
+### 破坏性变更
+
+- FAN Studio 多源 WebSocket 已停运：配置组 `data_sources.fan_studio` **仅保留** FSSN 地震信息与 FSSN CMT，地址改为 `wss://fssn-api.fanstudio.tech`，**不再需要** API Key / 主备偏好。
+- 旧 FAN 子开关（CEA、CWA、ShakeAlert、台风等）已移除；请改用 Jian Project / Wolfx / EQSC 等替代源。
+
+### 新功能
+
+- Jian Project 新增：中国地震预警网（省级）、台湾中央气象署地震报告、美国 ShakeAlert、中央气象局实时活跃台风（HTTP 轮询）。
+- 新增 FSSN 地震信息数据源登记与解析（此前仅有 CMT）。
+
+### 修复 / 其他
+
+- 关联 Issue #238、#42。
+
+
 # 2026/10/05 v1.6.5
 
 ## 🚀 What's Changed

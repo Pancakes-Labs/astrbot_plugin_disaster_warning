@@ -18,7 +18,6 @@ from ....utils.map_tile_sources import (
     MAP_TILE_SOURCES,
     normalize_map_source,
 )
-from ...network.websocket.fan_studio_connection_policy import ServerPreference
 from ...network.websocket.jian_project_connection_policy import (
     jian_project_auth_service,
 )
@@ -1446,84 +1445,57 @@ class ConfigValidator:
                 )
                 snet_cfg["poll_interval_seconds"] = 60
 
-        # 校验 FAN Studio 下的扩展开关与鉴权字段
+        # 校验 FSSN（原 fan_studio 配置组）：仅 fssn / fssn_cmt，无需 API Key
         fan_studio_cfg = cfg.get("fan_studio")
         if isinstance(fan_studio_cfg, dict):
-            # FAN 台风触发为遗留路径；缺省关闭。
-            if "china_typhoon" not in fan_studio_cfg:
-                fan_studio_cfg["china_typhoon"] = False
-            ConfigValidator._ensure_bool(fan_studio_cfg, "china_typhoon", False)
-            # 旧配置可能没有新键；缺省按 schema 默认开启，避免静默丢弃 /sa
-            if "usa_shakealert" not in fan_studio_cfg:
-                fan_studio_cfg["usa_shakealert"] = True
-            ConfigValidator._ensure_bool(fan_studio_cfg, "usa_shakealert", True)
+            ConfigValidator._ensure_bool(fan_studio_cfg, "enabled", True)
+            if "fssn" not in fan_studio_cfg:
+                fan_studio_cfg["fssn"] = True
+            ConfigValidator._ensure_bool(fan_studio_cfg, "fssn", True)
             if "fssn_cmt" not in fan_studio_cfg:
                 fan_studio_cfg["fssn_cmt"] = True
             ConfigValidator._ensure_bool(fan_studio_cfg, "fssn_cmt", True)
-
-            # api_key：WebSocket 建连后发送 {"type":"auth","appId","key"}
-            api_key = fan_studio_cfg.get("api_key")
-            if api_key is None:
-                fan_studio_cfg["api_key"] = ""
-            elif not isinstance(api_key, str):
-                logger.warning(
-                    "[灾害预警] 配置警告: FAN Studio api_key 类型错误，已重置为空。"
-                )
-                fan_studio_cfg["api_key"] = ""
-            else:
-                fan_studio_cfg["api_key"] = api_key.strip()
-
-            if (
-                fan_studio_cfg.get("enabled")
-                and not str(fan_studio_cfg.get("api_key", "")).strip()
+            # 清理已停运键，避免旧配置残留误导
+            for stale in (
+                "api_key",
+                "fan_server_preference",
+                "china_earthquake_warning",
+                "china_earthquake_warning_provincial",
+                "taiwan_cwa_earthquake",
+                "taiwan_cwa_report",
+                "china_cenc_earthquake",
+                "china_cenc_intensity_report",
+                "japan_jma_eew",
+                "usgs_earthquake",
+                "usa_shakealert",
+                "china_weather_alarm",
+                "china_tsunami",
+                "china_typhoon",
             ):
-                logger.warning(
-                    "[灾害预警] 配置警告: FAN Studio 数据源已启用但未配置 api_key，"
-                    "WebSocket 鉴权将无法完成，相关连接会被跳过。"
-                )
+                fan_studio_cfg.pop(stale, None)
 
-            # fan_server_preference：FAN Studio 主备服务器偏好
-            # 可选值：主服务器优先 / 备用服务器优先 / 自动；
-            # 缺省按 schema 默认"主服务器优先"填充，非法值规范化回退默认。
-            if "fan_server_preference" not in fan_studio_cfg:
-                fan_studio_cfg["fan_server_preference"] = (
-                    ServerPreference.PRIMARY_FIRST.value
-                )
-            else:
-                raw_pref = fan_studio_cfg.get("fan_server_preference")
-                if not isinstance(raw_pref, str):
-                    logger.warning(
-                        "[灾害预警] 配置警告: FAN Studio 服务器偏好类型错误，"
-                        "已重置为默认值。"
-                    )
-                    fan_studio_cfg["fan_server_preference"] = (
-                        ServerPreference.PRIMARY_FIRST.value
-                    )
-                else:
-                    normalized = ServerPreference.normalize(raw_pref)
-                    if normalized != str(raw_pref).strip():
-                        logger.warning(
-                            f"[灾害预警] 配置警告: FAN Studio 服务器偏好值无效"
-                            f"（{raw_pref}），已重置为默认值。"
-                        )
-                    fan_studio_cfg["fan_server_preference"] = normalized
-
-        # 校验 Jian Project 数据源配置（组总闸 + login_key + 7 大子源开关）
+        # 校验 Jian Project 数据源配置（组总闸 + login_key + 子源开关）
         jian_project_cfg = cfg.get("jian_project")
         if isinstance(jian_project_cfg, dict):
             ConfigValidator._ensure_bool(jian_project_cfg, "enabled", False)
             for sub_key in (
                 "china_earthquake_warning",
+                "china_earthquake_warning_provincial",
                 "taiwan_cwa_earthquake",
+                "taiwan_cwa_report",
                 "japan_jma_eew",
                 "china_weather_alarm",
                 "china_tsunami",
                 "china_cenc_earthquake",
                 "usgs_earthquake",
+                "usa_shakealert",
             ):
                 if sub_key not in jian_project_cfg:
                     jian_project_cfg[sub_key] = True
                 ConfigValidator._ensure_bool(jian_project_cfg, sub_key, True)
+            if "china_typhoon" not in jian_project_cfg:
+                jian_project_cfg["china_typhoon"] = False
+            ConfigValidator._ensure_bool(jian_project_cfg, "china_typhoon", False)
 
             raw_token = jian_project_cfg.get("login_key")
             if raw_token is None:

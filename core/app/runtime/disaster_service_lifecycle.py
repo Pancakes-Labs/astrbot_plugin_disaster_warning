@@ -129,6 +129,11 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.start()
+                jian_typhoon_poll = getattr(
+                    self.service, "jian_typhoon_poll_service", None
+                )
+                if jian_typhoon_poll is not None:
+                    await jian_typhoon_poll.start()
                 eqsc_cenc_ir_poll = getattr(
                     self.service, "eqsc_cenc_intensity_poll_service", None
                 )
@@ -281,6 +286,12 @@ class DisasterServiceLifecycleService:
             and getattr(eqsc_typhoon, "is_enabled", lambda: False)()
         ):
             expected_polls.append("eqsc_typhoon")
+        jian_typhoon = getattr(self.service, "jian_typhoon_poll_service", None)
+        if (
+            jian_typhoon is not None
+            and getattr(jian_typhoon, "is_enabled", lambda: False)()
+        ):
+            expected_polls.append("jian_typhoon")
         eqsc_cenc_ir = getattr(self.service, "eqsc_cenc_intensity_poll_service", None)
         if (
             eqsc_cenc_ir is not None
@@ -412,6 +423,11 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_typhoon_poll is not None:
                     await eqsc_typhoon_poll.stop()
+                jian_typhoon_poll = getattr(
+                    self.service, "jian_typhoon_poll_service", None
+                )
+                if jian_typhoon_poll is not None:
+                    await jian_typhoon_poll.stop()
                 eqsc_cenc_ir_poll = getattr(
                     self.service, "eqsc_cenc_intensity_poll_service", None
                 )

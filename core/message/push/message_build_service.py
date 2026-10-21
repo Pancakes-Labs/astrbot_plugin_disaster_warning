@@ -203,7 +203,7 @@ class MessageBuildService:
             return flags
 
         # 4. 台风路径图（缺省开）
-        if source_id in ("typhoon_fanstudio", "typhoon_eqsc"):
+        if source_id in ("typhoon_jianproject", "typhoon_eqsc", "typhoon_fanstudio"):
             typhoon_cfg = (
                 cfg.get("typhoon_config")
                 if isinstance(cfg.get("typhoon_config"), dict)
@@ -221,7 +221,7 @@ class MessageBuildService:
             return flags
 
         # 5. CWA 台湾正式地震报告图件（无开关；有图件 URI 才附加）
-        if source_id == "cwa_fanstudio_report":
+        if source_id in ("cwa_report_jianproject", "cwa_fanstudio_report"):
             has_report_media = any(
                 isinstance(meta.get(key), str) and str(meta.get(key)).strip()
                 for key in ("image_uri", "shakemap_uri")
@@ -1266,7 +1266,7 @@ class MessageBuildService:
         source_id: str,
     ) -> None:
         """按需附加台湾地震报告相关等震度报告图件。"""
-        if source_id != "cwa_fanstudio_report":
+        if source_id not in ("cwa_report_jianproject", "cwa_fanstudio_report"):
             return
 
         metadata = self._get_event_metadata(event)

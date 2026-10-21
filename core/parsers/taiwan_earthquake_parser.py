@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from ...utils.converters import safe_float_convert
+from ...utils.time_converter import TimeConverter
 from ...utils.plugin_logger import plugin_logger
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EarthquakeEvent, EventEnvelope
@@ -238,4 +239,106 @@ class CwaReportParser(BaseParser):
             return envelope
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 解析数据失败: {exc}")
+            return None
+
+class CwaReportJianProjectParser(BaseParser):
+    """台湾中央气象署地震报告解析器 - Jian Project。"""
+
+    def __init__(self, message_logger=None, source_id: str = "cwa_report_jianproject"):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            event_id = str(msg_data.get("id") or "").strip()
+            if not event_id:
+                return None
+
+            occurred_at = TimeConverter.parse_datetime(
+                msg_data.get("originTime")
+            ) or datetime.now(timezone.utc)
+            magnitude = safe_float_convert(msg_data.get("magnitude"))
+            if magnitude is not None:
+                magnitude = round(magnitude, 1)
+            depth = safe_float_convert(msg_data.get("depth"))
+            if depth is not None:
+                depth = round(depth, 1)
+            latitude = safe_float_convert(msg_data.get("latitude"))
+            longitude = safe_float_convert(msg_data.get("longitude"))
+            place_name = str(msg_data.get("placeName") or "").strip()
+            intensity = safe_float_convert(msg_data.get("intensity"))
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_cwa_report",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "earthquake_info",
+                "event_id": event_id,
+                "info_type": "地震报告",
+            }
+
+            domain_event = EarthquakeEvent(
+                occurred_at=occurred_at,
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
+                intensity=intensity,
+                scale=intensity,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="earthquake",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_cwa_report",
+                published_at=occurred_at,
+                aliases=(event_id,),
+                attributes={
+                    "parser_name": "taiwan_report_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "taiwan_cwa_report",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="cwa",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+            plugin_logger.info(
+                f"[灾害预警] CWA 地震报告 (Jian) 解析成功: {place_name} "
+                f"(M {magnitude})",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(f"[灾害预警] {self.source_id} 解析失败: {exc}")
             return None

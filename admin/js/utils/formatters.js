@@ -438,7 +438,7 @@ function resolveTyphoonDataMode(infoTypeOrEvent) {
  */
 function formatTyphoonSourceName(source, infoTypeOrEvent) {
     // 事件详情按数据形态细分；贡献榜请用 formatSourceName（中性实时名）
-    const normalized = normalizeSourceName(source || 'typhoon_fanstudio');
+    const normalized = normalizeSourceName(source || 'typhoon_jianproject');
     const mode = resolveTyphoonDataMode(infoTypeOrEvent);
     if (mode === 'enriched') {
         return '中国气象局：实时活跃台风 - Fan+EQSC';
@@ -469,7 +469,7 @@ function formatEventSourceName(eventOrSource) {
             || normalized === 'typhoon_eqsc_rebuild'
             || type === 'typhoon'
         ) {
-            return formatTyphoonSourceName(source || 'typhoon_fanstudio', eventOrSource);
+            return formatTyphoonSourceName(source || 'typhoon_jianproject', eventOrSource);
         }
         return formatSourceName(source);
     }

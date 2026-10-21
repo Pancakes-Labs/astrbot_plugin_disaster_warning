@@ -16,12 +16,12 @@ class SourceHealthMonitor:
 
     # 静态映射：数据源标识 -> 探测目标主机名/IP 地址
     HOST_MAP: dict[str, str] = {
-        "fan_studio_all": "ws.fanstudio.tech",
-        "fan_studio_cenc_ir": "ws.fanstudio.tech",
+        "fan_studio_all": "fssn-api.fanstudio.tech",
         "p2p_main": "api.p2pquake.net",
         "wolfx_all": "ws-api.wolfx.jp",
         "pancakes_api": "api.aloys23.link",
         "jian_project_all": "api.sismotide.top",
+        "jian_project_typhoon": "api.sismotide.top",
         # EQSC 为 HTTP 辅助通道，默认探测官方主机；可被 host_overrides 覆盖
         "eqsc": "equake.top",
         # S-Net：MSIL 瓦片源（TCP 443 探测连通性）
@@ -30,12 +30,12 @@ class SourceHealthMonitor:
 
     # 静态映射：数据源标识 -> 在管理后台展示的可读中文名称
     DISPLAY_MAP: dict[str, str] = {
-        "fan_studio_all": "FAN Studio",
-        "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        "fan_studio_all": "FSSN",
         "p2p_main": "P2P地震情報",
         "wolfx_all": "Wolfx",
         "pancakes_api": "PancakesAPI",
         "jian_project_all": "Jian Project",
+        "jian_project_typhoon": "Jian Project（台风）",
         "eqsc": "EQSC API",
         "snet_msil": "NIED S-Net",
     }

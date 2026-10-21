@@ -92,6 +92,13 @@ def _payload_matches_predicate(payload: dict[str, Any], predicate: str) -> bool:
     if predicate == "fssn_cmt":
         # FSSN CMT：检测到符合 FSSN CMT 特征的载荷
         return looks_like_fssn_cmt_payload(payload)
+    if predicate == "fssn_report":
+        # FSSN 地震信息：特征字段或 FSSN 前缀 ID，且排除 CMT
+        from .payload_guards import looks_like_fssn_payload
+
+        if looks_like_fssn_cmt_payload(payload):
+            return False
+        return looks_like_fssn_payload(payload)
     if predicate == "shakealert_eew":
         # ShakeAlert 与 FSSN 字段高度重合；共享守卫排除 FSSN/USGS/CMT 特征。
         return is_shakealert_compatible_payload(payload)
@@ -244,15 +251,35 @@ def detect_fan_studio_source_id(data: dict[str, Any]) -> str | None:
 
 
 def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
-    """统一解析 FAN Studio 消息并返回路由结果列表。
+    """统一解析 FAN Studio / FSSN 消息并返回路由结果列表。
 
-    兼容全量初始化消息、增量更新消息以及缺少显式来源名的特征识别场景。
+    兼容全量初始化消息、增量更新消息、列表响应以及缺少显式来源名的特征识别场景。
     """
     if not isinstance(data, dict):
         return []
 
     routed_messages: list[RoutedMessage] = []
     msg_type = str(data.get("type") or "").strip()
+
+    # 列表响应：展开为多条 update 风格载荷
+    if msg_type in {"fssnlist_response", "cmtlist_response"}:
+        source_name = "fssn" if msg_type == "fssnlist_response" else "fssn-cmt"
+        source_id = get_fan_studio_source_id(source_name)
+        if not source_id:
+            return []
+        items = data.get("Data")
+        if not isinstance(items, list):
+            return []
+        for item in items:
+            if isinstance(item, dict):
+                routed_messages.append(
+                    RoutedMessage(
+                        source_name=source_name,
+                        source_id=source_id,
+                        payload={"Data": item, "type": "update"},
+                    )
+                )
+        return routed_messages
 
     # initial_all 表示一条消息里携带多个来源的初始化快照，需要逐项拆包
     if msg_type == "initial_all":
@@ -351,8 +378,8 @@ def get_jian_project_source_id(source_name: str | None) -> str | None:
 def route_jian_project_message(data: dict[str, Any]) -> list[RoutedMessage]:
     """统一解析 Jian Project 消息并返回路由结果列表。
 
-    仅提取 7 大核心数据源：
-    cea, cwa-eew, jma-eew, weather, nmefc-tsunami, cenc, usgs。
+    按目录 provider_source_names 路由，含 cea / cea-pr / cwa-eew / cwa /
+    jma-eew / weather / nmefc-tsunami / cenc / usgs / sa 等。
     """
     if not isinstance(data, dict):
         return []
