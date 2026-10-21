@@ -190,7 +190,7 @@ async def _query_local(
             fan_id = to_fan_id(typhoon_id)
             find_by_real = getattr(db, "find_event_by_real_id", None)
             if callable(find_by_real):
-                raw = await find_by_real(fan_id, "typhoon_fanstudio")
+                raw = await find_by_real(fan_id, "typhoon_jianproject")
         if not raw:
             return {
                 "success": False,

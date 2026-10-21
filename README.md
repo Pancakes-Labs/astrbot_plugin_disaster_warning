@@ -1100,7 +1100,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 这是插件的核心，决定了您能接收到哪些来源的预警信息。建议根据地理位置和网络稳定性进行选择。
 
-#### 🔹 FAN Studio WebSocket (推荐)
+#### 🔹 FSSN WebSocket（原 FAN Studio，仅 FSSN）
 
 插件中目前最全面、最稳定的综合灾害数据流。
 

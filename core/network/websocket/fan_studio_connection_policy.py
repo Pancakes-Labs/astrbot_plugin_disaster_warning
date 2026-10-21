@@ -1,22 +1,12 @@
 """
-FAN Studio 连接配额与优先级策略。
+FSSN（原 FAN Studio 连接族）连接策略。
 
-上游按 IP 限制并发 WebSocket（通常最多 5 条）。
-插件侧策略：
-1. 启动时先建 fan_studio_all（/all），主通道在线后再建次要独立通道
-2. 运行中优先保活 /all；主通道遇配额/策略拒绝时，才释放次要通道让路
-3. 次要通道在主通道离线或命中配额时拉长退避，避免与 /all 抢连接
-4. 建连成功后发送应用层鉴权包：{"type":"auth","appId":"...","key":"sk-..."}
-
-新增服务器偏好功能：
-- 支持配置"主服务器优先"、"备用服务器优先"、"自动"三种策略
-- 连接时按偏好决定主备 URL 顺序
-- 追踪当前活跃的服务器类型
+现仅连接 wss://fssn-api.fanstudio.tech/all，公开路径无需鉴权。
+保留主通道命名与配额辅助函数，供 websocket_manager 兼容调用。
 """
 
 from __future__ import annotations
 
-import json
 from enum import Enum
 from typing import Any
 
@@ -25,12 +15,8 @@ from astrbot.api import logger
 # 主通道：聚合 /all
 FAN_PRIMARY_CONNECTION = "fan_studio_all"
 
-# 已知次要独立通道（不在 /all 内）
-FAN_SECONDARY_CONNECTIONS: frozenset[str] = frozenset(
-    {
-        "fan_studio_cenc_ir",
-    }
-)
+# 已知次要独立通道（FSSN API 已无独立次要通道）
+FAN_SECONDARY_CONNECTIONS: frozenset[str] = frozenset()
 
 # 上游常见 IP 并发上限（文档/经验值）；用于日志与策略说明，不作为硬编码断连阈值。
 FAN_IP_CONNECTION_LIMIT = 3
@@ -377,31 +363,17 @@ async def send_fan_studio_auth(
     connection_name: str,
     connection_info: dict[str, Any] | None,
 ) -> bool:
-    """在 FAN Studio 连接建立后发送鉴权包。
+    """FSSN 公开路径无需鉴权；保留函数供 websocket_manager 兼容调用。
 
-    Returns:
-        True 表示已成功发送；False 表示缺少凭证（配置问题）。
-
-    Raises:
-        网络/传输相关异常会原样向上抛出，由 websocket_manager
-        走标准重试与退避逻辑，避免被误判为永久配置失败。
+    建连后发送 fssnlist / cmtlist 拉取历史列表（对齐 FSSN API 文档）。
     """
     if not is_fan_studio_connection(connection_name):
         return True
-
-    app_id, api_key = resolve_fan_auth_credentials(connection_info)
-    if not app_id or not api_key:
-        logger.error(
-            f"[灾害预警] FAN Studio 连接 {connection_name} 缺少 appId/api_key，"
-            "无法发送鉴权包"
-        )
-        return False
-
-    payload = build_fan_auth_payload(app_id, api_key)
-    # 不吞掉 send_str 异常：瞬时网络错误应进入 manager 的重试路径。
-    await websocket.send_str(json.dumps(payload, ensure_ascii=False))
+    del connection_info  # 兼容旧签名
+    # 拉取已有事件列表；失败不阻断主循环（由上层重试）
+    for cmd in ("fssnlist", "cmtlist"):
+        await websocket.send_str(cmd)
     logger.debug(
-        f"[灾害预警] 已向 FAN Studio 连接 {connection_name} 发送鉴权包 "
-        f"(appId 为 {app_id[:8]}…)"
+        f"[灾害预警] FSSN 连接 {connection_name} 已发送 fssnlist/cmtlist（无需鉴权）"
     )
     return True

@@ -384,6 +384,14 @@ function ConnectionsGrid() {
                 china_tsunami: '自然资源部海啸预警中心',
                 china_typhoon: '中国气象局：实时活跃台风',
                 typhoon_fanstudio: '中国气象局：实时活跃台风',
+                typhoon_jianproject: '中国气象局：实时活跃台风 - Jian',
+                cea_jianproject: '中国地震预警网 (CEA) - Jian',
+                cea_pr_jianproject: '中国地震预警网 (省级) - Jian',
+                cwa_jianproject: '台湾中央气象署: 强震即时警报 - Jian',
+                cwa_report_jianproject: '台湾中央气象署: 地震报告 - Jian',
+                sa_jianproject: '美国 ShakeAlert 地震预警 - Jian',
+                fssn_fanstudio: 'FSSN 地震信息',
+
                 japan_jma_eew: '日本气象厅: 紧急地震速报',
                 // source_id 形态（后端 connection group status 使用）
                 cea_fanstudio: '中国地震预警网 (CEA)',

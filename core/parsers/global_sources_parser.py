@@ -960,3 +960,113 @@ class UsgsPancakesParser(BaseParser):
                 f"[灾害预警] {self.source_id} 解析 USGS 数据失败: {exc}"
             )
             return None
+
+class ShakeAlertEewJianProjectParser(BaseParser):
+    """美国 ShakeAlert 地震预警解析器 - Jian Project。"""
+
+    def __init__(self, message_logger=None, source_id: str = "sa_jianproject"):
+        super().__init__(source_id, message_logger)
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        try:
+            msg_data = self._extract_data(data)
+            if not msg_data or self._is_heartbeat_message(msg_data):
+                return None
+
+            event_id = str(msg_data.get("id") or "").strip()
+            if not event_id:
+                return None
+
+            raw_report_num = msg_data.get("number", 1)
+            try:
+                report_num = int(raw_report_num)
+            except (TypeError, ValueError):
+                report_num = 1
+            if report_num <= 0:
+                report_num = 1
+
+            occurred_at = TimeConverter.parse_datetime(
+                msg_data.get("originTime")
+            ) or datetime.now(timezone.utc)
+            magnitude = safe_float_convert(msg_data.get("magnitude"))
+            if magnitude is not None:
+                magnitude = round(magnitude, 1)
+            depth = safe_float_convert(msg_data.get("depth"))
+            if depth is not None:
+                depth = round(depth, 1)
+            latitude = safe_float_convert(msg_data.get("latitude"))
+            longitude = safe_float_convert(msg_data.get("longitude"))
+            place_name = str(msg_data.get("placeName") or "").strip()
+
+            source_entry = get_source_entry(self.source_id)
+            metadata = {
+                "source_family": "jian_project",
+                "source_enum": source_entry.source_enum
+                if source_entry
+                else "jian_project_sa",
+                "source_type": source_entry.source_type.value
+                if source_entry
+                else "earthquake_warning",
+                "event_id": event_id,
+                "report_num": report_num,
+                "updates": report_num,
+                "is_final": False,
+            }
+
+            domain_event = EarthquakeEvent(
+                occurred_at=occurred_at,
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
+                metadata=dict(metadata),
+            )
+
+            identity = EventIdentity(
+                event_id=event_id,
+                source_id=self.source_id,
+                event_type="earthquake_warning",
+                provider_family=source_entry.provider_family.value
+                if source_entry
+                else "jian_project",
+                source_enum=source_entry.source_enum
+                if source_entry
+                else "jian_project_sa",
+                report_num=report_num,
+                published_at=occurred_at,
+                aliases=(event_id,),
+                attributes={
+                    "parser_name": "shakealert_eew_parser",
+                    "config_key": source_entry.config_key
+                    if source_entry
+                    else "usa_shakealert",
+                },
+            )
+
+            envelope = EventEnvelope(
+                identity=identity,
+                event=domain_event,
+                received_at=datetime.now(timezone.utc),
+                payload=SourcePayload(
+                    source_id=self.source_id,
+                    provider_family=source_entry.provider_family.value
+                    if source_entry
+                    else "jian_project",
+                    message_type="sa",
+                    raw=dict(msg_data),
+                    attributes=dict(metadata),
+                ),
+                metadata=metadata,
+            )
+            plugin_logger.info(
+                f"[灾害预警] ShakeAlert (Jian) 解析成功: {place_name} "
+                f"(M {magnitude}) 第{report_num}报",
+                is_event_linked=True,
+                event_stream="earthquake",
+                is_silent_window=True,
+            )
+            return envelope
+        except Exception as exc:
+            plugin_logger.error(f"[灾害预警] {self.source_id} 解析失败: {exc}")
+            return None

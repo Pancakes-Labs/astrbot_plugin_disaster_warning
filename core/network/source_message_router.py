@@ -67,8 +67,7 @@ def _resolve_config_key(source_id: str) -> str:
     return source_entry.config_key
 
 
-# FAN Studio 自 2026-07 起：未鉴权时 /all 仅放行 fssn / fssn-cmt。
-# 建连后常先收到仅含这两路的半量 initial_all，鉴权成功后再推完整快照。
+# FSSN API /all 仅含 fssn / fssn-cmt；initial_all 即为完整快照。
 _FAN_PREAUTH_FREE_SOURCE_NAMES = frozenset({"fssn", "fssn-cmt"})
 
 
@@ -309,17 +308,9 @@ class SourceMessageRouter:
 
     @classmethod
     def _is_fan_preauth_partial_initial_all(cls, data: dict) -> bool:
-        """判断是否为鉴权前半量 initial_all（仅 fssn / fssn-cmt）。
-
-        FAN Studio 文档：未鉴权时 /all 仅放行这两路；鉴权成功后会再推完整快照。
-        若把半量包当正式 bootstrap 解析，会出现 fssn-cmt 解析日志刷两次。
-        """
-        if str(data.get("type") or "").strip() != "initial_all":
-            return False
-        source_keys = cls._fan_initial_all_known_source_keys(data)
-        if not source_keys:
-            return False
-        return all(key in _FAN_PREAUTH_FREE_SOURCE_NAMES for key in source_keys)
+        """旧 FAN 鉴权前半量 initial_all 判定；FSSN API 始终返回完整两路，恒为 False。"""
+        del data
+        return False
 
     def _create_fan_studio_handler(self):
         """创建 FAN Studio 连接的消息处理器。"""
@@ -384,13 +375,6 @@ class SourceMessageRouter:
                             plugin_logger.debug(
                                 f"[灾害预警] 关闭 FAN Studio 错误连接失败: {close_error}"
                             )
-                    return None
-
-                # 鉴权前半量 initial_all（仅 fssn/fssn-cmt）：直接丢弃等待鉴权后的完整快照，
-                # 不再通知静默协调器标记已收到 bootstrap，避免导致门闩提前放行。
-                if isinstance(data, dict) and self._is_fan_preauth_partial_initial_all(
-                    data
-                ):
                     return None
 
                 # 先校验路由映射，再把一条总线消息拆成多个候选数据源消息

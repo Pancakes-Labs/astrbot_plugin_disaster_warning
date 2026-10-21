@@ -889,7 +889,7 @@ class SimulationBuilder:
             extra["top_station"] = str(top.get("name") or "") if top is not None else ""
 
         # CWA 正式报告源：补报告图片与等震度图附件。
-        if source_entry.source_id == "cwa_fanstudio_report":
+        if source_entry.source_id == "cwa_report_jianproject":
             image_uri = str(params.get("image_uri") or "").strip()
             shakemap_uri = str(params.get("shakemap_uri") or "").strip()
             extra["image_uri"] = image_uri
@@ -899,13 +899,13 @@ class SimulationBuilder:
         # usgs_jianproject / usgs_pancakes 为 USGS 测定的 Jian Project / PancakesAPI 版本，
         # 共用同一展示链路（usgs_report），故透传各自真实解析器会产出的元数据。
         if source_entry.source_id in (
-            "usgs_fanstudio",
+            "usgs_jianproject",
             "usgs_jianproject",
             "usgs_pancakes",
         ):
             # url 仅对真实解析器会输出该字段的来源透传（FAN / Pancakes）；
             # UsgsEarthquakeJianProjectParser 不读取/产出 url，透传会引入真实链路不可能出现的元数据。
-            if source_entry.source_id in ("usgs_fanstudio", "usgs_pancakes"):
+            if source_entry.source_id in ("usgs_jianproject", "usgs_pancakes"):
                 url = str(params.get("url") or "").strip()
                 if url:
                     extra["url"] = url
@@ -920,7 +920,7 @@ class SimulationBuilder:
 
         # CENC 报告源：补信息类型与名称。
         if source_entry.source_id in (
-            "cenc_fanstudio",
+            "cenc_jianproject",
             "cenc_wolfx",
             "cenc_jianproject",
         ):
@@ -935,14 +935,14 @@ class SimulationBuilder:
             # 最大烈度：仅对真实解析器会产出 intensity 的来源透传
             # （Wolfx cenc_eqlist 含 intensity）；cenc_jianproject 不产出，透传会引入
             # 真实链路不会出现的烈度。即便 params 被注入 intensity 也按来源忽略。
-            if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx"):
+            if source_entry.source_id in ("cenc_jianproject", "cenc_wolfx"):
                 intensity = _safe_float(params.get("intensity"), None)
                 if intensity is not None:
                     extra["intensity"] = intensity
                     domain_event.intensity = intensity
 
         # CWA EEW 源：影响区域 locationDesc → impact_area（CwaEewPresenter 展示“影响区域”）。
-        if source_entry.source_id in ("cwa_fanstudio", "cwa_wolfx"):
+        if source_entry.source_id in ("cwa_jianproject", "cwa_wolfx"):
             location_desc = str(params.get("location_desc") or "").strip()
             if location_desc:
                 # 展示器按影响区域单值文本读取
@@ -999,7 +999,7 @@ class SimulationBuilder:
                 domain_event.metadata["is_cancel"] = True
 
         # CEA 地震预警源：补预估烈度 epiIntensity。
-        if source_entry.source_id in ("cea_fanstudio", "cea_pr_fanstudio", "cea_wolfx"):
+        if source_entry.source_id in ("cea_jianproject", "cea_pr_jianproject", "cea_wolfx"):
             epi_intensity = _safe_float(params.get("epi_intensity"), None)
             if epi_intensity is not None:
                 extra["epi_intensity"] = epi_intensity
@@ -1108,7 +1108,7 @@ class SimulationBuilder:
         # 中国海啸源按等级生成默认预报区，避免空数组导致展示空白。
         # 字段名对齐 TsunamiAlertPresenter 读取逻辑（name / warningLevel / estimatedArrivalTime / maxWaveHeight）。
         # 仅 FAN /tsunami 有结构化预报区；Jian Project 的 nmefc-tsunami 载荷不含，故不生成。
-        if not forecasts and source_entry.source_id == "china_tsunami_fanstudio":
+        if not forecasts and source_entry.source_id == "china_tsunami_jianproject":
             forecasts = [
                 {
                     "name": place_name,
@@ -1198,7 +1198,7 @@ class SimulationBuilder:
 
         # 发布机构按数据源对齐真实链路：
         if source_entry.source_id in (
-            "china_tsunami_fanstudio",
+            "china_tsunami_jianproject",
             "china_tsunami_jianproject",
         ):
             org_unit = "自然资源部海啸预警中心"
@@ -1317,7 +1317,7 @@ class SimulationBuilder:
         move_direction = str(params.get("move_direction") or "西北").strip()
 
         # 台风轨迹与风圈按数据源动态化，与真实解析器一致。缺省时生成默认轨迹驱动路径图、风圈补默认四象限。
-        is_fan_source = step.source_id == "typhoon_fanstudio"
+        is_fan_source = step.source_id == "typhoon_jianproject"
         history_track = _parse_json_list(params.get("history_track"))
         future_track = _parse_json_list(params.get("future_track"))
         wind_circle = _parse_json_dict(params.get("wind_circle"))
@@ -1344,7 +1344,7 @@ class SimulationBuilder:
         source_family = "fan_studio"
         if (
             step.source_id.startswith("typhoon_")
-            and step.source_id != "typhoon_fanstudio"
+            and step.source_id != "typhoon_jianproject"
         ):
             data_source = "eqsc"
             source_family = "eqsc"

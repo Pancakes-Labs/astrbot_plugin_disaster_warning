@@ -850,6 +850,67 @@ class UsgsEarthquakePresenter(BasePresenter):
         )
 
 
+class FssnReportPresenter(BasePresenter):
+    """FSSN 地震信息展示器。"""
+
+    presenter_name = "fssn_report_presenter"
+
+    @staticmethod
+    def _format_coordinates(latitude: float, longitude: float) -> str:
+        lat_dir = "N" if latitude >= 0 else "S"
+        lon_dir = "E" if longitude >= 0 else "W"
+        return f"{abs(latitude):.2f}°{lat_dir}, {abs(longitude):.2f}°{lon_dir}"
+
+    @staticmethod
+    def _format_depth(depth: float) -> str:
+        if depth == 0.0:
+            return "极浅"
+        return f"{depth} km"
+
+    @classmethod
+    def format_message(
+        cls, data: EarthquakeDisplayContext, options: dict | None = None
+    ) -> str:
+        if not _is_earthquake_view(data):
+            return "🚨[地震情报] 数据类型错误"
+
+        merged_options = dict(options or {})
+        timezone = merged_options.get("timezone", "UTC+8")
+        info_type = str(
+            data.metadata.get("info_type")
+            or data.metadata.get("infoTypeName")
+            or ""
+        ).strip()
+        type_tag = f" [{info_type}]" if info_type else ""
+        lines = [f"🚨[地震情报] FSSN{type_tag}"]
+
+        shock_time = _resolve_shock_time(data)
+        if shock_time:
+            lines.append(
+                f"⏰发震时间：{TimeConverter.format_time(shock_time, timezone)}"
+            )
+        if data.title and data.latitude is not None and data.longitude is not None:
+            coords = cls._format_coordinates(data.latitude, data.longitude)
+            lines.append(f"📍震中：{data.title} ({coords})")
+        elif data.title:
+            lines.append(f"📍震中：{data.title}")
+        if data.magnitude is not None:
+            lines.append(f"📊震级：M {data.magnitude:.1f}")
+        if data.depth is not None:
+            lines.append(f"🏔️深度：{cls._format_depth(data.depth)}")
+        return "\n".join(lines)
+
+    @classmethod
+    def present(
+        cls,
+        display_context: EarthquakeDisplayContext,
+        options: dict | None = None,
+    ) -> str:
+        return cls.format_message(
+            display_context, _resolve_options(display_context, options)
+        )
+
+
 class FssnCmtPresenter(BasePresenter):
     """FSSN 矩心矩张量解 (CMT) 展示器。"""
 

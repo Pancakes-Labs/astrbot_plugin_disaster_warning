@@ -22,11 +22,11 @@ from .base_parser import BaseParser
 
 
 class TyphoonParser(BaseParser):
-    """FAN Studio 实时活跃台风解析器。"""
+    """实时活跃台风解析器（FAN 遗留字段形态；现供 Jian HTTP 轮询复用）。"""
 
-    def __init__(self, message_logger=None):
+    def __init__(self, message_logger=None, source_id: str = "typhoon_jianproject"):
         """初始化台风解析器。"""
-        super().__init__("typhoon_fanstudio", message_logger)
+        super().__init__(source_id, message_logger)
 
     @staticmethod
     def _normalize_radius(value: Any) -> int | None:
@@ -139,11 +139,16 @@ class TyphoonParser(BaseParser):
 
         source_entry = get_source_entry(self.source_id)
         # 流水线元数据只保留形态/来源标记；规范化业务字段只写入 TyphoonEvent。
+        family = (
+            source_entry.provider_family.value
+            if source_entry
+            else "jian_project"
+        )
         pipeline_metadata = {
-            "data_source": "fan_studio",
-            "info_type": "fan",
-            "typhoon_data_mode": "fan",
-            "source_family": "fan_studio",
+            "data_source": family,
+            "info_type": "jian" if family == "jian_project" else "fan",
+            "typhoon_data_mode": "jian" if family == "jian_project" else "fan",
+            "source_family": family,
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -180,9 +185,7 @@ class TyphoonParser(BaseParser):
             event_id=typhoon_id,
             source_id=self.source_id,
             event_type="typhoon",
-            provider_family=source_entry.provider_family.value
-            if source_entry
-            else "fan_studio",
+            provider_family=family,
             source_enum=source_entry.source_enum if source_entry else "",
             published_at=updated_at,
             aliases=tuple(item for item in (name, name_en) if item),
@@ -200,9 +203,7 @@ class TyphoonParser(BaseParser):
             received_at=datetime.now(timezone.utc),
             payload=SourcePayload(
                 source_id=self.source_id,
-                provider_family=source_entry.provider_family.value
-                if source_entry
-                else "fan_studio",
+                provider_family=family,
                 message_type="typhoon",
                 raw=dict(typhoon_data),
                 # 原始输入只保留 raw；attributes 不再作为规范化字段第二份存储。

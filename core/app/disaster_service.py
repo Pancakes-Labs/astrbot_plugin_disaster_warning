@@ -32,10 +32,6 @@ from ..message.push.weather_aggregation_service import WeatherAggregationService
 from ..network.event_ingress_dispatch_service import EventIngressDispatchService
 from ..network.source_ingress_side_effect_service import SourceIngressSideEffectService
 from ..network.source_message_router import SourceMessageRouter
-from ..network.websocket.fan_studio_connection_policy import (
-    ServerPreference,
-    attach_fan_auth_from_plan,
-)
 from ..network.websocket.websocket_manager import HTTPDataFetcher, WebSocketManager
 from ..parsers.parser_registry import (
     create_parser_for_source,
@@ -48,6 +44,7 @@ from ..services.eqsc.eqsc_cenc_intensity_poll_service import (
 )
 from ..services.eqsc.eqsc_tsunami_poll_service import EqscTsunamiPollService
 from ..services.eqsc.eqsc_typhoon_poll_service import EqscTyphoonPollService
+from ..services.jian.jian_typhoon_poll_service import JianTyphoonPollService
 from ..services.geo.cn_seis_int_loc_loader import get_district_points
 from ..services.geo.jma_seis_int_loc_loader import get_sect_map
 from ..services.geo.region_service import region_service
@@ -213,6 +210,8 @@ class DisasterWarningService:
         self.eqsc_tsunami_poll_service = EqscTsunamiPollService(self)
         # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
         self.eqsc_typhoon_poll_service = EqscTyphoonPollService(self)
+        # Jian Project 台风 HTTP 轮询（替代已停运的 FAN 台风通道）
+        self.jian_typhoon_poll_service = JianTyphoonPollService(self)
         # EQSC CENC 烈度速报 HTTP 轮询（列表发现 + 详情投递；优先于 FAN 独立 WS）
         self.eqsc_cenc_intensity_poll_service = EqscCencIntensityPollService(self)
         # 连接健康采样 / 90 天条带 / 自动事故（Statuspage 风格）
@@ -581,6 +580,7 @@ class DisasterWarningService:
             getattr(self, "snet_poll_service", None),
             getattr(self, "eqsc_tsunami_poll_service", None),
             getattr(self, "eqsc_typhoon_poll_service", None),
+            getattr(self, "jian_typhoon_poll_service", None),
             getattr(self, "eqsc_cenc_intensity_poll_service", None),
         ):
             if poll is None:
@@ -738,7 +738,7 @@ class DisasterWarningService:
             # 2) EQSC 独立轮询：事件已含完整轨迹，跳过二次富化。
             if event.event_type == "typhoon":
                 source_id = str(getattr(event, "source_id", "") or "").strip()
-                if source_id == "typhoon_fanstudio":
+                if source_id in ("typhoon_jianproject", "typhoon_fanstudio"):
                     deduplicator = getattr(
                         getattr(self, "message_manager", None), "deduplicator", None
                     )
@@ -784,80 +784,13 @@ class DisasterWarningService:
         return await self.reconnect_service.reconnect_all_sources()
 
     async def switch_fan_server_preference(self, preference: str) -> dict[str, str]:
-        """临时切换 FAN Studio 服务器偏好并重新连接。
+        """兼容旧指令：FSSN API 无主备切换。"""
+        del preference
+        return {
+            "status": "unsupported",
+            "message": "FSSN API（原 FAN Studio）已无主备服务器偏好，无需切换。",
+        }
 
-        Args:
-            preference: "主服务器优先" 或 "备用服务器优先"
-
-        Returns:
-            "连接名 -> 处理结果"映射表
-
-        说明：
-        - 仅做运行期临时切换：不修改 data_sources.fan_studio.fan_server_preference
-          配置项，也不会持久化写回配置；
-        - 服务重启或连接计划重建后自动恢复配置中的原始偏好；
-        - 切换后的临时偏好随 connection_config 一并写入连接信息，
-          断线重连仍按临时偏好交替主备地址。
-        """
-        pref_obj = ServerPreference.parse_strict(preference)
-        if pref_obj is None:
-            return {"error": f"无效的服务器偏好: {preference}"}
-        pref = pref_obj.value
-
-        # 重新生成连接计划（传入临时偏好覆盖值，仅影响本次运行期 URL 顺序）
-        new_connections = ConnectionPlanBuilder.build(
-            self.config,
-            fan_server_pref_override=pref,
-        )
-        # 仅更新 FAN Studio 相关连接
-        results: dict[str, str] = {}
-        for conn_name, conn_config in new_connections.items():
-            if not str(conn_name or "").startswith("fan_studio"):
-                continue
-            # 更新连接配置
-            self.connections[conn_name] = conn_config
-            # 先断开旧连接
-            try:
-                await self.ws_manager.disconnect(conn_name)
-            except Exception as e:
-                logger.debug(f"[灾害预警] 断开 {conn_name} 旧连接时忽略: {e}")
-            # 重建连接信息
-            connection_info = {
-                "connection_name": conn_name,
-                "handler_type": conn_config["handler"],
-                "data_source": conn_config.get("data_source", conn_name),
-                "established_time": None,
-                "backup_url": conn_config.get("backup_url"),
-                "connection_config": dict(conn_config),
-            }
-            attach_fan_auth_from_plan(connection_info, conn_config)
-            # 触发强制重连
-            try:
-                # 清理旧连接信息
-                self.ws_manager.connection_info.pop(conn_name, None)
-                self.ws_manager.connection_retry_counts.pop(conn_name, None)
-                self.ws_manager.fallback_retry_counts.pop(conn_name, None)
-                # 取消同连接名的旧切换建连任务，避免两次切换交叉修改共享状态
-                task_name = f"dw_switch_{conn_name}"
-                for old_task in list(self.connection_tasks):
-                    if old_task.get_name() == task_name and not old_task.done():
-                        old_task.cancel()
-                # 异步建连
-                task = asyncio.create_task(
-                    self.ws_manager.connect(
-                        name=conn_name,
-                        uri=conn_config["url"],
-                        connection_info=connection_info,
-                    ),
-                    name=task_name,
-                )
-                self.connection_tasks.append(task)
-                results[conn_name] = f"✅ 已切换至 {pref}"
-            except Exception as e:
-                results[conn_name] = f"❌ 切换失败: {e}"
-                logger.error(f"[灾害预警] 切换 {conn_name} 服务器失败: {e}")
-
-        return results
 
     def get_service_status(self) -> dict[str, Any]:
         """获取服务状态。"""

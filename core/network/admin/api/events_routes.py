@@ -83,7 +83,7 @@ def _enrich_event_list(events: list[dict]) -> None:
             info_type = str(event.get("info_type") or "").strip()
             event["data_mode"] = resolve_data_mode(info_type, default="fan")
             event["source_label"] = format_event_source_name(
-                event.get("source_id") or event.get("source") or "typhoon_fanstudio",
+                event.get("source_id") or event.get("source") or "typhoon_jianproject",
                 event_type="typhoon",
                 info_type=info_type,
             )

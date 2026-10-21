@@ -19,10 +19,12 @@ MODE_ALIASES: dict[str, str] = {
     "fan": "fan",
     "fan_studio": "fan",
     "fanstudio": "fan",
+    "jian": "jian",
+    "jian_project": "jian",
 }
 
 
-def resolve_data_mode(value: object = "", *, default: str = "fan") -> str:
+def resolve_data_mode(value: object = "", *, default: str = "jian") -> str:
     """解析台风数据形态，未知或缺失值按指定默认值返回。"""
     text = str(value or "").strip().lower()
     return MODE_ALIASES.get(text, default)

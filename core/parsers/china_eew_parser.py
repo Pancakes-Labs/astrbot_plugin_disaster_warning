@@ -381,3 +381,27 @@ class CeaEewJianProjectParser(BaseParser):
         except Exception as exc:
             plugin_logger.error(f"[灾害预警] {self.source_id} 解析数据失败: {exc}")
             return None
+
+class CeaPrEewJianProjectParser(CeaEewJianProjectParser):
+    """中国地震预警网省级分中心解析器 - Jian Project。"""
+
+    def __init__(self, message_logger=None):
+        super().__init__(
+            message_logger=message_logger, source_id="cea_pr_jianproject"
+        )
+
+    def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
+        envelope = super()._parse_data(data)
+        if envelope is None:
+            return None
+        msg_data = self._extract_data(data) or {}
+        # 省级源显式携带 province；优先覆盖从地名推断的结果
+        province = str(msg_data.get("province") or "").strip()
+        if province:
+            province = resolve_province_full(province) or province
+            envelope.metadata["province"] = province
+            if hasattr(envelope.event, "province"):
+                envelope.event.province = province
+        if envelope.payload is not None:
+            envelope.payload.message_type = "cea-pr"
+        return envelope

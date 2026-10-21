@@ -163,6 +163,7 @@ class BaseParser:
         critical_fields = {
             "usgs_fanstudio": ["id", "magnitude", "placeName"],
             "sa_fanstudio": ["id", "magnitude", "placeName"],
+            "sa_jianproject": ["id", "magnitude", "placeName"],
             "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
             "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
             "china_weather_fanstudio": ["title", "description"],
