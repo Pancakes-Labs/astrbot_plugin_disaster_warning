@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import types
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 EXT_DIR = Path(__file__).resolve().parents[2] / "extensions" / "br_rs_waterq"
+# A sample date of last week. The poller sends only active results (90 days or newer).
+RECENT = (date.today() - timedelta(days=7)).strftime("%d/%m/%Y")
 UNSUITABLE_CODES = {1029, 5, 56, 1023}
 
 
@@ -234,7 +236,7 @@ def test_poller_end_to_end_with_fake_session(ext, make_api, locais_json):
     ext.extension.setup(api)
     fetch, _ = api.pollers["br_rs_waterq_balneabilidade"]
     bodies = [json.dumps(locais_json)]
-    _set(locais_json, 1026, situacao=3, ultimaColeta="02/03/2026")
+    _set(locais_json, 1026, situacao=3, ultimaColeta=RECENT)
     bodies.append(json.dumps(locais_json))
 
     class Resp:
@@ -265,7 +267,58 @@ def test_poller_end_to_end_with_fake_session(ext, make_api, locais_json):
     assert asyncio.run(fetch(session)) == []
     (env,) = asyncio.run(fetch(session))
     assert session.calls == [ext.extension.LOCAIS_URL] * 2
-    assert env.identity.event_id == "br_rs_waterq_1026_20260302_3"
+    sample = datetime.strptime(RECENT, "%d/%m/%Y")
+    assert env.identity.event_id == f"br_rs_waterq_1026_{sample:%Y%m%d}_3"
+
+
+def test_active_and_past(ext, locais_json):
+    """Check the hard limit: a sample 90 days old is active, 91 days old is past."""
+    ex = ext.extension
+    today = date(2026, 5, 24)  # 90 days after 23/02/2026
+    points = ex.parse_locais(locais_json, today=today)
+    by_date = {p["sample_date"]: p["active"] for p in points}
+    assert by_date == {date(2026, 2, 23): True, date(2026, 2, 24): True}
+    later = ex.parse_locais(locais_json, today=today + timedelta(days=1))
+    assert {p["sample_date"]: p["active"] for p in later}[date(2026, 2, 23)] is False
+    assert ex.is_active(date(2026, 2, 24), today + timedelta(days=1)) is True
+
+
+def test_poller_ignores_past_results(ext, make_api, locais_json):
+    """Check that the poller sends no event for a new bulletin with an old sample."""
+    api = make_api("en")
+    ext.extension.setup(api)
+    fetch, _ = api.pollers["br_rs_waterq_balneabilidade"]
+    old = (date.today() - timedelta(days=ext.extension.MAX_AGE_DAYS + 1)).strftime(
+        "%d/%m/%Y"
+    )
+    baseline = json.dumps(locais_json)
+    _set(locais_json, 1026, situacao=3, ultimaColeta=old)
+
+    class Resp:
+        def __init__(self, body):
+            self._body = body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def text(self):
+            return self._body
+
+    bodies = iter([baseline, json.dumps(locais_json)])
+
+    class Session:
+        def get(self, url):
+            return Resp(next(bodies))
+
+    session = Session()
+    assert asyncio.run(fetch(session)) == []
+    assert asyncio.run(fetch(session)) == []
 
 
 def test_locales_have_same_keys():

@@ -198,25 +198,45 @@ async def test_end_to_end_live(loaded, locais_json):
     assert poller.source_id == "br_rs_waterq_balneabilidade"
     assert poller.interval_seconds == 21600
 
-    # Seed the baseline: one live point had an old bulletin. The live poll shows a new bulletin.
-    target = next(
-        (p for p in locais_json if p["situacao"] == 3),
-        next(p for p in locais_json if p["situacao"] == 2),
-    )
-    seeded = [dict(p) for p in locais_json]
-    for p in seeded:
-        if p["codLocal"] == target["codLocal"]:
-            p.update(situacao=3, ultimaColeta="01/01/2000")
-    assert await poller.fetch(_ReplaySession([json.dumps(seeded)])) == []  # Baseline
-    async with _session() as live:
-        envelopes = await poller.fetch(live)  # The second poll calls the real API
-
-    expected_status = "unsuitable" if target["situacao"] == 3 else "suitable"
-    assert len(envelopes) == 1
-    envelope = envelopes[0]
-    md = envelope.event.metadata
-    assert md["cod_local"] == target["codLocal"] and md["status"] == expected_status
-    assert md["uf"] == "RS" and md["hazard"] == "water_quality"
+    # FEPAM samples from November to February. Out of season, all live results can be past.
+    # Then the poller must send nothing.
+    ext = sys.modules["_dw_ext_br_rs_waterq.extension"]
+    active = [p for p in ext.parse_locais(locais_json) if p["active"]]
+    if not active:
+        assert await poller.fetch(_ReplaySession([json.dumps(locais_json)])) == []
+        async with _session() as live:
+            assert await poller.fetch(live) == []  # Past results give no event
+        target = next(p for p in ext.parse_locais(locais_json))
+        envelope = ext.build_envelope(loaded._apis["br_rs_waterq"], target)
+        target = target["raw"]
+    else:
+        # Seed the baseline: one active live point had a suitable result the day before.
+        # The live poll then shows a new unsuitable bulletin for this point.
+        point = next((p for p in active if p["situacao"] == 3), active[0])
+        target = point["raw"]
+        seeded = [dict(p) for p in locais_json]
+        day_before = point["sample_date"].toordinal() - 1
+        for p in seeded:
+            if p["codLocal"] == target["codLocal"]:
+                p.update(
+                    situacao=2,
+                    ultimaColeta=date.fromordinal(day_before).strftime("%d/%m/%Y"),
+                )
+        assert await poller.fetch(_ReplaySession([json.dumps(seeded)])) == []
+        async with _session() as live:
+            envelopes = await poller.fetch(live)  # The second poll calls the real API
+        if target["situacao"] == 3:
+            (envelope,) = (
+                e
+                for e in envelopes
+                if e.event.metadata["cod_local"] == target["codLocal"]
+            )
+            md = envelope.event.metadata
+            assert md["status"] == "unsuitable"
+            assert md["uf"] == "RS" and md["hazard"] == "water_quality"
+        else:
+            # Suitable after suitable is not news. Check the envelope directly.
+            envelope = ext.build_envelope(loaded._apis["br_rs_waterq"], point)
 
     runtime_config = {"weather_config": {"weather_filter": {"enabled": True}}}
     decision = evaluate_push_decision_with_components(

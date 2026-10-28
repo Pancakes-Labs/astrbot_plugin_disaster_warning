@@ -157,6 +157,8 @@ curl "https://secweb.procergs.com.br/baln/rest/coletas/1026" -H "qtd: 5"
 - It polls `GET /locais` each 6 hours (setting `poll_interval`).
 - The first poll records the state of each point. It sends no message.
 - Then it sends a message when a new bulletin gives "unsuitable" for a point, or when a point changes from "unsuitable" to "suitable".
+- A result with a sample date more than 90 days old is past. The extension does not send it. This limit is fixed (`MAX_AGE_DAYS`).
+  Thus, out of the season, the extension sends no message. On 2026-10-28, all 96 points were past (last samples 23/02/2026 and 24/02/2026).
 
 ### 2.2 FEPAM surface water quality bulletins ❌
 

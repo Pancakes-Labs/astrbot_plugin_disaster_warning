@@ -15,6 +15,8 @@ import pytest
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 WATERQ_FIXTURE = PLUGIN_DIR / "tests" / "br_rs_waterq" / "fixtures"
 DISASTER_FIXTURE = PLUGIN_DIR / "tests" / "br_rs_disaster" / "fixtures"
+# A sample date of last week. The waterq poller sends only active results.
+RECENT = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%d/%m/%Y")
 
 DISASTER = "br_rs_disaster"
 WATERQ = "br_rs_waterq"
@@ -168,7 +170,7 @@ async def test_each_event_uses_its_own_presenter(two_loaded):
     baseline = json.dumps(locais)
     for item in locais:
         if item["codLocal"] == 1026:
-            item.update(situacao=3, ultimaColeta="02/03/2026")
+            item.update(situacao=3, ultimaColeta=RECENT)
     waterq = _poller(two_loaded, WATERQ, "br_rs_waterq_balneabilidade")
     session = _FakeSession([baseline, json.dumps(locais)])
     assert await waterq.fetch(session) == []
@@ -231,7 +233,7 @@ async def test_unregister_one_leaves_the_other(two_loaded):
     baseline = json.dumps(locais)
     for item in locais:
         if item["codLocal"] == 56:
-            item.update(ultimaColeta="02/03/2026")
+            item.update(ultimaColeta=RECENT)
     waterq = _poller(two_loaded, WATERQ, "br_rs_waterq_balneabilidade")
     session = _FakeSession([baseline, json.dumps(locais)])
     await waterq.fetch(session)

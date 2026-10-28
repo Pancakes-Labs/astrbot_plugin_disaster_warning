@@ -45,6 +45,81 @@ def test_levels_and_hazard_variants(ext):
     assert a["issued_at"].utcoffset().total_seconds() == -3 * 3600
 
 
+def test_active_and_past_alerts(ext, alerts_json):
+    """Check the active flag: status 1 and a last update 90 days old or newer.
+
+    The reference time is the atualizado field of the list.
+    """
+    ex = ext.extension
+    assert all(a["active"] for a in ex.parse_alerts(alerts_json))
+    data = copy.deepcopy(alerts_json)
+    for a in data["alertas"]:
+        if a["cod_alerta"] == 3141:
+            a["status"] = 0
+        if a["cod_alerta"] == 3159:
+            a["ult_atualizacao"] = "2026-07-30 10:00:00.000"  # 90 days and 6 h old
+    by_cod = {a["cod_alerta"]: a["active"] for a in ex.parse_alerts(data)}
+    assert by_cod[3141] is False and by_cod[3159] is False
+    assert list(by_cod.values()).count(True) == len(by_cod) - 2
+
+
+def test_active_limit_is_90_days(ext):
+    """Check the boundary. 15:00 UTC is 12:00 in Brasília."""
+    ex = ext.extension
+    base = {"uf": "RS", "nivel": "Alto", "evento": "Risco Hidrológico - Alto"}
+    data = {
+        "atualizado": "28-10-2026 15:00:00 UTC",
+        "alertas": [
+            {
+                **base,
+                "status": 1,
+                "cod_alerta": 1,
+                "ult_atualizacao": "2026-07-30 12:00:00",
+            },
+            {
+                **base,
+                "status": 1,
+                "cod_alerta": 2,
+                "ult_atualizacao": "2026-07-30 11:59:00",
+            },
+        ],
+    }
+    by_cod = {a["cod_alerta"]: a["active"] for a in ex.parse_alerts(data)}
+    assert by_cod == {1: True, 2: False}
+
+
+def test_poller_ignores_past_alerts(ext, make_api, alerts_json):
+    """Check that the alert poller sends no event for a past alert."""
+    api = make_api("en")
+    ext.extension.setup(api)
+    fetch, _ = api.pollers["br_rs_disaster_cemaden_alerts"]
+    data = copy.deepcopy(alerts_json)
+    for a in data["alertas"]:
+        a["status"] = 0
+
+    class Resp:
+        def __init__(self, body):
+            self._body = body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def text(self):
+            return self._body
+
+    class Session:
+        def get(self, url):
+            return Resp(json.dumps(data))
+
+    assert asyncio.run(fetch(Session())) == []
+
+
 def test_alert_dedup_and_update(ext, alerts_json):
     """Check that an alert returns again only when its update time changes."""
     ex = ext.extension

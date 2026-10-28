@@ -61,14 +61,14 @@ curl -X GET "https://painelalertas.cemaden.gov.br/wsAlertas2"
 | Field | Type | Example | Description |
 | :--- | :--- | :--- | :--- |
 | `alertas` | array | `[...]` | The list of active alerts. |
-| `atualizado` | string | `"28-10-2026 13:21:01 UTC"` | The time of the last update of the list, in UTC. The extension does not use it. |
+| `atualizado` | string | `"28-10-2026 13:21:01 UTC"` | The time of the last update of the list, in UTC. The extension uses it as the reference time for the 90-day limit. |
 | `alertas[].cod_alerta` | integer | `3141` | The unique id of the alert. The extension uses it to find new alerts. |
 | `alertas[].datahoracriacao` | string | `"2026-10-25 11:20:44.159"` | The time when CEMADEN created the alert, in Brasília time. The extension shows it as the issue time. |
 | `alertas[].ult_atualizacao` | string | `"2026-10-25 11:20:44.159"` | The time of the last update of the alert, in Brasília time. The extension uses it as the event time. |
 | `alertas[].codibge` | integer | `4318002` | The IBGE code of the municipality. |
 | `alertas[].evento` | string | `"Risco Hidrológico - Alto"` | The type of risk and the level. See "Meaning of `evento`". |
 | `alertas[].nivel` | string | `"Alto"` | The level of the alert. See "Meaning of `nivel`". |
-| `alertas[].status` | integer | `1` | The state of the alert. All alerts in the recorded sample have the value `1`. The extension does not use it. |
+| `alertas[].status` | integer | `1` | The state of the alert. All alerts in the recorded sample have the value `1`. The extension sends only alerts with the value `1`. |
 | `alertas[].uf` | string | `"RS"` | The code of the Brazilian state. |
 | `alertas[].municipio` | string | `"SÃO BORJA"` | The name of the municipality. |
 | `alertas[].latitude` | number | `-28.7468` | The latitude of the municipality. |
@@ -107,8 +107,7 @@ The extension reads only the start of the text. If `evento` starts with `Movimen
 | `ult_atualizacao` | Set the event time. The extension sends the alert again when this value changes. |
 | `datahoracriacao` | Show the issue time in the message. |
 | `municipio`, `codibge`, `latitude`, `longitude` | Put the place in the message and in the event data. |
-
-The extension ignores `status` and `atualizado`.
+| `status`, `atualizado` | Classify the alert as active or past. An alert is active if `status` is `1` and `ult_atualizacao` is a maximum of 90 days before `atualizado`. The extension does not send past alerts. This limit is fixed (`MAX_AGE_DAYS`). |
 
 ---
 

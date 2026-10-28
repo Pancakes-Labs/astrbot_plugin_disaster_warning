@@ -1,6 +1,8 @@
 """Rio Grande do Sul (Brazil): CEMADEN alerts, CEMADEN rain gauges, and ENSO data.
 
 To make another state, copy this package and change UF and the ids.
+An alert is active if CEMADEN gives status 1 and the last update is MAX_AGE_DAYS
+old or newer. The extension does not send past alerts.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ DEFAULT_THRESHOLDS = {  # level -> (acc1hr mm, acc24hr mm)
 }
 LEVEL_KEYS = {2: "yellow", 3: "orange", 4: "red"}
 ALERT_TIME_FMT = "%Y-%m-%d %H:%M:%S"
+FEED_TIME_FMT = "%d-%m-%Y %H:%M:%S UTC"  # The atualizado field, in UTC
+ACTIVE_STATUS = 1
+MAX_AGE_DAYS = 90  # Hard limit. An alert with an older last update is past, not active.
 GAUGE_TIME_FMT = "%d/%m/%y %H:%M"
 
 
@@ -39,8 +44,31 @@ def _parse_time(text, fmt: str) -> datetime | None:
         return None
 
 
+def _feed_time(data: dict) -> datetime:
+    """Return the time of the list (atualizado), or the time now if it is not valid."""
+    try:
+        return datetime.strptime(data["atualizado"], FEED_TIME_FMT).replace(
+            tzinfo=timezone.utc
+        )
+    except (KeyError, TypeError, ValueError):
+        return datetime.now(timezone.utc)
+
+
+def is_active(raw: dict, updated_at: datetime | None, feed_time: datetime) -> bool:
+    """Return True for status 1 and a last update MAX_AGE_DAYS old or newer."""
+    return (
+        raw.get("status") == ACTIVE_STATUS
+        and updated_at is not None
+        and feed_time - updated_at <= timedelta(days=MAX_AGE_DAYS)
+    )
+
+
 def parse_alerts(data: dict) -> list[dict]:
-    """Keep the alerts of this UF that have a known level. Add hazard and times."""
+    """Keep the alerts of this UF that have a known level.
+
+    Add the hazard, the times and the active flag.
+    """
+    feed_time = _feed_time(data or {})
     out = []
     for raw in (data or {}).get("alertas") or []:
         level = ALERT_LEVELS.get(raw.get("nivel"))
@@ -51,6 +79,7 @@ def parse_alerts(data: dict) -> list[dict]:
             if (raw.get("evento") or "").startswith("Movimentos de Massa")
             else "flood"
         )
+        updated_at = _parse_time(str(raw.get("ult_atualizacao"))[:19], ALERT_TIME_FMT)
         out.append(
             {
                 "raw": raw,
@@ -62,10 +91,9 @@ def parse_alerts(data: dict) -> list[dict]:
                 ),
                 # An alert stays active for days.
                 # The host time rule must use the last update.
-                "updated_at": _parse_time(
-                    str(raw.get("ult_atualizacao"))[:19], ALERT_TIME_FMT
-                ),
+                "updated_at": updated_at,
                 "updated": raw.get("ult_atualizacao") or "",
+                "active": is_active(raw, updated_at, feed_time),
             }
         )
     return out
@@ -295,7 +323,8 @@ def setup(api) -> None:
     thresholds = load_thresholds(cfg)
 
     async def fetch_alerts(session):
-        alerts = alert_state.fresh(parse_alerts(await _get_json(session, ALERTS_URL)))
+        alerts = parse_alerts(await _get_json(session, ALERTS_URL))
+        alerts = alert_state.fresh([a for a in alerts if a["active"]])
         if not alerts:
             return []
         ctx = await enso.get(session)

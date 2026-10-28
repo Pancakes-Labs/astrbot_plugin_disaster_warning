@@ -2,12 +2,13 @@
 
 The API lists the monitoring points with the status of the last bulletin.
 The extension sends an event when a point becomes unsuitable or suitable again.
+A result with a sample older than MAX_AGE_DAYS is past. The extension does not send it.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .presenter import make_presenter
 
@@ -24,6 +25,8 @@ UNSUITABLE = 3  # situacao 3: imprópria. The values 0 and 1 mean "not collected
 SEVERITY = {SUITABLE: 0, UNSUITABLE: 2}  # white and yellow
 STATUS = {SUITABLE: "suitable", UNSUITABLE: "unsuitable"}
 DATE_FMT = "%d/%m/%Y"
+BRT = timezone(timedelta(hours=-3))  # Brasília time, no daylight saving time
+MAX_AGE_DAYS = 90  # Hard limit. An older sample is past, not active.
 
 
 def _float(value) -> float | None:
@@ -40,8 +43,17 @@ def _date(text):
         return None
 
 
-def parse_locais(data) -> list[dict]:
-    """Keep the points that have a code and a known sample date."""
+def is_active(sample: date, today: date) -> bool:
+    """Return True if the sample is MAX_AGE_DAYS old or newer."""
+    return (today - sample).days <= MAX_AGE_DAYS
+
+
+def parse_locais(data, today: date | None = None) -> list[dict]:
+    """Keep the points that have a code and a known sample date.
+
+    Mark each point as active or past. The default for today is the date in Brasília.
+    """
+    today = today or datetime.now(BRT).date()
     out = []
     for raw in data if isinstance(data, list) else []:
         if not isinstance(raw, dict) or not isinstance(raw.get("codLocal"), int):
@@ -55,6 +67,7 @@ def parse_locais(data) -> list[dict]:
                 "cod_local": raw["codLocal"],
                 "situacao": raw.get("situacao"),
                 "sample_date": sample,
+                "active": is_active(sample, today),
             }
         )
     return out
@@ -181,7 +194,8 @@ def setup(api) -> None:
 
     async def fetch(session):
         points = parse_locais(await _get_json(session, LOCAIS_URL))
-        return [build_envelope(api, p) for p in state.changes(points)]
+        active = [p for p in points if p["active"]]  # Past results give no event
+        return [build_envelope(api, p) for p in state.changes(active)]
 
     api.register_presenter(PRESENTER_KEY, make_presenter(api))
     api.register_source(_entry(api))
