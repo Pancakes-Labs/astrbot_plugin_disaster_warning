@@ -257,31 +257,8 @@ class NmcPrecipitationClient(UaSessionMixin):
         return (url or "").split("?", 1)[0]
 
     async def download_image(self, url: str) -> bytes | None:
-        """下载单帧降水图片字节。
-
-        Args:
-            url: 图片完整 URL（可带 ?v= 参数）。
-
-        Returns:
-            图片字节；失败返回 None。
-        """
-        session = await self._ensure_session()
-        try:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    logger.warning(
-                        f"[灾害预警] 降水图片下载失败，状态码为{resp.status} URL：{url[:120]}"
-                    )
-                    return None
-                data = await resp.read()
-                if not data:
-                    return None
-                return data
-        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-            logger.warning(
-                f"[灾害预警] 降水图片下载异常: {type(e).__name__}: {e} URL：{url[:120]}"
-            )
-            return None
+        """下载单帧降水图片字节（URL 可带 ?v= 参数）；失败返回 None。"""
+        return await self._download_image_bytes(url, "降水")
 
     async def download_frames(
         self,
@@ -289,39 +266,9 @@ class NmcPrecipitationClient(UaSessionMixin):
     ) -> list[tuple[PrecipitationFrame, bytes]]:
         """并发下载多帧图片，返回 (frame, bytes) 配对列表。
 
-        使用信号量限制并发，避免一次拉取过多连接打爆 CDN。
         失败帧会被跳过，因此返回列表长度可能小于输入。
-
-        Args:
-            frames: 帧列表。
-
-        Returns:
-            下载成功的 (frame, bytes) 配对列表，顺序与输入一致。
         """
-        if not frames:
-            return []
-        sem = asyncio.Semaphore(self._concurrency)
-
-        async def _one(
-            f: PrecipitationFrame,
-        ) -> tuple[PrecipitationFrame, bytes] | None:
-            async with sem:
-                data = await self.download_image(f.url)
-                if data is None:
-                    return None
-                return (f, data)
-
-        results = await asyncio.gather(
-            *(_one(f) for f in frames),
-            return_exceptions=True,
-        )
-        pairs: list[tuple[PrecipitationFrame, bytes]] = []
-        for r in results:
-            if isinstance(r, BaseException):
-                continue
-            if r is not None:
-                pairs.append(r)
-        return pairs
+        return await self._download_pairs(frames, lambda f: f.url)
 
 
 __all__ = [
