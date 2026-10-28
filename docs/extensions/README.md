@@ -1,31 +1,36 @@
-# Writing an extension
+# How to write an extension
 
-Extensions add data sources, presenters and rules on top of this plugin without forking it.
-The binding contract is [`design.md`](design.md). The reference implementation is
-[`extensions/br_rs`](../../extensions/br_rs) (Brazil — Rio Grande do Sul).
+An extension adds data sources, presenters and rules to this plugin. You do not need a fork.
+The contract is in [`design.md`](design.md). The reference implementation is
+[`extensions/br_rs`](../../extensions/br_rs) (Brazil, Rio Grande do Sul).
 
-## 1. Enable one
+## 1. Enable an extension
 
-In the plugin config (WebUI → 🧩 扩展, key `extensions`):
+Open the plugin configuration (WebUI → 🧩 扩展, key `extensions`). Set these values:
 
 ```json
 "extensions": {
   "enabled_ids": ["br_rs"],
-  "settings": "{\"br_rs\": {\"language\": \"pt-BR\", \"alerts_interval\": 300}}"
+  "settings": "{\"br_rs\": {\"language\": \"en\", \"alerts_interval\": 300}}"
 }
 ```
 
-Reload the plugin, then run `/灾害预警扩展` to see each extension's state (🟢 loaded,
-🔴 error with the message, ⚪ not found). A broken extension never stops the host.
+Reload the plugin. Then send `/灾害预警扩展`. The command shows the state of each extension:
 
-## 2. Minimal extension
+- 🟢: the extension is loaded.
+- 🔴: an error occurred. The command shows the error message.
+- ⚪: the host did not find the extension.
+
+A broken extension does not stop the host.
+
+## 2. A minimal extension
 
 ```
-<data_dir>/extensions/my_ext/      # or <plugin_dir>/extensions/my_ext/ for bundled ones
+<data_dir>/extensions/my_ext/      # or <plugin_dir>/extensions/my_ext/ for a bundled extension
   extension.yaml
-  __init__.py                      # may be empty
+  __init__.py                      # this file can be empty
   extension.py
-  locale/zh-CN.json                # host language: must contain every key
+  locale/zh-CN.json                # the host language; it must contain all keys
   locale/en.json
 ```
 
@@ -40,7 +45,7 @@ permissions: [network]
 ```
 
 ```python
-# extension.py — never import host modules; use api.models
+# extension.py. Do not import host modules. Use api.models.
 def setup(api):
     m = api.models
     api.register_source(m.SourceEntry(
@@ -67,33 +72,36 @@ def setup(api):
     api.register_poller("my_ext_rain", fetch, interval_seconds=300)
 ```
 
-Build envelopes like `extensions/br_rs/extension.py::_envelope`:
+Make the envelopes in the same way as `extensions/br_rs/extension.py`:
 
-- `EventIdentity` with `event_type="weather_alarm"` and `provider_family="extension"`;
-- a `WeatherEvent` whose `metadata["severity_level"]` is 0–4 (white, blue, yellow, orange, red), which the host uses for filtering and aggregation.
+- Use an `EventIdentity` with `event_type="weather_alarm"` and `provider_family="extension"`.
+- Use a `WeatherEvent`. Set `metadata["severity_level"]` to a value from 0 to 4
+  (white, blue, yellow, orange, red). The host uses this value to filter and to aggregate.
 
-## 3. Things the host does for you
+## 3. Functions that the host does for you
 
-- **Rule chain:**
-  - time window: events older than 1 h are dropped, so use the *last update* time;
-  - minimum colour level, from `severity_level`;
-  - keyword filters.
-- **Push:** session targeting and weather aggregation.
-- **Reliability:**
-  - a shared HTTP session;
-  - a timeout on every fetch;
-  - exponential backoff on failures;
-  - throttled error logs.
-- **i18n:** `api.t(key, **fmt)` looks in `locale/<language>.json`, then `locale/zh-CN.json`, then falls back to the key itself.
+- The rule chain:
+  - The time window. The host ignores events that are older than one hour.
+    Thus, use the time of the *last update* as the event time.
+  - The minimum color level. The host uses `severity_level`.
+  - The keyword filters.
+- Push: session targets and weather aggregation.
+- Reliability:
+  - One shared HTTP session.
+  - A timeout for each fetch.
+  - A longer wait after each failure (exponential backoff).
+  - Not more than one error log message in each period.
+- Translation: `api.t(key, **fmt)` looks in `locale/<language>.json`, then in `locale/zh-CN.json`.
+  If it does not find the key, it gives the key itself.
 
-## 4. Testing
+## 4. Tests
 
-`tests/conftest.py` stubs AstrBot, so tests run without it:
+`tests/conftest.py` replaces AstrBot with stubs. Thus, the tests do not need AstrBot:
 
 ```bash
 uv venv .venv && uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/python -m pytest -q
 ```
 
-See `tests/br_rs/` for testing parsers on recorded fixtures with a fake `api`. See
-`tests/test_extension_integration.py` for loading an extension through the real host.
+For tests of parsers with recorded data and a fake `api`, see `tests/br_rs/`.
+For a test that loads an extension through the real host, see `tests/test_extension_integration.py`.
