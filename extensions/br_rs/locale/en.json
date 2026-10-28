@@ -23,5 +23,7 @@
   "enso.strength.weak": "weak",
   "enso.strength.moderate": "moderate",
   "enso.strength.strong": "strong",
-  "enso.strength.very_strong": "very strong"
+  "enso.strength.very_strong": "very strong",
+  "format.decimal": ".",
+  "format.time": "%d/%m/%Y %H:%M"
 }

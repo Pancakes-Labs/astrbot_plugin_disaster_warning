@@ -14,6 +14,7 @@
 
 - Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
 - Add the extension `br_rs` for Rio Grande do Sul, Brazil. It sends CEMADEN flood, landslide and heavy rain alerts. It adds El Niño and La Niña data from NOAA CPC by @h0ffmann
+- `br_rs` has messages in Chinese, English, Brazilian Portuguese (`pt-BR`) and Japanese (`ja-JP`). The pt-BR messages use the decimal comma and ISO 8601 dates by @h0ffmann
 - Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension by @h0ffmann
 
 ### 🌐 Data Sources & Network (数据源与网络)

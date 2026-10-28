@@ -29,7 +29,8 @@ An approval is for one action only. Get a new approval for each new action.
 ## Rule 2: Language (hard rule)
 
 - Write all new comments, docstrings and documentation in English.
-- Do not add text in Portuguese (pt-BR). Proper nouns and raw data values from external sources are not text that you write; you can keep them.
+- Do not add text in Portuguese (pt-BR) to comments, docstrings or documentation. The pt-BR text of an extension is permitted only in its locale file (`locale/pt-BR.json`). Proper nouns and raw data values from external sources are not text that you write; you can keep them.
+- Write the pt-BR locale text with the ptbr-writer skill (level `estrito`): an explicit subject, one statement in each sentence, the decimal comma and ISO 8601 dates.
 - Write all English text in ASD-STE100 (Simplified Technical English):
   - Write short sentences: 20 words maximum for an instruction, 25 words maximum for a description.
   - Write one instruction in each sentence.

@@ -17,6 +17,7 @@ def make_presenter(api):
         def present(cls, display_context, _options=None) -> str:
             """Return the message text for a weather display context."""
             t = api.t
+            dec = t("format.decimal")
             md = display_context.metadata or {}
             level = int(md.get("severity_level") or 0)
             lines = [f"{EMOJI.get(level, '⚪')} {display_context.title}"]
@@ -26,13 +27,13 @@ def make_presenter(api):
                 lines.append(
                     t(
                         "present.rain",
-                        acc1hr=_mm(md.get("acc1hr")),
-                        acc24hr=_mm(md.get("acc24hr")),
+                        acc1hr=_mm(md.get("acc1hr"), dec),
+                        acc24hr=_mm(md.get("acc24hr"), dec),
                     )
                 )
             elif md.get("hazard"):
                 lines.append(t("present.hazard", hazard=t(f"hazard.{md['hazard']}")))
-            when = _fmt_time(md.get("issue_time"))
+            when = _fmt_time(md.get("issue_time"), t("format.time"))
             if when:
                 lines.append(t("present.time", time=when))
             sources = ["CEMADEN"]
@@ -45,7 +46,7 @@ def make_presenter(api):
                         strength=t(f"enso.strength.{enso['strength']}"),
                         season=enso.get("season", ""),
                         year=enso.get("year", ""),
-                        anom=f"{enso.get('anom', 0):+.2f}",
+                        anom=f"{enso.get('anom', 0):+.2f}".replace(".", dec),
                     )
                 )
                 sources.append("NOAA CPC")
@@ -55,14 +56,14 @@ def make_presenter(api):
     return BrRsWeatherPresenter
 
 
-def _mm(value) -> str:
-    return "-" if value is None else f"{value:g}"
+def _mm(value, dec: str) -> str:
+    return "-" if value is None else f"{value:g}".replace(".", dec)
 
 
-def _fmt_time(iso) -> str:
+def _fmt_time(iso, fmt: str) -> str:
     if not iso:
         return ""
     try:
-        return datetime.fromisoformat(iso).strftime("%d/%m/%Y %H:%M")
+        return datetime.fromisoformat(iso).strftime(fmt)
     except ValueError:
         return str(iso)

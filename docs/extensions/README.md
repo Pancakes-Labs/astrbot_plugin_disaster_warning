@@ -37,6 +37,7 @@ A broken extension does not stop the host.
   extension.py
   locale/zh-CN.json                # the host language; it must contain all keys
   locale/en.json
+  locale/<lang>.json               # more languages, for example pt-BR.json and ja-JP.json
 ```
 
 ```yaml
@@ -97,6 +98,7 @@ Make the envelopes in the same way as `extensions/br_rs/extension.py`:
   - A longer wait after each failure (exponential backoff).
   - Not more than one error log message in each period.
 - Translation: `api.t(key, **fmt)` looks in `locale/<language>.json`, then in `locale/zh-CN.json`.
+  For numbers and dates, `br_rs` reads the keys `format.decimal` and `format.time` from the locale file.
   If it does not find the key, it gives the key itself.
 
 ## 4. Tests

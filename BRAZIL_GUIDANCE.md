@@ -36,7 +36,8 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
    - Write all new comments, docstrings, documents and commit messages in English.
    - Use ASD-STE100 (Simplified Technical English). Write short sentences. Use the active voice.
      Use simple words with one meaning.
-   - Do not add Portuguese text. Proper nouns and raw data values (for example, `Moderado`) are not our text.
+   - Do not add Portuguese text to comments, docstrings or documents. The pt-BR text is permitted only in a locale file (`locale/pt-BR.json`).
+     Write it with the ptbr-writer skill (level `estrito`). Proper nouns and raw data values (for example, `Moderado`) are not our text.
    - Do not change the Chinese comments that are already in the upstream code.
    - Keep the upstream log style (`[灾害预警] ...`) and the Chinese user interface text.
 3. **Python only.** Do not add JavaScript or WebUI work for this feature.
@@ -143,7 +144,7 @@ The review uses the ponytail ladder: (1) is it necessary, (2) does the repositor
 | Constants | Pass. The thresholds, the levels, the ENSO strength limits and the ONI column count are named constants. |
 | Complexity | Pass. `parse_rain` was rank C (16). Now `rain_level` and `_gauge_item` contain the threshold logic. The highest rank is B (9). |
 | Exceptions | Pass, with one justified exception. `EnsoCache.get` catches all exceptions (`# noqa: BLE001`), because ENSO is optional data. A failure there must not stop an alert. |
-| Removed | The identity attribute `fingerprint`. It was a copy of `published_at` and no code read it. The pt-BR locale. The parameter `source_id` of `_envelope` (the hazard gives it). |
+| Removed | The identity attribute `fingerprint`. It was a copy of `published_at` and no code read it. The first pt-BR locale (a later pull request adds it again, with the ptbr-writer rules). The parameter `source_id` of `_envelope` (the hazard gives it). |
 | Known limit | `AlertState` keeps each alert ID forever (a few KB in a year). A `ponytail:` comment marks this limit. Removing old IDs can cause a duplicate push if CEMADEN drops an alert for one poll. |
 | Not changed | `present` stays a classmethod, because the upstream `BasePresenter` uses a classmethod. Vulture reports its `cls` argument; this is a false positive. `_entry` sets some optional `SourceEntry` fields (`dispatch_family`, `routing_tags`) that only WebSocket routing uses. They cause no problem. |
 
@@ -214,7 +215,8 @@ An approval is for one action only. Get a new approval for each new action.
 ### Rule 2: Language (hard rule)
 
 - Write all new comments, docstrings and documentation in English.
-- Do not add text in Portuguese (pt-BR). Proper nouns and raw data values from external sources are not text that you write; you can keep them.
+- Do not add text in Portuguese (pt-BR) to comments, docstrings or documentation. The pt-BR text of an extension is permitted only in its locale file (`locale/pt-BR.json`). Proper nouns and raw data values from external sources are not text that you write; you can keep them.
+- Write the pt-BR locale text with the ptbr-writer skill (level `estrito`): an explicit subject, one statement in each sentence, the decimal comma and ISO 8601 dates.
 - Write all English text in ASD-STE100 (Simplified Technical English):
   - Write short sentences: 20 words maximum for an instruction, 25 words maximum for a description.
   - Write one instruction in each sentence.
