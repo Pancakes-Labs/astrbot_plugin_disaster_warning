@@ -38,6 +38,8 @@ A broken extension does not stop the host.
   locale/zh-CN.json                # the host language; it must contain all keys
   locale/en.json
   locale/<lang>.json               # more languages, for example pt-BR.json and ja-JP.json
+  meta.json                        # optional: maintainer, coverage, data sources and icon credit
+  extension.png                    # optional: the icon; give its license in meta.json
 ```
 
 ```yaml
