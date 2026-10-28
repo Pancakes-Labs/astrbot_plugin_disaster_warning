@@ -56,6 +56,8 @@ def parse_alerts(data: dict, uf: str = UF) -> list[dict]:
                 "level": level,
                 "hazard": hazard,
                 "issued_at": _parse_alert_time(raw.get("datahoracriacao")),
+                # Alerts stay active for days; the host time rule must see the last update.
+                "updated_at": _parse_alert_time(raw.get("ult_atualizacao")),
                 "updated": raw.get("ult_atualizacao") or "",
             }
         )
@@ -204,8 +206,9 @@ def build_alert_envelope(api, alert: dict, enso: dict | None):
     )
     event_id = f"{ID}_cemaden_{alert['cod_alerta']}"
     fp = f"{event_id}|{alert['updated']}"
+    event_time = alert.get("updated_at") or issued
     return _envelope(
-        api, ALERTS_SOURCE, event_id, title, headline, issued, metadata, raw, fp
+        api, ALERTS_SOURCE, event_id, title, headline, event_time, metadata, raw, fp
     )
 
 

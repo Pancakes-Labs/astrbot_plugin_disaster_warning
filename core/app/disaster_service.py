@@ -58,6 +58,8 @@ from ..services.query.eew_query_state_service import EEWQueryStateService
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
 from ..services.snet.snet_poll_service import SnetPollService
 from ..services.telemetry.telemetry_utils import track_error_safely
+from ..extensions.host_registry import HostRegistry
+from ..extensions.manager import ExtensionManager
 from ..sources.source_catalog import SOURCE_CATALOG, get_legacy_group_names
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
@@ -162,6 +164,10 @@ class DisasterWarningService:
         self.message_manager.set_session_config_manager(self.session_config_manager)
         # 用于离线通知节流，避免同一连接异常在短时间内反复刷屏。
         self._offline_notification_state: dict[str, dict[str, float]] = {}
+
+        # 扩展须在解析器装配前加载，使扩展注册的数据源与解析器按内置口径初始化。
+        self.extension_manager = ExtensionManager(self, HostRegistry())
+        self.extension_manager.load_all()
 
         # 解析器按数据源编号注册，后续所有事件入口都通过统一映射表调度。
         self.parsers = {}

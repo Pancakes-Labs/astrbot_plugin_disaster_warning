@@ -963,6 +963,34 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             logger.error(f"[灾害预警] 获取统计信息失败: {e}")
             yield _quoted_plain_result(f"❌ 获取统计信息失败: {str(e)}")
 
+    async def handle_extension_status(self, event):
+        """处理扩展状态命令，列出各扩展的加载状态、注册的数据源与错误信息。"""
+        manager = getattr(self.plugin.disaster_service, "extension_manager", None)
+        if manager is None:
+            yield quoted_plain_result(self.plugin, event, "❌ 灾害预警服务未启动")
+            return
+
+        records = manager.status()
+        if not records:
+            yield quoted_plain_result(
+                self.plugin,
+                event,
+                "🧩 未启用任何扩展\n💡 在配置 extensions.enabled_ids 中填写扩展 id 后重载插件",
+            )
+            return
+
+        state_icons = {"loaded": "🟢", "error": "🔴", "not_found": "⚪"}
+        lines = ["🧩 扩展状态"]
+        for record in records:
+            icon = state_icons.get(record["state"], "❔")
+            version = f" v{record['version']}" if record["version"] else ""
+            lines.append(f"{icon} {record['name']} ({record['id']}){version}")
+            if record["sources"]:
+                lines.append(f"   数据源: {', '.join(record['sources'])}")
+            if record["error"]:
+                lines.append(f"   错误: {record['error']}")
+        yield quoted_plain_result(self.plugin, event, "\n".join(lines))
+
     async def handle_disaster_logs(self, event):
         """查看原始日志记录文件的体积、条目数与起止时间（需管理员权限）。"""
         if not await self.plugin.is_plugin_admin(event):
