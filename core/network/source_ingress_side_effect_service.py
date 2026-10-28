@@ -9,6 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 
+# Map each list message type to its cache key and its log source name.
+_EQLIST_TARGETS = {
+    "cenc_eqlist": ("cenc", "wolfx_cenc_eqlist"),
+    "jma_eqlist": ("jma", "wolfx_jma_eqlist"),
+}
+
+
 class SourceIngressSideEffectService:
     """接入后副作用服务。"""
 
@@ -28,25 +35,17 @@ class SourceIngressSideEffectService:
         if not payload:
             return
 
+        list_target = _EQLIST_TARGETS.get(message_type)
+        if list_target is None:
+            return
+        list_key, log_source = list_target
         # Wolfx 的列表消息在正式事件解析前，就可以先刷新本地缓存并写摘要日志。
-        if message_type == "cenc_eqlist":
-            self.service.earthquake_list_service.update_earthquake_list("cenc", payload)
-            if self.service.message_logger:
-                self.service.message_logger.log_earthquake_list_summary(
-                    source="wolfx_cenc_eqlist",
-                    earthquake_list=payload,
-                )
-            return
-
-        # 日本地震列表同样先走缓存刷新与摘要记录，后续查询与管理端面板可直接复用。
-        if message_type == "jma_eqlist":
-            self.service.earthquake_list_service.update_earthquake_list("jma", payload)
-            if self.service.message_logger:
-                self.service.message_logger.log_earthquake_list_summary(
-                    source="wolfx_jma_eqlist",
-                    earthquake_list=payload,
-                )
-            return
+        self.service.earthquake_list_service.update_earthquake_list(list_key, payload)
+        if self.service.message_logger:
+            self.service.message_logger.log_earthquake_list_summary(
+                source=log_source,
+                earthquake_list=payload,
+            )
 
 
 __all__ = ["SourceIngressSideEffectService"]

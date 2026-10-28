@@ -39,17 +39,14 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .ua_session import UaSessionMixin
+
 PAGE_BASE = "https://www.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
 # 页面内容缓存 TTL（秒）。降水预报每日 2 次起报（08/20 北京时），
 # 缓存 300 秒既降低请求频率，又不会让用户看到明显过期的帧。
 PAGE_CACHE_TTL_SEC = 300.0
-
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 
 # 匹配 .time 元素的开标签（宽松 class，不依赖属性顺序与引号格式）
 _TIME_ELEM_RE = re.compile(r'<div class="col-xs-12 time[^"]*"[^>]*>')
@@ -82,7 +79,7 @@ class PrecipitationFrame:
     init_time: str
 
 
-class NmcPrecipitationClient:
+class NmcPrecipitationClient(UaSessionMixin):
     """NMC 降水量预报图抓取客户端。"""
 
     def __init__(
@@ -112,21 +109,6 @@ class NmcPrecipitationClient:
                 tuple[str, str], tuple[list[PrecipitationFrame], float]
             ] = {}
         self._page_cache = cls._page_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话。"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     async def fetch_page_frames(
         self,
@@ -275,31 +257,8 @@ class NmcPrecipitationClient:
         return (url or "").split("?", 1)[0]
 
     async def download_image(self, url: str) -> bytes | None:
-        """下载单帧降水图片字节。
-
-        Args:
-            url: 图片完整 URL（可带 ?v= 参数）。
-
-        Returns:
-            图片字节；失败返回 None。
-        """
-        session = await self._ensure_session()
-        try:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    logger.warning(
-                        f"[灾害预警] 降水图片下载失败，状态码为{resp.status} URL：{url[:120]}"
-                    )
-                    return None
-                data = await resp.read()
-                if not data:
-                    return None
-                return data
-        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-            logger.warning(
-                f"[灾害预警] 降水图片下载异常: {type(e).__name__}: {e} URL：{url[:120]}"
-            )
-            return None
+        """下载单帧降水图片字节（URL 可带 ?v= 参数）；失败返回 None。"""
+        return await self._download_image_bytes(url, "降水")
 
     async def download_frames(
         self,
@@ -307,39 +266,9 @@ class NmcPrecipitationClient:
     ) -> list[tuple[PrecipitationFrame, bytes]]:
         """并发下载多帧图片，返回 (frame, bytes) 配对列表。
 
-        使用信号量限制并发，避免一次拉取过多连接打爆 CDN。
         失败帧会被跳过，因此返回列表长度可能小于输入。
-
-        Args:
-            frames: 帧列表。
-
-        Returns:
-            下载成功的 (frame, bytes) 配对列表，顺序与输入一致。
         """
-        if not frames:
-            return []
-        sem = asyncio.Semaphore(self._concurrency)
-
-        async def _one(
-            f: PrecipitationFrame,
-        ) -> tuple[PrecipitationFrame, bytes] | None:
-            async with sem:
-                data = await self.download_image(f.url)
-                if data is None:
-                    return None
-                return (f, data)
-
-        results = await asyncio.gather(
-            *(_one(f) for f in frames),
-            return_exceptions=True,
-        )
-        pairs: list[tuple[PrecipitationFrame, bytes]] = []
-        for r in results:
-            if isinstance(r, BaseException):
-                continue
-            if r is not None:
-                pairs.append(r)
-        return pairs
+        return await self._download_pairs(frames, lambda f: f.url)
 
 
 __all__ = [

@@ -27,6 +27,8 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .ua_session import UaSessionMixin
+
 PAGE_BASE = "https://www.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
@@ -34,17 +36,12 @@ _IMAGE_HOST = "image.nmc.cn"
 # 又不会让用户看到明显过期的帧。
 PAGE_CACHE_TTL_SEC = 90.0
 
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 _DATA_IMG_RE = re.compile(r'data-img="([^"]+)"')
 _CODE_RE = re.compile(r"ECREF_([A-Z0-9_]+)_L88")
 _TIME_RE = re.compile(r"_PI_(\d{17})")
 
 
-class NmcRadarClient:
+class NmcRadarClient(UaSessionMixin):
     """NMC 雷达图抓取客户端。"""
 
     def __init__(
@@ -73,24 +70,6 @@ class NmcRadarClient:
         if not hasattr(cls, "_page_cache"):
             cls._page_cache: dict[tuple[str, str], tuple[list[str], float]] = {}
         self._page_cache = cls._page_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话。
-
-        注意：不清理类级页面缓存，URL 序列不依赖会话可跨请求复用。
-        """
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     async def fetch_page_radar_urls(
         self,
@@ -159,69 +138,16 @@ class NmcRadarClient:
         return url.replace("/medium", "", 1)
 
     async def download_image(self, url: str) -> bytes | None:
-        """下载单帧雷达图片字节。
-
-        Args:
-            url: 图片完整 URL。
-
-        Returns:
-            图片字节；失败返回 None。
-        """
-        session = await self._ensure_session()
-        try:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    logger.warning(
-                        f"[灾害预警] 雷达图片下载失败，状态码为{resp.status} URL：{url[:120]}"
-                    )
-                    return None
-                data = await resp.read()
-                if not data:
-                    return None
-                return data
-        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-            logger.warning(
-                f"[灾害预警] 雷达图片下载异常: {type(e).__name__}: {e} URL：{url[:120]}"
-            )
-            return None
+        """下载单帧雷达图片字节；失败返回 None。"""
+        return await self._download_image_bytes(url, "雷达")
 
     async def download_frames(self, urls: list[str]) -> list[tuple[str, bytes]]:
         """并发下载多帧图片，返回 (url, bytes) 配对列表。
 
-        使用信号量限制并发，避免一次拉取过多连接打爆 CDN。
         失败帧会被跳过，因此返回列表长度可能小于输入；配对保留 URL，
         供上层按实际成功帧提取时间戳，避免时间标签与帧错位。
-
-        Args:
-            urls: 图片 URL 列表。
-
-        Returns:
-            下载成功的 (url, bytes) 配对列表，顺序与输入一致。
         """
-        if not urls:
-            return []
-        sem = asyncio.Semaphore(self._concurrency)
-
-        async def _one(u: str) -> tuple[str, bytes] | None:
-            async with sem:
-                data = await self.download_image(u)
-                if data is None:
-                    return None
-                return (u, data)
-
-        # return_exceptions=True：单帧异常只跳过该帧，不让整个 gather 中断，
-        # 避免剩余任务成为孤儿协程在已关闭会话上继续运行。
-        results = await asyncio.gather(
-            *(_one(u) for u in urls),
-            return_exceptions=True,
-        )
-        pairs: list[tuple[str, bytes]] = []
-        for r in results:
-            if isinstance(r, BaseException):
-                continue
-            if r is not None:
-                pairs.append(r)
-        return pairs
+        return await self._download_pairs(urls, lambda u: u)
 
     @staticmethod
     def parse_time_from_url(url: str) -> str | None:

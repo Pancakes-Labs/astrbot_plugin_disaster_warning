@@ -27,12 +27,9 @@ import aiohttp
 
 from astrbot.api import logger
 
-API_BASE = "https://api.fanstudio.tech"
+from .ua_session import UaSessionMixin
 
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+API_BASE = "https://api.fanstudio.tech"
 
 # 全站映射表缓存 TTL（秒）。站点元数据极少变动，缓存 24 小时。
 STATION_TTL_SEC = 24 * 3600.0
@@ -40,7 +37,7 @@ STATION_TTL_SEC = 24 * 3600.0
 CACHE_FAIL_TTL_SEC = 10.0
 
 
-class FanStudioStationClient:
+class FanStudioStationClient(UaSessionMixin):
     """FAN Studio 全国气象站（五位站号）客户端。"""
 
     # 全站站点映射缓存（类级共享）：api_base -> (stations, error, expires_at)
@@ -66,21 +63,6 @@ class FanStudioStationClient:
         self._session: aiohttp.ClientSession | None = None
         # 全站站点映射缓存（类级共享，子类与父类共享同一份）。
         self._station_cache = type(self)._station_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话（不清理类级缓存）。"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     async def fetch_stations(
         self, use_cache: bool = True
