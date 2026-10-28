@@ -134,7 +134,7 @@
 2. **安装依赖**: 本插件的核心依赖大多已包含在 AstrBot 的默认依赖中，且在插件下载安装时会自动安装插件所需的依赖，通常无需额外安装。如果你的环境中确实缺少相关依赖，请安装：
 
    ```bash
-   pip install python-dateutil jinja2 playwright tzdata fastapi uvicorn
+   pip install jinja2 playwright tzdata fastapi uvicorn pyyaml certifi
    # Python < 3.11 额外安装
    pip install "tomli>=2.0.1; python_version < '3.11'"
    ```
