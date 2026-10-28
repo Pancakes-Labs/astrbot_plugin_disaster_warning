@@ -206,23 +206,6 @@ class NmcWeatherClient:
         self._cache_set(self._city_cache, key, data, ttl)
         return data
 
-    async def fetch_all_cities(self) -> dict[str, list[dict[str, Any]]]:
-        """拉取全国所有省份的城市列表，构建「省份码 -> 城市列表」映射。
-
-        用于按省份过滤 / 全量建映射缓存。逐省串行拉取（约 34 次请求），
-        由调用方决定是否落缓存；本方法不写缓存。
-
-        Returns:
-            {pcode: [{code, province, city, url}, ...]}；空 dict 表示全部失败。
-        """
-        result: dict[str, list[dict[str, Any]]] = {}
-        provinces = await self.fetch_provinces()
-        for p in provinces:
-            cities = await self.fetch_cities(p["code"], use_cache=False)
-            if cities:
-                result[p["code"]] = cities
-        return result
-
     # ------------------------------------------------------------------
     # 实况 + 历史（近 24h）
     # ------------------------------------------------------------------

@@ -28,7 +28,6 @@ import aiohttp
 from astrbot.api import logger
 
 PAGE_BASE = "https://www.nmc.cn"
-IMAGE_BASE = "https://image.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
 # 页面内容缓存 TTL（秒）。雷达帧每 6 分钟更新，缓存 90 秒既降低请求频率，
@@ -223,12 +222,6 @@ class NmcRadarClient:
             if r is not None:
                 pairs.append(r)
         return pairs
-
-    @staticmethod
-    def parse_code_from_url(url: str) -> str | None:
-        """从图片 URL 中提取站点代码（如 ACHN / AZ9010）。"""
-        m = _CODE_RE.search(url or "")
-        return m.group(1) if m else None
 
     @staticmethod
     def parse_time_from_url(url: str) -> str | None:

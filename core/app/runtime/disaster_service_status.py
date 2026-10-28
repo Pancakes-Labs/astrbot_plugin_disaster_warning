@@ -121,10 +121,6 @@ class DisasterServiceStatusService:
                             result[conn_name] = "主服务器"
         return result
 
-    def get_sub_source_status(self) -> dict[str, dict[str, bool]]:
-        """获取所有子数据源的启用状态。"""
-        return self._source_runtime_query.build_sub_source_status()
-
     def get_uptime(self) -> str:
         """获取服务运行时间。"""
         # 未启动时直接返回说明文本
@@ -147,8 +143,3 @@ class DisasterServiceStatusService:
             parts.append(f"{minutes}分")
         parts.append(f"{seconds}秒")
         return "".join(parts)
-
-    def get_active_data_sources(self) -> list[str]:
-        """获取当前配置中已启用的活跃数据源列表。"""
-        # 这里返回的是“配置上启用”的数据源标签集合，不等同于实时连接一定在线。
-        return self._source_runtime_query.get_enabled_source_labels()
