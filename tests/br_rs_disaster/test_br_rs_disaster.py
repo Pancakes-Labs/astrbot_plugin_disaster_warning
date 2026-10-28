@@ -6,8 +6,11 @@ import asyncio
 import copy
 import json
 import types
+from pathlib import Path
 
-from conftest import EXT_DIR
+# Do not import EXT_DIR from conftest. Each test directory has a conftest.py,
+# and Python keeps only the first module with the name "conftest".
+EXT_DIR = Path(__file__).resolve().parents[2] / "extensions" / "br_rs_disaster"
 
 # ------------------------------------------------------------------ alerts
 
