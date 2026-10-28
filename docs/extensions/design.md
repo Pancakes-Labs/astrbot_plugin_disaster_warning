@@ -28,7 +28,7 @@ extensions/<id>/
   extension.yaml
   __init__.py
   extension.py        # default entry module; it contains setup(api)
-  locale/<lang>.json  # for example zh-CN.json and en.json
+  locale/<lang>.json  # for example zh-CN.json, en.json, pt-BR.json and ja-JP.json
 ```
 
 `extension.yaml`:

@@ -262,6 +262,41 @@ def test_presenter_rain(ext, make_api, rain_json):
     assert "Rain: 31 mm/1h | - mm/24h" in out and "Heavy rain" in out
 
 
+def test_presenter_pt_br(ext, make_api, alerts_json, oni_text):
+    """Check the Brazilian Portuguese text, the decimal comma and the ISO 8601 date."""
+    out = _present(ext, make_api, "pt-BR", alerts_json, oni_text)
+    assert out.startswith("🟠 Alerta do CEMADEN: risco de inundação")
+    assert "Nível alto em SÃO BORJA/RS" in out
+    assert "Emitido em: 2026-10-25 11:20 (horário de Brasília)" in out
+    assert "o fenômeno El Niño está ativo, com intensidade muito forte" in out
+    assert "+2,16" in out and "+2.16" not in out
+    assert out.endswith("Fonte: CEMADEN / NOAA CPC")
+
+
+def test_presenter_ja_jp(ext, make_api, alerts_json, oni_text):
+    """Check the Japanese text and the Japanese date order."""
+    out = _present(ext, make_api, "ja-JP", alerts_json, oni_text)
+    assert out.startswith("🟠 CEMADEN警報：洪水の危険")
+    assert "SÃO BORJA/RS：危険度「高」" in out
+    assert "発表：2026/10/25 11:20（ブラジリア時間）" in out
+    assert "非常に強いエルニーニョ現象" in out and "+2.16" in out
+    assert out.endswith("出典：CEMADEN / NOAA CPC")
+
+
+def test_presenter_rain_pt_br_decimal_comma(ext, make_api, rain_json):
+    """Check that the Brazilian Portuguese rain text uses the decimal comma."""
+    ex = ext.extension
+    api = make_api("pt-BR")
+    item = ex.parse_rain(_gauges(rain_json, acc1hr=32.5, acc24hr=88.4))[0]
+    env = ex.build_rain_envelope(api, item, "20261028", None)
+    ctx = types.SimpleNamespace(
+        title=env.event.title, headline=env.event.headline, metadata=env.event.metadata
+    )
+    out = ext.presenter.make_presenter(api).present(ctx, None)
+    assert "Chuva: 32,5 mm em 1 h | 88,4 mm em 24 h" in out
+    assert "Chuva forte (nível alto) em" in out
+
+
 # ------------------------------------------------------------------ setup / locale
 
 

@@ -1776,7 +1776,7 @@ Settings of `br_rs`:
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
-| `language` | `zh-CN` | The language of the messages. The values are `zh-CN` and `en`. |
+| `language` | `zh-CN` | The language of the messages. The values are `zh-CN`, `en`, `pt-BR` and `ja-JP`. |
 | `alerts_interval` | `300` | The time between two requests for CEMADEN alerts, in seconds. |
 | `rain_interval` | `300` | The time between two requests for CEMADEN rain gauges, in seconds. |
 | `rain_thresholds` | See below | The rain totals that set the level of a rain gauge alert. |

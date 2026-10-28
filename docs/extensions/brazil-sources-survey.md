@@ -162,7 +162,7 @@ easy to make after the RS extension. MG and SP are good areas for a later step (
 | ENSO / ONI | **Background data**, not an event | The extension adds a line to rain and flood messages (for example, "a strong El Niño is active"). |
 
 Region keys: the UF and the IBGE municipality code (`codibge`). Time zone: `America/Sao_Paulo`.
-The text comes from the `locale/` directory of the extension (English and Chinese for now).
+The text comes from the `locale/` directory of the extension (Chinese, English, Brazilian Portuguese and Japanese).
 
 ---
 
@@ -171,7 +171,7 @@ The text comes from the `locale/` directory of the extension (English and Chines
 ```
 extensions/br_rs/
   extension.yaml        # id, api_version, min_host_version, permissions: [network]
-  locale/en.json, zh-CN.json
+  locale/zh-CN.json, en.json, pt-BR.json, ja-JP.json
   extension.py          # sources, pollers, parsers and envelopes
   presenter.py          # the text of the message
   enso.py               # the ENSO (NOAA ONI) background data
