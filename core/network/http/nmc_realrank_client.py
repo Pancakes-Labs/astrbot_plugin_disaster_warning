@@ -28,6 +28,8 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .ua_session import UaSessionMixin
+
 PAGE_BASE = "https://www.nmc.cn"
 _RANK_API = "/rest/realrank/{type}/{hour}/{ymdh}"
 
@@ -38,18 +40,13 @@ CACHE_FAIL_TTL_SEC = 5.0
 # 缓存最大条目数：键含用户可控 ymdh，防止恶意输入导致无限增长。
 CACHE_MAX_ENTRIES = 512
 
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 # 支持的排行要素类型
 RANK_TYPES = ("maxtemp", "mintemp", "rain", "wind")
 # 支持的时间跨度
 RANK_HOURS = (1, 6, 24)
 
 
-class NmcRealRankClient:
+class NmcRealRankClient(UaSessionMixin):
     """NMC 实况排行数据抓取客户端。"""
 
     def __init__(
@@ -77,24 +74,6 @@ class NmcRealRankClient:
                 tuple[str, str, int, str], tuple[dict[str, Any], float]
             ] = {}
         self._rank_cache = cls._rank_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话。
-
-        注意：不清理类级数据缓存，排行数据不依赖会话可跨请求复用。
-        """
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     @staticmethod
     def build_url(

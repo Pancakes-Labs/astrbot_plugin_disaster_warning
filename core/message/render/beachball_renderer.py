@@ -62,31 +62,6 @@ class BeachballRenderer:
 
         return n, u
 
-    def _compute_t_p_axes(
-        self, strike: float, dip: float, rake: float
-    ) -> tuple[list[float], list[float]]:
-        """计算 T 轴与 P 轴向量。"""
-        n, u = self._strike_dip_slip_to_fault_plane(strike, dip, rake)
-
-        # 标准定义：T = (n + u) / |n + u|，P = (n - u) / |n - u|
-        # 注意 P 为 n - u（而非 u - n），与震源机制教科书约定一致
-        t = [u[i] + n[i] for i in range(3)]
-        p = [n[i] - u[i] for i in range(3)]
-
-        norm_t = math.sqrt(sum(x * x for x in t))
-        norm_p = math.sqrt(sum(x * x for x in p))
-
-        t = [x / norm_t for x in t] if norm_t > 0 else [0.0, 0.0, 1.0]
-        p = [x / norm_p for x in p] if norm_p > 0 else [0.0, 0.0, 1.0]
-
-        # 确保轴朝向下半球 (Z > 0)
-        if t[2] < 0:
-            t = [-x for x in t]
-        if p[2] < 0:
-            p = [-x for x in p]
-
-        return t, p
-
     @staticmethod
     def _normalize(v: list[float]) -> list[float]:
         norm = math.sqrt(sum(x * x for x in v))

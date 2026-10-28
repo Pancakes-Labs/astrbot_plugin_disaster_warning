@@ -15,6 +15,7 @@ from collections.abc import Iterable
 
 from ..domain.typhoon.typhoon_modes import resolve_data_mode
 from ..sources.display_registry import SOURCE_ALIAS_MAP, SOURCE_DISPLAY_MAP
+from ..sources.source_catalog import get_source_entry, get_source_owner
 
 # 历史别名映射表与展示名称映射表已统一收编至
 # core/sources/display_registry.py（SOURCE_ALIAS_MAP / SOURCE_DISPLAY_MAP），
@@ -40,6 +41,9 @@ def format_source_name(source: str) -> str:
     """把来源标识格式化为更适合展示的中文标签。"""
     normalized = normalize_source_name(source)
     # 如果映射字典里找不到对应的漂亮展示名，则使用归一化后的去重字符串作为兜底
+    if normalized not in SOURCE_DISPLAY_MAP and get_source_owner(normalized):
+        # An extension source is not in the static table. Use its display_name.
+        return get_source_entry(normalized).display_name
     return SOURCE_DISPLAY_MAP.get(normalized) or str(source or "").strip() or "未知来源"
 
 

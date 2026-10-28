@@ -41,6 +41,24 @@ class RuleChain:
         return RuleDecision.accept(reason="规则链通过")
 
 
+# Rules of extensions: (rule, rule_name of the anchor, extension id).
+_REGISTERED_RULES: list[tuple[object, str, str]] = []
+
+
+def register_rule(rule, *, after: str = "local_rule", owner: str) -> None:
+    """Register a rule of an extension.
+
+    The rule goes after the built-in rule with rule_name equal to after.
+    If that rule does not exist, the rule goes at the end.
+    """
+    _REGISTERED_RULES.append((rule, after, owner))
+
+
+def unregister_rules(owner: str) -> None:
+    """Remove all rules that an extension registered."""
+    _REGISTERED_RULES[:] = [item for item in _REGISTERED_RULES if item[2] != owner]
+
+
 def build_default_rule_chain() -> RuleChain:
     """构建默认推送规则链。
 
@@ -48,17 +66,21 @@ def build_default_rule_chain() -> RuleChain:
     震动强度、报次与本地烈度判断。
     """
     # 顺次装配核心过滤逻辑规则实例
-    return RuleChain(
-        [
-            EventTimeRule(),
-            SourceEnabledRule(),
-            MeasurementTypeRule(),
-            WeatherRule(),
-            TyphoonRule(),
-            TsunamiRule(),
-            KeywordRule(),
-            EarthquakeThresholdRule(),
-            ReportRule(),
-            LocalIntensityRule(),
-        ]
-    )
+    rules = [
+        EventTimeRule(),
+        SourceEnabledRule(),
+        MeasurementTypeRule(),
+        WeatherRule(),
+        TyphoonRule(),
+        TsunamiRule(),
+        KeywordRule(),
+        EarthquakeThresholdRule(),
+        ReportRule(),
+        LocalIntensityRule(),
+    ]
+    # Put each extension rule after its anchor rule.
+    for rule, after, _owner in _REGISTERED_RULES:
+        names = [getattr(item, "rule_name", "") for item in rules]
+        index = names.index(after) + 1 if after in names else len(rules)
+        rules.insert(index, rule)
+    return RuleChain(rules)

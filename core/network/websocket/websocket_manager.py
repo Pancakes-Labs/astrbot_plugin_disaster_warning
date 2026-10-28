@@ -461,10 +461,6 @@ class WebSocketManager:
             # 会话退出后做一次幂等清理，防止已关闭 socket / 心跳任务残留占位
             await self._cleanup_closed_connection(name, websocket)
 
-    def _log_message(self, name: str, message: Any, uri: str):
-        """记录消息的辅助入口。"""
-        self._dispatch_service.log_message(name, message, uri)
-
     async def _cancel_heartbeat_task(self, name: str) -> None:
         """取消指定连接的心跳任务并等待其退出。"""
         task = self.heartbeat_tasks.pop(name, None)
@@ -732,31 +728,6 @@ class WebSocketManager:
                 )
         self._reconnect_service.handle_connection_error(name, uri, headers, error)
 
-    def _is_critical_error(self, error: Exception) -> bool:
-        """判断是否属于需要立即切换兜底策略的关键错误。"""
-        return self._reconnect_service.is_critical_error(error)
-
-    def _get_handler_name_for_connection(self, connection_name: str) -> str:
-        """获取连接名对应的处理器名称。"""
-        return self._dispatch_service.get_handler_name_for_connection(connection_name)
-
-    async def _schedule_reconnect(
-        self,
-        name: str,
-        uri: str,
-        headers: dict | None = None,
-        connection_info: dict[str, Any] | None = None,
-        force_fallback: bool = False,
-    ):
-        """按统一重连策略安排一次后续重连。"""
-        await self._reconnect_service.schedule_reconnect(
-            name,
-            uri,
-            headers,
-            connection_info,
-            force_fallback=force_fallback,
-        )
-
     async def _schedule_deferred_attempt_cleanup(
         self, name: str, attempt_id: str
     ) -> None:
@@ -935,10 +906,6 @@ class WebSocketManager:
         """启动管理器。"""
         await self._runtime_service.start()
 
-    async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
-        """取消并等待任务结束。"""
-        await self._runtime_service.cancel_and_wait(tasks)
-
     async def stop(self):
         """停止管理器。"""
         await self._runtime_service.stop()
@@ -1007,29 +974,6 @@ class WebSocketManager:
 
         # 以非阻塞异步任务方式抛出给外层订阅者，避免阻塞建连/重连主流程。
         asyncio.create_task(_invoke_callback())
-
-    def _emit_offline_notification(
-        self,
-        connection_name: str,
-        stage: str,
-        reason: str,
-        next_retry_in: str | None = None,
-        retry_count: int | None = None,
-        fallback_count: int | None = None,
-    ) -> None:
-        """以异步安全方式触发离线通知回调。"""
-        self._reconnect_service.emit_offline_notification(
-            connection_name=connection_name,
-            stage=stage,
-            reason=reason,
-            next_retry_in=next_retry_in,
-            retry_count=retry_count,
-            fallback_count=fallback_count,
-        )
-
-    def _find_handler_by_prefix(self, connection_name: str) -> str | None:
-        """按连接名前缀匹配处理器名称。"""
-        return self._dispatch_service.find_handler_by_prefix(connection_name)
 
 
 class HTTPDataFetcher:

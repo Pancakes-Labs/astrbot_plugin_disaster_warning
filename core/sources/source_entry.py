@@ -29,6 +29,7 @@ class ProviderFamily(Enum):
     EQSC = "eqsc"  # EQSC HTTP API（海啸/台风/火山等富化数据源）
     DIRECT_HTTP = "direct_http"  # 直连 HTTP 轮询源（如 NIED S-Net / MSIL 瓦片）
     JIAN_PROJECT = "jian_project"  # Jian Project WebSocket 聚合源
+    EXTENSION = "extension"  # Source that an extension registers
 
 
 class FusionRole(Enum):
@@ -107,11 +108,6 @@ class SourceEntry:
     metadata: dict[str, str] = field(
         default_factory=dict
     )  # 预留字典，存放未来扩展元数据
-
-    @property
-    def config_path(self) -> tuple[str, str]:
-        """返回数据源配置路径。"""
-        return self.config_group, self.config_key
 
     @property
     def timezone_name(self) -> str:

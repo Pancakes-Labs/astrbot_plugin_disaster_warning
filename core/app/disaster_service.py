@@ -58,6 +58,8 @@ from ..services.query.eew_query_state_service import EEWQueryStateService
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
 from ..services.snet.snet_poll_service import SnetPollService
 from ..services.telemetry.telemetry_utils import track_error_safely
+from ..extensions.host_registry import HostRegistry
+from ..extensions.manager import ExtensionManager
 from ..sources.source_catalog import SOURCE_CATALOG, get_legacy_group_names
 from ..sources.source_institution_catalog import get_institution_catalog
 from ..storage.session_config_manager import SessionConfigManager
@@ -89,6 +91,10 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
     source_entry = SOURCE_CATALOG.get(source_id)
     if source_entry is None:
         return False
+
+    # An extension source is enabled for all sessions when it is registered.
+    if source_entry.config_group == "extensions":
+        return True
 
     # 获取数据源组配置（合并历史别名组名，规范组名优先），组被禁用则该数据源禁用
     group_cfg: dict[str, Any] = {}
@@ -158,6 +164,11 @@ class DisasterWarningService:
         self.message_manager.set_session_config_manager(self.session_config_manager)
         # 用于离线通知节流，避免同一连接异常在短时间内反复刷屏。
         self._offline_notification_state: dict[str, dict[str, float]] = {}
+
+        # Load the extensions before the parsers start. The parsers of an extension
+        # then start in the same way as the built-in parsers.
+        self.extension_manager = ExtensionManager(self, HostRegistry())
+        self.extension_manager.load_all()
 
         # 解析器按数据源编号注册，后续所有事件入口都通过统一映射表调度。
         self.parsers = {}
@@ -627,10 +638,6 @@ class DisasterWarningService:
             # 透传任务登记回调，确保预热任务纳入停机统一回收
             warmup(register_task=self.register_background_task)
 
-    async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
-        """取消并等待任务结束。"""
-        await self.lifecycle_service.cancel_and_wait(tasks)
-
     def register_background_task(self, task: asyncio.Task) -> None:
         """注册服务级后台任务，确保停机时可统一回收。"""
         if task is None:
@@ -661,10 +668,6 @@ class DisasterWarningService:
         if coordinator is None:
             return False
         return bool(coordinator.is_silencing())
-
-    def is_in_silence_period(self) -> bool:
-        """兼容旧接口：等价于 is_silencing()。"""
-        return self.is_silencing()
 
     def _seed_event_for_silence(self, event: EventEnvelope) -> None:
         """静默期播种去重指纹（推送管理器 + 统计侧，若存在）。"""

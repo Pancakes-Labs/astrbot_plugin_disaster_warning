@@ -1158,19 +1158,6 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             await self._track_command_error(e, "simulate_disaster")
             yield _quoted_plain_result(f"❌ 模拟失败: {e}")
 
-    async def handle_query_earthquake_warning_with_timeout(
-        self, event, timeout: float = 15.0
-    ):
-        """带超时保护的地震预警查询。"""
-        try:
-            async for result in asyncio.wait_for(
-                self.handle_query_earthquake_warning(event),
-                timeout=timeout,
-            ):
-                yield result
-        except TimeoutError:
-            yield quoted_plain_result(self.plugin, event, "❌ 查询超时，请稍后重试")
-
     async def handle_query_jma_hypo_list(
         self,
         event,

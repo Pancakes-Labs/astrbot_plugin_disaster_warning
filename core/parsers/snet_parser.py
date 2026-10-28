@@ -387,15 +387,6 @@ def _rgb_to_shindo(r: int, g: int, b: int) -> float | None:
     return p * 10.0 - 3.0
 
 
-def _decode_pixel(png_bytes: bytes, x: int, y: int) -> tuple[int, int, int] | None:
-    """解码 PNG，返回 (x,y) 处 RGB。"""
-    try:
-        img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-        return img.getpixel((x, y))
-    except Exception:
-        return None
-
-
 def _build_stations(tiles: dict[str, Image.Image]) -> list[dict[str, Any]]:
     """遍历所有测站，解码 RGB → 震度。"""
     stations = []
