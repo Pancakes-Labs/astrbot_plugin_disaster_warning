@@ -3,7 +3,7 @@
 # NOAA CPC ONI
 
 The Oceanic Niño Index (ONI) measures the El Niño and La Niña climate events. The Climate Prediction Center (CPC) of NOAA publishes it as a text file.
-The `br_rs_disaster` extension reads this file to add background data to its messages.
+The `br_south_disaster` extension reads this file to add background data to its messages.
 
 **Base URL**: `https://www.cpc.ncep.noaa.gov/`
 
@@ -67,9 +67,9 @@ Each code has the first letters of three months.
 | `AMJ` | April, May, June | `NDJ` | November, December, January |
 | `MJJ` | May, June, July | `JJA` | June, July, August |
 
-### Classification in `br_rs_disaster`
+### Classification in `br_south_disaster`
 
-The extension uses the last row of the file. It reads `ANOM` and applies the bands in `extensions/br_rs_disaster/enso.py`. The sign sets the phase. The size sets the strength.
+The extension uses the last row of the file. It reads `ANOM` and applies the bands in `extensions/br_south_disaster/enso.py`. The sign sets the phase. The size sets the strength.
 
 | `ANOM` | Phase | Strength |
 | :--- | :--- | :--- |

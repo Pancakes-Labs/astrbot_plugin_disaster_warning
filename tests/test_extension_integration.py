@@ -1,4 +1,4 @@
-"""Integration test. Load br_rs_disaster with the real host registries.
+"""Integration test. Load br_south_disaster with the real host registries.
 
 A real CEMADEN alert goes through the rule chain and the presenter.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-FIXTURES = Path(__file__).parent / "br_rs_disaster" / "fixtures"
+FIXTURES = Path(__file__).parent / "br_south_disaster" / "fixtures"
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -63,8 +63,8 @@ class _FakeService:
 
 
 @pytest.fixture
-def loaded_br_rs_disaster(tmp_path):
-    """Load br_rs_disaster through the real extension manager and host registry. Unregister it after the test."""
+def loaded_br_south_disaster(tmp_path):
+    """Load br_south_disaster through the real extension manager and host registry. Unregister it after the test."""
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
     from astrbot_plugin_disaster_warning.core.extensions.host_registry import (
         HostRegistry,
@@ -76,8 +76,8 @@ def loaded_br_rs_disaster(tmp_path):
     service = _FakeService(
         {
             "extensions": {
-                "enabled_ids": ["br_rs_disaster"],
-                "settings": json.dumps({"br_rs_disaster": {"language": "en"}}),
+                "enabled_ids": ["br_south_disaster"],
+                "settings": json.dumps({"br_south_disaster": {"language": "en"}}),
             }
         }
     )
@@ -89,29 +89,29 @@ def loaded_br_rs_disaster(tmp_path):
     )
     manager.load_all()
     yield manager
-    HostRegistry().unregister_source_entries(owner="br_rs_disaster")
-    HostRegistry().unregister_presenters(owner="br_rs_disaster")
+    HostRegistry().unregister_source_entries(owner="br_south_disaster")
+    HostRegistry().unregister_presenters(owner="br_south_disaster")
 
 
-def test_br_rs_disaster_loads_through_real_host(loaded_br_rs_disaster):
-    """Check that br_rs_disaster loads and that its two sources are in the host catalog."""
+def test_br_south_disaster_loads_through_real_host(loaded_br_south_disaster):
+    """Check that br_south_disaster loads and that its two sources are in the host catalog."""
     from astrbot_plugin_disaster_warning.core.sources.source_catalog import (
         SOURCE_CATALOG,
         get_source_owner,
     )
 
-    (record,) = loaded_br_rs_disaster.status()
+    (record,) = loaded_br_south_disaster.status()
     assert record["state"] == "loaded", record["error"]
     assert set(record["sources"]) == {
-        "br_rs_disaster_cemaden_alerts",
-        "br_rs_disaster_cemaden_rain",
+        "br_south_disaster_cemaden_alerts",
+        "br_south_disaster_cemaden_rain",
     }
     for source_id in record["sources"]:
         assert source_id in SOURCE_CATALOG
-        assert get_source_owner(source_id) == "br_rs_disaster"
+        assert get_source_owner(source_id) == "br_south_disaster"
 
 
-async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_rs_disaster):
+async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_south_disaster):
     """Check that a fixture alert passes the rule chain and that the presenter shows CEMADEN."""
     from astrbot_plugin_disaster_warning.core.message.presenters.presenter_registry import (
         present_message,
@@ -120,9 +120,9 @@ async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_rs_disaster
         evaluate_push_decision_with_components,
     )
 
-    api = loaded_br_rs_disaster._apis["br_rs_disaster"]
+    api = loaded_br_south_disaster._apis["br_south_disaster"]
     poller = next(
-        p for p in api.pollers if p.source_id == "br_rs_disaster_cemaden_alerts"
+        p for p in api.pollers if p.source_id == "br_south_disaster_cemaden_alerts"
     )
     envelopes = await poller.fetch(_FakeSession())
 

@@ -3,8 +3,10 @@
 # Brazil water quality sources
 
 Status: research notes, 2026-10-28. This document lists the official water quality data
-of Brazil for the extensions. Only the state of Rio Grande do Sul (RS) is complete for now.
-The extension `br_rs_waterq` uses the first source in section 2.
+of Brazil for the extensions. The three states of the South are complete for now:
+Rio Grande do Sul (RS, section 2), Santa Catarina (SC, section 3) and Paraná (PR, section 4).
+The extension `br_south_waterq` uses sections 2.1, 3.1 and 4.1. Each state has a provider
+module in `extensions/br_south_waterq/providers/`.
 
 Legend:
 
@@ -91,7 +93,7 @@ curl "https://secweb.procergs.com.br/baln/rest/locais"
 | longitude | string | `-51.299964` | The longitude, as text |
 | situacao | int | `2` | The result. See the table of codes below. |
 | ibge | string | `4301909` | The IBGE code of the municipality |
-| bandeira | object | | Beach flag data. All values were null on 2026-10-28. `br_rs_waterq` does not use it. |
+| bandeira | object | | Beach flag data. All values were null on 2026-10-28. `br_south_waterq` does not use it. |
 | ultimaColeta | string | `24/02/2026` | The date of the last sample (dd/mm/yyyy) |
 | laboratorio | string | `CORSAN` | The laboratory: `FEPAM`, `PELOTAS` or `CORSAN` |
 | nomeMunicipio | string | `BARRA DO RIBEIRO` | The name of the municipality. It is null in `GET /locais/{codLocal}`. |
@@ -152,7 +154,7 @@ curl "https://secweb.procergs.com.br/baln/rest/coletas/1026" -H "qtd: 5"
 
 `GET /municipios` gives `[{"nome": "ALEGRETE", "ibge": 4300406}, ...]`: the municipalities with monitoring points.
 
-#### How `br_rs_waterq` uses the API
+#### How `br_south_waterq` uses the API
 
 - It polls `GET /locais` each 6 hours (setting `poll_interval`).
 - The first poll records the state of each point. It sends no message.
@@ -185,13 +187,193 @@ CORSAN is private since 2023. Thus, its own reports are not government data.
 
 ---
 
-## 3. Next steps
+## 3. Santa Catarina
 
-1. Find the SISAGUA open data endpoint, and filter it by `uf = RS`.
+### 3.1 IMA Balneabilidade (bathing water quality) ✅
+
+IMA (Instituto do Meio Ambiente de Santa Catarina, the state environmental agency) monitors
+the bathing water of the sea, lagoons and rivers of the coast. Samples continue all year.
+On 2026-10-28, the map had 260 points in 28 municipalities. The newest sample was 27/10/2026.
+
+- **Base URL**: `https://balneabilidade.ima.sc.gov.br`
+- **Operator**: IMA. The web site `https://balneabilidade.ima.sc.gov.br/` uses these endpoints
+  (jQuery `$.post` calls in the page).
+- **Authentication**: none. **Format**: JSON as `text/html`. Some bodies start with a byte order mark.
+- **TLS**: the certificate is valid with the system store.
+
+#### Important notes
+
+1. The map endpoint gives the current status of each point, but **no sample date**.
+   The samples endpoint gives the dates. It accepts one point for each request.
+2. IMA does not document the API. We found the endpoints in the code of the web site.
+3. The text values are in Portuguese, in mixed case. They are data.
+4. The criterion of the page: a point is suitable when 4 of the last 5 samples have less than
+   800 E. coli per 100 mL, and the last sample has less than 2,000 E. coli per 100 mL (CONAMA 274/2000).
+
+#### Current status of all points
+
+`POST /relatorio/mapa` (GET gives the same body)
+
+```bash
+curl -X POST "https://balneabilidade.ima.sc.gov.br/relatorio/mapa"
+```
+
+```json
+[
+  {
+    "CODIGO": "ca409384-a717-4bdc-8a14-b5fd6ed3cea8",
+    "MUNICIPIO_COD_IBGE": "4201950",
+    "MUNICIPIO": "Balneário Arroio do Silva",
+    "PONTO_NOME": "Ponto 03",
+    "BALNEARIO": "Praia do Arroio do Silva",
+    "LOCALIZACAO": "Em frente à Avenida Mondardo, lado direito do córrego (no mar)",
+    "LATITUDE": "-28.98813600",
+    "LONGITUDE": "-49.41199200",
+    "CONDICAO": "IMPRÓPRIO"
+  }
+]
+```
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| CODIGO | string | `ca409384-…` | The ID of the point (a UUID) |
+| MUNICIPIO_COD_IBGE | string | `4201950` | The IBGE code of the municipality |
+| MUNICIPIO | string | `Balneário Arroio do Silva` | The name of the municipality |
+| PONTO_NOME | string | `Ponto 03` | The name of the point |
+| BALNEARIO | string | `Praia do Arroio do Silva` | The name of the beach |
+| LOCALIZACAO | string | | The description of the place |
+| LATITUDE, LONGITUDE | string | `-28.98813600` | The position, as text |
+| CONDICAO | string | `IMPRÓPRIO` | `PRÓPRIO`: suitable. `IMPRÓPRIO`: unsuitable. The site shows other values as unknown. |
+
+On 2026-10-28, the map had 198 points with `PRÓPRIO` and 62 points with `IMPRÓPRIO`.
+
+#### Samples of one point
+
+`POST /relatorio/analisesPonto` with the form field `codigo=<CODIGO>`
+
+```bash
+curl -X POST "https://balneabilidade.ima.sc.gov.br/relatorio/analisesPonto" \
+  -d "codigo=ca409384-a717-4bdc-8a14-b5fd6ed3cea8"
+```
+
+```json
+[
+  {"DATA": "19/10/2026", "CONDICAO": "IMPRÓPRIO", "CHUVA": "Ausente", "RESULTADO": "6131", "TEMP_AGUA": "15.00"},
+  {"DATA": "13/10/2026", "CONDICAO": "IMPRÓPRIO", "CHUVA": "Ausente", "RESULTADO": "19863", "TEMP_AGUA": "17.00"}
+]
+```
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| DATA | string | `19/10/2026` | The date of the sample (dd/mm/yyyy) |
+| CONDICAO | string | `IMPRÓPRIO` | The status after this sample |
+| CHUVA | string | `Ausente` | Rain in the last 24 hours |
+| RESULTADO | string | `6131` | E. coli, in MPN (NMP) per 100 mL |
+| TEMP_AGUA | string | `15.00` | The water temperature (°C) |
+
+The endpoint gives the last 5 samples. Do not trust the order. Use the newest `DATA`.
+
+#### Other endpoints (not used)
+
+- `POST /relatorio/exportarCSV` with `municipioID`, `localID` and `ano`: the samples of one year, as CSV (UTF-8 with a byte order mark).
+- `GET /relatorio/downloadPDF/<yyyy-mm-dd>`: the PDF bulletin of a date.
+- `POST /municipio/getMunicipios`, `POST /local/getLocaisByMunicipio`, `POST /pontoColeta/getPontosByLocal`: lists for the site menus.
+
+#### How `br_south_waterq` uses the API
+
+- It polls `/relatorio/mapa` each 6 hours (setting `poll_interval`). The first poll records the status of each point. It sends no message.
+- When the status of a point changes, it calls `/relatorio/analisesPonto` for that point only. The newest sample gives the date and the E. coli result.
+- Thus, in SC, a new sample with the same status is not news. The extension sends a message only when a point becomes unsuitable, or suitable again.
+- A sample older than 90 days is past. The extension does not send it.
+
+---
+
+## 4. Paraná
+
+### 4.1 IAT Balneabilidade (bathing water quality, ArcGIS layer) ✅
+
+IAT (Instituto Água e Terra, the state environmental agency) monitors the bathing water of the
+coast (Litoral) and of the reservoirs and rivers of the West (Costa Oeste) in the summer season.
+On 2026-10-28, the layer had 76 points in 14 municipalities, for the season 2025/2026.
+
+- **Base URL**: `https://geopr.iat.pr.gov.br/server/rest/services/Geoprocessamento/balneabilidade/FeatureServer/0`
+- **Operator**: IAT, on the GeoPR portal (ArcGIS Enterprise). The IAT page
+  `https://www.iat.pr.gov.br/Pagina/Balneabilidade` links to the PDF bulletins and to the map.
+- **Authentication**: none. **Format**: ArcGIS JSON (`f=json`) or GeoJSON (`f=geojson`).
+- **TLS**: the certificate is valid with the system store.
+
+#### Important notes
+
+1. The layer has **one row for each point** and **one column for each campaign** of the season:
+   `b1` to `b11` (the result) and `b1_data` to `b11_data` (the date, in epoch milliseconds).
+   The last campaign with a result is the current result.
+2. On 2026-10-28, only `b1_data` (18/12/2025) and `b2_data` (26/12/2025) had dates.
+   The campaigns `b3` to `b9` had results, but no dates. The PDF bulletins give the dates.
+3. IAT uses the same layer each season (`ano1` is the year). The schema can change in a new season.
+4. The names of the municipalities have no accents (`Foz do Iguacu`).
+
+#### Query all points
+
+```bash
+curl "https://geopr.iat.pr.gov.br/server/rest/services/Geoprocessamento/balneabilidade/FeatureServer/0/query?where=1%3D1&outFields=*&returnGeometry=false&f=json"
+```
+
+```json
+{
+  "features": [
+    {
+      "attributes": {
+        "cod": "GN4", "regiao": "Litoral", "municipio": "Guaratuba",
+        "praia_rio": "Balneario Brejatuba", "local": "CANAL DO CAMPING - FOZ",
+        "b1": "Impropria", "b1_data": 1766026800000,
+        "b2": "Impropria", "b2_data": 1766718000000,
+        "b9": "Impropria", "b9_data": null, "b10": "", "b11": "",
+        "ano1": "2026", "cod_ibge": "4109609",
+        "latitude": -25.91092984, "longitude": -48.57199568
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| cod | string | `GN4` | The ID of the point |
+| regiao | string | `Litoral` | The region: `Litoral`, `Costa Oeste` or `Norte` |
+| municipio | string | `Guaratuba` | The name of the municipality |
+| praia_rio | string | `Balneario Brejatuba` | The beach or the river |
+| local | string | `CANAL DO CAMPING - FOZ` | The description of the place |
+| b1 … b11 | string | `Impropria` | The result of the campaign: `Propria` (suitable), `Impropria` (unsuitable) or empty (no sample) |
+| b1_data … b11_data | integer or null | `1766718000000` | The date of the campaign, in epoch milliseconds |
+| ano1 | string | `2026` | The year of the season |
+| cod_ibge | string | `4109609` | The IBGE code of the municipality |
+| latitude, longitude | number | `-25.91092984` | The position (SIRGAS 2000) |
+
+The layer gives a maximum of 2,000 rows for each request. `returnCountOnly=true` gives the count.
+
+#### How `br_south_waterq` uses the API
+
+- It polls the query each 6 hours (setting `poll_interval`). The first poll records the result of each point. It sends no message.
+- The result of a point is the last campaign with a value. The bulletin ID is `<ano1>-b<N>`.
+- The sample date is the newest date of this campaign or of an earlier campaign. The real sample
+  is not older than this date. Thus, the 90-day limit never sends an old result as active.
+  But it can mark a new result as past when IAT gives no date.
+- On 2026-10-28, all results were past (newest date 26/12/2025). The extension sent no message.
+
+---
+
+## 5. Next steps
+
+1. Find the SISAGUA open data endpoint, and filter it by `uf` for the South states.
 2. Ask FEPAM for a feed of the surface water results (IQA).
-3. Make the same table for Santa Catarina (SC). The SC agency IMA has a bathing water site (`balneabilidade.ima.sc.gov.br`).
+3. Ask IAT to fill the campaign dates (`b3_data` to `b11_data`) in the layer.
+4. To add a state, add a provider module in `extensions/br_south_waterq/providers/` and one line in `states.py`.
 
 ## Sources
+
+- IMA Balneabilidade web site (SC): https://balneabilidade.ima.sc.gov.br/
+- IAT Balneabilidade page (PR): https://www.iat.pr.gov.br/Pagina/Balneabilidade
+- IAT GeoPR layer (PR): https://geopr.iat.pr.gov.br/server/rest/services/Geoprocessamento/balneabilidade/FeatureServer/0
 
 - FEPAM Balneabilidade web application: http://balneabilidade.rs.gov.br/
 - The API used by the application: https://secweb.procergs.com.br/baln/rest/locais

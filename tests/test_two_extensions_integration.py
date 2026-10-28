@@ -1,6 +1,6 @@
 """Integration test of the extension mechanism with two extensions at the same time.
 
-Load br_rs_disaster and br_rs_waterq with the real extension manager and host registry.
+Load br_south_disaster and br_south_waterq with the real extension manager and host registry.
 """
 
 from __future__ import annotations
@@ -13,15 +13,18 @@ from pathlib import Path
 import pytest
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
-WATERQ_FIXTURE = PLUGIN_DIR / "tests" / "br_rs_waterq" / "fixtures"
-DISASTER_FIXTURE = PLUGIN_DIR / "tests" / "br_rs_disaster" / "fixtures"
+WATERQ_FIXTURE = PLUGIN_DIR / "tests" / "br_south_waterq" / "fixtures"
+DISASTER_FIXTURE = PLUGIN_DIR / "tests" / "br_south_disaster" / "fixtures"
 # A sample date of last week. The waterq poller sends only active results.
 RECENT = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%d/%m/%Y")
 
-DISASTER = "br_rs_disaster"
-WATERQ = "br_rs_waterq"
-DISASTER_SOURCES = {"br_rs_disaster_cemaden_alerts", "br_rs_disaster_cemaden_rain"}
-WATERQ_SOURCES = {"br_rs_waterq_balneabilidade"}
+DISASTER = "br_south_disaster"
+WATERQ = "br_south_waterq"
+DISASTER_SOURCES = {
+    "br_south_disaster_cemaden_alerts",
+    "br_south_disaster_cemaden_rain",
+}
+WATERQ_SOURCES = {"br_south_waterq_balneabilidade"}
 
 BROKEN_SETUP = """
 def setup(api):
@@ -161,17 +164,15 @@ async def test_each_event_uses_its_own_presenter(two_loaded):
         present_message,
     )
 
-    alerts = _poller(two_loaded, DISASTER, "br_rs_disaster_cemaden_alerts")
+    alerts = _poller(two_loaded, DISASTER, "br_south_disaster_cemaden_alerts")
     (alert, *_) = await alerts.fetch(_FakeSession())
 
-    locais = json.loads(
-        (WATERQ_FIXTURE / "balneabilidade_locais.json").read_text("utf-8")
-    )
+    locais = json.loads((WATERQ_FIXTURE / "fepam_rs_locais.json").read_text("utf-8"))
     baseline = json.dumps(locais)
     for item in locais:
         if item["codLocal"] == 1026:
             item.update(situacao=3, ultimaColeta=RECENT)
-    waterq = _poller(two_loaded, WATERQ, "br_rs_waterq_balneabilidade")
+    waterq = _poller(two_loaded, WATERQ, "br_south_waterq_balneabilidade")
     session = _FakeSession([baseline, json.dumps(locais)])
     assert await waterq.fetch(session) == []
     (water,) = await waterq.fetch(session)
@@ -227,14 +228,12 @@ async def test_unregister_one_leaves_the_other(two_loaded):
         get_source_owner,
     )
 
-    locais = json.loads(
-        (WATERQ_FIXTURE / "balneabilidade_locais.json").read_text("utf-8")
-    )
+    locais = json.loads((WATERQ_FIXTURE / "fepam_rs_locais.json").read_text("utf-8"))
     baseline = json.dumps(locais)
     for item in locais:
         if item["codLocal"] == 56:
             item.update(ultimaColeta=RECENT)
-    waterq = _poller(two_loaded, WATERQ, "br_rs_waterq_balneabilidade")
+    waterq = _poller(two_loaded, WATERQ, "br_south_waterq_balneabilidade")
     session = _FakeSession([baseline, json.dumps(locais)])
     await waterq.fetch(session)
     (water,) = await waterq.fetch(session)

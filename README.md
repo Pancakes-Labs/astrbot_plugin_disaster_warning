@@ -528,10 +528,10 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 </details>
 
-### Extension push example (Brazil, Rio Grande do Sul)
+### Extension push example (Brazil, South region)
 
 <details>
-<summary>CEMADEN flood alert (extension br_rs_disaster, language en)</summary>
+<summary>CEMADEN flood alert (extension br_south_disaster, language en)</summary>
 
 ```text
 🟠 CEMADEN alert: flood risk
@@ -545,7 +545,7 @@ Source: CEMADEN / NOAA CPC
 </details>
 
 <details>
-<summary>CEMADEN rain gauge alert (extension br_rs_disaster, language en)</summary>
+<summary>CEMADEN rain gauge alert (extension br_south_disaster, language en)</summary>
 
 ```text
 🟠 Heavy rain
@@ -562,17 +562,18 @@ Source: CEMADEN / NOAA CPC
 > The alert text comes from a recorded CEMADEN alert. The rain gauge text uses a sample reading, because the recorded rain data has no value above the thresholds. The ONI line comes from the recorded ONI file.
 
 <details>
-<summary>FEPAM bathing water alert (extension br_rs_waterq, language en)</summary>
+<summary>IMA bathing water alert (extension br_south_waterq, state SC, language en)</summary>
 
 ```text
 🟡 Water quality alert: unsuitable for bathing
-PRAIA DO U - TAPES/RS
+Praia do Arroio do Silva - Ponto 03 - Balneário Arroio do Silva/SC
 Status: unsuitable for bathing
-Sample date: 23/02/2026
-Laboratory: CORSAN
-Position: -30.6880; -51.3944
-Criterion: CONAMA 274/2000 (E. coli and thermotolerant coliforms)
-Source: FEPAM / PROCERGS
+Sample date: 19/10/2026
+E. coli: 6131 MPN/100 mL
+Laboratory: IMA
+Position: -28.9881; -49.4120
+Criterion: CONAMA 274/2000
+Source: IMA/SC
 ```
 
 </details>
@@ -1060,19 +1061,21 @@ Source: FEPAM / PROCERGS
 | :--- | :--- | :--- |
 | S-Net 海底地震计 (MSIL) | 地震情报 | ✅ |
 
-#### 🔹 Extensions (br_rs_disaster: Brazil, Rio Grande do Sul)
+#### 🔹 Extensions (br_south_disaster: Brazil, South region: RS, SC, PR)
 
 | 数据源 | 数据类型 | 状态 |
 | :--- | :--- | :--- |
 | CEMADEN alerts (`wsAlertas2`) | 气象预警 | 🧪 |
-| CEMADEN rain gauges (`getJson2.php?uf=RS`) | 气象预警 | 🧪 |
+| CEMADEN rain gauges (`getJson2.php?uf={RS,SC,PR}`) | 气象预警 | 🧪 |
 | NOAA CPC ONI (background data for El Niño and La Niña) | 气候背景 | 🧪 |
 
-#### 🔹 Extensions (br_rs_waterq: Brazil, Rio Grande do Sul, water quality)
+#### 🔹 Extensions (br_south_waterq: Brazil, South region: RS, SC, PR, water quality)
 
 | 数据源 | 数据类型 | 状态 |
 | :--- | :--- | :--- |
-| FEPAM Balneabilidade (`secweb.procergs.com.br/baln/rest/locais`) | 水质（游泳适宜性） | 🧪 |
+| FEPAM Balneabilidade, RS (`secweb.procergs.com.br/baln/rest/locais`) | 水质（游泳适宜性） | 🧪 |
+| IMA Balneabilidade, SC (`balneabilidade.ima.sc.gov.br/relatorio/mapa`) | 水质（游泳适宜性） | 🧪 |
+| IAT Balneabilidade, PR (`geopr.iat.pr.gov.br/.../balneabilidade/FeatureServer/0`) | 水质（游泳适宜性） | 🧪 |
 
 ✅ **正常**  
 ⚠️ **不稳定**  
@@ -1780,32 +1783,33 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 
 ### <span id="extensions-config">🧩 16. Extensions (`extensions`)</span>
 
-An extension adds data sources to the plugin. The plugin has two bundled extensions for Rio Grande do Sul, Brazil:
+An extension adds data sources to the plugin. The plugin has two bundled extensions for the South region of Brazil (the states RS, SC and PR):
 
-- `br_rs_disaster` sends CEMADEN rain, flood and landslide alerts. It adds El Niño and La Niña data from NOAA CPC.
-- `br_rs_waterq` sends the bathing water results of the FEPAM Balneabilidade program. See `docs/extensions/brazil-water-quality-sources.md`.
+- `br_south_disaster` sends CEMADEN rain, flood and landslide alerts of the selected states. It adds El Niño and La Niña data from NOAA CPC.
+- `br_south_waterq` sends the bathing water results of the state programs: FEPAM (RS), IMA (SC) and IAT (PR). See `docs/extensions/brazil-water-quality-sources.md`.
 
 The plugin loads no extension by default.
 
-- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `br_rs_disaster`. A failed extension does not stop the plugin. Reload the plugin after a change.
+- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `br_south_disaster`. A failed extension does not stop the plugin. Reload the plugin after a change.
 - **Extension settings (`settings`)**: JSON text. The first level is the extension id. The plugin ignores text that is not valid JSON. The default is `{}`.
 
 Example:
 
 ```json
 "extensions": {
-  "enabled_ids": ["br_rs_disaster", "br_rs_waterq"],
-  "settings": "{\"br_rs_disaster\": {\"language\": \"en\", \"rain_interval\": 600}, \"br_rs_waterq\": {\"language\": \"en\"}}"
+  "enabled_ids": ["br_south_disaster", "br_south_waterq"],
+  "settings": "{\"br_south_disaster\": {\"language\": \"en\", \"rain_interval\": 600}, \"br_south_waterq\": {\"language\": \"en\"}}"
 }
 ```
 
-Settings of `br_rs_disaster`:
+Settings of `br_south_disaster`:
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | `language` | `zh-CN` | The language of the messages. The values are `zh-CN`, `en`, `pt-BR` and `ja-JP`. |
 | `alerts_interval` | `300` | The time between two requests for CEMADEN alerts, in seconds. |
 | `rain_interval` | `300` | The time between two requests for CEMADEN rain gauges, in seconds. |
+| `states` | `["RS", "SC", "PR"]` | The list of states to monitor. The extension ignores an unknown code. If no code is known, it uses all states and writes a warning. |
 | `rain_thresholds` | See below | The rain totals that set the level of a rain gauge alert. |
 
 `rain_thresholds` has three keys: `yellow`, `orange` and `red`. Each key has `acc1hr` (rain in the last 1 hour, in mm) and `acc24hr` (rain in the last 24 hours, in mm). A gauge meets a level when one of the two values reaches the threshold. A key that you omit keeps its default.
@@ -1816,14 +1820,19 @@ Settings of `br_rs_disaster`:
 | `orange` | 3 | 30 | 100 |
 | `red` | 4 | 60 | 150 |
 
-Settings of `br_rs_waterq`:
+Settings of `br_south_waterq`:
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | `language` | `zh-CN` | The language of the messages. The values are `zh-CN`, `en`, `pt-BR` and `ja-JP`. |
-| `poll_interval` | `21600` | The time between two requests for the FEPAM results, in seconds (6 hours). FEPAM publishes one bulletin each Friday, from November to February. |
+| `states` | `["RS", "SC", "PR"]` | The list of states to monitor. The extension ignores an unknown code. If no code is known, it uses all states and writes a warning. |
+| `poll_interval` | `21600` | The time between two requests for the results of each state, in seconds (6 hours). |
 
-The first request records the state of each monitoring point and sends no message. Then the extension sends a message when a new bulletin gives "unsuitable" for a point, or when a point changes from "unsuitable" to "suitable".
+The first request records the state of each monitoring point and sends no message. Then the extension sends a message when a new bulletin gives "unsuitable" for a point, or when a point changes from "unsuitable" to "suitable". For SC, the extension sends a message only when the status of a point changes.
+
+Each extension has a fixed limit of 90 days. The extension never sends a past result. For `br_south_waterq`, a sample is past when its date is more than 90 days old or unknown. For `br_south_disaster`, see `docs/CEMADEN API.md`. In the off-season, the bathing water programs of RS and PR have only past results. Thus, the extension sends no message for these states.
+
+To add a state, add one line to `states.py` of `br_south_disaster`. For `br_south_waterq`, add one provider module and one line to `states.py`.
 
 Send `/灾害预警扩展` to see the state of each extension. For the extension contract and a guide to write your own extension, see [docs/extensions/README.md](docs/extensions/README.md).
 

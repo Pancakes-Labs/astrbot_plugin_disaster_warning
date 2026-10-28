@@ -1,0 +1,64 @@
+{
+  "id": "br_south_disaster",
+  "description": "Metadata of the br_south_disaster extension. The host does not read this file.",
+  "maintainer": {
+    "github": "h0ffmann",
+    "url": "https://github.com/h0ffmann",
+    "location": "Florianópolis, SC, Brazil",
+    "organization": "marola.dev"
+  },
+  "organization": {
+    "name": "marola.dev",
+    "roadmap": "CZ/JPN support soon."
+  },
+  "coverage": {
+    "country": "BR",
+    "states": [
+      "RS",
+      "SC",
+      "PR"
+    ],
+    "hazards": [
+      "flood",
+      "landslide",
+      "heavy_rain"
+    ],
+    "background_data": [
+      "enso"
+    ],
+    "region": "South"
+  },
+  "languages": [
+    "zh-CN",
+    "en",
+    "pt-BR",
+    "ja-JP"
+  ],
+  "data_sources": [
+    {
+      "name": "CEMADEN alerts",
+      "url": "https://painelalertas.cemaden.gov.br/wsAlertas2",
+      "document": "docs/CEMADEN API.md"
+    },
+    {
+      "name": "CEMADEN rain gauges",
+      "url": "https://resources.cemaden.gov.br/graficos/interativo/getJson2.php?uf={uf}",
+      "document": "docs/CEMADEN API.md",
+      "note": "One request for each state: uf is RS, SC or PR."
+    },
+    {
+      "name": "NOAA CPC ONI",
+      "url": "https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt",
+      "document": "docs/NOAA CPC ONI.md"
+    }
+  ],
+  "icon": {
+    "file": "extension.png",
+    "title": "marola logo v2",
+    "source": "https://github.com/marola-dev/marola/blob/a4c2af1b106a/docs/assets/logo-v2/marola-logo-v2.png",
+    "author": "marola-dev",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "changes": "None. The file is a copy of the source file."
+  }
+}

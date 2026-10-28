@@ -3,7 +3,7 @@
 # CEMADEN API
 
 CEMADEN is the National Center for Monitoring and Early Warning of Natural Disasters of Brazil.
-The `br_rs_disaster` extension reads two public endpoints of CEMADEN. Both endpoints use HTTP GET and need no key.
+The `br_south_disaster` extension reads two public endpoints of CEMADEN. Both endpoints use HTTP GET and need no key.
 
 **Base URL**: `https://painelalertas.cemaden.gov.br/` (alerts) and `https://resources.cemaden.gov.br/` (rain gauges)
 
@@ -25,7 +25,7 @@ The `br_rs_disaster` extension reads two public endpoints of CEMADEN. Both endpo
 
 /wsAlertas2
 
-Get the active hydrological and geological risk alerts for all Brazilian states. The extension keeps only the alerts of the state `RS`.
+Get the active hydrological and geological risk alerts for all Brazilian states. The extension keeps only the alerts of the selected South states (`RS`, `SC` and `PR`; the `states` setting selects them). It uses one request for all states.
 
 ### Example request
 
@@ -96,11 +96,11 @@ The text has the format `<type of risk> - <level>`. The recorded sample has thes
 
 The extension reads only the start of the text. If `evento` starts with `Movimentos de Massa`, the hazard is a landslide. For all other values, the hazard is a flood.
 
-### Fields that `br_rs_disaster` uses
+### Fields that `br_south_disaster` uses
 
 | Field | Use |
 | :--- | :--- |
-| `uf` | Keep only the value `RS`. |
+| `uf` | Keep only the values of the selected states (`RS`, `SC` or `PR`). |
 | `nivel` | Set the severity level (2, 3 or 4). |
 | `evento` | Set the hazard (flood or landslide). |
 | `cod_alerta` | Make the event id and find new alerts. |
@@ -115,7 +115,7 @@ The extension reads only the start of the text. If `evento` starts with `Movimen
 
 /graficos/interativo/getJson2.php
 
-Get the latest readings of all rain gauges of one state. The query parameter `uf` selects the state. The extension uses `uf=RS`.
+Get the latest readings of all rain gauges of one state. The query parameter `uf` selects the state. The extension sends one request for each selected state: `uf=RS`, `uf=SC` and `uf=PR`.
 
 ### Example request
 
@@ -194,8 +194,10 @@ Each array item is one rain gauge. A rain total is a number in millimeters (mm).
 | `tipoestacao` | integer | `1` | The type of the gauge. All gauges in the recorded sample have the value `1`. |
 | `status` | integer | `0` | The state of the gauge. All gauges in the recorded sample have the value `0`. |
 
-### Fields that `br_rs_disaster` uses
+### Fields that `br_south_disaster` uses
 
 The extension uses `uf`, `codibge`, `cidade`, `nomeestacao`, `datahoraUltimovalor`, `acc1hr` and `acc24hr`. It ignores all other fields.
+
+A reading is past when `datahoraUltimovalor` is more than 90 days older than the newest `datahoraUltimovalor` in the same response. The extension does not send past readings. This limit is fixed (`MAX_AGE_DAYS`).
 
 For each municipality, the extension keeps the gauge with the highest level. A gauge meets a level when `acc1hr` or `acc24hr` is equal to or higher than the threshold of that level. The `rain_thresholds` setting sets the thresholds. The defaults are in the [README](../README.md#extensions-config).

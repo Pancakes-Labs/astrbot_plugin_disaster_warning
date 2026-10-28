@@ -1,0 +1,9 @@
+id: br_south_disaster
+name: Brazil - South (disasters)
+version: 0.1.0
+api_version: 1
+min_host_version: 1.6.5
+entry: extension:setup
+description: This extension sends CEMADEN rain, flood, and landslide alerts for the South of Brazil (RS, SC and PR). The setting states selects the states. It adds El Niño and La Niña data from NOAA CPC.
+author: astrbot_plugin_disaster_warning
+permissions: [network]

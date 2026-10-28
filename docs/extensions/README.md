@@ -2,11 +2,11 @@
 
 An extension adds data sources, presenters and rules to this plugin. You do not need a fork.
 The contract is in [`design.md`](design.md). The reference implementation is
-[`extensions/br_rs_disaster`](../../extensions/br_rs_disaster) (Brazil, Rio Grande do Sul).
-A second example is [`extensions/br_rs_waterq`](../../extensions/br_rs_waterq) (bathing water quality). Its data source is in
+[`extensions/br_south_disaster`](../../extensions/br_south_disaster) (Brazil, South region).
+A second example is [`extensions/br_south_waterq`](../../extensions/br_south_waterq) (bathing water quality). Its data source is in
 [Brazil water quality sources](brazil-water-quality-sources.md).
 
-The API documents of the data sources of `br_rs_disaster` are:
+The API documents of the data sources of `br_south_disaster` are:
 
 - [CEMADEN API](../CEMADEN%20API.md): the alerts and the rain gauges.
 - [NOAA CPC ONI](../NOAA%20CPC%20ONI.md): the El Niño and La Niña index.
@@ -17,8 +17,8 @@ Open the plugin configuration (WebUI → 🧩 扩展, key `extensions`). Set the
 
 ```json
 "extensions": {
-  "enabled_ids": ["br_rs_disaster"],
-  "settings": "{\"br_rs_disaster\": {\"language\": \"en\", \"alerts_interval\": 300}}"
+  "enabled_ids": ["br_south_disaster"],
+  "settings": "{\"br_south_disaster\": {\"language\": \"en\", \"alerts_interval\": 300}}"
 }
 ```
 
@@ -82,7 +82,7 @@ def setup(api):
     api.register_poller("my_ext_rain", fetch, interval_seconds=300)
 ```
 
-Make the envelopes in the same way as `extensions/br_rs_disaster/extension.py`:
+Make the envelopes in the same way as `extensions/br_south_disaster/extension.py`:
 
 - Use an `EventIdentity` with `event_type="weather_alarm"` and `provider_family="extension"`.
 - Use a `WeatherEvent`. Set `metadata["severity_level"]` to a value from 0 to 4
@@ -102,7 +102,7 @@ Make the envelopes in the same way as `extensions/br_rs_disaster/extension.py`:
   - A longer wait after each failure (exponential backoff).
   - Not more than one error log message in each period.
 - Translation: `api.t(key, **fmt)` looks in `locale/<language>.json`, then in `locale/zh-CN.json`.
-  For numbers and dates, `br_rs_disaster` reads the keys `format.decimal` and `format.time` from the locale file.
+  For numbers and dates, `br_south_disaster` reads the keys `format.decimal` and `format.time` from the locale file.
   If it does not find the key, it gives the key itself.
 
 ## 4. Tests
@@ -114,5 +114,5 @@ uv venv .venv && uv pip install --python .venv/bin/python -r requirements-dev.tx
 .venv/bin/python -m pytest -q
 ```
 
-For tests of parsers with recorded data and a fake `api`, see `tests/br_rs_disaster/`.
+For tests of parsers with recorded data and a fake `api`, see `tests/br_south_disaster/`.
 For a test that loads an extension through the real host, see `tests/test_extension_integration.py`.

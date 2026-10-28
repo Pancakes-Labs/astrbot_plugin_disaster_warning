@@ -16,7 +16,7 @@ The maintainer gave these goals:
 
 An extension is a Python package. The host looks for extensions in two root directories:
 
-1. `<plugin_dir>/extensions/<id>/`: bundled extensions, for example `br_rs_disaster`.
+1. `<plugin_dir>/extensions/<id>/`: bundled extensions, for example `br_south_disaster`.
 2. `<data_dir>/extensions/<id>/`: extensions that the user installs.
    `data_dir` is `StarTools.get_data_dir("astrbot_plugin_disaster_warning")`.
 
@@ -36,8 +36,8 @@ extensions/<id>/
 `extension.yaml`:
 
 ```yaml
-id: br_rs_disaster                  # required; [a-z0-9_]+; it must be the same as the directory name
-name: Brazil - Rio Grande do Sul
+id: br_south_disaster                  # required; [a-z0-9_]+; it must be the same as the directory name
+name: Brazil - South (disasters)
 version: 0.1.0
 api_version: 1             # required; the host supports only 1
 min_host_version: 1.6.5    # optional; the host compares it with the version in metadata.yaml

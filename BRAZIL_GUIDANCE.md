@@ -1,7 +1,7 @@
 # BRAZIL_GUIDANCE.md
 
-This document records what we learned when we added the extension system and the `br_rs_disaster`
-extension (Brazil, Rio Grande do Sul). It is for the people and the AI agents that do the next
+This document records what we learned when we added the extension system and the `br_south_disaster`
+extension (Brazil, South region: RS, SC and PR). It is for the people and the AI agents that do the next
 work in this area. The upstream repository has no `AGENTS.md` file. When it gets one, use this
 document as the start.
 
@@ -20,8 +20,9 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
   - The system is declarative, discoverable and backward-compatible.
   - The system supports translations from the first version. Each extension has a `locale/`
     directory. A missing key uses the host language.
-- Brazil is too large for one source. Make one extension for each state (UF). Each extension
-  filters the national feeds by UF or by the IBGE municipality code.
+- Brazil is too large for one source. Make one extension for each region. Each extension
+  filters the national feeds by UF or by the IBGE municipality code. The bundled extensions
+  cover the South (RS, SC and PR) and have a `states` setting.
 - El Niño is background data, not a new disaster type. Heavy rain and floods use the
   existing weather type.
 
@@ -87,7 +88,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
 | Source | Access | Notes |
 |---|---|---|
 | CEMADEN alerts `painelalertas.cemaden.gov.br/wsAlertas2` | Public JSON | Levels `Moderado`, `Alto`, `Muito Alto` → 2, 3, 4. Hazards: hydrological risk and mass movement. |
-| CEMADEN rain gauges `resources.cemaden.gov.br/.../getJson2.php?uf=RS` | Public JSON | The server sends JSON as `text/html`. A missing total is the string `"-"`. A gauge without a reading has a null time. |
+| CEMADEN rain gauges `resources.cemaden.gov.br/.../getJson2.php?uf={RS,SC,PR}` | Public JSON | The server sends JSON as `text/html`. A missing total is the string `"-"`. A gauge without a reading has a null time. |
 | NOAA CPC ONI `oni.ascii.txt` | Public text | The last row is the current season. |
 | INMET warnings | Timeout from outside Brazil | Test from a Brazilian IP address. WMO WIS2 is a possible alternative. |
 | SGB SACE river levels | No API (Java RPC and PDF) | Needs reverse engineering. |
@@ -98,7 +99,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
   `/etc/ssl/cert.pem`) do not have this root. The extension HTTP session uses `certifi`.
   The AstrBot Docker image has the root and `certifi`.
 - RS is the best first state for floods, heavy rain and El Niño (455 gauges, four SGB river systems,
-  a strong El Niño in 2026). SC is the second state. The survey is in `docs/extensions/brazil-sources-survey.md`.
+  a strong El Niño in 2026). SC and PR joined later, and the extensions now cover all three states of the South. The survey is in `docs/extensions/brazil-sources-survey.md`.
 
 ## 4. How to work (lessons from this session)
 
@@ -119,7 +120,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
    suggestions in `docs/ponytail-audit.md`. If two helpers differ in an edge case
    (None, bool, inf, nan, empty text), they are not duplicates.
 6. **Test with real data at three levels:**
-   - Unit tests with recorded data (`tests/br_rs_disaster/fixtures/`).
+   - Unit tests with recorded data (`tests/br_south_disaster/fixtures/`).
    - Live tests with the real feeds (`tests/live/`). They run only with `DW_LIVE_TESTS=1`.
      They check the schema, the parser results and the full path through the host.
      An empty result (no alerts now) is a valid state.
@@ -132,7 +133,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
 8. **Ask only for real decisions.** The owner changed the language rule two times. Write a durable
    rule into `AGENTS.md` and into memory when the owner says "hard rule".
 
-## 5. Ponytail review of `extensions/br_rs_disaster` (after all fixes)
+## 5. Ponytail review of `extensions/br_south_disaster` (after all fixes)
 
 The review uses the ponytail ladder: (1) is it necessary, (2) does the repository already have it,
 (3) does the standard library have it, (4) can it be shorter.
@@ -150,7 +151,7 @@ The review uses the ponytail ladder: (1) is it necessary, (2) does the repositor
 | Known limit | `AlertState` keeps each alert ID forever (a few KB in a year). A `ponytail:` comment marks this limit. Removing old IDs can cause a duplicate push if CEMADEN drops an alert for one poll. |
 | Not changed | `present` stays a classmethod, because the upstream `BasePresenter` uses a classmethod. Vulture reports its `cls` argument; this is a false positive. `_entry` sets some optional `SourceEntry` fields (`dispatch_family`, `routing_tags`) that only WebSocket routing uses. They cause no problem. |
 
-## 6. Code smell scores of `extensions/br_rs_disaster`
+## 6. Code smell scores of `extensions/br_south_disaster`
 
 Rules: `extensions/ruff.toml` (strict: bugbear, complexity, pylint, simplify, exceptions and more).
 Complexity and maintainability: radon 6.0.1. Dead code: vulture 2.14 (60 % confidence).

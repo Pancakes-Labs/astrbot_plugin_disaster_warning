@@ -166,10 +166,10 @@ The text comes from the `locale/` directory of the extension (Chinese, English, 
 
 ---
 
-## 5. The structure of the first extension (`br_rs_disaster`)
+## 5. The structure of the first extension (`br_south_disaster`)
 
 ```
-extensions/br_rs_disaster/
+extensions/br_south_disaster/
   extension.yaml        # id, api_version, min_host_version, permissions: [network]
   locale/zh-CN.json, en.json, pt-BR.json, ja-JP.json
   extension.py          # sources, pollers, parsers and envelopes

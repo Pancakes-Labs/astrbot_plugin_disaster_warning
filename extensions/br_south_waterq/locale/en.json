@@ -1,0 +1,18 @@
+{
+  "title.unsuitable": "Water quality alert: unsuitable for bathing",
+  "title.suitable": "Water quality: suitable for bathing again",
+  "headline": "{beach} - {municipio}/{uf}",
+  "status.unsuitable": "unsuitable for bathing",
+  "status.suitable": "suitable for bathing",
+  "source.balneabilidade": "Bathing water quality (South of Brazil)",
+  "source.balneabilidade.desc": "Bathing water quality results of the state agencies of the South of Brazil (FEPAM in Rio Grande do Sul, IMA in Santa Catarina and IAT in Paraná). An alert shows when a point is unsuitable or suitable again.",
+  "present.status": "Status: {status}",
+  "present.sample": "Sample date: {date}",
+  "present.lab": "Laboratory: {lab}",
+  "present.location": "Position: {coords}",
+  "present.criterion": "Criterion: CONAMA 274/2000",
+  "present.source": "Source: {source}",
+  "format.decimal": ".",
+  "format.date": "%d/%m/%Y",
+  "present.ecoli": "E. coli: {value} MPN/100 mL"
+}

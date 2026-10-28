@@ -1,0 +1,9 @@
+id: br_south_waterq
+name: Brazil - South (water quality)
+version: 0.1.0
+api_version: 1
+min_host_version: 1.6.5
+entry: extension:setup
+description: This extension sends bathing water quality alerts for the South of Brazil. It uses FEPAM (RS), IMA (SC) and IAT (PR). It sends an alert when a point becomes unsuitable, and when a point is suitable again. It does not send results with a sample older than 90 days. The setting states selects the states.
+author: astrbot_plugin_disaster_warning
+permissions: [network]

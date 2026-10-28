@@ -13,21 +13,23 @@
 ### ✨ New Features (新功能)
 
 - Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
-- Add the extension `br_rs_disaster` for Rio Grande do Sul, Brazil. It sends CEMADEN flood, landslide and heavy rain alerts. It adds El Niño and La Niña data from NOAA CPC by @h0ffmann
-- `br_rs_disaster` has messages in Chinese, English, Brazilian Portuguese (`pt-BR`) and Japanese (`ja-JP`). The pt-BR messages use the decimal comma and ISO 8601 dates by @h0ffmann
-- Add the extension `br_rs_waterq` for Rio Grande do Sul, Brazil. It sends the bathing water results of the FEPAM Balneabilidade program (CONAMA 274/2000), in the same four languages by @h0ffmann
+- Add the extension `br_south_disaster` for the South region of Brazil (RS, SC and PR). It sends CEMADEN flood, landslide and heavy rain alerts. It adds El Niño and La Niña data from NOAA CPC by @h0ffmann
+- `br_south_disaster` has messages in Chinese, English, Brazilian Portuguese (`pt-BR`) and Japanese (`ja-JP`). The pt-BR messages use the decimal comma and ISO 8601 dates by @h0ffmann
+- Add the extension `br_south_waterq` for the South region of Brazil (RS, SC and PR). It sends the bathing water results of FEPAM (RS), IMA (SC) and IAT (PR) (CONAMA 274/2000), in the same four languages by @h0ffmann
+- Add the setting `states` to both extensions. It selects the states to monitor. The default is all states. To add a state, add one line to `states.py` (and one provider module for `br_south_waterq`) by @h0ffmann
+- Add a fixed limit of 90 days to both extensions. A past alert, rain gauge reading or water sample is never sent. The limit is not a setting by @h0ffmann
 - Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension by @h0ffmann
 
 ### 🌐 Data Sources & Network (数据源与网络)
 
-- Add the sources `br_rs_disaster_cemaden_alerts` and `br_rs_disaster_cemaden_rain`. They poll the CEMADEN endpoints. See `docs/CEMADEN API.md` by @h0ffmann
+- Add the sources `br_south_disaster_cemaden_alerts` and `br_south_disaster_cemaden_rain`. They poll the CEMADEN endpoints. See `docs/CEMADEN API.md` by @h0ffmann
 - Add the NOAA CPC ONI file as background data. See `docs/NOAA CPC ONI.md` by @h0ffmann
-- Add the source `br_rs_waterq_balneabilidade`. It polls the official FEPAM API on PROCERGS. See `docs/extensions/brazil-water-quality-sources.md` by @h0ffmann
+- Add the source `br_south_waterq_balneabilidade`. It polls the official API of each state: FEPAM on PROCERGS (RS), IMA (SC) and the IAT ArcGIS layer (PR). See `docs/extensions/brazil-water-quality-sources.md` by @h0ffmann
 - Use one HTTP session for all extension pollers. The session uses the `certifi` root certificates. This fixes `CERTIFICATE_VERIFY_FAILED` for the GlobalSign Root R46 of CEMADEN by @h0ffmann
 
 ### ⚙️ Configuration (配置)
 
-- Add the `extensions` configuration group with the keys `enabled_ids` and `settings`. The settings of `br_rs_disaster` are `language`, `alerts_interval`, `rain_interval` and `rain_thresholds` by @h0ffmann
+- Add the `extensions` configuration group with the keys `enabled_ids` and `settings`. The settings of `br_south_disaster` are `language`, `states`, `alerts_interval`, `rain_interval` and `rain_thresholds`. The settings of `br_south_waterq` are `language`, `states` and `poll_interval` by @h0ffmann
 - Add the requirements `pyyaml` and `certifi` by @h0ffmann
 
 ### 📚 Documentation (文档)
@@ -35,7 +37,7 @@
 - Add `docs/CEMADEN API.md`, `docs/NOAA CPC ONI.md` and the extension guide in `docs/extensions/` by @h0ffmann
 - Add `docs/ponytail-audit.md`: a list of possible simplifications of the existing code, for the maintainers to decide. This release does not apply them by @h0ffmann
 - Add the extension entries to the README by @h0ffmann
-- Add `docs/extensions/brazil-water-quality-sources.md`: the official water quality data of Brazil. Only Rio Grande do Sul is complete for now by @h0ffmann
+- Add `docs/extensions/brazil-water-quality-sources.md`: the official water quality data of Brazil. It covers RS, SC and PR by @h0ffmann
 
 ### 🔧 Chore (杂项)
 
