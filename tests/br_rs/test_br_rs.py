@@ -67,7 +67,12 @@ def test_alert_envelope(ext, make_api, alerts_json):
     assert env.identity.event_id == "br_rs_cemaden_3141"
     assert env.identity.event_type == "weather_alarm"
     assert env.identity.provider_family == "extension"
-    assert "2026-10-25 11:20:44.159" in env.identity.attributes["fingerprint"]
+    assert env.identity.source_id == "br_rs_cemaden_alerts"
+    # The event time is the last update time (ult_atualizacao).
+    assert env.identity.published_at == alert["updated_at"]
+    assert (
+        env.identity.published_at.strftime("%Y-%m-%d %H:%M:%S") == "2026-10-25 11:20:44"
+    )
     md = env.event.metadata
     assert md["severity_level"] == 3 and md["hazard"] == "flood" and md["uf"] == "RS"
     assert md["municipio"] == "SÃO BORJA" and md["codibge"] == 4318002

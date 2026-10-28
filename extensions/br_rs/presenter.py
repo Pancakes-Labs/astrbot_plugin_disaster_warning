@@ -14,7 +14,7 @@ def make_presenter(api):
         """Text presenter for the alerts and the rain events of br_rs."""
 
         @classmethod
-        def present(cls, display_context, options=None) -> str:
+        def present(cls, display_context, _options=None) -> str:
             """Return the message text for a weather display context."""
             t = api.t
             md = display_context.metadata or {}
