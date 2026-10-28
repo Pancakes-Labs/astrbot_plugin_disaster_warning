@@ -1,6 +1,6 @@
 # Extension system — MVP design (contract)
 
-Status: MVP contract, 2026-10-28. Language: Python only. Principle: smallest change that
+Status: MVP implemented on the fork, 2026-10-28 (see README.md for the developer guide). Language: Python only. Principle: smallest change that
 works (YAGNI). Anything not listed here is out of scope for the MVP.
 
 Goals from the maintainer: modular / pluggable, **fault-isolated** (a broken extension
