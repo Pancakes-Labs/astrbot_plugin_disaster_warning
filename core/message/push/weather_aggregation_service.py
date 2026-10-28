@@ -28,17 +28,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ....utils.plugin_logger import plugin_logger
+from ....utils.severity_emoji import WEATHER_COLOR_LEVELS, WEATHER_COLORS_BY_LEVEL
 from ...domain.event_models import EventEnvelope, WeatherEvent
 from ...services.identity.event_identity import resolve_event_time_aware
-
-# 气象预警颜色级别 → 数值（用于排序，数值越大优先级越高）
-_COLOR_LEVEL_MAP: dict[str, int] = {
-    "白色": 0,
-    "蓝色": 1,
-    "黄色": 2,
-    "橙色": 3,
-    "红色": 4,
-}
 
 
 @dataclass
@@ -139,14 +131,11 @@ class WeatherAggregationService:
         """从事件元数据中解析颜色级别。"""
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
         domain_event = event.event
-        # 事件元数据显式给出 severity_level（0..4）时直接采用，不再扫描标题颜色词。
+        # An explicit severity_level (0..4) in event metadata wins over title scanning.
         if isinstance(domain_event, WeatherEvent):
             severity_level = domain_event.metadata.get("severity_level")
             if isinstance(severity_level, int) and 0 <= severity_level <= 4:
-                color_name = next(
-                    c for c, v in _COLOR_LEVEL_MAP.items() if v == severity_level
-                )
-                return severity_level, color_name
+                return severity_level, WEATHER_COLORS_BY_LEVEL[severity_level]
         title_text = ""
         if isinstance(domain_event, WeatherEvent):
             title_text = getattr(domain_event, "title", "") or getattr(
@@ -158,7 +147,7 @@ class WeatherAggregationService:
         # 按由高到低优先级识别
         for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
             if color in title_text:
-                return _COLOR_LEVEL_MAP.get(color, 0), color
+                return WEATHER_COLOR_LEVELS.get(color, 0), color
 
         # 回退：从 severity_color / level 字段推断
         severity = str(
@@ -166,13 +155,13 @@ class WeatherAggregationService:
         ).strip()
         for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
             if color in severity:
-                return _COLOR_LEVEL_MAP.get(color, 0), color
+                return WEATHER_COLOR_LEVELS.get(color, 0), color
 
         return 0, "白色"
 
     def _is_red_level(self, entry: WeatherBufferEntry) -> bool:
         """判断是否为红色级别预警。"""
-        return entry.color_level >= _COLOR_LEVEL_MAP["红色"]
+        return entry.color_level >= WEATHER_COLOR_LEVELS["红色"]
 
     def _is_event_fresh(self, event: EventEnvelope, max_age_hours: float = 3.0) -> bool:
         """判断气象预警事件是否仍在时效内。
