@@ -1,8 +1,10 @@
 """
-ExtensionAPI：传给扩展 setup(api) 的唯一入口。
+ExtensionAPI is the only object that setup(api) receives.
 
-扩展不得直接导入宿主模块（宿主包名随安装方式而变），宿主类通过 api.models 提供。
-所有注册均记录 owner，setup 失败时可由 host_registry 一并回收。
+An extension must not import host modules. The host package name changes
+with the install method. The host classes are in api.models.
+Each registration records an owner. When setup fails, the host removes
+all registrations of that owner.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ MODELS = types.SimpleNamespace(
 
 
 class _PrefixedLogger:
-    """给每条日志加上 [扩展:<id>] 前缀。"""
+    """Add the prefix [扩展:<id>] to each log message."""
 
     def __init__(self, base, ext_id: str):
         self._base = base
@@ -47,7 +49,7 @@ class _PrefixedLogger:
 
 @dataclass(slots=True)
 class PollerSpec:
-    """扩展登记的一个轮询任务。"""
+    """One polling task that an extension registers."""
 
     source_id: str
     fetch: Callable[..., Awaitable[list]]
@@ -56,9 +58,11 @@ class PollerSpec:
 
 
 class ExtensionAPI:
-    """见 docs/extensions/design.md 第 4 节。"""
+    """See section 4 of docs/extensions/design.md."""
 
-    MIN_INTERVAL_SECONDS = 60  # 轮询间隔下限；测试可 monkeypatch
+    MIN_INTERVAL_SECONDS = (
+        60  # Lower limit of the polling interval. Tests can patch it.
+    )
 
     models = MODELS
 
@@ -84,12 +88,16 @@ class ExtensionAPI:
         self._translator = Translator(
             manifest.path / "locale", config.get("language") or None
         )
-        self.sources: list[str] = []  # 本扩展已注册的 source_id
-        self.pollers: list[PollerSpec] = []  # 交给 ExtensionManager.start() 调度
+        self.sources: list[
+            str
+        ] = []  # The source_id values that this extension registers
+        self.pollers: list[
+            PollerSpec
+        ] = []  # ExtensionManager.start() schedules these tasks
 
     @property
     def data_dir(self) -> pathlib.Path:
-        """扩展私有数据目录，首次访问时创建。"""
+        """Private data directory. The first access creates it."""
         self._data_dir.mkdir(parents=True, exist_ok=True)
         return self._data_dir
 

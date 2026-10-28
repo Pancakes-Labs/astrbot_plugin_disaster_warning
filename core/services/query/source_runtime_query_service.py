@@ -98,7 +98,7 @@ class SourceRuntimeQueryService:
         entry = SOURCE_CATALOG.get((source_id or "").strip())
         if entry is None:
             return False
-        # 扩展数据源：注册即视为全局启用
+        # An extension source is enabled for all sessions when it is registered.
         if entry.config_group == "extensions":
             return True
         return bool(self._group_config(entry.config_group).get("enabled", False))
@@ -186,7 +186,7 @@ class SourceRuntimeQueryService:
         # 若此 source_id 未在统一 catalog 目录中注册，一律判定为未启用
         if entry is None:
             return False
-        # 扩展数据源：注册即视为全局启用
+        # An extension source is enabled for all sessions when it is registered.
         if entry.config_group == "extensions":
             return True
         group_cfg = self._group_config(entry.config_group)

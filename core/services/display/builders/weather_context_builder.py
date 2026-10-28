@@ -102,7 +102,7 @@ def build_weather_display_context(projection: dict, options: dict | None = None)
         "event_type": envelope.event_type or getattr(envelope, "event_type", "weather"),
         "description": payload_details["description"],
     }
-    # 扩展数据源的展示器按约定读取 WeatherEvent.metadata；内置数据源保持原有口径不变。
+    # Extension presenters read WeatherEvent.metadata. Built-in sources do not change.
     if getattr(source_descriptor, "provider_family", "") == "extension":
         display_metadata = {**domain_metadata, **display_metadata}
     return WeatherDisplayContext(

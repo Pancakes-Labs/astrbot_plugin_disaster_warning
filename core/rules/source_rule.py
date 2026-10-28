@@ -100,7 +100,8 @@ class SourceEnabledRule(BaseRule):
                 context={"source_id": source_id},
             )
 
-        # 扩展数据源：注册即视为全局启用，不受 data_sources 开关约束。
+        # An extension source is enabled when it is registered.
+        # The data_sources switches do not apply.
         if source_entry.config_group == "extensions":
             return RuleDecision.accept(reason="扩展数据源已启用")
 

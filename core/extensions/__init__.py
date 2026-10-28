@@ -1,1 +1,1 @@
-"""扩展框架：发现、校验、加载并隔离运行第三方数据源扩展。"""
+"""Extension framework. It finds, validates, loads, and isolates data source extensions."""

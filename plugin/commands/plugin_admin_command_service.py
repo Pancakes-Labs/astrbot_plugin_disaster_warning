@@ -964,7 +964,10 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield _quoted_plain_result(f"❌ 获取统计信息失败: {str(e)}")
 
     async def handle_extension_status(self, event):
-        """处理扩展状态命令，列出各扩展的加载状态、注册的数据源与错误信息。"""
+        """Handle the extension status command.
+
+        Show the load state, the sources, and the error of each extension.
+        """
         manager = getattr(self.plugin.disaster_service, "extension_manager", None)
         if manager is None:
             yield quoted_plain_result(self.plugin, event, "❌ 灾害预警服务未启动")

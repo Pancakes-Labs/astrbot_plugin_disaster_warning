@@ -1,6 +1,8 @@
 """
-测试引导：在未安装 AstrBot 的环境中为插件提供最小桩模块，
-并把插件目录以包名 astrbot_plugin_disaster_warning 暴露到 sys.path。
+Test bootstrap. Provide minimal stub modules when AstrBot is not installed.
+
+Show the plugin directory on sys.path as the package
+astrbot_plugin_disaster_warning.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ PACKAGE_NAME = "astrbot_plugin_disaster_warning"
 
 
 class _StubLogger(logging.LoggerAdapter):
-    """接受插件自定义关键字参数（如 is_event_linked）的日志桩。"""
+    """Logger stub. It accepts the custom keyword arguments of the plugin, such as is_event_linked."""
 
     def process(self, msg, kwargs):
         allowed = {"exc_info", "stack_info", "stacklevel", "extra"}
@@ -24,7 +26,10 @@ class _StubLogger(logging.LoggerAdapter):
 
 
 class _StubModule(types.ModuleType):
-    """未显式定义的属性一律返回 MagicMock，避免为每个 AstrBot 符号单独建桩。"""
+    """Return a MagicMock for each attribute that is not defined.
+
+    This avoids a separate stub for each AstrBot symbol.
+    """
 
     def __getattr__(self, name):
         if name.startswith("__"):
@@ -36,7 +41,7 @@ class _StubModule(types.ModuleType):
 
 def _install_astrbot_stubs() -> None:
     if "astrbot" in sys.modules and not isinstance(sys.modules["astrbot"], _StubModule):
-        return  # 真实 AstrBot 已安装
+        return  # The real AstrBot is installed
     for name in (
         "astrbot",
         "astrbot.api",
@@ -68,7 +73,7 @@ def _expose_plugin_package() -> None:
     if parent not in sys.path:
         sys.path.insert(0, parent)
     if PACKAGE_NAME not in sys.modules and PLUGIN_DIR.name != PACKAGE_NAME:
-        # worktree 目录名可能不同：按真实路径注册包
+        # The worktree directory name can be different. Register the package by path.
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(

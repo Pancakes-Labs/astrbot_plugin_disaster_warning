@@ -110,7 +110,7 @@ class DisasterServiceLifecycleService:
                 snet_poll = getattr(self.service, "snet_poll_service", None)
                 if snet_poll is not None:
                     await snet_poll.start()
-                # 扩展轮询任务（单个扩展失败不影响宿主）
+                # Start the extension polling tasks. A failed extension does not stop the host.
                 extension_manager = getattr(self.service, "extension_manager", None)
                 if extension_manager is not None:
                     await extension_manager.start()
@@ -379,7 +379,7 @@ class DisasterServiceLifecycleService:
                 await self.cancel_and_wait(background_tasks)  # 终止并回收通用后台任务
                 self.service.background_tasks.clear()
 
-                # 停止扩展轮询并关闭其共享 HTTP 会话
+                # Stop the extension polling tasks and close their HTTP session.
                 extension_manager = getattr(self.service, "extension_manager", None)
                 if extension_manager is not None:
                     await extension_manager.stop()

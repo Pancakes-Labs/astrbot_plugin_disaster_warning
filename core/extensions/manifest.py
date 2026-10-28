@@ -1,5 +1,5 @@
 """
-扩展清单（extension.yaml）解析与校验。
+Parse and validate the extension manifest (extension.yaml).
 """
 
 from __future__ import annotations
@@ -10,38 +10,38 @@ from pathlib import Path
 
 import yaml
 
-SUPPORTED_API_VERSION = 1  # 宿主仅支持的扩展 API 版本
+SUPPORTED_API_VERSION = 1  # The only extension API version that the host supports
 DEFAULT_ENTRY = "extension:setup"
 _ID_RE = re.compile(r"[a-z0-9_]+")
 
 
 class ManifestError(ValueError):
-    """清单缺失、格式错误或与宿主不兼容。"""
+    """The manifest is missing, malformed, or not compatible with the host."""
 
 
 @dataclass(frozen=True, slots=True)
 class Manifest:
-    """extension.yaml 的只读视图。"""
+    """Read-only view of extension.yaml."""
 
     id: str
     name: str
     version: str
     api_version: int
-    min_host_version: str  # 空串表示不限制
-    entry: str  # "<模块>:<函数>"，模块相对扩展包
+    min_host_version: str  # An empty string means no limit
+    entry: str  # "<module>:<function>". The module is relative to the extension package
     description: str
     author: str
     permissions: tuple[str, ...]
-    path: Path  # 扩展目录
+    path: Path  # Extension directory
 
 
 def parse_version(text: str) -> tuple[int, ...]:
-    """把 "v1.6.5" 之类的版本号转换为可比较的整数元组。"""
+    """Convert a version such as "v1.6.5" to a tuple of integers."""
     return tuple(int(n) for n in re.findall(r"\d+", str(text).lstrip("vV")))
 
 
 def load_manifest(ext_dir: Path) -> Manifest:
-    """读取并校验 ext_dir/extension.yaml，失败时抛出 ManifestError。"""
+    """Read and validate ext_dir/extension.yaml. Raise ManifestError on failure."""
     file = ext_dir / "extension.yaml"
     try:
         raw = yaml.safe_load(file.read_text(encoding="utf-8"))
@@ -86,7 +86,7 @@ def load_manifest(ext_dir: Path) -> Manifest:
 
 
 def check_host_version(manifest: Manifest, host_version: str) -> None:
-    """宿主版本低于 min_host_version 时抛出 ManifestError。"""
+    """Raise ManifestError if the host version is lower than min_host_version."""
     if not manifest.min_host_version:
         return
     if parse_version(host_version) < parse_version(manifest.min_host_version):

@@ -1,4 +1,4 @@
-"""扩展框架测试：清单、i18n、加载隔离、轮询。"""
+"""Tests for the extension framework: manifest, i18n, load isolation, polling."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-# 与真实启动顺序一致：先导入主服务，避免循环导入
+# Import the main service first, as the plugin does, to prevent a circular import
 importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
 PKG = "astrbot_plugin_disaster_warning.core.extensions"
 api_mod = importlib.import_module(f"{PKG}.api")
@@ -22,7 +22,7 @@ i18n_mod = importlib.import_module(f"{PKG}.i18n")
 
 @pytest.fixture(autouse=True)
 def _patch_provider_family(monkeypatch):
-    # ProviderFamily.EXTENSION 由宿主重构提供；测试不依赖其合并进度
+    # ProviderFamily.EXTENSION comes from the host. The test does not depend on it.
     monkeypatch.setattr(
         api_mod, "ProviderFamily", SimpleNamespace(EXTENSION="extension")
     )
@@ -152,7 +152,7 @@ def test_manifest_defaults_and_version_check(tmp_path):
     assert m.entry == "extension:setup" and m.permissions == ("network",)
     with pytest.raises(manifest_mod.ManifestError, match="1.7.0"):
         manifest_mod.check_host_version(m, "v1.6.5")
-    manifest_mod.check_host_version(m, "v1.10.0")  # 数值比较而非字符串比较
+    manifest_mod.check_host_version(m, "v1.10.0")  # Compare numbers, not strings
 
 
 def test_manifest_missing_file(tmp_path):
@@ -169,15 +169,17 @@ def test_i18n_fallback_chain(tmp_path):
     (loc / "zh-CN.json").write_text(json.dumps({"a": "中{x}", "b": "只有中文"}))
     (loc / "pt-BR.json").write_text(json.dumps({"a": "pt {x}", "bad": "{missing}"}))
     t = i18n_mod.Translator(loc, "pt-BR").t
-    assert t("a", x=1) == "pt 1"  # 目标语言
-    assert t("b") == "只有中文"  # 回退宿主语言
-    assert t("zzz") == "zzz"  # 回退 key
-    assert t("bad") == "{missing}"  # 格式化失败返回原文
-    assert i18n_mod.Translator(loc, "xx").t("a", x=2) == "中2"  # 语言包缺失
-    assert i18n_mod.Translator(loc).t("a", x=3) == "中3"  # 默认宿主语言
+    assert t("a", x=1) == "pt 1"  # Target language
+    assert t("b") == "只有中文"  # Fall back to the host language
+    assert t("zzz") == "zzz"  # Fall back to the key
+    assert t("bad") == "{missing}"  # A format failure returns the original text
+    assert (
+        i18n_mod.Translator(loc, "xx").t("a", x=2) == "中2"
+    )  # The language file is missing
+    assert i18n_mod.Translator(loc).t("a", x=3) == "中3"  # Default host language
 
 
-# ---------------- 加载 ----------------
+# Load
 
 
 def test_happy_load_and_status(tmp_path):
@@ -331,14 +333,14 @@ def test_api_data_dir_created_on_demand(tmp_path):
     assert mgr._apis["dd"].data_dir == target and target.is_dir()
 
 
-# ---------------- 轮询 ----------------
+# Polling
 
 
 async def _wait_for(cond, timeout=3.0):
     loop = asyncio.get_running_loop()
     end = loop.time() + timeout
     while not cond():
-        assert loop.time() < end, "条件超时"
+        assert loop.time() < end, "condition timeout"
         await asyncio.sleep(0.01)
 
 
@@ -349,7 +351,8 @@ async def test_poller_delivers_envelopes_and_survives_handler_error(tmp_path):
     mgr.load_all()
     await mgr.start()
     try:
-        # "bad" 抛错，但 a、b 仍被送达，且循环继续（第二轮）
+        # "bad" raises an error. The items a and b are still delivered.
+        # The loop continues to the second round.
         await _wait_for(lambda: svc.events.count("a") >= 2)
         assert "b" in svc.events
     finally:

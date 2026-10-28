@@ -1,8 +1,9 @@
 """
-扩展管理器：发现、加载、隔离并驱动扩展的轮询任务。
+Extension manager. It finds and loads extensions, isolates them, and runs
+their polling tasks.
 
-任何扩展的任何失败都只会让该扩展进入 error 状态，并回收它已注册的内容，
-绝不影响宿主和其他扩展。
+A failure in one extension sets only that extension to the error state and
+removes its registrations. The host and the other extensions do not change.
 """
 
 from __future__ import annotations
@@ -31,10 +32,10 @@ PLUGIN_NAME = "astrbot_plugin_disaster_warning"
 
 
 def _build_ssl_context() -> ssl.SSLContext:
-    """优先使用 certifi 根证书。
+    """Use the certifi root certificates when they are available.
 
-    部分系统证书库缺少较新的根证书（如 CEMADEN 使用的 GlobalSign Root R46），
-    导致 CERTIFICATE_VERIFY_FAILED。
+    Some system stores do not have new roots, for example the GlobalSign
+    Root R46 of CEMADEN. The result is CERTIFICATE_VERIFY_FAILED.
     """
     try:
         import certifi
@@ -45,10 +46,10 @@ def _build_ssl_context() -> ssl.SSLContext:
 
 
 class ExtensionManager:
-    """见 docs/extensions/design.md 第 5 节。"""
+    """See section 5 of docs/extensions/design.md."""
 
-    MAX_BACKOFF_FACTOR = 10  # 退避上限：轮询间隔的倍数
-    LOG_THROTTLE_SECONDS = 600  # 同一轮询任务的错误日志最小间隔
+    MAX_BACKOFF_FACTOR = 10  # Maximum backoff, as a multiple of the polling interval
+    LOG_THROTTLE_SECONDS = 600  # Minimum seconds between error logs of one polling task
 
     def __init__(
         self,
@@ -64,12 +65,10 @@ class ExtensionManager:
         self._data_dir = data_dir
         self._roots = roots
         self.host_version = host_version or self._read_host_version()
-        self._records: list[dict[str, Any]] = []  # status() 的数据来源
-        self._apis: dict[str, ExtensionAPI] = {}  # 加载成功的扩展
+        self._records: list[dict[str, Any]] = []  # Data for status()
+        self._apis: dict[str, ExtensionAPI] = {}  # Extensions that loaded
         self._tasks: list[asyncio.Task] = []
         self._session: aiohttp.ClientSession | None = None
-
-    # ---------------- 加载 ----------------
 
     @staticmethod
     def _read_host_version() -> str:
@@ -88,7 +87,7 @@ class ExtensionManager:
         return [PLUGIN_DIR / "extensions", self._base_data_dir() / "extensions"]
 
     def _settings(self, cfg: dict) -> dict:
-        """settings 可能是 JSON 文本或已解析的 dict；非法时视为空。"""
+        """Return the settings dict. The value is JSON text or a dict. Return {} if it is not valid."""
         raw = cfg.get("settings") or {}
         if isinstance(raw, str):
             try:
@@ -98,20 +97,22 @@ class ExtensionManager:
                 return {}
         return raw if isinstance(raw, dict) else {}
 
-    def _record(self, ext_id: str, state: str, error: str = "", **extra) -> dict:
+    def _record(
+        self, ext_id: str, state: str, error: str = "", *, name: str = "", version=""
+    ) -> dict:
         rec = {
             "id": ext_id,
-            "name": extra.pop("name", ext_id),
-            "version": extra.pop("version", ""),
+            "name": name or ext_id,
+            "version": version,
             "state": state,
             "error": error,
-            "sources": extra.pop("sources", []),
+            "sources": [],
         }
         self._records.append(rec)
         return rec
 
     def _unregister_all(self, ext_id: str) -> None:
-        """回收某扩展已注册的全部内容；单项失败不影响其余项。"""
+        """Remove all registrations of an extension. A failed item does not stop the others."""
         reg = self.host_registry
         for name in (
             "unregister_source_entries",
@@ -125,7 +126,7 @@ class ExtensionManager:
                 logger.warning(f"[灾害预警] 扩展 {ext_id} 回收 {name} 失败: {e}")
 
     def load_all(self) -> None:
-        """按 enabled_ids 逐个加载扩展，单个失败不中断。"""
+        """Load the extensions in enabled_ids one by one. A failure does not stop the others."""
         self._records.clear()
         self._apis.clear()
         cfg = self.service.config.get("extensions", {}) or {}
@@ -154,7 +155,7 @@ class ExtensionManager:
     def _load_one(self, ext_id: str, ext_dir: Path, ext_settings: Any) -> None:
         rec = None
         pkg = f"_dw_ext_{ext_id}"
-        # 插件重载时清理上次导入的模块，确保扩展代码改动生效
+        # Remove the modules of an earlier load. A plugin reload then uses the new code.
         self._purge_modules(pkg)
         try:
             manifest = load_manifest(ext_dir)
@@ -169,7 +170,8 @@ class ExtensionManager:
                 host_version=self.host_version,
                 data_dir=self._base_data_dir() / "extensions_data" / ext_id,
             )
-            # 以私有包名导入，扩展内部可使用相对导入且不污染全局命名空间
+            # Import with a private package name. The extension can use relative imports
+            # and the global namespace stays clean.
             spec = importlib.util.spec_from_file_location(
                 pkg,
                 ext_dir / "__init__.py",
@@ -196,10 +198,8 @@ class ExtensionManager:
         rec.update(state="loaded", error="", sources=list(api.sources))
         logger.info(f"[灾害预警] 扩展 {ext_id} v{manifest.version} 已加载")
 
-    # ---------------- 运行 ----------------
-
     async def start(self) -> None:
-        """为每个已登记的轮询任务启动一个 asyncio 任务。"""
+        """Start one asyncio task for each registered polling task."""
         specs = [(i, p) for i, api in self._apis.items() for p in api.pollers]
         if not specs or self._tasks:
             return
@@ -215,7 +215,7 @@ class ExtensionManager:
             )
 
     async def stop(self) -> None:
-        """取消所有轮询任务并关闭共享的 HTTP 会话。"""
+        """Cancel all polling tasks and close the shared HTTP session."""
         tasks, self._tasks = self._tasks, []
         for t in tasks:
             t.cancel()
@@ -225,7 +225,7 @@ class ExtensionManager:
             self._session = None
 
     async def _run_poller(self, ext_id: str, spec: PollerSpec) -> None:
-        """轮询循环：除 CancelledError 外的异常一律吞掉并退避重试。"""
+        """Poll in a loop. Log each exception except CancelledError, then retry with backoff."""
         failures = 0
         last_log = float("-inf")
         label = f"{ext_id}/{spec.source_id}"
@@ -256,8 +256,6 @@ class ExtensionManager:
             factor = min(2**failures, self.MAX_BACKOFF_FACTOR) if failures else 1
             await asyncio.sleep(spec.interval_seconds * factor)
 
-    # ---------------- 状态 ----------------
-
     def status(self) -> list[dict]:
-        """返回各扩展的加载状态，供管理指令展示。"""
+        """Return the load state of each extension for the admin command."""
         return [dict(r, sources=list(r["sources"])) for r in self._records]

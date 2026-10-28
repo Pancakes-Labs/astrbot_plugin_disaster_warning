@@ -1,4 +1,4 @@
-"""冒烟测试：确认核心注册表与主服务模块可在桩环境下导入。"""
+"""Smoke tests. Make sure the core registries and the main service import with the stubs."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import importlib
 
 
 def test_core_registries_import():
-    # 与插件真实启动顺序一致：先导入主服务，避免解析器包的循环导入
+    # Import the main service first, as the plugin does. This prevents a
+    # circular import in the parser package.
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
     catalog = importlib.import_module(
         "astrbot_plugin_disaster_warning.core.sources.source_catalog"
