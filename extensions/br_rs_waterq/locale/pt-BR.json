@@ -1,0 +1,17 @@
+{
+  "title.unsuitable": "Alerta de balneabilidade: imprópria para banho",
+  "title.suitable": "Balneabilidade: própria para banho novamente",
+  "headline": "{beach} - {municipio}/{uf}",
+  "status.unsuitable": "imprópria para banho",
+  "status.suitable": "própria para banho",
+  "source.balneabilidade": "FEPAM - Balneabilidade (RS)",
+  "source.balneabilidade.desc": "A FEPAM publica estes boletins de balneabilidade para o Rio Grande do Sul. A extensão envia um alerta quando a água de um ponto fica imprópria para banho ou volta a ficar própria para banho.",
+  "present.status": "Situação: {status}",
+  "present.sample": "Data da coleta: {date}",
+  "present.lab": "Laboratório: {lab}",
+  "present.location": "Posição: {coords}",
+  "present.criterion": "Critério: CONAMA 274/2000 (E. coli e coliformes termotolerantes)",
+  "present.source": "Fonte: FEPAM / PROCERGS",
+  "format.decimal": ",",
+  "format.date": "%Y-%m-%d"
+}
