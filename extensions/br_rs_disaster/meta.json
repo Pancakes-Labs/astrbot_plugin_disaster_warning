@@ -5,19 +5,32 @@
     "github": "h0ffmann",
     "url": "https://github.com/h0ffmann",
     "location": "Florianópolis, SC, Brazil",
-    "company": "marola.dev"
+    "organization": "marola.dev"
   },
-  "company": {
+  "organization": {
     "name": "marola.dev",
     "roadmap": "CZ/JPN support soon."
   },
   "coverage": {
     "country": "BR",
-    "states": ["RS"],
-    "hazards": ["flood", "landslide", "heavy_rain"],
-    "background_data": ["enso"]
+    "states": [
+      "RS"
+    ],
+    "hazards": [
+      "flood",
+      "landslide",
+      "heavy_rain"
+    ],
+    "background_data": [
+      "enso"
+    ]
   },
-  "languages": ["zh-CN", "en", "pt-BR", "ja-JP"],
+  "languages": [
+    "zh-CN",
+    "en",
+    "pt-BR",
+    "ja-JP"
+  ],
   "data_sources": [
     {
       "name": "CEMADEN alerts",
