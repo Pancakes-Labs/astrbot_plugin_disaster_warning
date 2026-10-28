@@ -98,6 +98,9 @@ class SourceRuntimeQueryService:
         entry = SOURCE_CATALOG.get((source_id or "").strip())
         if entry is None:
             return False
+        # An extension source is enabled while its extension is loaded.
+        if entry.config_group == "extensions":
+            return True
         return bool(self._group_config(entry.config_group).get("enabled", False))
 
     def is_source_enabled_any_session(self, source_id: str) -> bool:
@@ -183,6 +186,9 @@ class SourceRuntimeQueryService:
         # 若此 source_id 未在统一 catalog 目录中注册，一律判定为未启用
         if entry is None:
             return False
+        # An extension source is enabled while its extension is loaded.
+        if entry.config_group == "extensions":
+            return True
         group_cfg = self._group_config(entry.config_group)
         # 如果所属配置大类的顶级 enabled 总开关为 False，则旗下子源全部失效
         if not group_cfg.get("enabled", False):

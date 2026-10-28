@@ -298,6 +298,7 @@ class DisasterWarningPlugin(Star):
             (
                 "🛠️ 运维管理\n"
                 "• /灾害预警状态 - 服务运行状态\n"
+                "• /灾害预警扩展 - 扩展加载状态\n"
                 "• /灾害预警重启 - 重载插件\n"
                 "• /灾害预警重连 - 强制重连离线数据源\n"
                 "• /灾害预警统计 / 灾害预警统计清除\n"
@@ -769,6 +770,12 @@ class DisasterWarningPlugin(Star):
         async for result in self._admin_command_service.handle_disaster_reconnect(
             event
         ):
+            yield result
+
+    @filter.command("灾害预警扩展")
+    async def disaster_extensions(self, event: AstrMessageEvent):
+        """查看扩展加载状态"""
+        async for result in self._admin_command_service.handle_extension_status(event):
             yield result
 
     @filter.command("灾害预警统计")

@@ -6,6 +6,38 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+# Unreleased
+
+## 🚀 What's Changed
+
+### ✨ New Features (新功能)
+
+- Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
+- Add the extension `br_rs` for Rio Grande do Sul, Brazil. It sends CEMADEN flood, landslide and heavy rain alerts. It adds El Niño and La Niña data from NOAA CPC by @h0ffmann
+- `br_rs` has messages in Chinese, English, Brazilian Portuguese (`pt-BR`) and Japanese (`ja-JP`). The pt-BR messages use the decimal comma and ISO 8601 dates by @h0ffmann
+- Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension by @h0ffmann
+
+### 🌐 Data Sources & Network (数据源与网络)
+
+- Add the sources `br_rs_cemaden_alerts` and `br_rs_cemaden_rain`. They poll the CEMADEN endpoints. See `docs/CEMADEN API.md` by @h0ffmann
+- Add the NOAA CPC ONI file as background data. See `docs/NOAA CPC ONI.md` by @h0ffmann
+- Use one HTTP session for all extension pollers. The session uses the `certifi` root certificates. This fixes `CERTIFICATE_VERIFY_FAILED` for the GlobalSign Root R46 of CEMADEN by @h0ffmann
+
+### ⚙️ Configuration (配置)
+
+- Add the `extensions` configuration group with the keys `enabled_ids` and `settings`. The settings of `br_rs` are `language`, `alerts_interval`, `rain_interval` and `rain_thresholds` by @h0ffmann
+- Add the requirements `pyyaml` and `certifi` by @h0ffmann
+
+### 📚 Documentation (文档)
+
+- Add `docs/CEMADEN API.md`, `docs/NOAA CPC ONI.md` and the extension guide in `docs/extensions/` by @h0ffmann
+- Add `docs/ponytail-audit.md`: a list of possible simplifications of the existing code, for the maintainers to decide. This release does not apply them by @h0ffmann
+- Add the extension entries to the README by @h0ffmann
+
+### 🔧 Chore (杂项)
+
+- Add the pytest harness. `tests/conftest.py` replaces AstrBot with stubs. The tests use recorded feed samples and a test of the real host by @h0ffmann
+
 # 2026/10/05 v1.6.5
 
 ## 🚀 What's Changed

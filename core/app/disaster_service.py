@@ -55,6 +55,8 @@ from ..services.geo.travel_time_loader import get_travel_times
 from ..services.notification import NotificationCenter
 from ..services.query.earthquake_list_service import EarthquakeListService
 from ..services.query.eew_query_state_service import EEWQueryStateService
+from ..extensions.host_registry import HostRegistry
+from ..extensions.manager import ExtensionManager
 from ..services.query.source_runtime_query_service import SourceRuntimeQueryService
 from ..services.snet.snet_poll_service import SnetPollService
 from ..services.telemetry.telemetry_utils import track_error_safely
@@ -89,6 +91,9 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
     source_entry = SOURCE_CATALOG.get(source_id)
     if source_entry is None:
         return False
+    # An extension source is enabled while its extension is loaded.
+    if source_entry.config_group == "extensions":
+        return True
 
     # 获取数据源组配置（合并历史别名组名，规范组名优先），组被禁用则该数据源禁用
     group_cfg: dict[str, Any] = {}
@@ -158,6 +163,10 @@ class DisasterWarningService:
         self.message_manager.set_session_config_manager(self.session_config_manager)
         # 用于离线通知节流，避免同一连接异常在短时间内反复刷屏。
         self._offline_notification_state: dict[str, dict[str, float]] = {}
+
+        # Load the extensions before the parsers. Thus, extension parsers start like built-in parsers.
+        self.extension_manager = ExtensionManager(self, HostRegistry())
+        self.extension_manager.load_all()
 
         # 解析器按数据源编号注册，后续所有事件入口都通过统一映射表调度。
         self.parsers = {}

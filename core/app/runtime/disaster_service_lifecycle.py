@@ -110,6 +110,10 @@ class DisasterServiceLifecycleService:
                 snet_poll = getattr(self.service, "snet_poll_service", None)
                 if snet_poll is not None:
                     await snet_poll.start()
+                # Start the extension polling tasks. A failed extension does not stop the host.
+                extension_manager = getattr(self.service, "extension_manager", None)
+                if extension_manager is not None:
+                    await extension_manager.start()
 
                 # EQSC AccessToken 必须先于海啸/台风轮询预热：
                 # 两路轮询共享同一 token_manager；若首轮并发请求时 token 尚未就绪，
@@ -374,6 +378,11 @@ class DisasterServiceLifecycleService:
                 ]
                 await self.cancel_and_wait(background_tasks)  # 终止并回收通用后台任务
                 self.service.background_tasks.clear()
+
+                # Stop the extension polling tasks and close their HTTP session.
+                extension_manager = getattr(self.service, "extension_manager", None)
+                if extension_manager is not None:
+                    await extension_manager.stop()
 
                 # 任务回收完成后，再逐项释放底层基础设施资源。
                 if getattr(self.service, "notification_center", None):

@@ -81,6 +81,11 @@ class WeatherRule(BaseRule):
                 detected_color = color
                 break
 
+        # An extension event can give the level directly: 0 white ... 4 red.
+        severity_level = domain_event.metadata.get("severity_level")
+        if isinstance(severity_level, int) and 0 <= severity_level <= 4:
+            detected_color = ["白色", "蓝色", "黄色", "橙色", "红色"][severity_level]
+
         # 对比颜色等级阈值进行过滤
         if color_levels.get(detected_color, 0) < color_levels.get(min_color_level, 0):
             return RuleDecision.reject(

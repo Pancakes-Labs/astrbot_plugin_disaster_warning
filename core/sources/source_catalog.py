@@ -1260,6 +1260,68 @@ for _entry in SOURCE_CATALOG.values():
         ).append(_entry.source_id)
 
 
+# Extension sources: source_id -> extension id. Built-in sources are not in this dict.
+_SOURCE_OWNERS: dict[str, str] = {}
+
+
+def _index_keys(entry: SourceEntry) -> list[tuple[dict, object]]:
+    """Return the (index, key) pairs of one entry. The rules are the same as in the loop above."""
+    pairs: list[tuple[dict, object]] = [
+        (SOURCE_IDS_BY_FAMILY, entry.provider_family),
+        (SOURCE_IDS_BY_TYPE, entry.source_type),
+        (SOURCE_IDS_BY_CONFIG_GROUP, entry.config_group),
+    ]
+    pairs += [
+        (SOURCE_IDS_BY_PROVIDER_MESSAGE_TYPE, v.strip())
+        for v in entry.provider_message_types
+    ]
+    pairs += [
+        (SOURCE_IDS_BY_PROVIDER_SOURCE_NAME, v.strip())
+        for v in entry.provider_source_names
+    ]
+    pairs += [(SOURCE_IDS_BY_ROUTING_TAG, v.strip()) for v in entry.routing_tags]
+    for index, value in (
+        (SOURCE_IDS_BY_QUERY_GROUP, entry.query_group),
+        (SOURCE_IDS_BY_FUSION_GROUP, entry.fusion_group),
+        (SOURCE_IDS_BY_DISPATCH_FAMILY, entry.dispatch_family),
+        (SOURCE_IDS_BY_INSTITUTION_KEY, entry.institution_key),
+    ):
+        if value:
+            pairs.append((index, value.strip()))
+    return pairs
+
+
+def register_source_entry(entry: SourceEntry, *, owner: str) -> None:
+    """Register an extension source. Raise ValueError if the source_id exists."""
+    if entry.source_id in SOURCE_CATALOG:
+        raise ValueError(f"数据源 {entry.source_id} 已存在，无法重复注册")
+    # Change the dicts in place. Other modules keep references to them.
+    SOURCE_CATALOG[entry.source_id] = entry
+    _SOURCE_OWNERS[entry.source_id] = owner
+    for index, key in _index_keys(entry):
+        index.setdefault(key, []).append(entry.source_id)
+
+
+def unregister_source_entries(owner: str) -> list[str]:
+    """Remove all sources of an extension. Return the removed source_ids."""
+    removed = [sid for sid, o in _SOURCE_OWNERS.items() if o == owner]
+    for source_id in removed:
+        entry = SOURCE_CATALOG.pop(source_id)
+        del _SOURCE_OWNERS[source_id]
+        for index, key in _index_keys(entry):
+            ids = index.get(key, [])
+            if source_id in ids:
+                ids.remove(source_id)
+            if not ids:
+                index.pop(key, None)
+    return removed
+
+
+def get_source_owner(source_id: str) -> str | None:
+    """Return the extension id of a source. Return None for a built-in source."""
+    return _SOURCE_OWNERS.get(source_id)
+
+
 def get_source_entry(source_id: str) -> SourceEntry | None:
     """按数据源标识获取注册项。"""
     return SOURCE_CATALOG.get(source_id)

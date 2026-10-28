@@ -1,0 +1,42 @@
+name: 🧩 Extension code smell check
+
+# This check runs only for the extensions. It uses the strict rules in extensions/ruff.toml.
+# A finding stops the job. The repository-wide ruff job does not stop the job.
+on:
+  push:
+    branches: [ main ]
+    paths: [ "extensions/**" ]
+  pull_request:
+    paths: [ "extensions/**", ".github/workflows/extensions-code-smell.yml" ]
+
+jobs:
+  code-smell:
+    name: Ruff strict rules and complexity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Ruff format check (extensions)
+        run: uvx ruff@0.14.2 format --check extensions
+
+      - name: Ruff strict rules (extensions/ruff.toml)
+        run: uvx ruff@0.14.2 check extensions
+
+      - name: Complexity (radon, fail on rank C or worse)
+        run: |
+          uvx radon@6.0.1 cc -s -a extensions
+          if uvx radon@6.0.1 cc -n C extensions | grep -q .; then
+            echo "A function has complexity rank C or worse."
+            exit 1
+          fi

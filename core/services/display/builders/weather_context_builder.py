@@ -102,6 +102,9 @@ def build_weather_display_context(projection: dict, options: dict | None = None)
         "event_type": envelope.event_type or getattr(envelope, "event_type", "weather"),
         "description": payload_details["description"],
     }
+    # Extension presenters read WeatherEvent.metadata. Built-in sources do not change.
+    if getattr(source_descriptor, "provider_family", "") == "extension":
+        display_metadata = {**domain_metadata, **display_metadata}
     return WeatherDisplayContext(
         event_id=envelope.id,
         source_id=resolved_source_id,

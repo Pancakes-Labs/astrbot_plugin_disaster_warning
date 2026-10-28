@@ -9,3 +9,5 @@ tomli>=2.4.1; python_version < "3.11"
 fastapi>=0.141.1
 uvicorn>=0.52.4
 aiosqlite>=0.22.1
+pyyaml>=6.0
+certifi>=2024.2.2
