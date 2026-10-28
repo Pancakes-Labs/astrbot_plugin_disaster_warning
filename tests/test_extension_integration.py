@@ -73,7 +73,7 @@ def loaded_br_rs(tmp_path):
         {
             "extensions": {
                 "enabled_ids": ["br_rs"],
-                "settings": json.dumps({"br_rs": {"language": "pt-BR"}}),
+                "settings": json.dumps({"br_rs": {"language": "en"}}),
             }
         }
     )

@@ -167,9 +167,9 @@ def test_i18n_fallback_chain(tmp_path):
     loc = tmp_path / "locale"
     loc.mkdir()
     (loc / "zh-CN.json").write_text(json.dumps({"a": "中{x}", "b": "只有中文"}))
-    (loc / "pt-BR.json").write_text(json.dumps({"a": "pt {x}", "bad": "{missing}"}))
-    t = i18n_mod.Translator(loc, "pt-BR").t
-    assert t("a", x=1) == "pt 1"  # Target language
+    (loc / "en.json").write_text(json.dumps({"a": "en {x}", "bad": "{missing}"}))
+    t = i18n_mod.Translator(loc, "en").t
+    assert t("a", x=1) == "en 1"  # Target language
     assert t("b") == "只有中文"  # Fall back to the host language
     assert t("zzz") == "zzz"  # Fall back to the key
     assert t("bad") == "{missing}"  # A format failure returns the original text
@@ -307,10 +307,10 @@ def setup(api):
 def test_settings_json_and_dict(tmp_path):
     code = "def setup(api):\n    api.logger.info('hi')\n"
     make_ext(tmp_path / "bundled", "cfg", code)
-    for settings in ('{"cfg": {"language": "pt-BR"}}', {"cfg": {"language": "pt-BR"}}):
+    for settings in ('{"cfg": {"language": "en"}}', {"cfg": {"language": "en"}}):
         mgr = make_manager(tmp_path, FakeService(["cfg"], settings))
         mgr.load_all()
-        assert mgr._apis["cfg"].config == {"language": "pt-BR"}
+        assert mgr._apis["cfg"].config == {"language": "en"}
     mgr = make_manager(tmp_path, FakeService(["cfg"], "{not json"))
     mgr.load_all()
     assert mgr._apis["cfg"].config == {}

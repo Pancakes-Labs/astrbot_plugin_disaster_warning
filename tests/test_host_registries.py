@@ -247,9 +247,9 @@ def test_weather_aggregation_uses_severity_level():
 def test_present_message_uses_registered_presenter():
     catalog.register_source_entry(_make_entry(), owner=OWNER)
     presenter_registry.register_text_presenter(PRESENTER_KEY, _Presenter, owner=OWNER)
-    env = _weather_envelope(title="Alerta", metadata={"severity_level": 2})
+    env = _weather_envelope(title="Alert", metadata={"severity_level": 2})
     text = presenter_registry.present_message(env, SOURCE_ID)
-    assert text == "EXT|Alerta|头条|2|test_ext_weather"
+    assert text == "EXT|Alert|头条|2|test_ext_weather"
 
 
 def test_format_source_name_for_extension_source():
