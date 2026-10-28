@@ -78,12 +78,12 @@ PARSER_CLASS_BY_NAME = {
 }
 
 
-# 扩展注册的解析器归属：parser_name -> 扩展 id。
+# Owner of each extension parser: parser_name -> extension id.
 _PARSER_OWNERS: dict[str, str] = {}
 
 
 def register_parser(parser_name: str, parser_class, *, owner: str) -> None:
-    """注册扩展解析器，parser_name 与已有解析器重名时抛出 ValueError。"""
+    """Register a parser of an extension. Raise ValueError if parser_name exists."""
     if parser_name in PARSER_CLASS_BY_NAME:
         raise ValueError(f"解析器 {parser_name} 已存在，无法重复注册")
     PARSER_CLASS_BY_NAME[parser_name] = parser_class
@@ -91,7 +91,7 @@ def register_parser(parser_name: str, parser_class, *, owner: str) -> None:
 
 
 def unregister_parsers(owner: str) -> None:
-    """移除指定扩展注册的全部解析器。"""
+    """Remove all parsers that an extension registered."""
     for parser_name in [n for n, o in _PARSER_OWNERS.items() if o == owner]:
         PARSER_CLASS_BY_NAME.pop(parser_name, None)
         del _PARSER_OWNERS[parser_name]

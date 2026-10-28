@@ -1237,8 +1237,8 @@ _ALL_SOURCE_INDEXES = (
 
 
 def _rebuild_source_indexes() -> None:
-    """按 SOURCE_CATALOG 当前内容原地重建全部 SOURCE_IDS_BY_* 索引。"""
-    # 原地清空而非重新赋值，其他模块已持有这些字典的引用。
+    """Rebuild all SOURCE_IDS_BY_* indexes in place from SOURCE_CATALOG."""
+    # Clear in place. Other modules keep references to these dicts.
     for _index in _ALL_SOURCE_INDEXES:
         _index.clear()
     for _entry in SOURCE_CATALOG.values():
@@ -1283,12 +1283,13 @@ def _rebuild_source_indexes() -> None:
 
 _rebuild_source_indexes()
 
-# 扩展注册的数据源归属：source_id -> 扩展 id（内置数据源不在其中）。
+# Owner of each extension source: source_id -> extension id.
+# Built-in sources are not in this dict.
 _SOURCE_OWNERS: dict[str, str] = {}
 
 
 def register_source_entry(entry: SourceEntry, *, owner: str) -> None:
-    """注册扩展数据源，source_id 重复时抛出 ValueError。"""
+    """Register a source of an extension. Raise ValueError if source_id exists."""
     if entry.source_id in SOURCE_CATALOG:
         raise ValueError(f"数据源 {entry.source_id} 已存在，无法重复注册")
     SOURCE_CATALOG[entry.source_id] = entry
@@ -1297,7 +1298,7 @@ def register_source_entry(entry: SourceEntry, *, owner: str) -> None:
 
 
 def unregister_source_entries(owner: str) -> list[str]:
-    """移除指定扩展注册的全部数据源，返回被移除的 source_id 列表。"""
+    """Remove all sources that an extension registered. Return the removed source_id values."""
     removed = [sid for sid, o in _SOURCE_OWNERS.items() if o == owner]
     for source_id in removed:
         SOURCE_CATALOG.pop(source_id, None)
@@ -1308,7 +1309,7 @@ def unregister_source_entries(owner: str) -> list[str]:
 
 
 def get_source_owner(source_id: str) -> str | None:
-    """返回数据源所属扩展 id，内置数据源返回 None。"""
+    """Return the extension id of a source. Return None for a built-in source."""
     return _SOURCE_OWNERS.get(source_id)
 
 

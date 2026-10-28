@@ -42,7 +42,7 @@ def format_source_name(source: str) -> str:
     normalized = normalize_source_name(source)
     # 如果映射字典里找不到对应的漂亮展示名，则使用归一化后的去重字符串作为兜底
     if normalized not in SOURCE_DISPLAY_MAP and get_source_owner(normalized):
-        # 扩展数据源不在静态展示名表中，使用其注册的 display_name
+        # An extension source is not in the static table. Use its display_name.
         return get_source_entry(normalized).display_name
     return SOURCE_DISPLAY_MAP.get(normalized) or str(source or "").strip() or "未知来源"
 

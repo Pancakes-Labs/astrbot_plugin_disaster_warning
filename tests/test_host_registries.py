@@ -1,4 +1,6 @@
-"""扩展宿主注册表测试：注册/注销往返、重复检测、启用态、气象严重度与展示分发。"""
+"""Tests for the host registries: register and unregister, duplicate checks,
+enabled state, weather severity, and presenter dispatch.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +8,8 @@ import importlib
 
 import pytest
 
-# 与插件真实启动顺序一致：先导入主服务，避免解析器包的循环导入
+# Import the main service first, as the plugin does. This prevents a
+# circular import in the parser package.
 importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
 
 PKG = "astrbot_plugin_disaster_warning.core"
@@ -116,7 +119,7 @@ def test_source_round_trip_and_duplicate():
     with pytest.raises(ValueError):
         catalog.register_source_entry(_make_entry(), owner="other")
     with pytest.raises(ValueError):
-        # 不得覆盖内置源
+        # Do not replace a built-in source
         catalog.register_source_entry(_make_entry("cea_fanstudio"), owner=OWNER)
 
     assert catalog.unregister_source_entries(OWNER) == [SOURCE_ID]
@@ -158,7 +161,7 @@ def test_rule_round_trip_and_position():
     base = [r.rule_name for r in rule_chain.build_default_rule_chain().rules]
     rule_chain.register_rule(_Rule(), owner=OWNER)
     names = [r.rule_name for r in rule_chain.build_default_rule_chain().rules]
-    assert names == [*base, "test_ext_rule"]  # local_rule 为内置末位
+    assert names == [*base, "test_ext_rule"]  # local_rule is the last built-in rule
     rule_chain.unregister_rules(OWNER)
     rule_chain.register_rule(_Rule(), after="source_rule", owner=OWNER)
     names = [r.rule_name for r in rule_chain.build_default_rule_chain().rules]
@@ -193,7 +196,7 @@ def test_source_enabled_rule_accepts_extension_source():
     assert qs.is_source_enabled(SOURCE_ID)
     assert qs.is_group_enabled(SOURCE_ID)
     assert qs.is_source_active(SOURCE_ID)
-    # 注销后回到“未注册数据源”拒绝
+    # After unregister, the rule rejects the source as not registered
     catalog.unregister_source_entries(OWNER)
     assert not source_rule.SourceEnabledRule().evaluate(ctx).accepted
     assert not disaster_service._is_source_enabled_by_catalog(SOURCE_ID, {})
@@ -202,11 +205,21 @@ def test_source_enabled_rule_accepts_extension_source():
 @pytest.mark.parametrize(
     ("title", "level", "min_color", "accepted"),
     [
-        ("红色暴雨预警", 1, "黄色", False),  # severity_level 优先于标题颜色词
+        (
+            "红色暴雨预警",
+            1,
+            "黄色",
+            False,
+        ),  # severity_level has priority over the title color word
         ("蓝色暴雨预警", 3, "橙色", True),
         ("暴雨", 2, "橙色", False),
         ("暴雨", 4, "红色", True),
-        ("红色暴雨预警", None, "黄色", True),  # 缺省沿用标题颜色词
+        (
+            "红色暴雨预警",
+            None,
+            "黄色",
+            True,
+        ),  # Without severity_level, use the title color word
         ("蓝色暴雨预警", None, "黄色", False),
     ],
 )

@@ -70,12 +70,15 @@ _DEFAULT_PRESENTERS_BY_EVENT_TYPE: dict[str, type[BasePresenter]] = {
 }
 
 
-# 扩展注册的展示器归属：text key -> 扩展 id。
+# Owner of each extension presenter: text key -> extension id.
 _PRESENTER_OWNERS: dict[str, str] = {}
 
 
 def register_text_presenter(key: str, presenter_class, *, owner: str) -> None:
-    """注册扩展文本展示器（鸭子类型：带 classmethod present(ctx, options) 即可）。"""
+    """Register a text presenter of an extension.
+
+    The class needs a classmethod present(ctx, options).
+    """
     if key in _TEXT_KEY_PRESENTER_REGISTRY:
         raise ValueError(f"文本展示键 {key} 已存在，无法重复注册")
     _TEXT_KEY_PRESENTER_REGISTRY[key] = presenter_class
@@ -83,14 +86,14 @@ def register_text_presenter(key: str, presenter_class, *, owner: str) -> None:
 
 
 def unregister_presenters(owner: str) -> None:
-    """移除指定扩展注册的全部展示器。"""
+    """Remove all presenters that an extension registered."""
     for key in [k for k, o in _PRESENTER_OWNERS.items() if o == owner]:
         _TEXT_KEY_PRESENTER_REGISTRY.pop(key, None)
         del _PRESENTER_OWNERS[key]
 
 
 def get_text_presenter_keys() -> set[str]:
-    """返回已注册的 text presenter key 集合（内置文本展示键 + 扩展注册键）。"""
+    """Return the text presenter keys: the built-in keys and the extension keys."""
     return _builtin_text_presenter_keys() | set(_PRESENTER_OWNERS)
 
 

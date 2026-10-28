@@ -92,7 +92,7 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
     if source_entry is None:
         return False
 
-    # 扩展数据源：注册即视为全局启用
+    # An extension source is enabled for all sessions when it is registered.
     if source_entry.config_group == "extensions":
         return True
 
@@ -165,7 +165,8 @@ class DisasterWarningService:
         # 用于离线通知节流，避免同一连接异常在短时间内反复刷屏。
         self._offline_notification_state: dict[str, dict[str, float]] = {}
 
-        # 扩展须在解析器装配前加载，使扩展注册的数据源与解析器按内置口径初始化。
+        # Load the extensions before the parsers start. The parsers of an extension
+        # then start in the same way as the built-in parsers.
         self.extension_manager = ExtensionManager(self, HostRegistry())
         self.extension_manager.load_all()
 

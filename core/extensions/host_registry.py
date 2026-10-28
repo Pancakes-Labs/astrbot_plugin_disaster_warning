@@ -1,14 +1,16 @@
 """
-宿主注册表适配器：把扩展的注册/注销请求转发到宿主的注册函数。
+Host registry adapter. It sends the register and unregister requests of an
+extension to the host registration functions.
 
-宿主函数在方法内延迟导入，避免本模块在宿主注册表未就绪时无法导入。
+Each method imports its host function late. The module can then load
+before the host registries are ready.
 """
 
 from __future__ import annotations
 
 
 class HostRegistry:
-    """生产环境使用的 host_registry；测试可注入同名方法的假对象。"""
+    """The host_registry for production. A test can use a fake with the same methods."""
 
     def register_source_entry(self, entry, *, owner: str) -> None:
         from ..sources.source_catalog import register_source_entry

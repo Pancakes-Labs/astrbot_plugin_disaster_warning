@@ -1,4 +1,7 @@
-"""集成测试：经真实宿主注册表加载 br_rs，并让真实 CEMADEN 告警走完规则链与展示器。"""
+"""Integration test. Load br_rs with the real host registries.
+
+A real CEMADEN alert goes through the rule chain and the presenter.
+"""
 
 from __future__ import annotations
 
@@ -31,11 +34,12 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    """按 URL 关键字返回本地夹具，避免测试访问网络。"""
+    """Return a local fixture by URL keyword. The test does not use the network."""
 
     def get(self, url: str):
         if "wsAlertas2" in url:
-            # 夹具录制于 2026-10-28；把更新时间改为当前巴西利亚时间，模拟刚更新的告警
+            # The fixture is from 2026-10-28. Set the update time to the current
+            # Brasilia time to simulate a new alert.
             data = json.loads((FIXTURES / "cemaden_alertas.json").read_text("utf-8"))
             now = datetime.now(timezone(timedelta(hours=-3)))
             for alert in data["alertas"]:
@@ -111,7 +115,7 @@ async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_rs):
     poller = next(p for p in api.pollers if p.source_id == "br_rs_cemaden_alerts")
     envelopes = await poller.fetch(_FakeSession())
 
-    # 夹具中 RS 有 3 条告警
+    # The fixture has 3 alerts for RS
     assert len(envelopes) == 3
     envelope = envelopes[0]
     assert envelope.event.metadata["uf"] == "RS"
