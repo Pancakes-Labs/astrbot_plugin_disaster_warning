@@ -131,9 +131,16 @@ class ExtensionManager:
                 logger.warning(f"[灾害预警] 扩展 {ext_id} 重复，已忽略 {dup}")
             self._load_one(ext_id, found[0], settings.get(ext_id))
 
+    @staticmethod
+    def _purge_modules(pkg: str) -> None:
+        for name in [n for n in sys.modules if n == pkg or n.startswith(pkg + ".")]:
+            del sys.modules[name]
+
     def _load_one(self, ext_id: str, ext_dir: Path, ext_settings: Any) -> None:
         rec = None
         pkg = f"_dw_ext_{ext_id}"
+        # 插件重载时清理上次导入的模块，确保扩展代码改动生效
+        self._purge_modules(pkg)
         try:
             manifest = load_manifest(ext_dir)
             rec = self._record(
@@ -162,8 +169,7 @@ class ExtensionManager:
             entry_mod = importlib.import_module(f"{pkg}.{mod_name}")
             getattr(entry_mod, func_name)(api)
         except Exception as e:
-            for name in [n for n in sys.modules if n == pkg or n.startswith(pkg + ".")]:
-                del sys.modules[name]
+            self._purge_modules(pkg)
             self._unregister_all(ext_id)
             msg = f"{type(e).__name__}: {e}"
             if rec is None:
