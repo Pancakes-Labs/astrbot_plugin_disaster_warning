@@ -81,11 +81,6 @@ class MessageBuildService:
         self.manager = manager  # 主消息管理器 MessagePushManager 实例
 
     @staticmethod
-    def _get_envelope(event: EventEnvelope):
-        """统一获取领域 envelope。"""
-        return event
-
-    @staticmethod
     def _get_domain_event(event: EventEnvelope):
         """统一获取领域事件。"""
         return event.event

@@ -117,10 +117,6 @@ class WeatherAggregationService:
         """
         self._flush_callback = callback
 
-    def update_config(self, config: dict[str, Any]) -> None:
-        """更新配置（支持运行时热更新）。"""
-        self._config = config
-
     def _get_aggregation_config(
         self, runtime_config: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -624,9 +620,3 @@ class WeatherAggregationService:
                 self.last_flush_batch_sessions = None
                 self.last_flushed_count = None
                 self.last_flushed_session = None
-
-    def get_buffer_stats(self) -> dict[str, int]:
-        """获取各会话缓冲区状态（用于状态展示）。"""
-        return {
-            session: len(buffer) for session, buffer in self._buffers.items() if buffer
-        }
