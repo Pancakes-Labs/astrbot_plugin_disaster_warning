@@ -102,9 +102,11 @@ class ExtensionAPI:
         return self._data_dir
 
     def t(self, key: str, **fmt) -> str:
+        """Translate a key in the language of this extension. Use the host language as fallback."""
         return self._translator.t(key, **fmt)
 
     def register_source(self, entry: SourceEntry) -> None:
+        """Register a data source of this extension. Raise ValueError if the entry is not an extension entry."""
         if entry.config_group != "extensions":
             raise ValueError("扩展数据源的 config_group 必须为 'extensions'")
         if entry.provider_family != ProviderFamily.EXTENSION:
@@ -115,12 +117,15 @@ class ExtensionAPI:
         self.sources.append(entry.source_id)
 
     def register_parser(self, name: str, parser_class) -> None:
+        """Register a parser class under a name. The host removes it when the extension unloads."""
         self._registry.register_parser(name, parser_class, owner=self.id)
 
     def register_presenter(self, key: str, presenter_class) -> None:
+        """Register a text presenter class under a key."""
         self._registry.register_text_presenter(key, presenter_class, owner=self.id)
 
     def register_rule(self, rule, *, after: str = "local_rule") -> None:
+        """Add a rule to the host rule chain after the rule with the name in `after`."""
         self._registry.register_rule(rule, after=after, owner=self.id)
 
     def register_poller(
@@ -131,6 +136,7 @@ class ExtensionAPI:
         interval_seconds: float,
         timeout_seconds: float = 30,
     ) -> None:
+        """Register an HTTP polling function for a source of this extension. Require the network permission."""
         if "network" not in self._manifest.permissions:
             raise PermissionError("register_poller 需要在 permissions 中声明 network")
         if source_id not in self.sources:

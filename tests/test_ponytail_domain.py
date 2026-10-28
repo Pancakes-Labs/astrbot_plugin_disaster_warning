@@ -25,5 +25,6 @@ _BASE = "astrbot_plugin_disaster_warning.core.domain.tsunami."
     ],
 )
 def test_clean_text(module, raw, expected):
+    """Check that the text cleaner removes the unwanted characters."""
     mod = importlib.import_module(_BASE + module)
     assert mod._clean_text(raw) == expected

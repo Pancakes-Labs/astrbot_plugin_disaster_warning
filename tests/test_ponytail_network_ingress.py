@@ -36,6 +36,7 @@ def _run(svc, message_type, payload):
     ],
 )
 def test_list_message_updates_cache_and_logs(message_type, key, source):
+    """Check that a list message updates the cache and writes the log."""
     svc = _service()
     _run(svc, message_type, {"No1": {}})
     svc.earthquake_list_service.update_earthquake_list.assert_called_once_with(
@@ -47,6 +48,7 @@ def test_list_message_updates_cache_and_logs(message_type, key, source):
 
 
 def test_no_logger_still_updates_cache():
+    """Check that the cache updates when no logger is set."""
     svc = _service(with_logger=False)
     _run(svc, "jma_eqlist", {"a": 1})
     svc.earthquake_list_service.update_earthquake_list.assert_called_once_with(
@@ -59,6 +61,7 @@ def test_no_logger_still_updates_cache():
     [("other", {"a": 1}), ("cenc_eqlist", {}), ("cenc_eqlist", None)],
 )
 def test_other_cases_do_nothing(message_type, payload):
+    """Check that other messages change nothing."""
     svc = _service()
     _run(svc, message_type, payload)
     svc.earthquake_list_service.update_earthquake_list.assert_not_called()

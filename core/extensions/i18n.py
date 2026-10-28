@@ -31,6 +31,7 @@ class Translator:
         return self._cache[lang]
 
     def t(self, key: str, **fmt) -> str:
+        """Return the text for a key. Fall back to the host language, then to the key. Fill the format fields."""
         text = self._table(self._lang).get(key)
         if text is None:
             text = self._table(HOST_LANG).get(key, key)

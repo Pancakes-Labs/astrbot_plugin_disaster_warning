@@ -15,6 +15,7 @@ def _mod(name: str):
 
 
 def test_has_connecting_channels():
+    """Check the detection of channels that are connecting."""
     cls = _mod("core.services.health.connection_health_service").ConnectionHealthService
     f = cls._has_connecting_channels
     assert f([]) is False
@@ -37,11 +38,13 @@ def test_has_connecting_channels():
     ],
 )
 def test_match_area(area, kw, expected):
+    """Check the area keyword match of the AQI query service."""
     m = _mod("core.services.query.aqi_query_service")
     assert m._match_area({"Area": area}, kw) is expected
 
 
 def test_place_counts_order():
+    """Check the place counts order. Ties keep the first-seen order."""
     m = _mod("core.services.query.jma_hypo_query_service")
     events = [
         {"mag": 1, "dep": 1, "place_cn": "B"},
@@ -65,6 +68,7 @@ def test_place_counts_order():
 
 
 def test_notification_unread_count():
+    """Check the count of unread notifications."""
     m = _mod("core.services.notification.notification_center")
     obj = object.__new__(m.NotificationCenter)
     obj._cache = {
@@ -79,6 +83,7 @@ def test_notification_unread_count():
 
 
 def test_simulation_step_safe_numbers():
+    """Check that a simulation step uses the default value for a bad number."""
     m = _mod("core.services.simulation.flow_models")
     step = m.SimulationStep.from_dict(
         {
@@ -100,6 +105,7 @@ def test_simulation_step_safe_numbers():
 
 
 def test_time_converter_zoneinfo():
+    """Check the time conversion with a zoneinfo time zone."""
     mod = _mod("utils.time_converter")
     tc = mod.TimeConverter
     assert tc._get_timezone("Asia/Tokyo").key == "Asia/Tokyo"

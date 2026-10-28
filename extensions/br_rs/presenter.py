@@ -8,9 +8,14 @@ EMOJI = {0: "⚪", 1: "🔵", 2: "🟡", 3: "🟠", 4: "🔴"}
 
 
 def make_presenter(api):
+    """Return a presenter class that is bound to the translator of the extension."""
+
     class BrRsWeatherPresenter:
+        """Text presenter for the alerts and the rain events of br_rs."""
+
         @classmethod
         def present(cls, display_context, options=None) -> str:
+            """Return the message text for a weather display context."""
             t = api.t
             md = display_context.metadata or {}
             level = int(md.get("severity_level") or 0)

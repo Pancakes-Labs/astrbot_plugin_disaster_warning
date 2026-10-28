@@ -13,6 +13,7 @@ def _store():
 
 
 def test_cenc_profile_from_dict():
+    """Check that the CENC profile is built from a dictionary."""
     store = _store()
     profile = store.build_cenc_similarity_profile(
         {
@@ -29,6 +30,7 @@ def test_cenc_profile_from_dict():
 
 
 def test_cenc_profile_compatibility():
+    """Check the compatibility rule between two CENC profiles."""
     store = _store()
     base = store.build_cenc_similarity_profile(
         {
