@@ -1,0 +1,30 @@
+# Code smell rules for the extensions. These rules apply only to the files in this directory.
+# The root of the repository has no ruff configuration. Thus, ruff uses this file for extensions/.
+target-version = "py310"
+
+[lint]
+select = [
+    "E", "F", "W",  # pycodestyle and pyflakes (the ruff defaults)
+    "B",            # bugbear: likely bugs
+    "C4",           # comprehensions
+    "C90",          # mccabe complexity
+    "SIM",          # code that you can make simpler
+    "RET",          # return statements
+    "ARG",          # arguments that the code does not use
+    "PL",           # pylint: too many arguments, branches and statements; magic values
+    "PIE", "PERF",  # unnecessary code and slow patterns
+    "ERA",          # code in comments
+    "BLE",          # blind except
+    "TRY",          # exception handling
+    "N",            # naming
+    "UP",           # syntax for the target Python version
+    "RUF",          # ruff-specific rules
+]
+
+[lint.mccabe]
+max-complexity = 8
+
+[lint.pylint]
+max-args = 5
+max-branches = 8
+max-statements = 30
