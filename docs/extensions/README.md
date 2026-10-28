@@ -3,6 +3,8 @@
 An extension adds data sources, presenters and rules to this plugin. You do not need a fork.
 The contract is in [`design.md`](design.md). The reference implementation is
 [`extensions/br_rs_disaster`](../../extensions/br_rs_disaster) (Brazil, Rio Grande do Sul).
+A second example is [`extensions/br_rs_waterq`](../../extensions/br_rs_waterq) (bathing water quality). Its data source is in
+[Brazil water quality sources](brazil-water-quality-sources.md).
 
 The API documents of the data sources of `br_rs_disaster` are:
 

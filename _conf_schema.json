@@ -1530,7 +1530,7 @@
   "extensions": {
     "description": "🧩 扩展",
     "type": "object",
-    "hint": "加载第三方或内置扩展（如 br_rs_disaster 巴西南大河州气象预警）。默认不启用任何扩展，对现有行为无影响。修改后需重载插件生效",
+    "hint": "加载第三方或内置扩展（如 br_rs_disaster 巴西南大河州灾害预警、br_rs_waterq 巴西南大河州水质）。默认不启用任何扩展，对现有行为无影响。修改后需重载插件生效",
     "items": {
       "enabled_ids": {
         "description": "启用的扩展 ID 列表",

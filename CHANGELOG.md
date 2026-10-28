@@ -15,12 +15,14 @@
 - Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
 - Add the extension `br_rs_disaster` for Rio Grande do Sul, Brazil. It sends CEMADEN flood, landslide and heavy rain alerts. It adds El Niño and La Niña data from NOAA CPC by @h0ffmann
 - `br_rs_disaster` has messages in Chinese, English, Brazilian Portuguese (`pt-BR`) and Japanese (`ja-JP`). The pt-BR messages use the decimal comma and ISO 8601 dates by @h0ffmann
+- Add the extension `br_rs_waterq` for Rio Grande do Sul, Brazil. It sends the bathing water results of the FEPAM Balneabilidade program (CONAMA 274/2000), in the same four languages by @h0ffmann
 - Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension by @h0ffmann
 
 ### 🌐 Data Sources & Network (数据源与网络)
 
 - Add the sources `br_rs_disaster_cemaden_alerts` and `br_rs_disaster_cemaden_rain`. They poll the CEMADEN endpoints. See `docs/CEMADEN API.md` by @h0ffmann
 - Add the NOAA CPC ONI file as background data. See `docs/NOAA CPC ONI.md` by @h0ffmann
+- Add the source `br_rs_waterq_balneabilidade`. It polls the official FEPAM API on PROCERGS. See `docs/extensions/brazil-water-quality-sources.md` by @h0ffmann
 - Use one HTTP session for all extension pollers. The session uses the `certifi` root certificates. This fixes `CERTIFICATE_VERIFY_FAILED` for the GlobalSign Root R46 of CEMADEN by @h0ffmann
 
 ### ⚙️ Configuration (配置)
@@ -33,6 +35,7 @@
 - Add `docs/CEMADEN API.md`, `docs/NOAA CPC ONI.md` and the extension guide in `docs/extensions/` by @h0ffmann
 - Add `docs/ponytail-audit.md`: a list of possible simplifications of the existing code, for the maintainers to decide. This release does not apply them by @h0ffmann
 - Add the extension entries to the README by @h0ffmann
+- Add `docs/extensions/brazil-water-quality-sources.md`: the official water quality data of Brazil. Only Rio Grande do Sul is complete for now by @h0ffmann
 
 ### 🔧 Chore (杂项)
 
