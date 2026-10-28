@@ -39,17 +39,14 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .ua_session import UaSessionMixin
+
 PAGE_BASE = "https://www.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
 # 页面内容缓存 TTL（秒）。降水预报每日 2 次起报（08/20 北京时），
 # 缓存 300 秒既降低请求频率，又不会让用户看到明显过期的帧。
 PAGE_CACHE_TTL_SEC = 300.0
-
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 
 # 匹配 .time 元素的开标签（宽松 class，不依赖属性顺序与引号格式）
 _TIME_ELEM_RE = re.compile(r'<div class="col-xs-12 time[^"]*"[^>]*>')
@@ -82,7 +79,7 @@ class PrecipitationFrame:
     init_time: str
 
 
-class NmcPrecipitationClient:
+class NmcPrecipitationClient(UaSessionMixin):
     """NMC 降水量预报图抓取客户端。"""
 
     def __init__(
@@ -112,21 +109,6 @@ class NmcPrecipitationClient:
                 tuple[str, str], tuple[list[PrecipitationFrame], float]
             ] = {}
         self._page_cache = cls._page_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话。"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     async def fetch_page_frames(
         self,

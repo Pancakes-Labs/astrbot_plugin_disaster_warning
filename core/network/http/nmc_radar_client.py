@@ -27,6 +27,8 @@ import aiohttp
 
 from astrbot.api import logger
 
+from .ua_session import UaSessionMixin
+
 PAGE_BASE = "https://www.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
@@ -34,17 +36,12 @@ _IMAGE_HOST = "image.nmc.cn"
 # 又不会让用户看到明显过期的帧。
 PAGE_CACHE_TTL_SEC = 90.0
 
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 _DATA_IMG_RE = re.compile(r'data-img="([^"]+)"')
 _CODE_RE = re.compile(r"ECREF_([A-Z0-9_]+)_L88")
 _TIME_RE = re.compile(r"_PI_(\d{17})")
 
 
-class NmcRadarClient:
+class NmcRadarClient(UaSessionMixin):
     """NMC 雷达图抓取客户端。"""
 
     def __init__(
@@ -73,24 +70,6 @@ class NmcRadarClient:
         if not hasattr(cls, "_page_cache"):
             cls._page_cache: dict[tuple[str, str], tuple[list[str], float]] = {}
         self._page_cache = cls._page_cache
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话。
-
-        注意：不清理类级页面缓存，URL 序列不依赖会话可跨请求复用。
-        """
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
 
     async def fetch_page_radar_urls(
         self,

@@ -27,12 +27,9 @@ import aiohttp
 
 from astrbot.api import logger
 
-PAGE_BASE = "https://www.nmc.cn"
+from .ua_session import UaSessionMixin
 
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+PAGE_BASE = "https://www.nmc.cn"
 
 # 省份/城市列表缓存 TTL（秒）。行政区划极少变动，缓存 24 小时。
 CITY_TTL_SEC = 24 * 3600.0
@@ -44,7 +41,7 @@ CACHE_FAIL_TTL_SEC = 5.0
 CACHE_MAX_ENTRIES = 256
 
 
-class NmcWeatherClient:
+class NmcWeatherClient(UaSessionMixin):
     """NMC 气象站（城市级）数据抓取客户端。"""
 
     def __init__(
@@ -75,24 +72,13 @@ class NmcWeatherClient:
             cls._real_cache: dict[tuple[str, str], tuple[dict[str, Any], float]] = {}
         self._real_cache = cls._real_cache
 
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """确保 aiohttp 会话可用（延迟初始化）。"""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={"User-Agent": _UA, "Referer": self._page_base + "/"},
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """关闭 HTTP 会话（不清理类级缓存，纯数据可跨请求复用）。"""
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
-
     # ------------------------------------------------------------------
     # 通用 GET 与缓存
     # ------------------------------------------------------------------
+
+    def _session_headers(self) -> dict[str, str]:
+        """Add the Referer header to the default headers."""
+        return {**super()._session_headers(), "Referer": self._page_base + "/"}
 
     async def _get_json(self, path: str) -> Any | None:
         """GET 并解析 JSON；失败返回 None。"""
