@@ -528,6 +528,39 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 </details>
 
+### Extension push example (Brazil, Rio Grande do Sul)
+
+<details>
+<summary>CEMADEN flood alert (extension br_rs, language en)</summary>
+
+```text
+🟠 CEMADEN alert: flood risk
+Level High in SÃO BORJA/RS
+Risk: flood
+Issued: 25/10/2026 11:20 (Brasília time)
+Background data: a very strong El Niño is active (ONI JAS 2026: +2.16). It is not the cause of this alert.
+Source: CEMADEN / NOAA CPC
+```
+
+</details>
+
+<details>
+<summary>CEMADEN rain gauge alert (extension br_rs, language en)</summary>
+
+```text
+🟠 Heavy rain
+Heavy rain (High) in PAROBÉ/RS
+Rain: 32 mm/1h | 88.4 mm/24h
+Issued: 28/10/2026 13:10 (Brasília time)
+Background data: a very strong El Niño is active (ONI JAS 2026: +2.16). It is not the cause of this alert.
+Source: CEMADEN / NOAA CPC
+```
+
+</details>
+
+> [!NOTE]
+> The alert text comes from a recorded CEMADEN alert. The rain gauge text uses a sample reading, because the recorded rain data has no value above the thresholds. The ONI line comes from the recorded ONI file.
+
 ### 台风信息推送示例
 
 <details>
@@ -1011,6 +1044,14 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 | :--- | :--- | :--- |
 | S-Net 海底地震计 (MSIL) | 地震情报 | ✅ |
 
+#### 🔹 Extensions (br_rs: Brazil, Rio Grande do Sul)
+
+| 数据源 | 数据类型 | 状态 |
+| :--- | :--- | :--- |
+| CEMADEN alerts (`wsAlertas2`) | 气象预警 | 🧪 |
+| CEMADEN rain gauges (`getJson2.php?uf=RS`) | 气象预警 | 🧪 |
+| NOAA CPC ONI (background data for El Niño and La Niña) | 气候背景 | 🧪 |
+
 ✅ **正常**  
 ⚠️ **不稳定**  
 ❌ **完全不可用**  
@@ -1022,6 +1063,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 
 > [!TIP]
 > 其中 PancakesAPI 为插件自建数据源，数据服务公开可用。详情请查看[PancakesAPI文档](https://wiki.aloys23.link/wiki/PancakesAPI)。
+
+> [!NOTE]
+> The extension sources are off by default. Enable them in the [extensions configuration](#extensions-config). For the API details, see [CEMADEN API](docs/CEMADEN%20API.md) and [NOAA CPC ONI](docs/NOAA%20CPC%20ONI.md). To write an extension, see [docs/extensions/README.md](docs/extensions/README.md).
 
 ### ⏰ 数据延迟
 
@@ -1712,6 +1756,43 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 
 ---
 
+### <span id="extensions-config">🧩 16. Extensions (`extensions`)</span>
+
+An extension adds data sources to the plugin. The plugin has one bundled extension: `br_rs`. It sends CEMADEN rain, flood and landslide alerts for Rio Grande do Sul, Brazil. It adds El Niño and La Niña data from NOAA CPC. The plugin loads no extension by default.
+
+- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `br_rs`. A failed extension does not stop the plugin. Reload the plugin after a change.
+- **Extension settings (`settings`)**: JSON text. The first level is the extension id. The plugin ignores text that is not valid JSON. The default is `{}`.
+
+Example:
+
+```json
+"extensions": {
+  "enabled_ids": ["br_rs"],
+  "settings": "{\"br_rs\": {\"language\": \"en\", \"rain_interval\": 600}}"
+}
+```
+
+Settings of `br_rs`:
+
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| `language` | `zh-CN` | The language of the messages. The values are `zh-CN` and `en`. |
+| `alerts_interval` | `300` | The time between two requests for CEMADEN alerts, in seconds. |
+| `rain_interval` | `300` | The time between two requests for CEMADEN rain gauges, in seconds. |
+| `rain_thresholds` | See below | The rain totals that set the level of a rain gauge alert. |
+
+`rain_thresholds` has three keys: `yellow`, `orange` and `red`. Each key has `acc1hr` (rain in the last 1 hour, in mm) and `acc24hr` (rain in the last 24 hours, in mm). A gauge meets a level when one of the two values reaches the threshold. A key that you omit keeps its default.
+
+| Key | Level | `acc1hr` (mm) | `acc24hr` (mm) |
+| :--- | :--- | :--- | :--- |
+| `yellow` | 2 | 20 | 50 |
+| `orange` | 3 | 30 | 100 |
+| `red` | 4 | 60 | 150 |
+
+Send `/灾害预警扩展` to see the state of each extension. For the extension contract and a guide to write your own extension, see [docs/extensions/README.md](docs/extensions/README.md).
+
+---
+
 </details>
 
 ### ♨️ WebUI 配置热重载说明
@@ -1791,6 +1872,7 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 | 命令 | 别名 | 描述 |
 | :--- | :--- | :--- |
 | `/灾害预警状态` | - | 查看服务运行状态 |
+| `/灾害预警扩展` | - | Show the load state of each extension (loaded, error, not found) |
 | `/灾害预警重启` | `/灾害预警重载` | 重载插件（等价于 AstrBot WebUI 中的重载） **(仅管理员)** |
 | `/重启AstrBot` | `/重启 AstrBot` `/重载AstrBot` 等（含大小写/空格变体） | 重启整个 AstrBot 进程 **(仅管理员)** |
 | `/灾害预警重连` | - | 强制重连所有离线数据源 **(仅管理员)** |
