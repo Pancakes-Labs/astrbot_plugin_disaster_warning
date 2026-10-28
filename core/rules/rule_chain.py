@@ -41,24 +41,41 @@ class RuleChain:
         return RuleDecision.accept(reason="规则链通过")
 
 
+# 扩展注册的规则：(规则对象, 插入锚点 rule_name, 扩展 id)。
+_REGISTERED_RULES: list[tuple[object, str, str]] = []
+
+
+def register_rule(rule, *, after: str = "local_rule", owner: str) -> None:
+    """注册扩展规则，插入到 rule_name 为 after 的内置规则之后（找不到则追加到末尾）。"""
+    _REGISTERED_RULES.append((rule, after, owner))
+
+
+def unregister_rules(owner: str) -> None:
+    """移除指定扩展注册的全部规则。"""
+    _REGISTERED_RULES[:] = [item for item in _REGISTERED_RULES if item[2] != owner]
+
+
 def build_default_rule_chain() -> RuleChain:
     """构建默认推送规则链。
 
     默认顺序从基础有效性校验开始，再逐步进入来源、气象、台风、海啸、关键词、
-    震动强度、报次与本地烈度判断。
+    震动强度、报次与本地烈度判断。扩展注册的规则按锚点插入其后。
     """
     # 顺次装配核心过滤逻辑规则实例
-    return RuleChain(
-        [
-            EventTimeRule(),
-            SourceEnabledRule(),
-            MeasurementTypeRule(),
-            WeatherRule(),
-            TyphoonRule(),
-            TsunamiRule(),
-            KeywordRule(),
-            EarthquakeThresholdRule(),
-            ReportRule(),
-            LocalIntensityRule(),
-        ]
-    )
+    rules = [
+        EventTimeRule(),
+        SourceEnabledRule(),
+        MeasurementTypeRule(),
+        WeatherRule(),
+        TyphoonRule(),
+        TsunamiRule(),
+        KeywordRule(),
+        EarthquakeThresholdRule(),
+        ReportRule(),
+        LocalIntensityRule(),
+    ]
+    for rule, after, _owner in _REGISTERED_RULES:
+        names = [getattr(item, "rule_name", "") for item in rules]
+        index = names.index(after) + 1 if after in names else len(rules)
+        rules.insert(index, rule)
+    return RuleChain(rules)

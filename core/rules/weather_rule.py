@@ -74,12 +74,17 @@ class WeatherRule(BaseRule):
 
         color_levels = {"白色": 0, "蓝色": 1, "黄色": 2, "橙色": 3, "红色": 4}
 
-        # 颜色按由高到低的优先级识别，命中后即可停止继续扫描。
-        detected_color = "白色"
-        for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
-            if color in title_text:
-                detected_color = color
-                break
+        # 事件元数据显式给出 severity_level（0..4）时直接采用，不再扫描标题颜色词。
+        severity_level = domain_event.metadata.get("severity_level")
+        if isinstance(severity_level, int) and 0 <= severity_level <= 4:
+            detected_color = ["白色", "蓝色", "黄色", "橙色", "红色"][severity_level]
+        else:
+            # 颜色按由高到低的优先级识别，命中后即可停止继续扫描。
+            detected_color = "白色"
+            for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
+                if color in title_text:
+                    detected_color = color
+                    break
 
         # 对比颜色等级阈值进行过滤
         if color_levels.get(detected_color, 0) < color_levels.get(min_color_level, 0):
