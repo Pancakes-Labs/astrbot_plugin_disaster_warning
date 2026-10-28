@@ -4,6 +4,11 @@ An extension adds data sources, presenters and rules to this plugin. You do not 
 The contract is in [`design.md`](design.md). The reference implementation is
 [`extensions/br_rs`](../../extensions/br_rs) (Brazil, Rio Grande do Sul).
 
+The API documents of the data sources of `br_rs` are:
+
+- [CEMADEN API](../CEMADEN%20API.md): the alerts and the rain gauges.
+- [NOAA CPC ONI](../NOAA%20CPC%20ONI.md): the El Niño and La Niña index.
+
 ## 1. Enable an extension
 
 Open the plugin configuration (WebUI → 🧩 扩展, key `extensions`). Set these values:
