@@ -40,7 +40,13 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
    - Do not change the Chinese comments that are already in the upstream code.
    - Keep the upstream log style (`[灾害预警] ...`) and the Chinese user interface text.
 3. **Python only.** Do not add JavaScript or WebUI work for this feature.
-4. **Smallest change that works (ponytail).**
+4. **A pull request only adds lines (hard rule).** Do not change or remove existing upstream code.
+   This makes the review easy.
+   - `git diff --numstat main | awk '$2>0'` must give no output.
+   - Insert a hook as new lines. If you must change the behavior of an existing function, add a
+     wrapper after it (see `build_default_rule_chain` in `core/rules/rule_chain.py`).
+   - Put possible simplifications of the existing code in `docs/ponytail-audit.md`. Do not apply them.
+5. **Smallest change that works (ponytail), in the new code.**
    - Reuse code that is already in the repository.
    - Use the standard library before you add code.
    - Do not add an abstraction that has only one use.
@@ -65,7 +71,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
 - `EventTimeRule` ignores events that are older than one hour. A CEMADEN alert stays active for
   days. Thus, use the time of the last update (`ult_atualizacao`) as the event time, not the creation time.
 - The host found the weather severity from Chinese color words in the title. Now an event can
-  set `metadata["severity_level"]` (0 to 4). The color map is one constant in `utils/severity_emoji.py`.
+  set `metadata["severity_level"]` (0 to 4). `WeatherRule` and the weather aggregation use it.
 - The weather presenter header, the region resolver and the icon maps are for China only.
   An extension supplies its own presenter.
 - `SOURCE_CATALOG` and the `SOURCE_IDS_BY_*` indexes are module dicts. Other modules keep
@@ -104,8 +110,11 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
    - Before a refactor, write a test that keeps the old behavior. Run the new test on the **old**
      code too. It must pass on the old code and on the new code.
    - Compare each docstring with the assertions of its test.
-5. **Remove only provably dead code from the upstream code.** If two helpers differ in an edge case
-   (None, bool, inf, nan, empty text), do not merge them. Put the item in `docs/ponytail-audit.md` for the maintainer.
+5. **Do not refactor the upstream code in a feature pull request.** We did two ponytail passes on the
+   upstream code (approximately 617 lines removed and 173 lines simplified). The owner asked us to
+   revert all of them, because a feature pull request must only add lines. Now the findings are
+   suggestions in `docs/ponytail-audit.md`. If two helpers differ in an edge case
+   (None, bool, inf, nan, empty text), they are not duplicates.
 6. **Test with real data at three levels:**
    - Unit tests with recorded data (`tests/br_rs/fixtures/`).
    - Live tests with the real feeds (`tests/live/`). They run only with `DW_LIVE_TESTS=1`.
@@ -155,7 +164,7 @@ Complexity and maintainability: radon 6.0.1. Dead code: vulture 2.14 (60 % confi
 | Maintainability index, `presenter.py` | A (50.16) | A (50.16) |
 | Source lines (SLOC) | 349 | 349 |
 | Vulture findings | 4 | 3 (all are entry points of the extension contract) |
-| Tests (offline / live) | 109 / 7 | 109 / 7 |
+| Tests (offline / live) | 61 / 7 | 61 / 7 |
 
 The ruff findings before the change: 7 lines too long, 2 magic values, 1 blind `except`,
 1 function with too many arguments, 1 unused argument.
@@ -168,5 +177,5 @@ The CI job `.github/workflows/extensions-code-smell.yml` runs these checks for e
 - INMET: test the access from a Brazilian IP address. Then add the INMET CAP warnings.
 - SGB river levels: get permission, or read the PDF bulletins.
 - Session overrides for extension sources are not in the MVP.
-- `docs/ponytail-audit.md` lists items for the maintainers to decide. Row 5 needs a check.
+- `docs/ponytail-audit.md` lists suggestions for the existing code. The maintainers decide. Row 15 needs a check.
 - Do not send `AGENTS.md` (the rules of the fork) to the upstream repository.
