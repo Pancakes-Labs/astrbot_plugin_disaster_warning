@@ -78,6 +78,25 @@ PARSER_CLASS_BY_NAME = {
 }
 
 
+# 扩展注册的解析器归属：parser_name -> 扩展 id。
+_PARSER_OWNERS: dict[str, str] = {}
+
+
+def register_parser(parser_name: str, parser_class, *, owner: str) -> None:
+    """注册扩展解析器，parser_name 与已有解析器重名时抛出 ValueError。"""
+    if parser_name in PARSER_CLASS_BY_NAME:
+        raise ValueError(f"解析器 {parser_name} 已存在，无法重复注册")
+    PARSER_CLASS_BY_NAME[parser_name] = parser_class
+    _PARSER_OWNERS[parser_name] = owner
+
+
+def unregister_parsers(owner: str) -> None:
+    """移除指定扩展注册的全部解析器。"""
+    for parser_name in [n for n, o in _PARSER_OWNERS.items() if o == owner]:
+        PARSER_CLASS_BY_NAME.pop(parser_name, None)
+        del _PARSER_OWNERS[parser_name]
+
+
 def resolve_parser_class(parser_name: str):
     """按解析器名称解析对应的解析器类。"""
     normalized_name = (parser_name or "").strip()

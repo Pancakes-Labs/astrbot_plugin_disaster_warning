@@ -100,6 +100,10 @@ class SourceEnabledRule(BaseRule):
                 context={"source_id": source_id},
             )
 
+        # 扩展数据源：注册即视为全局启用，不受 data_sources 开关约束。
+        if source_entry.config_group == "extensions":
+            return RuleDecision.accept(reason="扩展数据源已启用")
+
         session_label = context.session_id or "global"
 
         # 1) 全局总闸：仅校验组级开关，不校验子源级开关。

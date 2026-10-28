@@ -143,6 +143,14 @@ class WeatherAggregationService:
         """从事件元数据中解析颜色级别。"""
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
         domain_event = event.event
+        # 事件元数据显式给出 severity_level（0..4）时直接采用，不再扫描标题颜色词。
+        if isinstance(domain_event, WeatherEvent):
+            severity_level = domain_event.metadata.get("severity_level")
+            if isinstance(severity_level, int) and 0 <= severity_level <= 4:
+                color_name = next(
+                    c for c, v in _COLOR_LEVEL_MAP.items() if v == severity_level
+                )
+                return severity_level, color_name
         title_text = ""
         if isinstance(domain_event, WeatherEvent):
             title_text = getattr(domain_event, "title", "") or getattr(

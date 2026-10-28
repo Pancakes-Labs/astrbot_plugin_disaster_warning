@@ -90,6 +90,10 @@ def _is_source_enabled_by_catalog(source_id: str, data_sources: dict[str, Any]) 
     if source_entry is None:
         return False
 
+    # 扩展数据源：注册即视为全局启用
+    if source_entry.config_group == "extensions":
+        return True
+
     # 获取数据源组配置（合并历史别名组名，规范组名优先），组被禁用则该数据源禁用
     group_cfg: dict[str, Any] = {}
     for legacy in get_legacy_group_names(source_entry.config_group):
