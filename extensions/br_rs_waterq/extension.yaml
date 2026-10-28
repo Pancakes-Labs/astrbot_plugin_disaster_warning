@@ -1,0 +1,9 @@
+id: br_rs_waterq
+name: Brazil - Rio Grande do Sul (water quality)
+version: 0.1.0
+api_version: 1
+min_host_version: 1.6.5
+entry: extension:setup
+description: This extension sends bathing water quality alerts for Rio Grande do Sul, Brazil. It uses the FEPAM Balneabilidade program. It sends an alert when a new bulletin says that a point is unsuitable. It also sends an alert when a point is suitable again.
+author: astrbot_plugin_disaster_warning
+permissions: [network]

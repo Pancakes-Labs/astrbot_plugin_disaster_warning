@@ -1,0 +1,17 @@
+{
+  "title.unsuitable": "Water quality alert: unsuitable for bathing",
+  "title.suitable": "Water quality: suitable for bathing again",
+  "headline": "{beach} - {municipio}/{uf}",
+  "status.unsuitable": "unsuitable for bathing",
+  "status.suitable": "suitable for bathing",
+  "source.balneabilidade": "FEPAM - Bathing water quality (RS)",
+  "source.balneabilidade.desc": "FEPAM bathing water quality bulletins for Rio Grande do Sul. An alert shows when a point is unsuitable or suitable again.",
+  "present.status": "Status: {status}",
+  "present.sample": "Sample date: {date}",
+  "present.lab": "Laboratory: {lab}",
+  "present.location": "Position: {coords}",
+  "present.criterion": "Criterion: CONAMA 274/2000 (E. coli and thermotolerant coliforms)",
+  "present.source": "Source: FEPAM / PROCERGS",
+  "format.decimal": ".",
+  "format.date": "%d/%m/%Y"
+}
