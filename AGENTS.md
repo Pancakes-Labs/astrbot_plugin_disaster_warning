@@ -37,3 +37,10 @@ An approval is for one action only. Get a new approval for each new action.
   - Use simple words that have one meaning. Use the same word for the same thing. Do not use idioms, slang or contractions.
   - Use articles ("the", "a"). Do not use noun clusters of more than three words.
 - Do not change the Chinese comments that are already in the upstream code. Keep the log message style of the upstream code (`[灾害预警] ...`).
+
+## Rule 3: A pull request only adds lines (hard rule)
+
+- Do not change or remove existing upstream code in a feature pull request. This makes the review easy.
+- Before you push, run `git diff --numstat main | awk '$2>0'`. The command must give no output.
+- Insert a hook as new lines. If you must change an existing function, add a wrapper after it.
+- Put simplifications of the existing code in `docs/ponytail-audit.md` as suggestions. Do not apply them.

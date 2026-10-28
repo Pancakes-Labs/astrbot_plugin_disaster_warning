@@ -25,15 +25,12 @@
 ### ⚙️ Configuration (配置)
 
 - Add the `extensions` configuration group with the keys `enabled_ids` and `settings`. The settings of `br_rs` are `language`, `alerts_interval`, `rain_interval` and `rain_thresholds` by @h0ffmann
-- Change the requirements. Add `pyyaml` and `certifi`. Remove `pydantic` and `python-dateutil` by @h0ffmann
-
-### ♻️ Refactor (重构)
-
-- Remove code that has no references (the ponytail cleanup). The change removes about 617 lines and 2 dependencies. See `docs/ponytail-audit.md` by @h0ffmann
+- Add the requirements `pyyaml` and `certifi` by @h0ffmann
 
 ### 📚 Documentation (文档)
 
 - Add `docs/CEMADEN API.md`, `docs/NOAA CPC ONI.md` and the extension guide in `docs/extensions/` by @h0ffmann
+- Add `docs/ponytail-audit.md`: a list of possible simplifications of the existing code, for the maintainers to decide. This release does not apply them by @h0ffmann
 - Add the extension entries to the README by @h0ffmann
 
 ### 🔧 Chore (杂项)

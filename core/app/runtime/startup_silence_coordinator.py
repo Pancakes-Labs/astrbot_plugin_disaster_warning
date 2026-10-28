@@ -163,6 +163,9 @@ class StartupSilenceCoordinator:
         }
 
     # 兼容旧名
+    def is_in_silence_period(self) -> bool:
+        return self.is_silencing()
+
     def resolve_enabled(self, debug_config: dict[str, Any] | None) -> bool:
         """从 debug_config 解析是否启用静默启动。
 
@@ -346,6 +349,27 @@ class StartupSilenceCoordinator:
         logger.debug(f"[灾害预警] 静默门闩已建连: {gate.gate_id}")
         self._evaluate_ready(reason_hint=f"ws_connected:{gate.gate_id}")
 
+    def note_connection_skipped(self, connection_name: str, reason: str = "") -> None:
+        """某连接无法完成（缺鉴权/熔断等），不阻塞全局就绪。"""
+        if not self.enabled or self.state == SilenceState.READY:
+            return
+        gate = self._ensure_ws_gate(connection_name)
+        if gate is None:
+            return
+        gate.skipped = True
+        gate.skip_reason = reason or "skipped"
+        gate.primed = True
+        gate.connected = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
+        logger.debug(
+            f"[灾害预警] 静默门闩已跳过: {gate.gate_id}"
+            + (f" ({gate.skip_reason})" if gate.skip_reason else "")
+        )
+        self._evaluate_ready(reason_hint=f"ws_skipped:{gate.gate_id}")
+
     def note_bootstrap_payload(
         self,
         *,
@@ -420,6 +444,26 @@ class StartupSilenceCoordinator:
             # 失败不直接 primed；watchdog 的 first_poll_timeout / 硬超时会兜底。
             return
         self._mark_primed(gate, bootstrap_kind="poll_first_fetch")
+
+    def note_poll_skipped(self, poll_id: str, reason: str = "") -> None:
+        """轮询源未启用或无法运行。"""
+        if not self.enabled or self.state == SilenceState.READY:
+            return
+        gate_id = str(poll_id or "").strip()
+        if not gate_id:
+            return
+        gate = self.gates.get(gate_id)
+        if gate is None:
+            gate = GateState(gate_id=gate_id, kind="poll")
+            self.gates[gate_id] = gate
+        gate.skipped = True
+        gate.skip_reason = reason or "disabled"
+        gate.primed = True
+        # 待武装期间登记跳过进度，等 arm() 后迁移到正式门闩，
+        # 避免 gates.clear() 后 skipped 丢失而干等硬超时。
+        if self.state == SilenceState.PENDING:
+            self._pending_skipped.add(gate.gate_id)
+        self._evaluate_ready(reason_hint=f"poll_skipped:{gate_id}")
 
     def note_event_absorbed(
         self,

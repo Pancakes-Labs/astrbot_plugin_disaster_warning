@@ -19,27 +19,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-
-def safe_float(value: Any, default: Any = None) -> Any:
-    """Convert a value to float. Return the default when the value is not valid."""
-    if value is None or value == "":
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def safe_int(value: Any, default: Any = None) -> Any:
-    """Convert a value to int through float. Return the default when not valid."""
-    if value is None or value == "":
-        return default
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
 # 进程内模拟流递增计数器：用于生成稳定且不重复的 flow / step 标识
 _flow_sequence = 0
 _flow_sequence_lock = threading.Lock()
@@ -153,24 +132,36 @@ class SimulationStep:
         """
         data = dict(data or {})
 
+        def _safe_int(value: Any, default: int) -> int:
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_float(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         return cls.create(
             step_id=str(data.get("step_id") or uuid.uuid4().hex[:12]),
             disaster_type=str(data.get("disaster_type") or "earthquake"),
             source_id=str(data.get("source_id") or ""),
             params=dict(data.get("params") or {}),
-            report_num=safe_int(data.get("report_num"), 1),
+            report_num=_safe_int(data.get("report_num"), 1),
             is_final=bool(data.get("is_final", False)),
             event_key=str(data.get("event_key") or ""),
             event_time=str(data.get("event_time") or ""),
-            time_offset_seconds=safe_float(data.get("time_offset_seconds"), 0.0),
-            event_time_delay_seconds=safe_float(
+            time_offset_seconds=_safe_float(data.get("time_offset_seconds"), 0.0),
+            event_time_delay_seconds=_safe_float(
                 data.get("event_time_delay_seconds"), 0.0
             ),
             update_time=str(data.get("update_time") or ""),
-            update_time_offset_seconds=safe_float(
+            update_time_offset_seconds=_safe_float(
                 data.get("update_time_offset_seconds"), 0.0
             ),
-            update_time_delay_seconds=safe_float(
+            update_time_delay_seconds=_safe_float(
                 data.get("update_time_delay_seconds"), 0.0
             ),
         )

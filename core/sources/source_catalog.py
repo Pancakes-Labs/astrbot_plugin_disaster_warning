@@ -1222,89 +1222,98 @@ SOURCE_IDS_BY_QUERY_GROUP: dict[str, list[str]] = {}
 SOURCE_IDS_BY_FUSION_GROUP: dict[str, list[str]] = {}
 SOURCE_IDS_BY_DISPATCH_FAMILY: dict[str, list[str]] = {}
 SOURCE_IDS_BY_INSTITUTION_KEY: dict[str, list[str]] = {}
-_ALL_SOURCE_INDEXES = (
-    SOURCE_IDS_BY_FAMILY,
-    SOURCE_IDS_BY_TYPE,
-    SOURCE_IDS_BY_CONFIG_GROUP,
-    SOURCE_IDS_BY_PROVIDER_MESSAGE_TYPE,
-    SOURCE_IDS_BY_PROVIDER_SOURCE_NAME,
-    SOURCE_IDS_BY_ROUTING_TAG,
-    SOURCE_IDS_BY_QUERY_GROUP,
-    SOURCE_IDS_BY_FUSION_GROUP,
-    SOURCE_IDS_BY_DISPATCH_FAMILY,
-    SOURCE_IDS_BY_INSTITUTION_KEY,
-)
-
-
-def _rebuild_source_indexes() -> None:
-    """Rebuild all SOURCE_IDS_BY_* indexes in place from SOURCE_CATALOG."""
-    # Clear in place. Other modules keep references to these dicts.
-    for _index in _ALL_SOURCE_INDEXES:
-        _index.clear()
-    for _entry in SOURCE_CATALOG.values():
-        # 先按最常见的主维度建立索引：提供方家族、事件类型、配置分组。
-        SOURCE_IDS_BY_FAMILY.setdefault(_entry.provider_family, []).append(
+for _entry in SOURCE_CATALOG.values():
+    # 先按最常见的主维度建立索引：提供方家族、事件类型、配置分组。
+    SOURCE_IDS_BY_FAMILY.setdefault(_entry.provider_family, []).append(_entry.source_id)
+    SOURCE_IDS_BY_TYPE.setdefault(_entry.source_type, []).append(_entry.source_id)
+    SOURCE_IDS_BY_CONFIG_GROUP.setdefault(_entry.config_group, []).append(
+        _entry.source_id
+    )
+    # 再按消息类型、来源名和路由标签建立细粒度索引，供路由器和查询层复用。
+    for _message_type in _entry.provider_message_types:
+        SOURCE_IDS_BY_PROVIDER_MESSAGE_TYPE.setdefault(
+            _message_type.strip(), []
+        ).append(_entry.source_id)
+    for _source_name in _entry.provider_source_names:
+        SOURCE_IDS_BY_PROVIDER_SOURCE_NAME.setdefault(_source_name.strip(), []).append(
             _entry.source_id
         )
-        SOURCE_IDS_BY_TYPE.setdefault(_entry.source_type, []).append(_entry.source_id)
-        SOURCE_IDS_BY_CONFIG_GROUP.setdefault(_entry.config_group, []).append(
+    for _routing_tag in _entry.routing_tags:
+        SOURCE_IDS_BY_ROUTING_TAG.setdefault(_routing_tag.strip(), []).append(
             _entry.source_id
         )
-        # 再按消息类型、来源名和路由标签建立细粒度索引，供路由器和查询层复用。
-        for _message_type in _entry.provider_message_types:
-            SOURCE_IDS_BY_PROVIDER_MESSAGE_TYPE.setdefault(
-                _message_type.strip(), []
-            ).append(_entry.source_id)
-        for _source_name in _entry.provider_source_names:
-            SOURCE_IDS_BY_PROVIDER_SOURCE_NAME.setdefault(
-                _source_name.strip(), []
-            ).append(_entry.source_id)
-        for _routing_tag in _entry.routing_tags:
-            SOURCE_IDS_BY_ROUTING_TAG.setdefault(_routing_tag.strip(), []).append(
-                _entry.source_id
-            )
-        if _entry.query_group:
-            SOURCE_IDS_BY_QUERY_GROUP.setdefault(_entry.query_group.strip(), []).append(
-                _entry.source_id
-            )
-        if _entry.fusion_group:
-            SOURCE_IDS_BY_FUSION_GROUP.setdefault(
-                _entry.fusion_group.strip(), []
-            ).append(_entry.source_id)
-        if _entry.dispatch_family:
-            SOURCE_IDS_BY_DISPATCH_FAMILY.setdefault(
-                _entry.dispatch_family.strip(), []
-            ).append(_entry.source_id)
-        if _entry.institution_key:
-            SOURCE_IDS_BY_INSTITUTION_KEY.setdefault(
-                _entry.institution_key.strip(), []
-            ).append(_entry.source_id)
+    if _entry.query_group:
+        SOURCE_IDS_BY_QUERY_GROUP.setdefault(_entry.query_group.strip(), []).append(
+            _entry.source_id
+        )
+    if _entry.fusion_group:
+        SOURCE_IDS_BY_FUSION_GROUP.setdefault(_entry.fusion_group.strip(), []).append(
+            _entry.source_id
+        )
+    if _entry.dispatch_family:
+        SOURCE_IDS_BY_DISPATCH_FAMILY.setdefault(
+            _entry.dispatch_family.strip(), []
+        ).append(_entry.source_id)
+    if _entry.institution_key:
+        SOURCE_IDS_BY_INSTITUTION_KEY.setdefault(
+            _entry.institution_key.strip(), []
+        ).append(_entry.source_id)
 
 
-_rebuild_source_indexes()
-
-# Owner of each extension source: source_id -> extension id.
-# Built-in sources are not in this dict.
+# Extension sources: source_id -> extension id. Built-in sources are not in this dict.
 _SOURCE_OWNERS: dict[str, str] = {}
 
 
+def _index_keys(entry: SourceEntry) -> list[tuple[dict, object]]:
+    """Return the (index, key) pairs of one entry. The rules are the same as in the loop above."""
+    pairs: list[tuple[dict, object]] = [
+        (SOURCE_IDS_BY_FAMILY, entry.provider_family),
+        (SOURCE_IDS_BY_TYPE, entry.source_type),
+        (SOURCE_IDS_BY_CONFIG_GROUP, entry.config_group),
+    ]
+    pairs += [
+        (SOURCE_IDS_BY_PROVIDER_MESSAGE_TYPE, v.strip())
+        for v in entry.provider_message_types
+    ]
+    pairs += [
+        (SOURCE_IDS_BY_PROVIDER_SOURCE_NAME, v.strip())
+        for v in entry.provider_source_names
+    ]
+    pairs += [(SOURCE_IDS_BY_ROUTING_TAG, v.strip()) for v in entry.routing_tags]
+    for index, value in (
+        (SOURCE_IDS_BY_QUERY_GROUP, entry.query_group),
+        (SOURCE_IDS_BY_FUSION_GROUP, entry.fusion_group),
+        (SOURCE_IDS_BY_DISPATCH_FAMILY, entry.dispatch_family),
+        (SOURCE_IDS_BY_INSTITUTION_KEY, entry.institution_key),
+    ):
+        if value:
+            pairs.append((index, value.strip()))
+    return pairs
+
+
 def register_source_entry(entry: SourceEntry, *, owner: str) -> None:
-    """Register a source of an extension. Raise ValueError if source_id exists."""
+    """Register an extension source. Raise ValueError if the source_id exists."""
     if entry.source_id in SOURCE_CATALOG:
         raise ValueError(f"数据源 {entry.source_id} 已存在，无法重复注册")
+    # Change the dicts in place. Other modules keep references to them.
     SOURCE_CATALOG[entry.source_id] = entry
     _SOURCE_OWNERS[entry.source_id] = owner
-    _rebuild_source_indexes()
+    for index, key in _index_keys(entry):
+        index.setdefault(key, []).append(entry.source_id)
 
 
 def unregister_source_entries(owner: str) -> list[str]:
-    """Remove all sources that an extension registered. Return the removed source_id values."""
+    """Remove all sources of an extension. Return the removed source_ids."""
     removed = [sid for sid, o in _SOURCE_OWNERS.items() if o == owner]
     for source_id in removed:
-        SOURCE_CATALOG.pop(source_id, None)
+        entry = SOURCE_CATALOG.pop(source_id)
         del _SOURCE_OWNERS[source_id]
-    if removed:
-        _rebuild_source_indexes()
+        for index, key in _index_keys(entry):
+            ids = index.get(key, [])
+            if source_id in ids:
+                ids.remove(source_id)
+            if not ids:
+                index.pop(key, None)
     return removed
 
 
@@ -1360,6 +1369,16 @@ def get_source_ids_by_query_group(query_group: str) -> list[str]:
     return list(SOURCE_IDS_BY_QUERY_GROUP.get((query_group or "").strip(), []))
 
 
+def get_source_ids_by_fusion_group(fusion_group: str) -> list[str]:
+    """按融合分组过滤数据源。"""
+    return list(SOURCE_IDS_BY_FUSION_GROUP.get((fusion_group or "").strip(), []))
+
+
 def get_source_ids_by_dispatch_family(dispatch_family: str) -> list[str]:
     """按分发族过滤数据源。"""
     return list(SOURCE_IDS_BY_DISPATCH_FAMILY.get((dispatch_family or "").strip(), []))
+
+
+def get_source_ids_by_institution_key(institution_key: str) -> list[str]:
+    """按机构键过滤数据源。"""
+    return list(SOURCE_IDS_BY_INSTITUTION_KEY.get((institution_key or "").strip(), []))

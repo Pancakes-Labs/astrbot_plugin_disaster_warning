@@ -4,7 +4,6 @@
 """
 
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 # 时区定义映射
 TIMEZONES = {
@@ -15,6 +14,14 @@ TIMEZONES = {
     "UTC+9": timezone(timedelta(hours=9)),  # 日本时间
     "JST": timezone(timedelta(hours=9)),
 }
+
+# 尝试导入 zoneinfo 以支持 IANA 时区 (Python 3.9+)
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    # Python 3.8 或更早版本需要 backports.zoneinfo
+    # 如果没有安装，降级为仅支持固定偏移
+    ZoneInfo = None
 
 
 class TimeConverter:
@@ -127,7 +134,7 @@ class TimeConverter:
                 pass
 
         # 3. 尝试 IANA 时区 (如 "Asia/Shanghai")
-        if tz_obj is None:
+        if tz_obj is None and ZoneInfo:
             try:
                 tz_obj = ZoneInfo(tz_str)
             except Exception:

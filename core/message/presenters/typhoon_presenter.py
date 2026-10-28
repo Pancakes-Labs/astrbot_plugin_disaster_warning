@@ -72,6 +72,27 @@ class TyphoonPresenter(BasePresenter):
         """把风速与风力合并为「最大风速：20 m/s (8级)」格式。"""
         return format_wind_speed(wind_speed, power)
 
+    @staticmethod
+    def _get_source_org_name(display_context: TyphoonDisplayContext) -> str:
+        """根据来源返回发布机构显示名。"""
+        if display_context.source_id:
+            source_entry = get_source_entry(display_context.source_id)
+            if source_entry and source_entry.display_name:
+                # catalog 可能是“中国气象局（实时活跃台风）”，推送标题固定机构名为“中国气象局”
+                name = source_entry.display_name
+                for token in (
+                    "（实时活跃台风）",
+                    "：实时活跃台风",
+                    ": 实时活跃台风",
+                    " - Fan+EQSC",
+                    " - Fan",
+                    " - EQSC",
+                ):
+                    name = name.replace(token, "")
+                name = name.replace("台风", "").strip(" ：:")
+                return name or "中国气象局"
+        return "中国气象局"
+
     @classmethod
     def _get_typhoon_level_emoji(cls, typhoon_type: str | None) -> str:
         """根据台风强度等级返回圆形颜色 emoji。"""

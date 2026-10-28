@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from ...utils.china_regions import province_short
-from ...utils.severity_emoji import WEATHER_COLOR_LEVELS, WEATHER_COLORS_BY_LEVEL
 from ..domain.event_models import WeatherEvent
 from ..domain.event_payload import SourcePayload
 from .base_rule import BaseRule, RuleContext
@@ -73,22 +72,22 @@ class WeatherRule(BaseRule):
         elif legacy_provinces:
             keywords = list(dict.fromkeys([*keywords, *legacy_provinces]))
 
-        # An explicit severity_level (0..4) in event metadata wins over title scanning.
+        color_levels = {"白色": 0, "蓝色": 1, "黄色": 2, "橙色": 3, "红色": 4}
+
+        # 颜色按由高到低的优先级识别，命中后即可停止继续扫描。
+        detected_color = "白色"
+        for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
+            if color in title_text:
+                detected_color = color
+                break
+
+        # An extension event can give the level directly: 0 white ... 4 red.
         severity_level = domain_event.metadata.get("severity_level")
         if isinstance(severity_level, int) and 0 <= severity_level <= 4:
-            detected_color = WEATHER_COLORS_BY_LEVEL[severity_level]
-        else:
-            # 颜色按由高到低的优先级识别，命中后即可停止继续扫描。
-            detected_color = "白色"
-            for color in ["红色", "橙色", "黄色", "蓝色", "白色"]:
-                if color in title_text:
-                    detected_color = color
-                    break
+            detected_color = ["白色", "蓝色", "黄色", "橙色", "红色"][severity_level]
 
         # 对比颜色等级阈值进行过滤
-        if WEATHER_COLOR_LEVELS.get(detected_color, 0) < WEATHER_COLOR_LEVELS.get(
-            min_color_level, 0
-        ):
+        if color_levels.get(detected_color, 0) < color_levels.get(min_color_level, 0):
             return RuleDecision.reject(
                 reason="气象颜色级别过滤",
                 detail=f"当前颜色 {detected_color} 低于最低要求 {min_color_level}",

@@ -123,6 +123,28 @@ def resolve_active_server_label(
     return "未知"
 
 
+def resolve_active_server_domain(
+    connection_info: dict[str, Any] | None,
+) -> str:
+    """从连接信息解析当前活跃的服务器域名（用于调试/日志）。
+
+    返回 URI 解析后的 hostname（如 ws.fanstudio.tech），
+    不包含协议、路径或查询参数；URI 不可解析时回退原始值。
+    """
+    if not isinstance(connection_info, dict):
+        return ""
+    uri = str(connection_info.get("uri") or "").strip()
+    if not uri:
+        return ""
+    from urllib.parse import urlsplit
+
+    try:
+        hostname = urlsplit(uri).hostname
+        return hostname or uri
+    except Exception:
+        return uri
+
+
 # 次要通道命中配额后的短时重连间隔（秒）
 SECONDARY_QUOTA_RECONNECT_INTERVAL = 120
 

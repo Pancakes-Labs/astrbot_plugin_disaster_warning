@@ -124,7 +124,7 @@ class EqscTyphoonClient(EqscHttpClient):
                 return None, LOOKUP_ERROR
 
             # 解析响应：{"typhoon": [{...}]}
-            typhoon_list = data.get("typhoon", [])
+            typhoon_list = data.get("typhoon", []) if isinstance(data, dict) else []
             # 非列表视为无效响应（上游异常 / 结构变更），保留可重试语义，
             # 避免把错误结构当作命中缓存后污染下游解析。
             if not isinstance(typhoon_list, list):
@@ -197,7 +197,7 @@ class EqscTyphoonClient(EqscHttpClient):
                 # 列表接口异常：标记为 error，供上层区分网络故障与编号未命中。
                 return [], LOOKUP_ERROR
 
-            typhoon_list = data.get("typhoon", [])
+            typhoon_list = data.get("typhoon", []) if isinstance(data, dict) else []
             # 非列表视为无效响应：返回 error 语义而非把它当成空列表，
             # 以免上层将服务异常误判为「未命中」而提前放弃重试。
             if not isinstance(typhoon_list, list):

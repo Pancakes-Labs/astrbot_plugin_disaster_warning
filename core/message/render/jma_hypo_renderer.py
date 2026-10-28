@@ -145,6 +145,17 @@ def _dot_radius(magnitude: float) -> float:
     return max(MIN_DOT_RADIUS, min(r, MAX_DOT_RADIUS))
 
 
+def _legend_dot_radius(threshold: float) -> float:
+    """图例圆点：取该档中位震级，保证 M5/M6/M7/M8 档大小可区分。"""
+    if threshold >= 8.0:
+        sample_mag = 8.2
+    else:
+        # 各档区间宽度：0.5 或 1.0
+        span = 0.5 if threshold < 1.0 else 1.0
+        sample_mag = float(threshold) + span * 0.5
+    return _dot_radius(sample_mag)
+
+
 def _sort_events_by_mag_asc(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """按震级升序，使高震级最后绘制、不被小震遮挡。"""
     return sorted(events, key=lambda e: float(e.get("mag") or 0.0))

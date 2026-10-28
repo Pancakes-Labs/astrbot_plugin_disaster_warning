@@ -60,7 +60,8 @@ def parse_alerts(data: dict) -> list[dict]:
                 "issued_at": _parse_time(
                     str(raw.get("datahoracriacao"))[:19], ALERT_TIME_FMT
                 ),
-                # An alert stays active for days. The host time rule must use the last update.
+                # An alert stays active for days.
+                # The host time rule must use the last update.
                 "updated_at": _parse_time(
                     str(raw.get("ult_atualizacao"))[:19], ALERT_TIME_FMT
                 ),
@@ -74,39 +75,50 @@ def _num(value) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None  # "-" -> None
 
 
+def _meets(value: float | None, limit: float) -> bool:
+    return value is not None and value >= limit
+
+
+def rain_level(acc1: float | None, acc24: float | None, thresholds: dict) -> int:
+    """Return the highest level that the 1 h or the 24 h total meets, or 0."""
+    return max(
+        (
+            lvl
+            for lvl, (t1, t24) in thresholds.items()
+            if _meets(acc1, t1) or _meets(acc24, t24)
+        ),
+        default=0,
+    )
+
+
+def _gauge_item(g: dict, thresholds: dict) -> dict | None:
+    """Return the rain item of one gauge, or None if the gauge meets no threshold."""
+    acc1, acc24 = _num(g.get("acc1hr")), _num(g.get("acc24hr"))
+    level = rain_level(acc1, acc24, thresholds)
+    if not level:
+        return None
+    return {
+        "rank": (level, acc24 or 0.0, acc1 or 0.0),
+        "codibge": g.get("codibge"),
+        "municipio": g.get("cidade") or "",
+        "station": g.get("nomeestacao") or "",
+        "level": level,
+        "acc1hr": acc1,
+        "acc24hr": acc24,
+        "observed_at": _parse_time(g.get("datahoraUltimovalor"), GAUGE_TIME_FMT),
+    }
+
+
 def parse_rain(gauges: list, thresholds: dict = DEFAULT_THRESHOLDS) -> list[dict]:
     """Keep the worst gauge of each municipality that meets a threshold."""
     worst: dict = {}
     for g in gauges or []:
-        if g.get("uf") != UF:
+        item = _gauge_item(g, thresholds) if g.get("uf") == UF else None
+        if item is None:
             continue
-        acc1, acc24 = _num(g.get("acc1hr")), _num(g.get("acc24hr"))
-        level = max(
-            (
-                lvl
-                for lvl, (t1, t24) in thresholds.items()
-                if (acc1 is not None and acc1 >= t1)
-                or (acc24 is not None and acc24 >= t24)
-            ),
-            default=0,
-        )
-        if not level:
-            continue
-        rank = (level, acc24 or 0.0, acc1 or 0.0)
-        code = g.get("codibge")
-        if code not in worst or rank > worst[code]["rank"]:
-            worst[code] = {
-                "rank": rank,
-                "codibge": code,
-                "municipio": g.get("cidade") or "",
-                "station": g.get("nomeestacao") or "",
-                "level": level,
-                "acc1hr": acc1,
-                "acc24hr": acc24,
-                "observed_at": _parse_time(
-                    g.get("datahoraUltimovalor"), GAUGE_TIME_FMT
-                ),
-            }
+        code = item["codibge"]
+        if code not in worst or item["rank"] > worst[code]["rank"]:
+            worst[code] = item
     return list(worst.values())
 
 
@@ -129,6 +141,8 @@ class AlertState:
     """Store the last update of each alert. Return only new or updated alerts."""
 
     def __init__(self) -> None:
+        # ponytail: the dict keeps each alert id forever (a few KB a year).
+        # Remove old ids if the memory use becomes a problem.
         self._seen: dict = {}
 
     def fresh(self, alerts: list[dict]) -> list[dict]:
@@ -142,13 +156,19 @@ class AlertState:
 
 
 class RainState:
-    """Store the last level of each municipality for the day. Return only higher levels."""
+    """Store the last level of each municipality for the day.
+
+    Return only higher levels.
+    """
 
     def __init__(self) -> None:
         self._last: dict = {}
 
     def escalations(self, items: list[dict], day: str) -> list[dict]:
-        """Return the items whose level is higher than the last level of this municipality on this day."""
+        """Return the items with a level higher than the last level of the day.
+
+        The comparison uses the last level of the same municipality.
+        """
         out = []
         for it in items:
             prev_day, prev_level = self._last.get(it["codibge"], (None, 0))
@@ -160,9 +180,10 @@ class RainState:
         return out
 
 
-def _envelope(api, source_id, event_id, metadata, when, raw, fingerprint=None):
+def _envelope(api, event_id, metadata, when, raw):
     m = api.models
     hazard = metadata["hazard"]
+    source_id = RAIN_SOURCE if hazard == "rain" else ALERTS_SOURCE
     headline = api.t(
         "headline.rain" if hazard == "rain" else "headline.alert",
         level=api.t(f"level.{metadata['severity_level']}"),
@@ -176,7 +197,6 @@ def _envelope(api, source_id, event_id, metadata, when, raw, fingerprint=None):
         provider_family="extension",
         source_enum=source_id,
         published_at=when,
-        attributes={"fingerprint": fingerprint or event_id},
     )
     event = m.WeatherEvent(
         title=api.t(f"title.{hazard}"),
@@ -189,7 +209,10 @@ def _envelope(api, source_id, event_id, metadata, when, raw, fingerprint=None):
 
 
 def build_alert_envelope(api, alert: dict, enso: dict | None):
-    """Build the event envelope for a CEMADEN alert. The event time is the last update time."""
+    """Build the event envelope for a CEMADEN alert.
+
+    The event time is the last update time.
+    """
     raw = alert["raw"]
     issued = alert["issued_at"]
     metadata = {
@@ -204,19 +227,14 @@ def build_alert_envelope(api, alert: dict, enso: dict | None):
         "enso": enso,
     }
     event_id = f"{ID}_cemaden_{alert['cod_alerta']}"
-    return _envelope(
-        api,
-        ALERTS_SOURCE,
-        event_id,
-        metadata,
-        alert["updated_at"] or issued,
-        raw,
-        f"{event_id}|{alert['updated']}",
-    )
+    return _envelope(api, event_id, metadata, alert["updated_at"] or issued, raw)
 
 
 def build_rain_envelope(api, item: dict, day: str, enso: dict | None):
-    """Build the event envelope for a rain gauge item. The event time is the gauge reading time."""
+    """Build the event envelope for a rain gauge item.
+
+    The event time is the time of the gauge reading.
+    """
     observed = item["observed_at"]
     metadata = {
         "severity_level": item["level"],
@@ -232,7 +250,7 @@ def build_rain_envelope(api, item: dict, day: str, enso: dict | None):
     }
     event_id = f"{ID}_rain_{item['codibge']}_{day}_{item['level']}"
     raw = {k: v for k, v in item.items() if k not in ("rank", "observed_at")}
-    return _envelope(api, RAIN_SOURCE, event_id, metadata, observed, raw)
+    return _envelope(api, event_id, metadata, observed, raw)
 
 
 async def _get_json(session, url: str):
@@ -267,7 +285,10 @@ def _entry(api, source_id: str, kind: str, priority: int):
 
 
 def setup(api) -> None:
-    """Entry point of the extension. Register the presenter, the two sources, and the two pollers."""
+    """Entry point of the extension.
+
+    Register the presenter, the two sources and the two pollers.
+    """
     cfg = api.config or {}
     enso = EnsoCache()
     alert_state, rain_state = AlertState(), RainState()

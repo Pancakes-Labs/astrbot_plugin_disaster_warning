@@ -120,6 +120,17 @@ class EqscTsunamiPollService:
         self._owns_token_manager = True
         return self._client
 
+    def get_runtime_status(self) -> dict[str, Any]:
+        """供健康面板读取的轻量运行态。"""
+        return {
+            "running": self.running,
+            "enabled": self.is_enabled(),
+            "last_success_at": self._last_success_at,
+            "consecutive_failures": int(self._consecutive_failures),
+            "last_event_id": self._last_event_id,
+            "poll_interval_seconds": self._resolve_interval(),
+        }
+
     async def start(self) -> None:
         """启动后台轮询任务。"""
         if self.running:

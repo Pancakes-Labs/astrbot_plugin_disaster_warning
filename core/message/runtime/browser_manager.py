@@ -706,6 +706,61 @@ class BrowserManager:
                     raise
                 break
 
+    async def _initialize_remote_page_pool(self):
+        """初始化远程浏览器的页面池（兼容 browserless CDP）"""
+        try:
+            # browserless CDP：必须使用默认 context
+            contexts = self._browser.contexts
+
+            if contexts:
+                # 使用第一个 context（browserless 的默认 context）
+                self._context = contexts[0]
+            else:
+                # 没有现有 context，创建新的
+                self._context = await asyncio.wait_for(
+                    self._browser.new_context(
+                        viewport=dict(self.DEFAULT_VIEWPORT),
+                        device_scale_factor=2,
+                    ),
+                    timeout=15.0,
+                )
+
+            # 从 context 创建页面
+            for i in range(self.pool_size):
+                try:
+                    page = await asyncio.wait_for(
+                        self._context.new_page(), timeout=10.0
+                    )
+                    if not await self._put_page_into_pool(page):
+                        break
+                except asyncio.TimeoutError:
+                    logger.error(f"[灾害预警] 创建页面 {i + 1} 超时")
+                    if i == 0:
+                        raise
+                    break
+                except Exception as e:
+                    logger.error(f"[灾害预警] 创建页面 {i + 1} 失败: {e}")
+                    if i == 0:
+                        raise
+                    break
+
+            # 检查是否至少有一个页面可用
+            if self._page_pool.qsize() == 0:
+                raise RuntimeError("无法创建任何可用页面")
+
+            logger.info(
+                f"[灾害预警] 远程浏览器页面池初始化完成，可用页面: {self._page_pool.qsize()}"
+            )
+
+        except asyncio.TimeoutError:
+            logger.error("[灾害预警] 远程浏览器页面池初始化超时")
+            raise RuntimeError(
+                "远程浏览器页面池初始化超时，请检查网络或增加 browserless 超时设置"
+            )
+        except Exception as e:
+            logger.error(f"[灾害预警] 远程浏览器页面池初始化失败: {e}")
+            raise
+
     async def render_card(
         self,
         html_content: str,

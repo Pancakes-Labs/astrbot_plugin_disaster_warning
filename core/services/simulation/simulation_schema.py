@@ -2383,6 +2383,14 @@ _FIELD_BUILDERS: dict[str, Any] = {
 }
 
 
+def _resolve_disaster_type(source_id: str) -> str | None:
+    """按数据源类型解析灾种键。"""
+    entry = get_source_entry(source_id)
+    if entry is None:
+        return None
+    return _SOURCE_TYPE_TO_DISASTER_TYPE.get(entry.source_type)
+
+
 def _split_field_groups(
     fields: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:

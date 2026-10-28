@@ -93,7 +93,9 @@ def _build_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
     for mag in mags:
         mag_bins[_mag_bin_label(mag)] += 1
 
-    place_counter = Counter(str(e.get("place_cn") or "未知地点") for e in events)
+    place_counter: Counter[str] = Counter()
+    for e in events:
+        place_counter[str(e.get("place_cn") or "未知地点")] += 1
     place_counts = [
         {"place": place, "count": count} for place, count in place_counter.most_common()
     ]

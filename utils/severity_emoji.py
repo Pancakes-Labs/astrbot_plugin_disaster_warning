@@ -131,18 +131,6 @@ WEATHER_COLOR_LEVEL_EMOJI: Final[dict[str, str]] = {
     "白色": "⚪",
 }
 
-# Weather warning colors indexed by level (0 = white .. 4 = red).
-WEATHER_COLORS_BY_LEVEL: Final[tuple[str, ...]] = (
-    "白色",
-    "蓝色",
-    "黄色",
-    "橙色",
-    "红色",
-)
-WEATHER_COLOR_LEVELS: Final[dict[str, int]] = {
-    color: level for level, color in enumerate(WEATHER_COLORS_BY_LEVEL)
-}
-
 
 # ============================================================================
 # 五、海啸等级（中国 / 日本）
@@ -377,8 +365,6 @@ __all__ = [
     "TYPHOON_LEVEL_EMOJI",
     "typhoon_level_emoji",
     "WEATHER_COLOR_LEVEL_EMOJI",
-    "WEATHER_COLORS_BY_LEVEL",
-    "WEATHER_COLOR_LEVELS",
     "CN_TSUNNAMI_LEVEL_EMOJI",
     "JP_TSUNNAMI_LEVEL_EMOJI",
     "cn_tsunami_level_emoji",

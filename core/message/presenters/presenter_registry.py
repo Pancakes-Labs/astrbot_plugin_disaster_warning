@@ -24,8 +24,7 @@ from .earthquake_presenter import (
     SnetPresenter,
     UsgsEarthquakePresenter,
 )
-from .text_presenter import TextPresenter
-from .text_presenter import get_text_presenter_keys as _builtin_text_presenter_keys
+from .text_presenter import TextPresenter, get_text_presenter_keys
 from .tsunami_presenter import JmaTsunamiPresenter, TsunamiAlertPresenter
 from .typhoon_presenter import TyphoonPresenter
 from .weather_presenter import WeatherAlertPresenter
@@ -70,14 +69,15 @@ _DEFAULT_PRESENTERS_BY_EVENT_TYPE: dict[str, type[BasePresenter]] = {
 }
 
 
-# Owner of each extension presenter: text key -> extension id.
+# Extension presenters: text presenter key -> extension id.
 _PRESENTER_OWNERS: dict[str, str] = {}
+_builtin_text_presenter_keys = get_text_presenter_keys
 
 
 def register_text_presenter(key: str, presenter_class, *, owner: str) -> None:
-    """Register a text presenter of an extension.
+    """Register a text presenter of an extension. Raise ValueError if the key exists.
 
-    The class needs a classmethod present(ctx, options).
+    The class needs a classmethod present(display_context, options).
     """
     if key in _TEXT_KEY_PRESENTER_REGISTRY:
         raise ValueError(f"文本展示键 {key} 已存在，无法重复注册")
@@ -86,14 +86,14 @@ def register_text_presenter(key: str, presenter_class, *, owner: str) -> None:
 
 
 def unregister_presenters(owner: str) -> None:
-    """Remove all presenters that an extension registered."""
+    """Remove all presenters of an extension."""
     for key in [k for k, o in _PRESENTER_OWNERS.items() if o == owner]:
         _TEXT_KEY_PRESENTER_REGISTRY.pop(key, None)
         del _PRESENTER_OWNERS[key]
 
 
 def get_text_presenter_keys() -> set[str]:
-    """Return the text presenter keys: the built-in keys and the extension keys."""
+    """Return the built-in text presenter keys and the keys of the extensions."""
     return _builtin_text_presenter_keys() | set(_PRESENTER_OWNERS)
 
 
