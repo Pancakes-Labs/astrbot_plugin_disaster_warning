@@ -105,7 +105,7 @@ def test_simulation_step_safe_numbers():
 
 
 def test_time_converter_zoneinfo():
-    """Check the time conversion with a zoneinfo time zone."""
+    """Check the time zone lookup for an IANA name, a UTC offset and an unknown name."""
     mod = _mod("utils.time_converter")
     tc = mod.TimeConverter
     assert tc._get_timezone("Asia/Tokyo").key == "Asia/Tokyo"

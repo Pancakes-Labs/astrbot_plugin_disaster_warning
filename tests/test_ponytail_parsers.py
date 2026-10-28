@@ -50,7 +50,7 @@ GOLDEN = {
 
 
 def test_dispatch_matches_golden():
-    """Check that each parser output equals the stored golden output."""
+    """Check that each catalog source gets the same parser class as before the refactor."""
     actual = {}
     for source_id in catalog.SOURCE_CATALOG:
         parser = registry.create_parser_for_source(source_id)
