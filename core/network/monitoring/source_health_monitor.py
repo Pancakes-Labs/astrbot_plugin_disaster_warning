@@ -58,6 +58,17 @@ class SourceHealthMonitor:
             if str(key).strip() and str(value).strip()
         }
 
+    def set_host_override(self, source_name: str, host: str | None) -> None:
+        """动态更新某个数据源的探测主机。"""
+        key = str(source_name or "").strip()
+        value = str(host or "").strip()
+        if not key:
+            return
+        if value:
+            self._host_overrides[key] = value
+        else:
+            self._host_overrides.pop(key, None)
+
     def get_expected_data_sources(self) -> dict[str, str]:
         """返回管理端面板预期展示的数据源列表。"""
         return dict(self.DISPLAY_MAP)

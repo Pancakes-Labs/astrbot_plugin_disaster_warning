@@ -133,6 +133,49 @@ class SimulationStorage:
             self._save_to_disk()
             return flow
 
+    def create_flow(
+        self,
+        *,
+        name: str,
+        steps: list[Any] | None = None,
+        description: str = "",
+        target_session: str = "",
+    ) -> SimulationFlow:
+        """创建新草稿并保存。"""
+        flow = SimulationFlow.create(
+            name=name,
+            steps=steps,
+            description=description,
+            target_session=target_session,
+        )
+        return self.save_flow(flow)
+
+    def update_flow(
+        self,
+        flow_id: str,
+        *,
+        name: str | None = None,
+        steps: list[Any] | None = None,
+        description: str | None = None,
+        target_session: str | None = None,
+    ) -> SimulationFlow | None:
+        """更新既有草稿（仅覆盖传入字段），返回更新后的草稿。"""
+        with self._lock:
+            flow = self._flows.get(flow_id)
+            if flow is None:
+                return None
+            if name is not None:
+                flow.name = str(name).strip() or flow.name
+            if steps is not None:
+                flow.steps = list(steps)
+            if description is not None:
+                flow.description = str(description)
+            if target_session is not None:
+                flow.target_session = str(target_session)
+            flow.updated_at = datetime.now(timezone.utc)
+            self._save_to_disk()
+            return flow
+
     def delete_flow(self, flow_id: str) -> bool:
         """删除草稿。"""
         with self._lock:

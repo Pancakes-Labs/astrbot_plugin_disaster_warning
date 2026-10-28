@@ -581,6 +581,24 @@ class EventDeduplicationService:
         lon_grid = round(float(lon) * 5.0) / 5.0
         return f"cenc_ir|{time_key}|{mag_key}|{lat_grid:.1f},{lon_grid:.1f}"
 
+    def _remember_cenc_ir_fingerprint(
+        self,
+        fingerprint: str,
+        *,
+        source_id: str,
+        priority: int,
+        event_id: str,
+    ) -> None:
+        """写入烈度速报跨源指纹缓存。"""
+        self._remember_priority_fingerprint(
+            self._cenc_ir_cache,
+            self._cenc_ir_cache_max_size,
+            fingerprint,
+            source_id=source_id,
+            priority=priority,
+            event_id=event_id,
+        )
+
     def _should_push_cenc_intensity_report(
         self,
         event: EventEnvelope,

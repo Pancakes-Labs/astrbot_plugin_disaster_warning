@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .jma_tsunami_normalize import _clean_text
-
 # 中国海啸：信息 < 蓝色 < 黄色 < 橙色 < 红色
 # 解除单独处理：过滤时默认放行（便于收到解除通告）。
 CN_TSUNAMI_LEVEL_ORDER: list[str] = [
@@ -87,6 +85,15 @@ JP_TSUNAMI_LEVEL_ALIASES: dict[str, str] = {
     "cancel": "解除",
     "cancelled": "解除",
 }
+
+
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"null", "none"}:
+        return ""
+    return text
 
 
 def normalize_cn_tsunami_level(raw: Any) -> str:

@@ -103,6 +103,27 @@ class SnetPeakService:
             "results": results,
         }
 
+    async def observe_event(self, event: EventEnvelope) -> dict[str, Any]:
+        """从 EventEnvelope 提取测站并写入峰值。"""
+        stations = self._extract_stations(event)
+        observed_at = self._extract_observed_at(event)
+        # hit_count 使用推送过滤阈值（若有），否则不累计
+        hit_threshold = None
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        raw_min = metadata.get("min_shindo")
+        if raw_min is not None:
+            try:
+                hit_threshold = float(raw_min)
+            except (TypeError, ValueError):
+                hit_threshold = None
+
+        result = await self.observe_stations(
+            stations,
+            observed_at=observed_at,
+            hit_threshold=hit_threshold,
+        )
+        return result
+
     async def clear_peaks(self) -> bool:
         """清空峰值表并重置内存统计。
 

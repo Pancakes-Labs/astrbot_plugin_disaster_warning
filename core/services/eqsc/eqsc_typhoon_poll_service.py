@@ -149,6 +149,22 @@ class EqscTyphoonPollService:
         self._owns_token_manager = True
         return self._client
 
+    def get_runtime_status(self) -> dict[str, Any]:
+        """供健康面板读取的轻量运行态。"""
+        deduplicator = getattr(
+            getattr(self.service, "message_manager", None), "deduplicator", None
+        )
+        typhoon_cache = getattr(deduplicator, "_typhoon_cache", None)
+        tracked_typhoons = len(typhoon_cache) if isinstance(typhoon_cache, dict) else 0
+        return {
+            "running": self.running,
+            "enabled": self.is_enabled(),
+            "last_success_at": self._last_success_at,
+            "consecutive_failures": int(self._consecutive_failures),
+            "tracked_typhoons": tracked_typhoons,
+            "poll_interval_seconds": self._resolve_interval(),
+        }
+
     async def start(self) -> None:
         """启动后台轮询任务。"""
         if self.running:

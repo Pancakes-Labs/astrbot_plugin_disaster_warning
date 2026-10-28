@@ -30,9 +30,12 @@ import aiohttp
 
 from astrbot.api import logger
 
-from .ua_session import UaSessionMixin
-
 API_BASE = "https://api.fanstudio.tech"
+
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # AQI 全量数据缓存 TTL（秒）。AQI 数据按小时更新，10 分钟缓存足够。
 AQI_TTL_SEC = 600.0
@@ -40,7 +43,7 @@ AQI_TTL_SEC = 600.0
 CACHE_FAIL_TTL_SEC = 10.0
 
 
-class FanAqiClient(UaSessionMixin):
+class FanAqiClient:
     """FAN Studio 城市空气质量指数（AQI）客户端。"""
 
     # 全量 AQI 数据缓存（类级共享）：api_base -> (data, error, expires_at)
@@ -64,6 +67,21 @@ class FanAqiClient(UaSessionMixin):
         self._session: aiohttp.ClientSession | None = None
         # AQI 全量数据缓存（类级共享，子类与父类共享同一份）。
         self._aqi_cache = type(self)._aqi_cache
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """确保 aiohttp 会话可用（延迟初始化）。"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=self._timeout,
+                headers={"User-Agent": _UA},
+            )
+        return self._session
+
+    async def close(self) -> None:
+        """关闭 HTTP 会话（不清理类级缓存）。"""
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
 
     async def fetch_aqi(
         self, use_cache: bool = True

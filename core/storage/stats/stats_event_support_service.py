@@ -222,3 +222,7 @@ class StatsEventSupportService:
             return f"{domain_event.title or domain_event.headline}"
 
         return "未知事件"
+
+    def get_event_description(self, event: EventEnvelope) -> str:
+        """生成简短的事件描述。"""
+        return self.get_event_description_from_envelope(event)

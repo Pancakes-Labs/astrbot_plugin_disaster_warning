@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any
 
 from ....utils.converters import safe_float_convert
@@ -280,6 +281,16 @@ class FusionStateStore:
 
         return None
 
+    @staticmethod
+    def _parse_similarity_time(raw_value: Any) -> datetime | None:
+        """复用统一时间转换工具，解析近似匹配所需的时间字段。"""
+        return TimeConverter.parse_datetime(raw_value)
+
+    @staticmethod
+    def _safe_float(raw_value: Any) -> float | None:
+        """复用统一浮点转换工具，避免在融合仓储内重复实现数值清洗。"""
+        return safe_float_convert(raw_value)
+
     @classmethod
     def build_cenc_similarity_profile(
         cls,
@@ -317,12 +328,12 @@ class FusionStateStore:
             return profile
 
         if isinstance(data, dict):
-            profile["occurred_at"] = TimeConverter.parse_datetime(
+            profile["occurred_at"] = cls._parse_similarity_time(
                 data.get("occurred_at") or data.get("time") or data.get("shockTime")
             )
-            profile["latitude"] = safe_float_convert(data.get("latitude"))
-            profile["longitude"] = safe_float_convert(data.get("longitude"))
-            profile["magnitude"] = safe_float_convert(data.get("magnitude"))
+            profile["latitude"] = cls._safe_float(data.get("latitude"))
+            profile["longitude"] = cls._safe_float(data.get("longitude"))
+            profile["magnitude"] = cls._safe_float(data.get("magnitude"))
             return profile
 
         return profile
@@ -338,19 +349,19 @@ class FusionStateStore:
         注意这里仍然要求上层先完成测定类型过滤；
         本函数只负责比较时空与震级，不负责判断 reviewed / automatic 是否一致。
         """
-        left_time = TimeConverter.parse_datetime(left.get("occurred_at"))
-        right_time = TimeConverter.parse_datetime(right.get("occurred_at"))
+        left_time = cls._parse_similarity_time(left.get("occurred_at"))
+        right_time = cls._parse_similarity_time(right.get("occurred_at"))
         if left_time is None or right_time is None:
             return False
         if abs((left_time - right_time).total_seconds()) > 90:
             return False
 
-        left_lat = safe_float_convert(left.get("latitude"))
-        right_lat = safe_float_convert(right.get("latitude"))
-        left_lon = safe_float_convert(left.get("longitude"))
-        right_lon = safe_float_convert(right.get("longitude"))
-        left_mag = safe_float_convert(left.get("magnitude"))
-        right_mag = safe_float_convert(right.get("magnitude"))
+        left_lat = cls._safe_float(left.get("latitude"))
+        right_lat = cls._safe_float(right.get("latitude"))
+        left_lon = cls._safe_float(left.get("longitude"))
+        right_lon = cls._safe_float(right.get("longitude"))
+        left_mag = cls._safe_float(left.get("magnitude"))
+        right_mag = cls._safe_float(right.get("magnitude"))
         if None in (left_lat, right_lat, left_lon, right_lon, left_mag, right_mag):
             return False
 

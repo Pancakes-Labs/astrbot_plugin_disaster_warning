@@ -181,6 +181,14 @@ class StatisticsManager:
             None
         )  # type: ignore[arg-type]
 
+    def _extract_region(self, text: str, strict: bool = False) -> str | None:
+        """从文本中提取地区（省份）信息"""
+        return self.event_support_service.extract_region(text, strict=strict)
+
+    def _get_event_description(self, event: EventEnvelope) -> str:
+        """生成简短的事件描述"""
+        return self.event_support_service.get_event_description_from_envelope(event)
+
     def save_stats(self):
         """保存统计数据"""
         # 序列化与落盘细节统一交由 repository 处理。

@@ -203,6 +203,10 @@ class MessageLogger:
         csv_path = Path(__file__).parent.parent.parent / "resources/epsp-area.csv"
         return P2PAreaMappingLoader.load(csv_path)
 
+    def _extract_content_without_timestamp(self, log_content: str) -> str:
+        """提取日志内容中排除时间戳的部分，用于重复检测"""
+        return self._log_dedup_service.extract_content_without_timestamp(log_content)
+
     def _is_exact_duplicate_in_log(self, new_log_content: str) -> bool:
         """检查最近的日志中是否存在完全重复的内容（基于内存缓存）"""
         return self._log_dedup_service.is_exact_duplicate_in_log(new_log_content)

@@ -98,7 +98,7 @@ class SourceRuntimeQueryService:
         entry = SOURCE_CATALOG.get((source_id or "").strip())
         if entry is None:
             return False
-        # An extension source is enabled for all sessions when it is registered.
+        # An extension source is enabled while its extension is loaded.
         if entry.config_group == "extensions":
             return True
         return bool(self._group_config(entry.config_group).get("enabled", False))
@@ -186,7 +186,7 @@ class SourceRuntimeQueryService:
         # 若此 source_id 未在统一 catalog 目录中注册，一律判定为未启用
         if entry is None:
             return False
-        # An extension source is enabled for all sessions when it is registered.
+        # An extension source is enabled while its extension is loaded.
         if entry.config_group == "extensions":
             return True
         group_cfg = self._group_config(entry.config_group)
@@ -195,6 +195,18 @@ class SourceRuntimeQueryService:
             return False
         # 读取子数据源对应键名下的具体布尔值配置
         return bool(group_cfg.get(entry.config_key, False))
+
+    def is_family_enabled(self, provider_family: str) -> bool:
+        """判断指定提供方家族下是否存在已启用数据源。"""
+        family_value = (provider_family or "").strip()
+        if not family_value:
+            return False
+        # 家族中只要有任意一个数据源开关被用户打开，则整个服务商家族判定为 enabled
+        return any(
+            self.is_source_enabled(source_id)
+            for source_id, entry in SOURCE_CATALOG.items()
+            if entry.provider_family.value == family_value
+        )
 
     def get_enabled_source_ids(self) -> list[str]:
         """获取当前配置下所有已被启用的具体数据源 ID 列表。"""

@@ -77,18 +77,22 @@ class NotificationCenter:
 
     def _build_meta_locked(self) -> dict[str, Any]:
         """基于当前缓存构造通知元信息。"""
+        unread_count = 0
         read_map = self._cache.get("read_map", {})
-        # 核算未读条目数
-        unread_count = sum(
-            1
-            for item in self._cache.get("items", [])
-            if not read_map.get(str(item.get("id")), False)
-        )
+        # 循环核算未读条目数
+        for item in self._cache.get("items", []):
+            if not read_map.get(str(item.get("id")), False):
+                unread_count += 1
         return {
             "unread_count": unread_count,
             "last_sync_at": self._cache.get("last_sync_at"),
             "total_count": len(self._cache.get("items", [])),
         }
+
+    async def get_meta(self) -> dict[str, Any]:
+        """获取通知元信息。"""
+        async with self._lock:
+            return self._build_meta_locked()
 
     async def get_payload(self) -> dict[str, Any]:
         """获取前端通知中心完整载荷。"""

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -40,8 +41,6 @@ from .flow_models import (
     DISASTER_TYPE_WEATHER,
     SimulationStep,
     generate_sim_id,
-    safe_float,
-    safe_int,
 )
 
 # SourceType 枚举 -> 灾种字符串键（与 simulation_schema 同源同语义）
@@ -52,6 +51,38 @@ _SOURCE_TYPE_TO_DISASTER_TYPE: dict[SourceType, str] = {
     SourceType.WEATHER: DISASTER_TYPE_WEATHER,
     SourceType.TYPHOON: DISASTER_TYPE_TYPHOON,
 }
+
+# 进程内模拟事件递增计数器：避免同秒多次触发时 ID 冲突
+_sim_event_sequence = 0
+_sim_event_sequence_lock = threading.Lock()
+
+
+def _next_sim_event_sequence() -> int:
+    """获取下一个模拟事件序号（线程安全，单调递增）。"""
+    global _sim_event_sequence
+    with _sim_event_sequence_lock:
+        _sim_event_sequence += 1
+        return _sim_event_sequence
+
+
+def _safe_float(value: Any, default: float | None = None) -> float | None:
+    """安全转 float。"""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int | None = None) -> int | None:
+    """安全转 int。"""
+    if value is None or value == "":
+        return default
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_json_list(raw: Any) -> list[dict[str, Any]]:
@@ -245,18 +276,18 @@ def _resolve_event_time(step: SimulationStep) -> datetime:
         base = parsed
     else:
         # 2. 回退秒数：优先 params，其次 step 顶层（仅在无绝对时间时生效）
-        offset = safe_float(params.get("time_offset_seconds"), None)
+        offset = _safe_float(params.get("time_offset_seconds"), None)
         if offset is None:
-            offset = safe_float(getattr(step, "time_offset_seconds", 0.0), None)
-        offset = safe_float(offset, 0.0) or 0.0
+            offset = _safe_float(getattr(step, "time_offset_seconds", 0.0), None)
+        offset = _safe_float(offset, 0.0) or 0.0
         if offset:
             base = base - timedelta(seconds=abs(offset))
 
     # 3. 延迟秒数：在绝对时间 / 回退结果 / 当前时间之上统一向后叠加
-    delay = safe_float(params.get("event_time_delay_seconds"), None)
+    delay = _safe_float(params.get("event_time_delay_seconds"), None)
     if delay is None:
-        delay = safe_float(getattr(step, "event_time_delay_seconds", 0.0), None)
-    delay = safe_float(delay, 0.0) or 0.0
+        delay = _safe_float(getattr(step, "event_time_delay_seconds", 0.0), None)
+    delay = _safe_float(delay, 0.0) or 0.0
     if delay:
         base = base + timedelta(seconds=abs(delay))
     return base
@@ -287,18 +318,18 @@ def _resolve_update_time(step: SimulationStep) -> datetime:
         base = parsed
     else:
         # 2. 回退秒数：优先 params，其次 step 顶层（仅在无绝对时间时生效）
-        offset = safe_float(params.get("update_time_offset_seconds"), None)
+        offset = _safe_float(params.get("update_time_offset_seconds"), None)
         if offset is None:
-            offset = safe_float(getattr(step, "update_time_offset_seconds", 0.0), None)
-        offset = safe_float(offset, 0.0) or 0.0
+            offset = _safe_float(getattr(step, "update_time_offset_seconds", 0.0), None)
+        offset = _safe_float(offset, 0.0) or 0.0
         if offset:
             base = base - timedelta(seconds=abs(offset))
 
     # 3. 延迟秒数：在绝对时间 / 回退结果 / 当前时间之上统一向后叠加
-    delay = safe_float(params.get("update_time_delay_seconds"), None)
+    delay = _safe_float(params.get("update_time_delay_seconds"), None)
     if delay is None:
-        delay = safe_float(getattr(step, "update_time_delay_seconds", 0.0), None)
-    delay = safe_float(delay, 0.0) or 0.0
+        delay = _safe_float(getattr(step, "update_time_delay_seconds", 0.0), None)
+    delay = _safe_float(delay, 0.0) or 0.0
     if delay:
         base = base + timedelta(seconds=abs(delay))
     return base
@@ -446,10 +477,10 @@ class SimulationBuilder:
     ) -> _StepBuildResult:
         """构建地震领域事件与特有元数据。"""
         params = step.params
-        lat = safe_float(params.get("latitude"), 39.9)
-        lon = safe_float(params.get("longitude"), 116.4)
-        magnitude = safe_float(params.get("magnitude"), 5.5)
-        depth = safe_float(params.get("depth"), 10.0)
+        lat = _safe_float(params.get("latitude"), 39.9)
+        lon = _safe_float(params.get("longitude"), 116.4)
+        magnitude = _safe_float(params.get("magnitude"), 5.5)
+        depth = _safe_float(params.get("depth"), 10.0)
         place_name = str(params.get("place_name") or "").strip()
         if not place_name:
             place_name = region_service.translate_place_name("模拟震中", lat, lon)
@@ -477,7 +508,7 @@ class SimulationBuilder:
             or "jma" in step.source_id
             or "p2p" in step.source_id
         ):
-            scale = safe_int(params.get("scale"), None)
+            scale = _safe_int(params.get("scale"), None)
             # cwa_jianproject 的 CwaEewJianProjectParser 不产出震度；schema 不暴露该字段，
             # 但构建器不会按 schema 重新校验入参，故此处显式排除，避免 params 被注入后误写。
             if scale is not None and source_entry.source_id != "cwa_jianproject":
@@ -591,7 +622,7 @@ class SimulationBuilder:
             or source_entry.parser_name == "china_intensity_report_parser"
             or source_entry.parser_name == "china_intensity_report_eqsc_parser"
         ):
-            intensity = safe_float(params.get("intensity"), None)
+            intensity = _safe_float(params.get("intensity"), None)
             if intensity is not None:
                 domain_event.intensity = max(1.0, min(12.0, round(intensity, 1)))
                 domain_event.headline = f"{place_name}{magnitude:.1f}级地震"
@@ -626,11 +657,11 @@ class SimulationBuilder:
                         {
                             "name": name or "模拟台站",
                             "intensity": st_intensity,
-                            "lat": safe_float(
+                            "lat": _safe_float(
                                 item.get("lat") or item.get("latitude") or lat,
                                 lat,
                             ),
-                            "lon": safe_float(
+                            "lon": _safe_float(
                                 item.get("lon") or item.get("longitude") or lon,
                                 lon,
                             ),
@@ -664,12 +695,12 @@ class SimulationBuilder:
 
         # FSSN CMT 源：补节面、多震级、矩心深度与矩张量分量
         if source_entry.parser_name == "fssn_cmt_parser":
-            strike = safe_float(params.get("strike"), 200.0)
-            dip = safe_float(params.get("dip"), 77.0)
-            rake = safe_float(params.get("rake"), 74.0)
-            strike2 = safe_float(params.get("strike2"), round((strike + 180) % 360, 1))
-            dip2 = safe_float(params.get("dip2"), round(90 - dip, 1))
-            rake2 = safe_float(params.get("rake2"), round(-rake, 1))
+            strike = _safe_float(params.get("strike"), 200.0)
+            dip = _safe_float(params.get("dip"), 77.0)
+            rake = _safe_float(params.get("rake"), 74.0)
+            strike2 = _safe_float(params.get("strike2"), round((strike + 180) % 360, 1))
+            dip2 = _safe_float(params.get("dip2"), round(90 - dip, 1))
+            rake2 = _safe_float(params.get("rake2"), round(-rake, 1))
             domain_event.headline = "FSSN CMT 模拟地震"
             # 震级集合：优先用 schema 的 all_magnitudes JSON，缺省按主震级推导
             all_magnitudes = _parse_json_dict(params.get("all_magnitudes")) or {
@@ -713,9 +744,9 @@ class SimulationBuilder:
 
         # Global Quake：补 PGA、MMI 烈度、台站统计、定位质量、深度置信区间与事件簇。
         if presentation_type == "global_quake":
-            max_pga = safe_float(params.get("max_pga"), 100.0)
+            max_pga = _safe_float(params.get("max_pga"), 100.0)
             extra["max_pga"] = max_pga
-            mmi_intensity = safe_float(params.get("intensity"), None)
+            mmi_intensity = _safe_float(params.get("intensity"), None)
             if mmi_intensity is not None:
                 # 内部统一按数值烈度传递，展示器 _get_intensity_emoji 支持数值。
                 extra["intensity"] = mmi_intensity
@@ -792,7 +823,7 @@ class SimulationBuilder:
                     ]
                 )
             # 最高震度：优先取用户指定值，否则取测站分布中的最大震度
-            max_shindo = safe_float(params.get("max_shindo"), None)
+            max_shindo = _safe_float(params.get("max_shindo"), None)
             if max_shindo is None and stations:
                 try:
                     max_shindo = max(float(s.get("shindo") or 0.0) for s in stations)
@@ -814,8 +845,8 @@ class SimulationBuilder:
                     stations, key=lambda x: float(x.get("shindo") or 0.0), reverse=True
                 )[0]
             # min_shindo / station_min_shindo：参与触发测站统计（对齐 snet_filter_constants）
-            min_shindo = safe_float(params.get("min_shindo"), 1.5)
-            station_min_shindo = safe_float(params.get("station_min_shindo"), 0.5)
+            min_shindo = _safe_float(params.get("min_shindo"), 1.5)
+            station_min_shindo = _safe_float(params.get("station_min_shindo"), 0.5)
             triggered = [
                 s
                 for s in stations
@@ -824,17 +855,17 @@ class SimulationBuilder:
             # 领域事件坐标取最高震度测站（对齐 snet_parser：latitude/longitude 取 top）。
             # 测站缺经纬度时回退到参考经纬度（用户自定义震中），避免事件坐标退化到 (0,0)。
             if top is not None:
-                top_lat = safe_float(top.get("lat"), None)
-                top_lon = safe_float(top.get("lon"), None)
+                top_lat = _safe_float(top.get("lat"), None)
+                top_lon = _safe_float(top.get("lon"), None)
                 domain_event.latitude = (
                     top_lat
                     if top_lat is not None
-                    else safe_float(params.get("latitude"), 35.0)
+                    else _safe_float(params.get("latitude"), 35.0)
                 )
                 domain_event.longitude = (
                     top_lon
                     if top_lon is not None
-                    else safe_float(params.get("longitude"), 140.0)
+                    else _safe_float(params.get("longitude"), 140.0)
                 )
                 domain_event.place_name = "日本海沟 S-Net 海底观测网"
             domain_event.magnitude = None
@@ -905,7 +936,7 @@ class SimulationBuilder:
             # （Wolfx cenc_eqlist 含 intensity）；cenc_jianproject 不产出，透传会引入
             # 真实链路不会出现的烈度。即便 params 被注入 intensity 也按来源忽略。
             if source_entry.source_id in ("cenc_fanstudio", "cenc_wolfx"):
-                intensity = safe_float(params.get("intensity"), None)
+                intensity = _safe_float(params.get("intensity"), None)
                 if intensity is not None:
                     extra["intensity"] = intensity
                     domain_event.intensity = intensity
@@ -969,7 +1000,7 @@ class SimulationBuilder:
 
         # CEA 地震预警源：补预估烈度 epiIntensity。
         if source_entry.source_id in ("cea_fanstudio", "cea_pr_fanstudio", "cea_wolfx"):
-            epi_intensity = safe_float(params.get("epi_intensity"), None)
+            epi_intensity = _safe_float(params.get("epi_intensity"), None)
             if epi_intensity is not None:
                 extra["epi_intensity"] = epi_intensity
                 extra["intensity"] = epi_intensity
@@ -1006,8 +1037,8 @@ class SimulationBuilder:
                 shindo = round(float(item.get("shindo", 0)), 1)
             except (TypeError, ValueError):
                 shindo = 0.0
-            lat = safe_float(item.get("lat"), None)
-            lon = safe_float(item.get("lon"), None)
+            lat = _safe_float(item.get("lat"), None)
+            lon = _safe_float(item.get("lon"), None)
             rgb = item.get("rgb")
             if isinstance(rgb, (tuple, list)) and len(rgb) >= 3:
                 rgb = [int(c) for c in rgb[:3]]
@@ -1056,9 +1087,9 @@ class SimulationBuilder:
             title = "海啸警报"
 
         place_name = str(params.get("place_name") or "模拟海域").strip()
-        lat = safe_float(params.get("latitude"), 35.0)
-        lon = safe_float(params.get("longitude"), 140.0)
-        magnitude = safe_float(params.get("magnitude"), 7.5)
+        lat = _safe_float(params.get("latitude"), 35.0)
+        lon = _safe_float(params.get("longitude"), 140.0)
+        magnitude = _safe_float(params.get("magnitude"), 7.5)
 
         # 日本海啸 Minor 视为“若干海面变动”，与信息同级不触发 warning 文案；
         # “解除”为解除通告。仅当等级为实际警报/注意报级别（或标题含警报/预警）时
@@ -1183,7 +1214,7 @@ class SimulationBuilder:
             "latitude": lat,
             "longitude": lon,
             "magnitude": magnitude,
-            "depth": safe_float(params.get("depth"), 10.0),
+            "depth": _safe_float(params.get("depth"), 10.0),
             "message_type": message_type,
             "forecasts": forecasts,
             "monitoring_stations": monitoring_stations,
@@ -1243,8 +1274,8 @@ class SimulationBuilder:
             "type": weather_code,
             "alert_code": weather_code,
             "code": weather_code,
-            "longitude": safe_float(params.get("longitude"), 116.4),
-            "latitude": safe_float(params.get("latitude"), 39.9),
+            "longitude": _safe_float(params.get("longitude"), 116.4),
+            "latitude": _safe_float(params.get("latitude"), 39.9),
             "title": title,
             "headline": headline,
             "description": description,
@@ -1281,8 +1312,8 @@ class SimulationBuilder:
         name_en = str(params.get("name_en") or "SIM").strip()
         typhoon_type = str(params.get("typhoon_type") or "台风").strip()
 
-        lat = safe_float(params.get("latitude"), 20.0)
-        lon = safe_float(params.get("longitude"), 125.0)
+        lat = _safe_float(params.get("latitude"), 20.0)
+        lon = _safe_float(params.get("longitude"), 125.0)
         move_direction = str(params.get("move_direction") or "西北").strip()
 
         # 台风轨迹与风圈按数据源动态化，与真实解析器一致。缺省时生成默认轨迹驱动路径图、风圈补默认四象限。
@@ -1337,13 +1368,13 @@ class SimulationBuilder:
             typhoon_type=typhoon_type,
             latitude=lat,
             longitude=lon,
-            pressure=safe_int(params.get("pressure"), 960),
-            wind_speed=safe_float(params.get("wind_speed"), 35.0),
-            power=safe_int(params.get("power"), 12),
+            pressure=_safe_int(params.get("pressure"), 960),
+            wind_speed=_safe_float(params.get("wind_speed"), 35.0),
+            power=_safe_int(params.get("power"), 12),
             move_direction=move_direction,
-            move_speed=safe_float(params.get("move_speed"), 20.0),
-            radius7=safe_int(params.get("radius7"), 300),
-            radius10=safe_int(params.get("radius10"), 100),
+            move_speed=_safe_float(params.get("move_speed"), 20.0),
+            radius7=_safe_int(params.get("radius7"), 300),
+            radius10=_safe_int(params.get("radius10"), 100),
             is_active=True,
             updated_at=update_time or now,
             history_track=history_track,

@@ -157,6 +157,7 @@ class PluginCommandSupportService:
 
     # 生效范围关键字别名表（统一转小写后匹配）
     LOCATION_SCOPE_GLOBAL = "全局"
+    LOCATION_SCOPE_CURRENT = "当前会话"
     LOCATION_SCOPE_SESSION = "指定会话"
 
     _LOCATION_SCOPE_ALIASES: dict[str, str] = {
