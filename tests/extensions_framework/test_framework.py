@@ -29,35 +29,47 @@ def _patch_provider_family(monkeypatch):
 
 
 class FakeRegistry:
+    """Fake host registry that records the calls."""
+
     def __init__(self):
         self.calls = []
 
     def register_source_entry(self, entry, *, owner):
+        """Record the source entry."""
         self.calls.append(("source", entry.source_id, owner))
 
     def register_parser(self, name, cls, *, owner):
+        """Record the parser."""
         self.calls.append(("parser", name, owner))
 
     def register_text_presenter(self, key, cls, *, owner):
+        """Record the presenter."""
         self.calls.append(("presenter", key, owner))
 
     def register_rule(self, rule, *, after="local_rule", owner):
+        """Record the rule."""
         self.calls.append(("rule", after, owner))
 
     def unregister_source_entries(self, owner):
+        """Record the removal of the owner sources."""
         self.calls.append(("unreg_source", owner))
 
     def unregister_parsers(self, owner):
+        """Record the removal of the owner parsers."""
         self.calls.append(("unreg_parser", owner))
 
     def unregister_presenters(self, owner):
+        """Record the removal of the owner presenters."""
         self.calls.append(("unreg_presenter", owner))
 
     def unregister_rules(self, owner):
+        """Record the removal of the owner rules."""
         self.calls.append(("unreg_rule", owner))
 
 
 class FakeService:
+    """Fake disaster service that stores the handled envelopes."""
+
     def __init__(self, enabled, settings="{}"):
         self.config = {"extensions": {"enabled_ids": enabled, "settings": settings}}
         self.events = []
@@ -90,6 +102,7 @@ def setup(api):
 
 
 def make_ext(root, ext_id, code=POLLER_EXT, *, permissions=("network",), **manifest):
+    """Write a test extension package to disk."""
     d = root / ext_id
     d.mkdir(parents=True)
     fields = {
@@ -107,6 +120,7 @@ def make_ext(root, ext_id, code=POLLER_EXT, *, permissions=("network",), **manif
 
 
 def make_manager(tmp_path, service, registry=None, roots=None, **kw):
+    """Return an extension manager with a fake registry and a fake service."""
     return manager_mod.ExtensionManager(
         service,
         registry or FakeRegistry(),
@@ -138,6 +152,7 @@ def _fast_poll(monkeypatch):
     ],
 )
 def test_manifest_errors(tmp_path, patch, msg):
+    """Check that a bad manifest raises an error."""
     d = make_ext(tmp_path, "good")
     data = json.loads((d / "extension.yaml").read_text())
     data.update(patch)
@@ -147,6 +162,7 @@ def test_manifest_errors(tmp_path, patch, msg):
 
 
 def test_manifest_defaults_and_version_check(tmp_path):
+    """Check the manifest defaults and the host version check."""
     d = make_ext(tmp_path, "good", min_host_version="1.7.0")
     m = manifest_mod.load_manifest(d)
     assert m.entry == "extension:setup" and m.permissions == ("network",)
@@ -156,6 +172,7 @@ def test_manifest_defaults_and_version_check(tmp_path):
 
 
 def test_manifest_missing_file(tmp_path):
+    """Check that a missing manifest file raises an error."""
     with pytest.raises(manifest_mod.ManifestError):
         manifest_mod.load_manifest(tmp_path)
 
@@ -164,6 +181,7 @@ def test_manifest_missing_file(tmp_path):
 
 
 def test_i18n_fallback_chain(tmp_path):
+    """Check the fallback from the extension language to the host language and to the key."""
     loc = tmp_path / "locale"
     loc.mkdir()
     (loc / "zh-CN.json").write_text(json.dumps({"a": "中{x}", "b": "只有中文"}))
@@ -183,6 +201,7 @@ def test_i18n_fallback_chain(tmp_path):
 
 
 def test_happy_load_and_status(tmp_path):
+    """Check that a valid extension loads and the status shows it."""
     make_ext(tmp_path / "bundled", "good")
     reg = FakeRegistry()
     mgr = make_manager(tmp_path, FakeService(["good"]), reg)
@@ -201,6 +220,7 @@ def test_happy_load_and_status(tmp_path):
 
 
 def test_not_found_and_disabled_not_loaded(tmp_path):
+    """Check that a missing or disabled extension does not load."""
     make_ext(tmp_path / "bundled", "other")
     mgr = make_manager(tmp_path, FakeService(["ghost"]))
     mgr.load_all()
@@ -210,6 +230,7 @@ def test_not_found_and_disabled_not_loaded(tmp_path):
 
 
 def test_failing_setup_isolated(tmp_path):
+    """Check that a failing setup does not stop the other extensions."""
     root = tmp_path / "bundled"
     make_ext(root, "bad", "def setup(api):\n    raise RuntimeError('nope')\n")
     make_ext(root, "good")
@@ -231,6 +252,7 @@ def test_failing_setup_isolated(tmp_path):
 
 
 def test_import_error_and_missing_entry(tmp_path):
+    """Check the error state for an import error and for a missing entry point."""
     root = tmp_path / "bundled"
     make_ext(root, "imp", "import does_not_exist_xyz\n")
     make_ext(root, "noentry", "x = 1\n")
@@ -242,6 +264,7 @@ def test_import_error_and_missing_entry(tmp_path):
 
 
 def test_relative_import_inside_extension(tmp_path):
+    """Check that a relative import works inside an extension package."""
     d = make_ext(
         tmp_path / "bundled",
         "rel",
@@ -255,6 +278,7 @@ def test_relative_import_inside_extension(tmp_path):
 
 
 def test_duplicate_id_first_root_wins(tmp_path):
+    """Check that the first root wins when two roots have the same extension id."""
     make_ext(tmp_path / "bundled", "dup")
     make_ext(tmp_path / "user", "dup")
     mgr = make_manager(tmp_path, FakeService(["dup"]))
@@ -265,6 +289,7 @@ def test_duplicate_id_first_root_wins(tmp_path):
 
 
 def test_incompatible_host_version(tmp_path):
+    """Check that an extension for another host version does not load."""
     make_ext(tmp_path / "bundled", "new", min_host_version="9.0")
     mgr = make_manager(tmp_path, FakeService(["new"]))
     mgr.load_all()
@@ -272,6 +297,7 @@ def test_incompatible_host_version(tmp_path):
 
 
 def test_poller_requires_network_permission(tmp_path):
+    """Check that register_poller needs the network permission."""
     make_ext(tmp_path / "bundled", "nonet", permissions=())
     reg = FakeRegistry()
     mgr = make_manager(tmp_path, FakeService(["nonet"]), reg)
@@ -282,6 +308,7 @@ def test_poller_requires_network_permission(tmp_path):
 
 
 def test_register_source_validation_and_poller_ownership(tmp_path):
+    """Check the source validation and that a poller needs a source of the same extension."""
     code = """
 def setup(api):
     bad = type("E", (), dict(source_id="s", config_group="data_sources",
@@ -305,6 +332,7 @@ def setup(api):
 
 
 def test_settings_json_and_dict(tmp_path):
+    """Check that the settings accept a JSON string and a dictionary."""
     code = "def setup(api):\n    api.logger.info('hi')\n"
     make_ext(tmp_path / "bundled", "cfg", code)
     for settings in ('{"cfg": {"language": "en"}}', {"cfg": {"language": "en"}}):
@@ -317,6 +345,7 @@ def test_settings_json_and_dict(tmp_path):
 
 
 def test_poller_interval_clamped(tmp_path, monkeypatch):
+    """Check that the poll interval has a minimum value."""
     monkeypatch.setattr(api_mod.ExtensionAPI, "MIN_INTERVAL_SECONDS", 60)
     make_ext(tmp_path / "bundled", "clamp")
     mgr = make_manager(tmp_path, FakeService(["clamp"]))
@@ -325,6 +354,7 @@ def test_poller_interval_clamped(tmp_path, monkeypatch):
 
 
 def test_api_data_dir_created_on_demand(tmp_path):
+    """Check that the data directory is created at the first access."""
     make_ext(tmp_path / "bundled", "dd", "def setup(api):\n    pass\n")
     mgr = make_manager(tmp_path, FakeService(["dd"]))
     mgr.load_all()
@@ -345,6 +375,7 @@ async def _wait_for(cond, timeout=3.0):
 
 
 async def test_poller_delivers_envelopes_and_survives_handler_error(tmp_path):
+    """Check that the poller sends envelopes and continues after a handler error."""
     make_ext(tmp_path / "bundled", "p1")
     svc = FakeService(["p1"])
     mgr = make_manager(tmp_path, svc)
@@ -361,6 +392,7 @@ async def test_poller_delivers_envelopes_and_survives_handler_error(tmp_path):
 
 @pytest.mark.parametrize("mode", ["raise", "hang"])
 async def test_poller_failures_do_not_kill_task(tmp_path, mode):
+    """Check that a failed fetch does not stop the polling task."""
     make_ext(tmp_path / "bundled", "p2")
     svc = FakeService(["p2"], {"p2": {"mode": mode}})
     mgr = make_manager(tmp_path, svc)
@@ -376,6 +408,7 @@ async def test_poller_failures_do_not_kill_task(tmp_path, mode):
 
 
 async def test_backoff_capped(tmp_path, monkeypatch):
+    """Check that the retry backoff has a maximum."""
     sleeps = []
     real_sleep = asyncio.sleep
 
@@ -397,6 +430,7 @@ async def test_backoff_capped(tmp_path, monkeypatch):
 
 
 async def test_stop_cancels_cleanly_and_is_idempotent(tmp_path):
+    """Check that stop cancels the tasks and that a second call is safe."""
     make_ext(tmp_path / "bundled", "p4")
     mgr = make_manager(tmp_path, FakeService(["p4"]))
     mgr.load_all()
@@ -411,6 +445,7 @@ async def test_stop_cancels_cleanly_and_is_idempotent(tmp_path):
 
 
 async def test_start_without_pollers_is_noop(tmp_path):
+    """Check that start does nothing when no poller is registered."""
     mgr = make_manager(tmp_path, FakeService([]))
     mgr.load_all()
     await mgr.start()

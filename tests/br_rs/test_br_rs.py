@@ -1,3 +1,5 @@
+"""Offline tests of the br_rs parsers, state classes, envelopes, presenter, and pollers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +13,7 @@ from conftest import EXT_DIR
 
 
 def test_parse_alerts_filters_rs_and_maps_levels(ext, alerts_json):
+    """Check that only RS alerts remain and that the levels map to 2, 3, and 4."""
     ex = ext.extension
     alerts = ex.parse_alerts(alerts_json)
     assert alerts and all(a["raw"]["uf"] == "RS" for a in alerts)
@@ -20,6 +23,7 @@ def test_parse_alerts_filters_rs_and_maps_levels(ext, alerts_json):
 
 
 def test_levels_and_hazard_variants(ext):
+    """Check the level and hazard values for the event name variants."""
     ex = ext.extension
     base = {"uf": "RS", "datahoracriacao": "2026-10-25 11:20:44.159"}
     data = {
@@ -39,6 +43,7 @@ def test_levels_and_hazard_variants(ext):
 
 
 def test_alert_dedup_and_update(ext, alerts_json):
+    """Check that an alert returns again only when its update time changes."""
     ex = ext.extension
     state = ex.AlertState()
     first = state.fresh(ex.parse_alerts(alerts_json))
@@ -53,6 +58,7 @@ def test_alert_dedup_and_update(ext, alerts_json):
 
 
 def test_alert_envelope(ext, make_api, alerts_json):
+    """Check the fields of the alert envelope."""
     ex = ext.extension
     api = make_api("en")
     enso = ext.enso.build_enso("JAS 2026 29.12 2.16\n")
@@ -80,6 +86,7 @@ def _gauges(rain_json, **overrides):
 
 
 def test_rain_levels(ext, rain_json):
+    """Check the rain level for each threshold."""
     ex = ext.extension
     # The real fixture has only "-" and 0.2 mm: no alert and no error.
     assert ex.parse_rain(rain_json) == []
@@ -96,6 +103,7 @@ def test_rain_levels(ext, rain_json):
 
 
 def test_rain_worst_gauge_per_municipality_and_custom_thresholds(ext, rain_json):
+    """Check that one gauge remains for each municipality and that custom thresholds apply."""
     ex = ext.extension
     g = copy.deepcopy(rain_json)
     g[0].update(acc1hr=25, acc24hr=10)  # PAROBÉ yellow
@@ -107,6 +115,7 @@ def test_rain_worst_gauge_per_municipality_and_custom_thresholds(ext, rain_json)
 
 
 def test_rain_escalation_only(ext, rain_json):
+    """Check that the rain state returns only higher levels on the same day."""
     ex = ext.extension
     state = ex.RainState()
     day = "20261028"
@@ -120,6 +129,7 @@ def test_rain_escalation_only(ext, rain_json):
 
 
 def test_rain_envelope(ext, make_api, rain_json):
+    """Check the fields of the rain envelope."""
     ex = ext.extension
     api = make_api("en")
     item = ex.parse_rain(_gauges(rain_json, acc1hr=31, acc24hr=40))[0]
@@ -134,6 +144,7 @@ def test_rain_envelope(ext, make_api, rain_json):
 
 
 def test_oni_parse_and_classify(ext, oni_text):
+    """Check the ONI parser and the phase and strength classes."""
     e = ext.enso
     got = e.build_enso(oni_text)
     assert (got["season"], got["year"], got["anom"]) == ("JAS", 2026, 2.16)
@@ -153,6 +164,8 @@ def test_oni_parse_and_classify(ext, oni_text):
 
 
 def test_enso_cache(ext, oni_text):
+    """Check that the ENSO cache downloads once and keeps the last value after a failure."""
+
     class Resp:
         def __init__(self, ok):
             self.ok = ok
@@ -208,6 +221,7 @@ def _present(ext, make_api, lang, alerts_json, enso_text):
 
 
 def test_presenter_en(ext, make_api, alerts_json, oni_text):
+    """Check the English presenter text."""
     out = _present(ext, make_api, "en", alerts_json, oni_text)
     assert out.startswith("🟠 CEMADEN alert: flood risk")
     assert "SÃO BORJA/RS" in out
@@ -218,6 +232,7 @@ def test_presenter_en(ext, make_api, alerts_json, oni_text):
 
 
 def test_presenter_zh_cn_and_neutral(ext, make_api, alerts_json, oni_text):
+    """Check the Chinese presenter text and the neutral ENSO phase."""
     out = _present(ext, make_api, "zh-CN", alerts_json, oni_text)
     assert (
         "厄尔尼诺" in out
@@ -230,6 +245,7 @@ def test_presenter_zh_cn_and_neutral(ext, make_api, alerts_json, oni_text):
 
 
 def test_presenter_rain(ext, make_api, rain_json):
+    """Check the presenter text of a rain event."""
     ex = ext.extension
     api = make_api("en")
     item = ex.parse_rain(_gauges(rain_json, acc1hr=31, acc24hr="-"))[0]
@@ -245,6 +261,7 @@ def test_presenter_rain(ext, make_api, rain_json):
 
 
 def test_setup_registrations(ext, make_api):
+    """Check that setup registers the presenter, two sources, and two pollers."""
     api = make_api("en", {"alerts_interval": 600})
     ext.extension.setup(api)
     assert set(api.sources) == {"br_rs_cemaden_alerts", "br_rs_cemaden_rain"}
@@ -266,6 +283,7 @@ def test_setup_registrations(ext, make_api):
 
 
 def test_pollers_end_to_end_with_fake_session(ext, make_api, alerts_json, rain_json):
+    """Check both pollers with a fake session that returns the fixtures."""
     api = make_api("en")
     ext.extension.setup(api)
     rain = _gauges(rain_json, acc1hr=61)
@@ -306,6 +324,7 @@ def test_pollers_end_to_end_with_fake_session(ext, make_api, alerts_json, rain_j
 
 
 def test_locale_zh_cn_has_every_key(ext):
+    """Check that the Chinese locale has every key of the English locale."""
     loc = {
         p.stem: json.loads(p.read_text("utf-8"))
         for p in (EXT_DIR / "locale").glob("*.json")

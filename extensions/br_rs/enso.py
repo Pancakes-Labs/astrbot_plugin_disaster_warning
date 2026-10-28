@@ -48,6 +48,7 @@ class EnsoCache:
         self._fetched_at: float | None = None
 
     async def get(self, session) -> dict | None:
+        """Return the cached ENSO dict. Download the ONI file when the cache is older than 24 hours."""
         now = time.monotonic()
         if self._fetched_at is not None and now - self._fetched_at < CACHE_SECONDS:
             return self.value

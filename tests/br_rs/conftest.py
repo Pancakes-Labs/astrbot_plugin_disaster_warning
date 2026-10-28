@@ -31,12 +31,15 @@ class FakeAPI:
         self.sources, self.pollers, self.presenters = {}, {}, {}
 
     def register_source(self, entry):
+        """Record the source entry."""
         self.sources[entry.source_id] = entry
 
     def register_presenter(self, key, cls):
+        """Record the presenter class."""
         self.presenters[key] = cls
 
     def register_poller(self, source_id, fetch, *, interval_seconds):
+        """Record the fetch function and the interval."""
         self.pollers[source_id] = (fetch, interval_seconds)
 
 
@@ -57,6 +60,7 @@ def ext():
 
 @pytest.fixture
 def make_api():
+    """Return the FakeAPI class."""
     return FakeAPI
 
 
@@ -66,14 +70,17 @@ def _fixture_json(name):
 
 @pytest.fixture(scope="session")
 def alerts_json():
+    """Return the stored CEMADEN alerts fixture."""
     return _fixture_json("cemaden_alertas.json")
 
 
 @pytest.fixture(scope="session")
 def rain_json():
+    """Return the stored CEMADEN rain gauge fixture."""
     return _fixture_json("cemaden_rain_RS.json")
 
 
 @pytest.fixture(scope="session")
 def oni_text():
+    """Return the stored NOAA ONI text fixture."""
     return (FIXTURES / "oni.ascii.txt").read_text("utf-8")

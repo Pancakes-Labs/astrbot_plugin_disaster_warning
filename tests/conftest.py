@@ -21,6 +21,7 @@ class _StubLogger(logging.LoggerAdapter):
     """Logger stub. It accepts the custom keyword arguments of the plugin, such as is_event_linked."""
 
     def process(self, msg, kwargs):
+        """Remove the keyword arguments that the standard logger does not accept."""
         allowed = {"exc_info", "stack_info", "stacklevel", "extra"}
         return msg, {k: v for k, v in kwargs.items() if k in allowed}
 
@@ -59,8 +60,11 @@ def _install_astrbot_stubs() -> None:
     api.logger = _StubLogger(logging.getLogger("astrbot"), {})
 
     class StarTools:
+        """Stub of the AstrBot StarTools helper."""
+
         @staticmethod
         def get_data_dir(name: str) -> Path:
+            """Return a temporary data directory for the plugin."""
             path = Path(__import__("tempfile").gettempdir()) / "dw-test-data" / name
             path.mkdir(parents=True, exist_ok=True)
             return path

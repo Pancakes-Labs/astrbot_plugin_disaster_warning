@@ -132,6 +132,7 @@ class AlertState:
         self._seen: dict = {}
 
     def fresh(self, alerts: list[dict]) -> list[dict]:
+        """Return the alerts that are new or have a newer update time."""
         out = []
         for a in alerts:
             if self._seen.get(a["cod_alerta"]) != a["updated"]:
@@ -147,6 +148,7 @@ class RainState:
         self._last: dict = {}
 
     def escalations(self, items: list[dict], day: str) -> list[dict]:
+        """Return the items whose level is higher than the last level of this municipality on this day."""
         out = []
         for it in items:
             prev_day, prev_level = self._last.get(it["codibge"], (None, 0))
@@ -187,6 +189,7 @@ def _envelope(api, source_id, event_id, metadata, when, raw, fingerprint=None):
 
 
 def build_alert_envelope(api, alert: dict, enso: dict | None):
+    """Build the event envelope for a CEMADEN alert. The event time is the last update time."""
     raw = alert["raw"]
     issued = alert["issued_at"]
     metadata = {
@@ -213,6 +216,7 @@ def build_alert_envelope(api, alert: dict, enso: dict | None):
 
 
 def build_rain_envelope(api, item: dict, day: str, enso: dict | None):
+    """Build the event envelope for a rain gauge item. The event time is the gauge reading time."""
     observed = item["observed_at"]
     metadata = {
         "severity_level": item["level"],
@@ -263,6 +267,7 @@ def _entry(api, source_id: str, kind: str, priority: int):
 
 
 def setup(api) -> None:
+    """Entry point of the extension. Register the presenter, the two sources, and the two pollers."""
     cfg = api.config or {}
     enso = EnsoCache()
     alert_state, rain_state = AlertState(), RainState()

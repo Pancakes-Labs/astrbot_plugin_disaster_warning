@@ -8,6 +8,7 @@ import importlib
 def test_core_registries_import():
     # Import the main service first, as the plugin does. This prevents a
     # circular import in the parser package.
+    """Check that the core registries import without error."""
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
     catalog = importlib.import_module(
         "astrbot_plugin_disaster_warning.core.sources.source_catalog"
@@ -20,4 +21,5 @@ def test_core_registries_import():
 
 
 def test_disaster_service_module_imports():
+    """Check that the disaster service module imports without error."""
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")

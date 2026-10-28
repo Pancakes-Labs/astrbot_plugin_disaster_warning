@@ -20,6 +20,7 @@ def _client(status, data):
 
 
 def test_list_and_detail_response_handling():
+    """Check that the typhoon client handles the list and detail responses."""
     for status, data, expected_state, expected_list in [
         (200, {"typhoon": [{"a": 1}]}, "hit", [{"a": 1}]),
         (200, {"typhoon": []}, "empty", []),

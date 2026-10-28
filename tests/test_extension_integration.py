@@ -27,9 +27,11 @@ class _FakeResponse:
         return False
 
     def raise_for_status(self):
+        """Do nothing. The fake response is always successful."""
         return None
 
     async def text(self):
+        """Return the stored response text."""
         return self._text
 
 
@@ -37,6 +39,7 @@ class _FakeSession:
     """Return a local fixture by URL keyword. The test does not use the network."""
 
     def get(self, url: str):
+        """Return a fake response for the URL. The alert times are set to the current time."""
         if "wsAlertas2" in url:
             # The fixture is from 2026-10-28. Set the update time to the current
             # Brasilia time to simulate a new alert.
@@ -61,6 +64,7 @@ class _FakeService:
 
 @pytest.fixture
 def loaded_br_rs(tmp_path):
+    """Load br_rs through the real extension manager and host registry. Unregister it after the test."""
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
     from astrbot_plugin_disaster_warning.core.extensions.host_registry import (
         HostRegistry,
@@ -90,6 +94,7 @@ def loaded_br_rs(tmp_path):
 
 
 def test_br_rs_loads_through_real_host(loaded_br_rs):
+    """Check that br_rs loads and that its two sources are in the host catalog."""
     from astrbot_plugin_disaster_warning.core.sources.source_catalog import (
         SOURCE_CATALOG,
         get_source_owner,
@@ -104,6 +109,7 @@ def test_br_rs_loads_through_real_host(loaded_br_rs):
 
 
 async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_rs):
+    """Check that a fixture alert passes the rule chain and that the presenter shows CEMADEN."""
     from astrbot_plugin_disaster_warning.core.message.presenters.presenter_registry import (
         present_message,
     )

@@ -13,11 +13,14 @@ PKG = "astrbot_plugin_disaster_warning.core.network.http."
 
 
 class FakeResp:
+    """Fake HTTP response with a status and a body."""
+
     def __init__(self, status, body):
         self.status = status
         self._body = body
 
     async def read(self):
+        """Return the stored body bytes."""
         return self._body
 
     async def __aenter__(self):
@@ -28,12 +31,15 @@ class FakeResp:
 
 
 class FakeGetSession:
+    """Fake session that returns a list of fake responses in order."""
+
     closed = False
 
     def __init__(self, outcome):
         self.outcome = outcome
 
     def get(self, url):
+        """Return the next fake response as a context manager."""
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         return self.outcome
@@ -47,6 +53,7 @@ class FakeGetSession:
     ],
 )
 def test_download_image_outcomes(module, name):
+    """Check the result of the image download for each response status."""
     cls = getattr(importlib.import_module(PKG + module), name)
     cases = [
         (FakeResp(200, b"abc"), b"abc"),
@@ -67,6 +74,7 @@ def test_download_image_outcomes(module, name):
 
 
 def test_download_frames_keep_order_and_skip_failures():
+    """Check that the frame download keeps the order and skips the failed frames."""
     radar = importlib.import_module(PKG + "nmc_radar_client").NmcRadarClient
     precip = importlib.import_module(PKG + "nmc_precipitation_client")
 

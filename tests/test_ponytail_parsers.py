@@ -50,6 +50,7 @@ GOLDEN = {
 
 
 def test_dispatch_matches_golden():
+    """Check that each parser output equals the stored golden output."""
     actual = {}
     for source_id in catalog.SOURCE_CATALOG:
         parser = registry.create_parser_for_source(source_id)
@@ -58,4 +59,5 @@ def test_dispatch_matches_golden():
 
 
 def test_unknown_source_is_none():
+    """Check that an unknown source gives no parser."""
     assert registry.create_parser_for_source("no_such_source") is None

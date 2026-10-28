@@ -25,16 +25,20 @@ CASES = [
 
 
 class FakeSession:
+    """Fake HTTP session that records the close call."""
+
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.closed = False
 
     async def close(self):
+        """Record that the session is closed."""
         self.closed = True
 
 
 @pytest.mark.parametrize(("module", "name"), CASES)
 def test_session_is_lazy_reused_and_closed(module, name):
+    """Check that the session is created on first use, reused, and closed once."""
     cls = getattr(importlib.import_module(PKG + module), name)
 
     async def run():

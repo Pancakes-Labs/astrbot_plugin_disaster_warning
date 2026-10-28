@@ -99,6 +99,7 @@ def _cleanup():
 
 
 def test_source_round_trip_and_duplicate():
+    """Check that a source entry registers, unregisters, and rejects a duplicate id."""
     before_ids = set(catalog.SOURCE_CATALOG)
     before_idx = _snapshot_indexes()
     catalog_ref = catalog.SOURCE_CATALOG
@@ -129,6 +130,7 @@ def test_source_round_trip_and_duplicate():
 
 
 def test_parser_round_trip():
+    """Check that a parser registers and unregisters by owner."""
     parser_registry.register_parser("test_ext_parser", _Parser, owner=OWNER)
     catalog.register_source_entry(_make_entry(), owner=OWNER)
     assert parser_registry.resolve_parser_class("test_ext_parser") is _Parser
@@ -144,6 +146,7 @@ def test_parser_round_trip():
 
 
 def test_presenter_round_trip():
+    """Check that a text presenter registers and unregisters by owner."""
     builtin = set(presenter_registry.get_text_presenter_keys())
     presenter_registry.register_text_presenter(PRESENTER_KEY, _Presenter, owner=OWNER)
     assert PRESENTER_KEY in presenter_registry.get_text_presenter_keys()
@@ -158,6 +161,7 @@ def test_presenter_round_trip():
 
 
 def test_rule_round_trip_and_position():
+    """Check that a rule is added at the requested position and removed by owner."""
     base = [r.rule_name for r in rule_chain.build_default_rule_chain().rules]
     rule_chain.register_rule(_Rule(), owner=OWNER)
     names = [r.rule_name for r in rule_chain.build_default_rule_chain().rules]
@@ -184,6 +188,7 @@ def _weather_envelope(title="暴雨", metadata=None, source_id=SOURCE_ID):
 
 
 def test_source_enabled_rule_accepts_extension_source():
+    """Check that the source rule accepts an enabled extension source."""
     catalog.register_source_entry(_make_entry(), owner=OWNER)
     ctx = base_rule.RuleContext(
         event=_weather_envelope(),
@@ -224,6 +229,7 @@ def test_source_enabled_rule_accepts_extension_source():
     ],
 )
 def test_weather_rule_uses_severity_level(title, level, min_color, accepted):
+    """Check that the weather rule reads the severity level from the metadata."""
     meta = {} if level is None else {"severity_level": level}
     ctx = base_rule.RuleContext(
         event=_weather_envelope(title=title, metadata=meta),
@@ -236,6 +242,7 @@ def test_weather_rule_uses_severity_level(title, level, min_color, accepted):
 
 
 def test_weather_aggregation_uses_severity_level():
+    """Check that weather aggregation reads the severity level from the metadata."""
     cls = weather_aggregation.WeatherAggregationService
     svc = cls.__new__(cls)
     env = _weather_envelope(title="蓝色暴雨预警", metadata={"severity_level": 3})
@@ -245,6 +252,7 @@ def test_weather_aggregation_uses_severity_level():
 
 
 def test_present_message_uses_registered_presenter():
+    """Check that present_message uses the presenter registered for the source."""
     catalog.register_source_entry(_make_entry(), owner=OWNER)
     presenter_registry.register_text_presenter(PRESENTER_KEY, _Presenter, owner=OWNER)
     env = _weather_envelope(title="Alert", metadata={"severity_level": 2})
@@ -253,6 +261,7 @@ def test_present_message_uses_registered_presenter():
 
 
 def test_format_source_name_for_extension_source():
+    """Check that the source name of an extension source is its display name."""
     storage = _mod("storage.source_compat")
     assert storage.format_source_name(SOURCE_ID) == SOURCE_ID
     catalog.register_source_entry(_make_entry(), owner=OWNER)
