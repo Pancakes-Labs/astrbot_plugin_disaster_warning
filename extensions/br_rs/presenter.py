@@ -1,4 +1,4 @@
-"""Text presenter for br_rs weather events (bound to the extension API for t())."""
+"""Text presenter for the br_rs weather events."""
 
 from __future__ import annotations
 
