@@ -12,7 +12,7 @@ from .enso import EnsoCache
 from .presenter import make_presenter
 
 UF = "RS"
-ID = "br_rs"
+ID = "br_rs_disaster"
 ALERTS_SOURCE = f"{ID}_cemaden_alerts"
 RAIN_SOURCE = f"{ID}_cemaden_rain"
 PRESENTER_KEY = f"{ID}_weather"

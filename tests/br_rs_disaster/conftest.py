@@ -1,4 +1,4 @@
-"""Fixtures for br_rs: a fake ExtensionAPI built from the real host classes."""
+"""Fixtures for br_rs_disaster: a fake ExtensionAPI built from the real host classes."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_servi
 from astrbot_plugin_disaster_warning.core.extensions.api import MODELS  # noqa: E402
 from astrbot_plugin_disaster_warning.core.extensions.i18n import Translator  # noqa: E402
 
-EXT_DIR = Path(__file__).resolve().parents[2] / "extensions" / "br_rs"
+EXT_DIR = Path(__file__).resolve().parents[2] / "extensions" / "br_rs_disaster"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -47,14 +47,16 @@ class FakeAPI:
 def ext():
     """Load the extension as a standalone package, like the host does."""
     spec = importlib.util.spec_from_file_location(
-        "_ext_br_rs", EXT_DIR / "__init__.py", submodule_search_locations=[str(EXT_DIR)]
+        "_ext_br_rs_disaster",
+        EXT_DIR / "__init__.py",
+        submodule_search_locations=[str(EXT_DIR)],
     )
-    sys.modules["_ext_br_rs"] = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(sys.modules["_ext_br_rs"])
+    sys.modules["_ext_br_rs_disaster"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sys.modules["_ext_br_rs_disaster"])
     return types.SimpleNamespace(
-        extension=importlib.import_module("_ext_br_rs.extension"),
-        enso=importlib.import_module("_ext_br_rs.enso"),
-        presenter=importlib.import_module("_ext_br_rs.presenter"),
+        extension=importlib.import_module("_ext_br_rs_disaster.extension"),
+        enso=importlib.import_module("_ext_br_rs_disaster.enso"),
+        presenter=importlib.import_module("_ext_br_rs_disaster.presenter"),
     )
 
 

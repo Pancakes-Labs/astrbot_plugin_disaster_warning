@@ -3,7 +3,7 @@
 # CEMADEN API
 
 CEMADEN is the National Center for Monitoring and Early Warning of Natural Disasters of Brazil.
-The `br_rs` extension reads two public endpoints of CEMADEN. Both endpoints use HTTP GET and need no key.
+The `br_rs_disaster` extension reads two public endpoints of CEMADEN. Both endpoints use HTTP GET and need no key.
 
 **Base URL**: `https://painelalertas.cemaden.gov.br/` (alerts) and `https://resources.cemaden.gov.br/` (rain gauges)
 
@@ -96,7 +96,7 @@ The text has the format `<type of risk> - <level>`. The recorded sample has thes
 
 The extension reads only the start of the text. If `evento` starts with `Movimentos de Massa`, the hazard is a landslide. For all other values, the hazard is a flood.
 
-### Fields that `br_rs` uses
+### Fields that `br_rs_disaster` uses
 
 | Field | Use |
 | :--- | :--- |
@@ -195,7 +195,7 @@ Each array item is one rain gauge. A rain total is a number in millimeters (mm).
 | `tipoestacao` | integer | `1` | The type of the gauge. All gauges in the recorded sample have the value `1`. |
 | `status` | integer | `0` | The state of the gauge. All gauges in the recorded sample have the value `0`. |
 
-### Fields that `br_rs` uses
+### Fields that `br_rs_disaster` uses
 
 The extension uses `uf`, `codibge`, `cidade`, `nomeestacao`, `datahoraUltimovalor`, `acc1hr` and `acc24hr`. It ignores all other fields.
 

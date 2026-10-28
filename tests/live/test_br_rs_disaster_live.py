@@ -1,4 +1,4 @@
-"""Live tests for br_rs. They call the real CEMADEN and NOAA CPC services.
+"""Live tests for br_rs_disaster. They call the real CEMADEN and NOAA CPC services.
 
 Set DW_LIVE_TESTS=1 to run them. They check the feed schemas, the parsers, and the full host path.
 """
@@ -96,21 +96,21 @@ def _check_fields(item: dict, fields: dict, where: str) -> None:
 
 @pytest.fixture(scope="module")
 def ext():
-    """Load br_rs as a standalone package, like the host does."""
+    """Load br_rs_disaster as a standalone package, like the host does."""
     spec = importlib.util.spec_from_file_location(
-        "_ext_br_rs_live",
-        PLUGIN_DIR / "extensions" / "br_rs" / "__init__.py",
-        submodule_search_locations=[str(PLUGIN_DIR / "extensions" / "br_rs")],
+        "_ext_br_rs_disaster_live",
+        PLUGIN_DIR / "extensions" / "br_rs_disaster" / "__init__.py",
+        submodule_search_locations=[str(PLUGIN_DIR / "extensions" / "br_rs_disaster")],
     )
-    sys.modules["_ext_br_rs_live"] = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(sys.modules["_ext_br_rs_live"])
-    return importlib.import_module("_ext_br_rs_live.extension")
+    sys.modules["_ext_br_rs_disaster_live"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sys.modules["_ext_br_rs_disaster_live"])
+    return importlib.import_module("_ext_br_rs_disaster_live.extension")
 
 
 @pytest.fixture(scope="module")
 def enso_mod(ext):
-    """Return the enso module of the live-loaded br_rs package."""
-    return importlib.import_module("_ext_br_rs_live.enso")
+    """Return the enso module of the live-loaded br_rs_disaster package."""
+    return importlib.import_module("_ext_br_rs_disaster_live.enso")
 
 
 @pytest.fixture(scope="module")
@@ -258,12 +258,12 @@ class _FakeService:
 
 @pytest.fixture
 def loaded(tmp_path):
-    """Load br_rs through the real extension manager and host registry."""
+    """Load br_rs_disaster through the real extension manager and host registry."""
     service = _FakeService(
         {
             "extensions": {
-                "enabled_ids": ["br_rs"],
-                "settings": json.dumps({"br_rs": {"language": "en"}}),
+                "enabled_ids": ["br_rs_disaster"],
+                "settings": json.dumps({"br_rs_disaster": {"language": "en"}}),
             }
         }
     )
@@ -272,8 +272,8 @@ def loaded(tmp_path):
     )
     manager.load_all()
     yield manager
-    HostRegistry().unregister_source_entries(owner="br_rs")
-    HostRegistry().unregister_presenters(owner="br_rs")
+    HostRegistry().unregister_source_entries(owner="br_rs_disaster")
+    HostRegistry().unregister_presenters(owner="br_rs_disaster")
 
 
 async def test_end_to_end_live(loaded, ext):
@@ -290,9 +290,12 @@ async def test_end_to_end_live(loaded, ext):
 
     fetched = {}
     async with _session() as session:
-        for poller in loaded._apis["br_rs"].pollers:
+        for poller in loaded._apis["br_rs_disaster"].pollers:
             fetched[poller.source_id] = await poller.fetch(session)
-    assert set(fetched) == {"br_rs_cemaden_alerts", "br_rs_cemaden_rain"}
+    assert set(fetched) == {
+        "br_rs_disaster_cemaden_alerts",
+        "br_rs_disaster_cemaden_rain",
+    }
     print("\nlive envelopes:", {k: len(v) for k, v in fetched.items()})  # Shown with -s
 
     runtime_config = {"weather_config": {"weather_filter": {"enabled": True}}}
@@ -311,7 +314,7 @@ async def test_end_to_end_live(loaded, ext):
             text = present_message(envelope, envelope.source_id)
             assert "CEMADEN" in text
 
-            if source_id == "br_rs_cemaden_alerts":
+            if source_id == "br_rs_disaster_cemaden_alerts":
                 updated = envelope.payload.raw["ult_atualizacao"]
                 expected = datetime.strptime(updated[:19], ext.ALERT_TIME_FMT)
                 assert envelope.event.effective_at == expected.replace(tzinfo=BRT)

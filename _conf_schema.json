@@ -1530,18 +1530,18 @@
   "extensions": {
     "description": "🧩 扩展",
     "type": "object",
-    "hint": "加载第三方或内置扩展（如 br_rs 巴西南大河州气象预警）。默认不启用任何扩展，对现有行为无影响。修改后需重载插件生效",
+    "hint": "加载第三方或内置扩展（如 br_rs_disaster 巴西南大河州气象预警）。默认不启用任何扩展，对现有行为无影响。修改后需重载插件生效",
     "items": {
       "enabled_ids": {
         "description": "启用的扩展 ID 列表",
         "type": "list",
-        "hint": "填写要加载的扩展 ID，每行一个，例如 br_rs。扩展目录位于插件目录 extensions/ 或数据目录 extensions/ 下。某个扩展加载失败只会跳过该扩展，不影响插件其他功能",
+        "hint": "填写要加载的扩展 ID，每行一个，例如 br_rs_disaster。扩展目录位于插件目录 extensions/ 或数据目录 extensions/ 下。某个扩展加载失败只会跳过该扩展，不影响插件其他功能",
         "default": []
       },
       "settings": {
         "description": "扩展私有配置（JSON）",
         "type": "string",
-        "hint": "JSON 文本，按扩展 ID 分组，例如 {\"br_rs\": {\"language\": \"pt-BR\"}}。格式错误时将被忽略并视为 {}",
+        "hint": "JSON 文本，按扩展 ID 分组，例如 {\"br_rs_disaster\": {\"language\": \"pt-BR\"}}。格式错误时将被忽略并视为 {}",
         "default": "{}"
       }
     }

@@ -1,6 +1,6 @@
 # BRAZIL_GUIDANCE.md
 
-This document records what we learned when we added the extension system and the `br_rs`
+This document records what we learned when we added the extension system and the `br_rs_disaster`
 extension (Brazil, Rio Grande do Sul). It is for the people and the AI agents that do the next
 work in this area. The upstream repository has no `AGENTS.md` file. When it gets one, use this
 document as the start.
@@ -119,7 +119,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
    suggestions in `docs/ponytail-audit.md`. If two helpers differ in an edge case
    (None, bool, inf, nan, empty text), they are not duplicates.
 6. **Test with real data at three levels:**
-   - Unit tests with recorded data (`tests/br_rs/fixtures/`).
+   - Unit tests with recorded data (`tests/br_rs_disaster/fixtures/`).
    - Live tests with the real feeds (`tests/live/`). They run only with `DW_LIVE_TESTS=1`.
      They check the schema, the parser results and the full path through the host.
      An empty result (no alerts now) is a valid state.
@@ -132,7 +132,7 @@ Date: 2026-10-28. Scope: upstream issue 153 (extension system) and the first Bra
 8. **Ask only for real decisions.** The owner changed the language rule two times. Write a durable
    rule into `AGENTS.md` and into memory when the owner says "hard rule".
 
-## 5. Ponytail review of `extensions/br_rs` (after all fixes)
+## 5. Ponytail review of `extensions/br_rs_disaster` (after all fixes)
 
 The review uses the ponytail ladder: (1) is it necessary, (2) does the repository already have it,
 (3) does the standard library have it, (4) can it be shorter.
@@ -150,7 +150,7 @@ The review uses the ponytail ladder: (1) is it necessary, (2) does the repositor
 | Known limit | `AlertState` keeps each alert ID forever (a few KB in a year). A `ponytail:` comment marks this limit. Removing old IDs can cause a duplicate push if CEMADEN drops an alert for one poll. |
 | Not changed | `present` stays a classmethod, because the upstream `BasePresenter` uses a classmethod. Vulture reports its `cls` argument; this is a false positive. `_entry` sets some optional `SourceEntry` fields (`dispatch_family`, `routing_tags`) that only WebSocket routing uses. They cause no problem. |
 
-## 6. Code smell scores of `extensions/br_rs`
+## 6. Code smell scores of `extensions/br_rs_disaster`
 
 Rules: `extensions/ruff.toml` (strict: bugbear, complexity, pylint, simplify, exceptions and more).
 Complexity and maintainability: radon 6.0.1. Dead code: vulture 2.14 (60 % confidence).

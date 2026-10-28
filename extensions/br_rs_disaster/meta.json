@@ -1,6 +1,6 @@
 {
-  "id": "br_rs",
-  "description": "Metadata of the br_rs extension. The host does not read this file.",
+  "id": "br_rs_disaster",
+  "description": "Metadata of the br_rs_disaster extension. The host does not read this file.",
   "maintainer": {
     "github": "h0ffmann",
     "url": "https://github.com/h0ffmann",

@@ -1,4 +1,4 @@
-"""Offline tests of the br_rs parsers, state classes, envelopes, presenter, and pollers."""
+"""Offline tests of the br_rs_disaster parsers, state classes, envelopes, presenter, and pollers."""
 
 from __future__ import annotations
 
@@ -64,10 +64,10 @@ def test_alert_envelope(ext, make_api, alerts_json):
     enso = ext.enso.build_enso("JAS 2026 29.12 2.16\n")
     alert = next(a for a in ex.parse_alerts(alerts_json) if a["cod_alerta"] == 3141)
     env = ex.build_alert_envelope(api, alert, enso)
-    assert env.identity.event_id == "br_rs_cemaden_3141"
+    assert env.identity.event_id == "br_rs_disaster_cemaden_3141"
     assert env.identity.event_type == "weather_alarm"
     assert env.identity.provider_family == "extension"
-    assert env.identity.source_id == "br_rs_cemaden_alerts"
+    assert env.identity.source_id == "br_rs_disaster_cemaden_alerts"
     # The event time is the last update time (ult_atualizacao).
     assert env.identity.published_at == alert["updated_at"]
     assert (
@@ -139,7 +139,7 @@ def test_rain_envelope(ext, make_api, rain_json):
     api = make_api("en")
     item = ex.parse_rain(_gauges(rain_json, acc1hr=31, acc24hr=40))[0]
     env = ex.build_rain_envelope(api, item, "20261028", None)
-    assert env.identity.event_id == "br_rs_rain_4314050_20261028_3"
+    assert env.identity.event_id == "br_rs_disaster_rain_4314050_20261028_3"
     assert env.event.metadata["hazard"] == "rain"
     assert env.event.metadata["severity_level"] == 3
     assert env.event.metadata["acc1hr"] == 31
@@ -304,8 +304,11 @@ def test_setup_registrations(ext, make_api):
     """Check that setup registers the presenter, two sources, and two pollers."""
     api = make_api("en", {"alerts_interval": 600})
     ext.extension.setup(api)
-    assert set(api.sources) == {"br_rs_cemaden_alerts", "br_rs_cemaden_rain"}
-    assert set(api.presenters) == {"br_rs_weather"}
+    assert set(api.sources) == {
+        "br_rs_disaster_cemaden_alerts",
+        "br_rs_disaster_cemaden_rain",
+    }
+    assert set(api.presenters) == {"br_rs_disaster_weather"}
     m = api.models
     for sid, entry in api.sources.items():
         assert entry.source_type == m.SourceType.WEATHER
@@ -313,13 +316,13 @@ def test_setup_registrations(ext, make_api):
         assert (entry.config_group, entry.config_key) == ("extensions", sid)
         assert entry.parser_name == ""
         assert entry.presentation_type == "weather"
-        assert entry.text_presenter_key == "br_rs_weather"
+        assert entry.text_presenter_key == "br_rs_disaster_weather"
         assert entry.default_timezone == "America/Sao_Paulo"
         assert entry.display_name and not entry.display_name.startswith("source.")
         assert sid in api.pollers
-    assert api.pollers["br_rs_cemaden_alerts"][1] == 600
-    assert api.pollers["br_rs_cemaden_rain"][1] == 300
-    assert hasattr(api.presenters["br_rs_weather"], "present")
+    assert api.pollers["br_rs_disaster_cemaden_alerts"][1] == 600
+    assert api.pollers["br_rs_disaster_cemaden_rain"][1] == 300
+    assert hasattr(api.presenters["br_rs_disaster_weather"], "present")
 
 
 def test_pollers_end_to_end_with_fake_session(ext, make_api, alerts_json, rain_json):
@@ -353,8 +356,8 @@ def test_pollers_end_to_end_with_fake_session(ext, make_api, alerts_json, rain_j
         def get(self, url):
             return Resp(bodies[url])
 
-    fetch_alerts = api.pollers["br_rs_cemaden_alerts"][0]
-    fetch_rain = api.pollers["br_rs_cemaden_rain"][0]
+    fetch_alerts = api.pollers["br_rs_disaster_cemaden_alerts"][0]
+    fetch_rain = api.pollers["br_rs_disaster_cemaden_rain"][0]
     first = asyncio.run(fetch_alerts(Session()))
     assert len(first) == 3 and first[0].event.metadata["enso"]["phase"] == "el_nino"
     assert asyncio.run(fetch_alerts(Session())) == []
@@ -379,7 +382,7 @@ def test_locale_zh_cn_has_every_key(ext):
 def test_meta_json_and_icon():
     """Check that meta.json is valid, that its icon file is a PNG, and that the credit is complete."""
     meta = json.loads((EXT_DIR / "meta.json").read_text("utf-8"))
-    assert meta["id"] == "br_rs"
+    assert meta["id"] == "br_rs_disaster"
     assert meta["maintainer"]["github"] == "h0ffmann"
     assert meta["maintainer"]["company"] == meta["company"]["name"] == "marola.dev"
     assert set(meta["languages"]) == {

@@ -1,4 +1,4 @@
-"""Text presenter for the br_rs weather events."""
+"""Text presenter for the br_rs_disaster weather events."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ def make_presenter(api):
     """Return a presenter class that is bound to the translator of the extension."""
 
     class BrRsWeatherPresenter:
-        """Text presenter for the alerts and the rain events of br_rs."""
+        """Text presenter for the alerts and the rain events of br_rs_disaster."""
 
         @classmethod
         def present(cls, display_context, _options=None) -> str:

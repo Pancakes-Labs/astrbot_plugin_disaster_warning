@@ -531,7 +531,7 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 ### Extension push example (Brazil, Rio Grande do Sul)
 
 <details>
-<summary>CEMADEN flood alert (extension br_rs, language en)</summary>
+<summary>CEMADEN flood alert (extension br_rs_disaster, language en)</summary>
 
 ```text
 🟠 CEMADEN alert: flood risk
@@ -545,7 +545,7 @@ Source: CEMADEN / NOAA CPC
 </details>
 
 <details>
-<summary>CEMADEN rain gauge alert (extension br_rs, language en)</summary>
+<summary>CEMADEN rain gauge alert (extension br_rs_disaster, language en)</summary>
 
 ```text
 🟠 Heavy rain
@@ -1044,7 +1044,7 @@ Source: CEMADEN / NOAA CPC
 | :--- | :--- | :--- |
 | S-Net 海底地震计 (MSIL) | 地震情报 | ✅ |
 
-#### 🔹 Extensions (br_rs: Brazil, Rio Grande do Sul)
+#### 🔹 Extensions (br_rs_disaster: Brazil, Rio Grande do Sul)
 
 | 数据源 | 数据类型 | 状态 |
 | :--- | :--- | :--- |
@@ -1758,21 +1758,21 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 
 ### <span id="extensions-config">🧩 16. Extensions (`extensions`)</span>
 
-An extension adds data sources to the plugin. The plugin has one bundled extension: `br_rs`. It sends CEMADEN rain, flood and landslide alerts for Rio Grande do Sul, Brazil. It adds El Niño and La Niña data from NOAA CPC. The plugin loads no extension by default.
+An extension adds data sources to the plugin. The plugin has one bundled extension: `br_rs_disaster`. It sends CEMADEN rain, flood and landslide alerts for Rio Grande do Sul, Brazil. It adds El Niño and La Niña data from NOAA CPC. The plugin loads no extension by default.
 
-- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `br_rs`. A failed extension does not stop the plugin. Reload the plugin after a change.
+- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `br_rs_disaster`. A failed extension does not stop the plugin. Reload the plugin after a change.
 - **Extension settings (`settings`)**: JSON text. The first level is the extension id. The plugin ignores text that is not valid JSON. The default is `{}`.
 
 Example:
 
 ```json
 "extensions": {
-  "enabled_ids": ["br_rs"],
-  "settings": "{\"br_rs\": {\"language\": \"en\", \"rain_interval\": 600}}"
+  "enabled_ids": ["br_rs_disaster"],
+  "settings": "{\"br_rs_disaster\": {\"language\": \"en\", \"rain_interval\": 600}}"
 }
 ```
 
-Settings of `br_rs`:
+Settings of `br_rs_disaster`:
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |

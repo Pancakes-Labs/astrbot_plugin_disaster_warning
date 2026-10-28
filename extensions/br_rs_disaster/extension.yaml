@@ -1,5 +1,5 @@
-id: br_rs
-name: Brazil - Rio Grande do Sul
+id: br_rs_disaster
+name: Brazil - Rio Grande do Sul (disasters)
 version: 0.1.0
 api_version: 1
 min_host_version: 1.6.5
