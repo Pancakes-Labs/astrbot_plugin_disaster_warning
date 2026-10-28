@@ -51,6 +51,7 @@ _SOURCE_TYPE_TO_DISASTER_TYPE: dict[SourceType, str] = {
     SourceType.TYPHOON: DISASTER_TYPE_TYPHOON,
 }
 
+
 def _safe_float(value: Any, default: float | None = None) -> float | None:
     """安全转 float。"""
     if value is None or value == "":
