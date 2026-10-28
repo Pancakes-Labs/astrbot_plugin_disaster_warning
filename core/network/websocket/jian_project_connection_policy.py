@@ -142,13 +142,6 @@ class JianProjectAuthService:
             return False
         return True
 
-    def get_persisted_refresh_token(self) -> str | None:
-        """获取当前持久化的有效长期 Token。"""
-        self._ensure_loaded()
-        if self.has_valid_token():
-            return self._refresh_token
-        return None
-
     def clear_stored_token(self) -> None:
         """清除持久化的长期 Token（如遇到 4201/4202 过期或失效时）。"""
         self._refresh_token = None

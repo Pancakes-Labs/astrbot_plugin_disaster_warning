@@ -110,11 +110,6 @@ class SourceEntry:
     )  # 预留字典，存放未来扩展元数据
 
     @property
-    def config_path(self) -> tuple[str, str]:
-        """返回数据源配置路径。"""
-        return self.config_group, self.config_key
-
-    @property
     def timezone_name(self) -> str:
         """返回数据源默认时区名称，做防空字符串保护并退化到 UTC。"""
         return (self.default_timezone or "UTC").strip() or "UTC"

@@ -1359,16 +1359,6 @@ def get_source_ids_by_query_group(query_group: str) -> list[str]:
     return list(SOURCE_IDS_BY_QUERY_GROUP.get((query_group or "").strip(), []))
 
 
-def get_source_ids_by_fusion_group(fusion_group: str) -> list[str]:
-    """按融合分组过滤数据源。"""
-    return list(SOURCE_IDS_BY_FUSION_GROUP.get((fusion_group or "").strip(), []))
-
-
 def get_source_ids_by_dispatch_family(dispatch_family: str) -> list[str]:
     """按分发族过滤数据源。"""
     return list(SOURCE_IDS_BY_DISPATCH_FAMILY.get((dispatch_family or "").strip(), []))
-
-
-def get_source_ids_by_institution_key(institution_key: str) -> list[str]:
-    """按机构键过滤数据源。"""
-    return list(SOURCE_IDS_BY_INSTITUTION_KEY.get((institution_key or "").strip(), []))

@@ -40,7 +40,6 @@ import aiohttp
 from astrbot.api import logger
 
 PAGE_BASE = "https://www.nmc.cn"
-IMAGE_BASE = "https://image.nmc.cn"
 _IMAGE_HOST = "image.nmc.cn"
 
 # 页面内容缓存 TTL（秒）。降水预报每日 2 次起报（08/20 北京时），

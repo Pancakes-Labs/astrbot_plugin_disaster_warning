@@ -637,10 +637,6 @@ class DisasterWarningService:
             # 透传任务登记回调，确保预热任务纳入停机统一回收
             warmup(register_task=self.register_background_task)
 
-    async def _cancel_and_wait(self, tasks: list[asyncio.Task]) -> None:
-        """取消并等待任务结束。"""
-        await self.lifecycle_service.cancel_and_wait(tasks)
-
     def register_background_task(self, task: asyncio.Task) -> None:
         """注册服务级后台任务，确保停机时可统一回收。"""
         if task is None:
@@ -671,10 +667,6 @@ class DisasterWarningService:
         if coordinator is None:
             return False
         return bool(coordinator.is_silencing())
-
-    def is_in_silence_period(self) -> bool:
-        """兼容旧接口：等价于 is_silencing()。"""
-        return self.is_silencing()
 
     def _seed_event_for_silence(self, event: EventEnvelope) -> None:
         """静默期播种去重指纹（推送管理器 + 统计侧，若存在）。"""

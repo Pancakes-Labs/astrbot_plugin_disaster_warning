@@ -178,14 +178,6 @@ class WebAdminServer:
             """管理端 WebSocket 实时推送端点。"""
             await self._runtime_service.handle_websocket(websocket)
 
-    async def _send_full_update(self, websocket: WebSocket):
-        """向单个客户端发送完整数据更新。"""
-        await self._runtime_service.send_full_update(websocket)
-
-    async def _broadcast_data(self):
-        """向所有已连接客户端广播数据更新。"""
-        await self._runtime_service.broadcast_data()
-
     async def get_realtime_data(self) -> dict:
         """获取 WebSocket 推送所需的实时数据。"""
         return await self._runtime_service.get_realtime_data()
@@ -205,18 +197,6 @@ class WebAdminServer:
     async def notify_simulation_progress(self, run):
         """当模拟事件流执行进度变更时，向所有客户端推送实时进度。"""
         await self._runtime_service.notify_simulation_progress(run)
-
-    def _get_data_source_host(self, source_name: str) -> str | None:
-        """获取数据源的主机名，供延迟探测使用。"""
-        return self._source_health_monitor.get_data_source_host(source_name)
-
-    async def _ping_host(
-        self, host: str, port: int = 443, timeout: float = 3.0
-    ) -> float | None:
-        """使用 TCP 连接测试主机延迟。"""
-        return await self._source_health_monitor.ping_host(
-            host, port=port, timeout=timeout
-        )
 
     async def _background_ping_loop(self):
         """后台定期更新延迟缓存。"""
