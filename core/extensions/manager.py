@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import ssl
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,20 @@ from .manifest import check_host_version, load_manifest
 
 PLUGIN_DIR = Path(__file__).resolve().parents[2]
 PLUGIN_NAME = "astrbot_plugin_disaster_warning"
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    """优先使用 certifi 根证书。
+
+    部分系统证书库缺少较新的根证书（如 CEMADEN 使用的 GlobalSign Root R46），
+    导致 CERTIFICATE_VERIFY_FAILED。
+    """
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 class ExtensionManager:
@@ -188,7 +203,9 @@ class ExtensionManager:
         specs = [(i, p) for i, api in self._apis.items() for p in api.pollers]
         if not specs or self._tasks:
             return
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=_build_ssl_context())
+        )
         for ext_id, spec in specs:
             self._tasks.append(
                 asyncio.create_task(

@@ -11,7 +11,6 @@
   "source.alerts.desc": "CEMADEN hydrological risk and landslide alerts for Rio Grande do Sul",
   "source.rain": "CEMADEN - Heavy rain (RS)",
   "source.rain.desc": "Heavy rain derived from CEMADEN rain gauges in Rio Grande do Sul",
-  "present.location": "Location: {municipio}/{uf}",
   "present.rain": "Rain: {acc1hr} mm/1h | {acc24hr} mm/24h",
   "present.hazard": "Risk: {hazard}",
   "present.time": "Issued: {time} (Brasília time)",

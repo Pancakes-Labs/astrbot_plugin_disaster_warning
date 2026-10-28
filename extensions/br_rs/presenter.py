@@ -17,14 +17,6 @@ def make_presenter(api):
             lines = [f"{EMOJI.get(level, '⚪')} {display_context.title}"]
             if display_context.headline:
                 lines.append(display_context.headline)
-            if md.get("municipio"):
-                lines.append(
-                    t(
-                        "present.location",
-                        municipio=md["municipio"],
-                        uf=md.get("uf", ""),
-                    )
-                )
             if md.get("hazard") == "rain":
                 lines.append(
                     t(

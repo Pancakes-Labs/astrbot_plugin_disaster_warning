@@ -11,7 +11,6 @@
   "source.alerts.desc": "CEMADEN 针对南里奥格兰德州的水文风险与滑坡预警",
   "source.rain": "CEMADEN - 强降雨（RS）",
   "source.rain.desc": "基于 CEMADEN 雨量站推算的南里奥格兰德州强降雨预警",
-  "present.location": "地点：{municipio}/{uf}",
   "present.rain": "降雨：{acc1hr} mm/1小时 | {acc24hr} mm/24小时",
   "present.hazard": "风险：{hazard}",
   "present.time": "发布时间：{time}（巴西利亚时间）",

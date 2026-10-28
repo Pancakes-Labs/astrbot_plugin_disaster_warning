@@ -11,7 +11,6 @@
   "source.alerts.desc": "Alertas de risco hidrológico e movimentos de massa do CEMADEN para o Rio Grande do Sul",
   "source.rain": "CEMADEN - Chuva intensa (RS)",
   "source.rain.desc": "Chuva intensa derivada dos pluviômetros do CEMADEN no Rio Grande do Sul",
-  "present.location": "Local: {municipio}/{uf}",
   "present.rain": "Chuva: {acc1hr} mm/1h | {acc24hr} mm/24h",
   "present.hazard": "Risco: {hazard}",
   "present.time": "Emitido: {time} (Brasília)",
