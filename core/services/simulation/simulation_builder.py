@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import json
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -51,19 +50,6 @@ _SOURCE_TYPE_TO_DISASTER_TYPE: dict[SourceType, str] = {
     SourceType.WEATHER: DISASTER_TYPE_WEATHER,
     SourceType.TYPHOON: DISASTER_TYPE_TYPHOON,
 }
-
-# 进程内模拟事件递增计数器：避免同秒多次触发时 ID 冲突
-_sim_event_sequence = 0
-_sim_event_sequence_lock = threading.Lock()
-
-
-def _next_sim_event_sequence() -> int:
-    """获取下一个模拟事件序号（线程安全，单调递增）。"""
-    global _sim_event_sequence
-    with _sim_event_sequence_lock:
-        _sim_event_sequence += 1
-        return _sim_event_sequence
-
 
 def _safe_float(value: Any, default: float | None = None) -> float | None:
     """安全转 float。"""

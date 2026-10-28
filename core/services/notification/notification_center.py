@@ -89,11 +89,6 @@ class NotificationCenter:
             "total_count": len(self._cache.get("items", [])),
         }
 
-    async def get_meta(self) -> dict[str, Any]:
-        """获取通知元信息。"""
-        async with self._lock:
-            return self._build_meta_locked()
-
     async def get_payload(self) -> dict[str, Any]:
         """获取前端通知中心完整载荷。"""
         async with self._lock:

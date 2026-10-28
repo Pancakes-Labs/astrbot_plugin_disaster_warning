@@ -160,20 +160,6 @@ def get_flat_index() -> list[tuple[str, float, float, str, float]]:
     return _cached_flat_index or []
 
 
-def lookup_sect(addr: str) -> str | None:
-    """查询单个町丁目对应的地域名。
-
-    Args:
-        addr: 町丁目名（如 "御坊市薗"）。
-
-    Returns:
-        地域名字符串，未找到时返回 None。
-    """
-    if not addr:
-        return None
-    return get_sect_map().get(addr)
-
-
 def clear_cache() -> None:
     """清除模块级缓存，强制下次调用时重新加载文件。
 

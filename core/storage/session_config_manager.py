@@ -96,13 +96,6 @@ class SessionConfigManager:
             return
         self._change_listeners.append(listener)
 
-    def remove_change_listener(self, listener) -> None:
-        """移除配置变更监听器。"""
-        try:
-            self._change_listeners.remove(listener)
-        except ValueError:
-            pass
-
     @property
     def change_version(self) -> int:
         """当前配置版本号（每次覆写写入自增）。"""

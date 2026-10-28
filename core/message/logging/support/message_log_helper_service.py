@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 
@@ -87,15 +86,3 @@ class MessageLogHelperService:
                 return True
 
         return False
-
-    @staticmethod
-    def format_binary_timestamp(timestamp_ms: int) -> str:
-        """格式化二进制消息中的毫秒级时间戳。"""
-        if timestamp_ms <= 0:
-            return "无数据"
-
-        try:
-            dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
-            return dt.isoformat().replace("+00:00", "Z")
-        except (ValueError, OSError, OverflowError):
-            return str(timestamp_ms)

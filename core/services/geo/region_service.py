@@ -100,37 +100,5 @@ class RegionService:
             return chinese_name
         return original_name if fallback_to_original else ""
 
-    def is_data_loaded(self) -> bool:
-        """检查数据是否已加载。"""
-        return self._fe_numbers is not None and self._fe_names is not None
-
-    def get_region_stats(self) -> dict:
-        """获取区域数据统计信息。
-
-        可用于调试或管理端查看当前资源是否正确加载。
-        """
-        self._load_data()
-
-        if self._fe_numbers is None or self._fe_names is None:
-            return {
-                "loaded": False,
-                "total_names": 0,
-                "grid_rows": 0,
-                "grid_cols": 0,
-                "unique_regions": 0,
-            }
-
-        flat_numbers = [num for row in self._fe_numbers for num in row]
-        unique_regions = len(set(flat_numbers))
-        return {
-            "loaded": True,
-            "total_names": len(self._fe_names),
-            "grid_rows": len(self._fe_numbers),
-            "grid_cols": len(self._fe_numbers[0]) if self._fe_numbers else 0,
-            "unique_regions": unique_regions,
-            "grid_precision": "1° × 1°",
-            "coverage": "全球 (-90°~90°, -180°~180°)",
-        }
-
 
 region_service = RegionService()
