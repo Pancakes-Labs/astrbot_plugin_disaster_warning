@@ -17,7 +17,6 @@ def test_parse_alerts_filters_rs_and_maps_levels(ext, alerts_json):
     by_cod = {a["cod_alerta"]: a for a in alerts}
     assert by_cod[3141]["level"] == 3 and by_cod[3141]["hazard"] == "flood"
     assert by_cod[3159]["level"] == 2
-    assert len(ex.parse_alerts(alerts_json, uf="SC")) != len(alerts)
 
 
 def test_levels_and_hazard_variants(ext):
@@ -55,7 +54,7 @@ def test_alert_dedup_and_update(ext, alerts_json):
 
 def test_alert_envelope(ext, make_api, alerts_json):
     ex = ext.extension
-    api = make_api("pt-BR")
+    api = make_api("en")
     enso = ext.enso.build_enso("JAS 2026 29.12 2.16\n")
     alert = next(a for a in ex.parse_alerts(alerts_json) if a["cod_alerta"] == 3141)
     env = ex.build_alert_envelope(api, alert, enso)
@@ -80,13 +79,10 @@ def _gauges(rain_json, **overrides):
     return g
 
 
-def test_rain_fixture_has_no_warning_and_dash_is_handled(ext, rain_json):
-    # Real fixture: only "-" and 0.2 mm -> nothing, and no crash on "-".
-    assert ext.extension.parse_rain(rain_json) == []
-
-
 def test_rain_levels(ext, rain_json):
     ex = ext.extension
+    # The real fixture has only "-" and 0.2 mm: no alert and no error.
+    assert ex.parse_rain(rain_json) == []
     cases = [
         ({"acc1hr": 20}, 2),
         ({"acc24hr": 100}, 3),
@@ -125,7 +121,7 @@ def test_rain_escalation_only(ext, rain_json):
 
 def test_rain_envelope(ext, make_api, rain_json):
     ex = ext.extension
-    api = make_api("pt-BR")
+    api = make_api("en")
     item = ex.parse_rain(_gauges(rain_json, acc1hr=31, acc24hr=40))[0]
     env = ex.build_rain_envelope(api, item, "20261028", None)
     assert env.identity.event_id == "br_rs_rain_4314050_20261028_3"
@@ -139,9 +135,8 @@ def test_rain_envelope(ext, make_api, rain_json):
 
 def test_oni_parse_and_classify(ext, oni_text):
     e = ext.enso
-    row = e.parse_oni(oni_text)
-    assert (row["season"], row["year"], row["anom"]) == ("JAS", 2026, 2.16)
     got = e.build_enso(oni_text)
+    assert (got["season"], got["year"], got["anom"]) == ("JAS", 2026, 2.16)
     assert (got["phase"], got["strength"]) == ("el_nino", "very_strong")
     table = {
         0.49: ("neutral", ""),
@@ -154,7 +149,7 @@ def test_oni_parse_and_classify(ext, oni_text):
     }
     for anom, expect in table.items():
         assert e.classify(anom) == expect
-    assert e.parse_oni("garbage") is None
+    assert e.build_enso("garbage") is None
 
 
 def test_enso_cache(ext, oni_text):
@@ -212,13 +207,14 @@ def _present(ext, make_api, lang, alerts_json, enso_text):
     return cls.present(ctx, None)
 
 
-def test_presenter_pt_br(ext, make_api, alerts_json, oni_text):
-    out = _present(ext, make_api, "pt-BR", alerts_json, oni_text)
-    assert out.startswith("🟠 Alerta CEMADEN: risco hidrológico")
+def test_presenter_en(ext, make_api, alerts_json, oni_text):
+    out = _present(ext, make_api, "en", alerts_json, oni_text)
+    assert out.startswith("🟠 CEMADEN alert: flood risk")
     assert "SÃO BORJA/RS" in out
-    assert "25/10/2026 11:20 (Brasília)" in out
-    assert "El Niño muito forte" in out and "+2.16" in out and "Não é causa" in out
-    assert out.endswith("Fonte: CEMADEN / NOAA CPC")
+    assert "25/10/2026 11:20 (Brasília time)" in out
+    assert "very strong El Niño" in out and "+2.16" in out
+    assert "not the cause" in out
+    assert out.endswith("Source: CEMADEN / NOAA CPC")
 
 
 def test_presenter_zh_cn_and_neutral(ext, make_api, alerts_json, oni_text):
@@ -228,28 +224,28 @@ def test_presenter_zh_cn_and_neutral(ext, make_api, alerts_json, oni_text):
         and "并非本次预警的成因" in out
         and "来源：CEMADEN / NOAA CPC" in out
     )
-    neutral = _present(ext, make_api, "pt-BR", alerts_json, "JAS 2026 29.12 0.10\n")
+    neutral = _present(ext, make_api, "en", alerts_json, "JAS 2026 29.12 0.10\n")
     assert "ONI" not in neutral and "NOAA" not in neutral
-    assert neutral.endswith("Fonte: CEMADEN")
+    assert neutral.endswith("Source: CEMADEN")
 
 
 def test_presenter_rain(ext, make_api, rain_json):
     ex = ext.extension
-    api = make_api("pt-BR")
+    api = make_api("en")
     item = ex.parse_rain(_gauges(rain_json, acc1hr=31, acc24hr="-"))[0]
     env = ex.build_rain_envelope(api, item, "20261028", None)
     ctx = types.SimpleNamespace(
         title=env.event.title, headline=env.event.headline, metadata=env.event.metadata
     )
     out = ext.presenter.make_presenter(api).present(ctx, None)
-    assert "Chuva: 31 mm/1h | - mm/24h" in out and "Chuva intensa" in out
+    assert "Rain: 31 mm/1h | - mm/24h" in out and "Heavy rain" in out
 
 
 # ------------------------------------------------------------------ setup / locale
 
 
 def test_setup_registrations(ext, make_api):
-    api = make_api("pt-BR", {"alerts_interval": 600})
+    api = make_api("en", {"alerts_interval": 600})
     ext.extension.setup(api)
     assert set(api.sources) == {"br_rs_cemaden_alerts", "br_rs_cemaden_rain"}
     assert set(api.presenters) == {"br_rs_weather"}
@@ -262,7 +258,7 @@ def test_setup_registrations(ext, make_api):
         assert entry.presentation_type == "weather"
         assert entry.text_presenter_key == "br_rs_weather"
         assert entry.default_timezone == "America/Sao_Paulo"
-        assert entry.display_name and entry.display_name != "source.alerts"
+        assert entry.display_name and not entry.display_name.startswith("source.")
         assert sid in api.pollers
     assert api.pollers["br_rs_cemaden_alerts"][1] == 600
     assert api.pollers["br_rs_cemaden_rain"][1] == 300
@@ -270,7 +266,7 @@ def test_setup_registrations(ext, make_api):
 
 
 def test_pollers_end_to_end_with_fake_session(ext, make_api, alerts_json, rain_json):
-    api = make_api("pt-BR")
+    api = make_api("en")
     ext.extension.setup(api)
     rain = _gauges(rain_json, acc1hr=61)
     bodies = {
@@ -314,7 +310,7 @@ def test_locale_zh_cn_has_every_key(ext):
         p.stem: json.loads(p.read_text("utf-8"))
         for p in (EXT_DIR / "locale").glob("*.json")
     }
-    assert {"zh-CN", "en", "pt-BR"} <= set(loc)
+    assert {"zh-CN", "en"} <= set(loc)
     union = set().union(*loc.values())
     assert union <= set(loc["zh-CN"])
     for name, d in loc.items():

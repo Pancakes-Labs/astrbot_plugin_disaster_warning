@@ -1,9 +1,9 @@
 id: br_rs
-name: Brasil — Rio Grande do Sul
+name: Brazil - Rio Grande do Sul
 version: 0.1.0
 api_version: 1
 min_host_version: 1.6.5
 entry: extension:setup
-description: Heavy rain, flood/landslide risk (CEMADEN) and El Niño/La Niña context (NOAA CPC) for Rio Grande do Sul, Brazil.
+description: This extension sends CEMADEN rain, flood, and landslide alerts for Rio Grande do Sul, Brazil. It adds El Niño and La Niña data from NOAA CPC.
 author: astrbot_plugin_disaster_warning
 permissions: [network]
