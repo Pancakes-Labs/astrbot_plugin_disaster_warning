@@ -374,3 +374,17 @@ def test_locale_zh_cn_has_every_key(ext):
     assert union <= set(loc["zh-CN"])
     for name, d in loc.items():
         assert set(d) == union, name
+
+
+def test_meta_json_and_icon():
+    """Check that meta.json is valid, that its icon file is a PNG, and that the credit is complete."""
+    meta = json.loads((EXT_DIR / "meta.json").read_text("utf-8"))
+    assert meta["id"] == "br_rs"
+    assert meta["maintainer"]["github"] == "h0ffmann"
+    assert meta["maintainer"]["company"] == meta["company"]["name"] == "marola.dev"
+    assert set(meta["languages"]) == {
+        p.stem for p in (EXT_DIR / "locale").glob("*.json")
+    }
+    icon = meta["icon"]
+    assert (EXT_DIR / icon["file"]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    assert icon["license"] == "CC-BY-4.0" and icon["author"] and icon["source"]
