@@ -191,9 +191,11 @@ def _match_area(item: dict[str, Any], keyword: str) -> bool:
         return False
     if area == kw or area == kw + "市":
         return True
-    for suffix in _AREA_SUFFIXES:
-        if area.endswith(suffix) and area[: -len(suffix)] == kw:
-            return True
+    if any(
+        area.endswith(suffix) and area[: -len(suffix)] == kw
+        for suffix in _AREA_SUFFIXES
+    ):
+        return True
     return kw in area
 
 

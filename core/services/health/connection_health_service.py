@@ -300,10 +300,10 @@ class ConnectionHealthService:
     @staticmethod
     def _has_connecting_channels(live_components: list[dict[str, Any]]) -> bool:
         """是否仍有已启用但未连通的通道（建连中）。"""
-        for comp in live_components:
-            if bool(comp.get("enabled")) and not bool(comp.get("connected")):
-                return True
-        return False
+        return any(
+            bool(comp.get("enabled")) and not bool(comp.get("connected"))
+            for comp in live_components
+        )
 
     # ──────────────────────────── 时间工具 ────────────────────────────
 
