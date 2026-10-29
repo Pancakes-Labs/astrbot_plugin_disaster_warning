@@ -968,6 +968,9 @@ class PluginAdminCommandService(CommandTelemetryMixin):
 
         Show the load state, the sources, and the error of each extension.
         """
+        if not await self.plugin.is_plugin_admin(event):
+            yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
+            return
         manager = getattr(self.plugin.disaster_service, "extension_manager", None)
         if manager is None:
             yield quoted_plain_result(self.plugin, event, "❌ 灾害预警服务未启动")
