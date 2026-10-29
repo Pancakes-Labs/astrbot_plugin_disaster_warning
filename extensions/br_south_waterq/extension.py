@@ -56,7 +56,8 @@ class BulletinState:
             self._seen[p["key"]] = key
             if self._ready and _is_news(prev, key):
                 out.append(p)
-        self._ready = True
+        if points:
+            self._ready = True
         return out
 
 
