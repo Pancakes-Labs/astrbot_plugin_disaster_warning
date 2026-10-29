@@ -543,3 +543,54 @@ def test_past_gauge_is_ignored(ext, rain_by_state):
     old = next(g for g in gauges if g["datahoraUltimovalor"].startswith("12/12/23"))
     old.update(acc1hr=99, acc24hr=200)
     assert all(i["codibge"] != old["codibge"] for i in ex.parse_rain(gauges, uf="SC"))
+
+
+def test_enso_cancel_keeps_alerts(ext, make_api, alerts_json):
+    """Check that an alert stays new when the poll stops during the ENSO request."""
+    api = make_api("en")
+    ext.extension.setup(api)
+    fetch = api.pollers["br_south_disaster_cemaden_alerts"][0]
+
+    class Resp:
+        def __init__(self, body):
+            self.body = body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        async def text(self):
+            return self.body
+
+    class Session:
+        def __init__(self, oni_fails):
+            self.oni_fails = oni_fails
+
+        def get(self, url):
+            if url == ext.enso.ONI_URL:
+                if self.oni_fails:
+                    raise asyncio.CancelledError  # Same as the poll timeout
+                return Resp("JAS 2026 29.12 2.16\n")
+            return Resp(json.dumps(alerts_json))
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(fetch(Session(oni_fails=True)))
+    assert len(asyncio.run(fetch(Session(oni_fails=False)))) == 3
+
+
+def test_bad_settings_use_defaults(ext, make_api):
+    """Check that bad intervals, thresholds or states do not stop the setup."""
+    cfg = {
+        "alerts_interval": "5 min",
+        "rain_interval": None,
+        "states": 123,
+        "rain_thresholds": {"moderate": {"acc1hr": "a lot"}},
+    }
+    api = make_api("en", cfg)
+    ext.extension.setup(api)
+    assert [i for _, _, i in api.all_pollers] == [300] * 4

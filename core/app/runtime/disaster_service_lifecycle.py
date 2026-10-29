@@ -113,7 +113,10 @@ class DisasterServiceLifecycleService:
                 # Start the extension polling tasks. A failed extension does not stop the host.
                 extension_manager = getattr(self.service, "extension_manager", None)
                 if extension_manager is not None:
-                    await extension_manager.start()
+                    try:
+                        await extension_manager.start()
+                    except Exception as exc:
+                        logger.warning(f"[灾害预警] 扩展轮询启动失败（已忽略）: {exc}")
 
                 # EQSC AccessToken 必须先于海啸/台风轮询预热：
                 # 两路轮询共享同一 token_manager；若首轮并发请求时 token 尚未就绪，

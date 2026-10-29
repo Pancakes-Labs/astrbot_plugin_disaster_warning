@@ -170,6 +170,18 @@ def _recent(when: datetime | None, newest: datetime | None) -> bool:
     return when is not None and newest - when <= timedelta(days=MAX_AGE_DAYS)
 
 
+def int_setting(api, cfg: dict, key: str, default: int) -> int:
+    """Return cfg[key] as an int.
+
+    If the value is not a number, log a warning and return the default.
+    """
+    try:
+        return int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        api.logger.warning(f"Setting '{key}' is not a number. Use {default}.")
+        return default
+
+
 def load_thresholds(config: dict) -> dict:
     """Replace the default thresholds with the values in config["rain_thresholds"]."""
     merged = dict(DEFAULT_THRESHOLDS)
@@ -178,10 +190,13 @@ def load_thresholds(config: dict) -> dict:
         item = custom.get(key)
         if isinstance(item, dict):
             t1, t24 = merged[lvl]
-            merged[lvl] = (
-                float(item.get("acc1hr", t1)),
-                float(item.get("acc24hr", t24)),
-            )
+            try:
+                merged[lvl] = (
+                    float(item.get("acc1hr", t1)),
+                    float(item.get("acc24hr", t24)),
+                )
+            except (TypeError, ValueError):
+                continue  # Not a number: keep the default threshold
     return merged
 
 
@@ -352,20 +367,23 @@ def setup(api) -> None:
 
     async def fetch_alerts(session):
         alerts = parse_alerts(await _get_json(session, ALERTS_URL), ufs)
-        alerts = alert_state.fresh([a for a in alerts if a["active"]])
+        alerts = [a for a in alerts if a["active"]]
         if not alerts:
             return []
+        # Get ENSO before the state changes. A timeout then does not lose an alert.
         ctx = await enso.get(session)
+        alerts = alert_state.fresh(alerts)
         return [build_alert_envelope(api, a, ctx) for a in alerts]
 
     def rain_fetcher(uf: str):
         async def fetch_rain(session):
             gauges = await _get_json(session, RAIN_URL.format(uf=uf))
             day = datetime.now(BRT).strftime("%Y%m%d")
-            items = rain_state.escalations(parse_rain(gauges, thresholds, uf), day)
+            items = parse_rain(gauges, thresholds, uf)
             if not items:
                 return []
             ctx = await enso.get(session)
+            items = rain_state.escalations(items, day)
             return [build_rain_envelope(api, i, day, ctx) for i in items]
 
         return fetch_rain
@@ -376,11 +394,11 @@ def setup(api) -> None:
     api.register_poller(
         ALERTS_SOURCE,
         fetch_alerts,
-        interval_seconds=int(cfg.get("alerts_interval", 300)),
+        interval_seconds=int_setting(api, cfg, "alerts_interval", 300),
     )
     for uf in ufs:
         api.register_poller(
             RAIN_SOURCE,
             rain_fetcher(uf),
-            interval_seconds=int(cfg.get("rain_interval", 300)),
+            interval_seconds=int_setting(api, cfg, "rain_interval", 300),
         )

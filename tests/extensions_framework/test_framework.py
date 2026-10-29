@@ -215,8 +215,9 @@ def test_happy_load_and_status(tmp_path):
         "error": "",
         "sources": ["src_good"],
     }
-    assert ("source", "src_good", "good") in reg.calls
-    assert not any(c[0].startswith("unreg") for c in reg.calls)
+    # The load removes the registrations of an earlier load first, then registers.
+    last_unreg = max(i for i, c in enumerate(reg.calls) if c[0].startswith("unreg"))
+    assert reg.calls.index(("source", "src_good", "good")) > last_unreg
 
 
 def test_not_found_and_disabled_not_loaded(tmp_path):
@@ -247,7 +248,9 @@ def test_failing_setup_isolated(tmp_path):
         "unreg_presenter",
         "unreg_rule",
     }
-    assert all(c[1] == "bad" for c in unreg)
+    assert {c[1] for c in unreg} == {"bad", "good"}  # good: only the pre-load cleanup
+    good_unreg = [i for i, c in enumerate(reg.calls) if c[:2] == ("unreg_rule", "good")]
+    assert reg.calls.index(("source", "src_good", "good")) > max(good_unreg)
     assert "_dw_ext_bad.extension" not in sys.modules
 
 

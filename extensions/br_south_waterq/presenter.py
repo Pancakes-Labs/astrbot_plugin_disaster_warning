@@ -27,7 +27,7 @@ def make_presenter(api):
             if sample:
                 lines.append(t("present.sample", date=sample))
             if md.get("ecoli") is not None:
-                value = f"{md['ecoli']:g}".replace(".", t("format.decimal"))
+                value = f"{md['ecoli']:.10g}".replace(".", t("format.decimal"))
                 lines.append(t("present.ecoli", value=value))
             if md.get("laboratorio"):
                 lines.append(t("present.lab", lab=md["laboratorio"]))

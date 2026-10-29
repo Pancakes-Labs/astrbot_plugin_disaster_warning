@@ -157,6 +157,8 @@ class ExtensionManager:
         pkg = f"_dw_ext_{ext_id}"
         # Remove the modules of an earlier load. A plugin reload then uses the new code.
         self._purge_modules(pkg)
+        # Remove the registrations of an earlier load. A new load then does not fail.
+        self._unregister_all(ext_id)
         try:
             manifest = load_manifest(ext_dir)
             rec = self._record(
@@ -235,7 +237,7 @@ class ExtensionManager:
             now = time.monotonic()
             if now - last_log >= self.LOG_THROTTLE_SECONDS:
                 last_log = now
-                logger.warning(f"[灾害预警] 扩展轮询 {label} {msg}")
+                logger.warning(f"[灾害预警] 扩展轮询 {label} {msg}", exc_info=True)
 
         while True:
             try:

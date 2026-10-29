@@ -13,6 +13,8 @@ import pytest
 EXT_DIR = Path(__file__).resolve().parents[2] / "extensions" / "br_south_waterq"
 # A sample date of last week. The poller sends only active results (90 days or newer).
 RECENT = date.today() - timedelta(days=7)
+# The day of the state tests. The RS samples of the recorded data are then active.
+TODAY = date(2026, 3, 10)
 UNSUITABLE_RS = {5, 56, 1023, 1029}
 SC_POINT = (
     "ca409384-a717-4bdc-8a14-b5fd6ed3cea8"  # Unsuitable, newest sample 19/10/2026
@@ -31,7 +33,7 @@ def _rs_point(ext, locais, cod):
 
 def _ready_state(ext, points):
     state = ext.extension.BulletinState()
-    assert state.changes(points) == []
+    assert state.changes(points, TODAY) == []
     return state
 
 
@@ -131,8 +133,8 @@ def test_baseline_emits_nothing(ext, rs_json):
     """Check that the first two calls with the same data give no event."""
     state = ext.extension.BulletinState()
     points = ext.rs.parse(rs_json)
-    assert state.changes(points) == []
-    assert state.changes(points) == []
+    assert state.changes(points, TODAY) == []
+    assert state.changes(points, TODAY) == []
 
 
 def test_new_unsuitable_bulletin(ext, rs_json):
@@ -140,9 +142,9 @@ def test_new_unsuitable_bulletin(ext, rs_json):
     state = _ready_state(ext, ext.rs.parse(rs_json))
     _set_rs(rs_json, 1029, ultimaColeta="02/03/2026")  # Was unsuitable already
     _set_rs(rs_json, 1026, ultimaColeta="02/03/2026", situacao=3)  # Was suitable
-    got = state.changes(ext.rs.parse(rs_json))
+    got = state.changes(ext.rs.parse(rs_json), TODAY)
     assert {p["key"] for p in got} == {"1029", "1026"}
-    assert state.changes(ext.rs.parse(rs_json)) == []
+    assert state.changes(ext.rs.parse(rs_json), TODAY) == []
 
 
 def test_back_to_suitable(ext, rs_json):
@@ -150,7 +152,7 @@ def test_back_to_suitable(ext, rs_json):
     state = _ready_state(ext, ext.rs.parse(rs_json))
     _set_rs(rs_json, 56, situacao=2, ultimaColeta="02/03/2026")
     _set_rs(rs_json, 1026, ultimaColeta="02/03/2026")  # Suitable to suitable
-    got = state.changes(ext.rs.parse(rs_json))
+    got = state.changes(ext.rs.parse(rs_json), TODAY)
     assert [(p["key"], p["status"]) for p in got] == [("56", "suitable")]
 
 
@@ -158,9 +160,9 @@ def test_not_collected_is_ignored(ext, rs_json):
     """Check that "not collected" gives no event and keeps the last known state."""
     state = _ready_state(ext, ext.rs.parse(rs_json))
     _set_rs(rs_json, 56, situacao=0, ultimaColeta="02/03/2026")
-    assert state.changes(ext.rs.parse(rs_json)) == []
+    assert state.changes(ext.rs.parse(rs_json), TODAY) == []
     _set_rs(rs_json, 56, situacao=2, ultimaColeta="09/03/2026")
-    assert [p["key"] for p in state.changes(ext.rs.parse(rs_json))] == ["56"]
+    assert [p["key"] for p in state.changes(ext.rs.parse(rs_json), TODAY)] == ["56"]
 
 
 def test_sc_status_change_only(ext, sc_json):
@@ -444,3 +446,54 @@ def test_meta_json_and_icon():
     assert (EXT_DIR / "extension.png").read_bytes() == (
         EXT_DIR.parent / "br_south_disaster" / "extension.png"
     ).read_bytes()
+
+
+# ------------------------------------------------------------------ review fixes
+
+
+def test_failed_complete_keeps_change(ext, make_api, rs_json):
+    """Check that a failed sample request keeps the change for the next poll."""
+    calls = []
+
+    async def fetch(session):
+        return ext.rs.parse(rs_json)
+
+    async def complete(session, news):
+        calls.append(len(news))
+        if len(calls) == 1:
+            raise asyncio.TimeoutError
+        return news
+
+    provider = types.SimpleNamespace(
+        fetch=fetch, complete=complete, SOURCE_LABEL="FEPAM/RS"
+    )
+    poll = ext.extension.make_fetch(make_api("en"), provider)
+    assert asyncio.run(poll(None)) == []  # Baseline
+    _set_rs(rs_json, 1026, situacao=3, ultimaColeta=RECENT.strftime("%d/%m/%Y"))
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(poll(None))
+    (env,) = asyncio.run(poll(None))
+    assert env.event.metadata["point"] == "1026"
+
+
+def test_past_unsuitable_gives_no_recovery(ext, rs_json):
+    """Check that a past unsuitable result gives no "suitable again" event."""
+    later = TODAY + timedelta(days=200)  # All recorded RS samples are past
+    state = ext.extension.BulletinState()
+    assert state.changes(ext.rs.parse(rs_json), later) == []
+    _set_rs(rs_json, 56, situacao=2, ultimaColeta=later.strftime("%d/%m/%Y"))
+    assert state.changes(ext.rs.parse(rs_json), later) == []
+
+
+def test_bad_settings_use_defaults(ext, make_api):
+    """Check that a bad interval or states value does not stop the setup."""
+    api = make_api("en", {"poll_interval": "6 h", "states": 123})
+    ext.extension.setup(api)
+    assert [i for _, _, i, _ in api.all_pollers] == [21600] * 3
+
+
+def test_presenter_large_ecoli_value(ext, make_api, sc_json):
+    """Check that a 7-digit E. coli result does not use scientific notation."""
+    p = next(p for p in ext.sc.parse(sc_json) if p["key"] == SC_POINT)
+    p.update(sample_date=date(2026, 10, 19), ecoli=2419600.0)
+    assert "E. coli: 2419600 MPN/100 mL" in _present(ext, make_api, "en", p, "IMA/SC")

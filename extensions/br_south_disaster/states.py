@@ -15,10 +15,11 @@ STATES = {
 def selected_states(config: dict) -> tuple[str, ...]:
     """Return the state codes in config["states"], in the order of STATES.
 
-    If the setting is empty or not set, return all states. Ignore unknown codes.
+    If the setting is empty, not set or not a list, return all states.
+    Ignore unknown codes.
     """
     wanted = (config or {}).get("states")
-    if not wanted:
+    if not wanted or not isinstance(wanted, (list, tuple)):
         return tuple(STATES)
     codes = {str(code).strip().upper() for code in wanted}
     return tuple(uf for uf in STATES if uf in codes)

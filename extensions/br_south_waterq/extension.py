@@ -22,11 +22,24 @@ DEFAULT_INTERVAL = 21600  # 6 h. The agencies publish about one bulletin each we
 SEVERITY = {SUITABLE: 0, UNSUITABLE: 2}  # white and yellow
 BRT = timezone(timedelta(hours=-3))  # Brasília time, no daylight saving time
 MAX_AGE_DAYS = 90  # Hard limit. An older sample is past, not active.
+PAST = "past"  # Saved status of a past result. It gave no alert, so no recovery.
 
 
 def is_active(sample: date | None, today: date) -> bool:
     """Return True if the sample date is known and MAX_AGE_DAYS old or newer."""
     return sample is not None and (today - sample).days <= MAX_AGE_DAYS
+
+
+def int_setting(api, cfg: dict, key: str, default: int) -> int:
+    """Return cfg[key] as an int.
+
+    If the value is not a number, log a warning and return the default.
+    """
+    try:
+        return int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        api.logger.warning(f"Setting '{key}' is not a number. Use {default}.")
+        return default
 
 
 def _is_news(prev, key) -> bool:
@@ -45,20 +58,32 @@ class BulletinState:
         self._seen: dict = {}
         self._ready = False
 
-    def changes(self, points: list[dict]) -> list[dict]:
+    def changes(self, points: list[dict], today: date | None = None) -> list[dict]:
         """Return the points with a new unsuitable bulletin or a recovery."""
+        today = today or datetime.now(BRT).date()
         out = []
         for p in points:
             if p["status"] not in SEVERITY:
                 continue  # Not collected or unknown: keep the last known state
             key = (p["bulletin"], p["status"])
+            sample = p.get("sample_date")
+            if sample is not None and not is_active(sample, today):
+                key = (p["bulletin"], PAST)
             prev = self._seen.get(p["key"])
             self._seen[p["key"]] = key
-            if self._ready and _is_news(prev, key):
+            if self._ready and key[1] != PAST and _is_news(prev, key):
                 out.append(p)
         if points:
             self._ready = True
         return out
+
+    def snapshot(self) -> tuple[dict, bool]:
+        """Return a copy of the state."""
+        return dict(self._seen), self._ready
+
+    def restore(self, saved: tuple[dict, bool]) -> None:
+        """Set the state back to a snapshot."""
+        self._seen, self._ready = dict(saved[0]), saved[1]
 
 
 def build_envelope(api, point: dict, source_label: str, now: datetime | None = None):
@@ -142,10 +167,16 @@ def make_fetch(api, provider):
     state = BulletinState()
 
     async def fetch(session):
-        news = state.changes(await provider.fetch(session))
+        points = await provider.fetch(session)
+        saved = state.snapshot()
+        news = state.changes(points)
         if not news:
             return []
-        news = await provider.complete(session, news)
+        try:
+            news = await provider.complete(session, news)
+        except BaseException:
+            state.restore(saved)  # A failure or a timeout: try again at the next poll
+            raise
         today = datetime.now(BRT).date()
         return [
             build_envelope(api, p, provider.SOURCE_LABEL)
@@ -175,6 +206,6 @@ def setup(api) -> None:
         api.register_poller(
             SOURCE,
             make_fetch(api, STATES[uf]),
-            interval_seconds=int(cfg.get("poll_interval", DEFAULT_INTERVAL)),
+            interval_seconds=int_setting(api, cfg, "poll_interval", DEFAULT_INTERVAL),
             timeout_seconds=60,  # SC asks for the samples of each changed point
         )
