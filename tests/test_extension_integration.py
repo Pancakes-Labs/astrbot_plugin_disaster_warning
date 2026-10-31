@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,90 @@ async def test_unregister_one_leaves_the_other(two_loaded):
     assert f"{FIRST}_source" not in SOURCE_CATALOG
     assert get_source_owner(f"{SECOND}_source") == SECOND
     assert present_message(second, second.source_id).startswith(SECOND)
+
+
+def _context(metadata, provider_family="extension"):
+    importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
+    from astrbot_plugin_disaster_warning.core.services.display.builders import (
+        weather_context_builder as builder,
+    )
+
+    event = types.SimpleNamespace(
+        metadata=metadata, headline="Headline", description=""
+    )
+    envelope = types.SimpleNamespace(
+        id="host_id", event_type="weather_alarm", event=event
+    )
+    return builder.build_weather_display_context(
+        {
+            "envelope": envelope,
+            "resolved_source_id": "host_source",
+            "source_descriptor": types.SimpleNamespace(provider_family=provider_family),
+            "source_payload": {},
+            "metadata": {"status": "from_display", "other": 1},
+            "title": "Title",
+        }
+    ).metadata
+
+
+def test_extension_fields_win_over_display_fields():
+    """Check the merge direction of the event metadata of an extension."""
+    metadata = _context({"status": "from_extension"})
+    assert metadata["status"] == "from_extension"
+    assert metadata["other"] == 1
+
+
+def test_extension_cannot_replace_the_host_fields():
+    """Check that the identity of an event stays with the host."""
+    metadata = _context({"event_id": "fake", "source_id": "fake"})
+    assert (metadata["event_id"], metadata["source_id"]) == ("host_id", "host_source")
+
+
+def test_built_in_source_ignores_event_metadata():
+    """Check that the display metadata of a built-in source does not change."""
+    metadata = _context({"status": "from_extension"}, provider_family="fan_studio")
+    assert metadata["status"] == "from_display"
+
+
+@pytest.mark.parametrize("metadata", [None, "text", 3, [1]])
+async def test_rules_accept_event_metadata_that_is_not_a_dict(two_loaded, metadata):
+    """Check the weather rule and the aggregation with a bad metadata value."""
+    from astrbot_plugin_disaster_warning.core.message.push.push_policy import (
+        evaluate_push_decision_with_components,
+    )
+    from astrbot_plugin_disaster_warning.core.message.push.weather_aggregation_service import (
+        WeatherAggregationService,
+    )
+
+    envelope = await _first_event(two_loaded, FIRST)
+    envelope.event.metadata = metadata
+    runtime_config = {"weather_config": {"weather_filter": {"enabled": True}}}
+    evaluate_push_decision_with_components(
+        envelope, runtime_config=runtime_config, policy_state={}
+    )
+    service = WeatherAggregationService.__new__(WeatherAggregationService)
+    assert service._resolve_color_level(envelope)[0] == 0
+
+
+@pytest.mark.parametrize("level", [True, 5, -1, "3", 2.0])
+async def test_bad_severity_level_is_ignored(two_loaded, level):
+    """Check that only an int from 0 to 4 sets the color level."""
+    from astrbot_plugin_disaster_warning.core.message.push.weather_aggregation_service import (
+        WeatherAggregationService,
+    )
+
+    envelope = await _first_event(two_loaded, FIRST)
+    envelope.event.metadata = {"severity_level": level}
+    service = WeatherAggregationService.__new__(WeatherAggregationService)
+    assert service._resolve_color_level(envelope)[0] == 0
+
+
+async def test_severity_level_sets_the_color(two_loaded):
+    """Check the normal path of the severity level."""
+    from astrbot_plugin_disaster_warning.core.message.push.weather_aggregation_service import (
+        WeatherAggregationService,
+    )
+
+    envelope = await _first_event(two_loaded, FIRST)
+    service = WeatherAggregationService.__new__(WeatherAggregationService)
+    assert service._resolve_color_level(envelope) == (3, "橙色")

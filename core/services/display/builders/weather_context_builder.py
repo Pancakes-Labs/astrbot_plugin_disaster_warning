@@ -103,8 +103,14 @@ def build_weather_display_context(projection: dict, options: dict | None = None)
         "description": payload_details["description"],
     }
     # Extension presenters read WeatherEvent.metadata. Built-in sources do not change.
+    # The fields of the extension win, but an extension cannot replace the host fields.
     if getattr(source_descriptor, "provider_family", "") == "extension":
-        display_metadata = {**domain_metadata, **display_metadata}
+        host_fields = ("event_id", "source_id", "event_type", "description")
+        display_metadata = {
+            **display_metadata,
+            **domain_metadata,
+            **{key: display_metadata[key] for key in host_fields},
+        }
     return WeatherDisplayContext(
         event_id=envelope.id,
         source_id=resolved_source_id,

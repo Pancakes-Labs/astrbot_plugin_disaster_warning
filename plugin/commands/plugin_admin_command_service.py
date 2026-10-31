@@ -981,11 +981,16 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield quoted_plain_result(
                 self.plugin,
                 event,
-                "🧩 未启用任何扩展\n💡 在配置 extensions.enabled_ids 中填写扩展 id 后重载插件",
+                "🧩 未发现任何扩展\n💡 将扩展放入数据目录 extensions/，在配置 extensions.enabled_ids 中填写扩展 id 后重载插件",
             )
             return
 
-        state_icons = {"loaded": "🟢", "error": "🔴", "not_found": "⚪"}
+        state_icons = {
+            "loaded": "🟢",
+            "error": "🔴",
+            "not_found": "⚪",
+            "disabled": "⚫",
+        }
         lines = ["🧩 扩展状态"]
         for record in records:
             icon = state_icons.get(record["state"], "❔")

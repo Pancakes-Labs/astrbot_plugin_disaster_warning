@@ -146,8 +146,17 @@ class WeatherAggregationService:
         title_text = ""
         # An extension event can give the level directly: 0 white ... 4 red.
         if isinstance(domain_event, WeatherEvent):
-            severity_level = domain_event.metadata.get("severity_level")
-            if isinstance(severity_level, int) and 0 <= severity_level <= 4:
+            event_metadata = domain_event.metadata
+            severity_level = (
+                event_metadata.get("severity_level")
+                if isinstance(event_metadata, dict)
+                else None
+            )
+            if (
+                isinstance(severity_level, int)
+                and not isinstance(severity_level, bool)
+                and 0 <= severity_level <= 4
+            ):
                 return severity_level, ["白色", "蓝色", "黄色", "橙色", "红色"][
                     severity_level
                 ]

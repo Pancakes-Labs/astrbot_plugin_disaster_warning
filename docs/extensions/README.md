@@ -31,7 +31,8 @@ Reload the plugin. Then send `/灾害预警扩展`. The command shows the state 
 
 - 🟢: the extension is loaded.
 - 🔴: an error occurred. The command shows the error message.
-- ⚪: the host did not find the extension.
+- ⚪: the extension is in `enabled_ids`, but the host did not find it.
+- ⚫: the extension is on disk, but it is not in `enabled_ids`. The host does not import it.
 
 A broken extension does not stop the host.
 

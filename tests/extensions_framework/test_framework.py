@@ -225,9 +225,35 @@ def test_not_found_and_disabled_not_loaded(tmp_path):
     make_ext(tmp_path / "bundled", "other")
     mgr = make_manager(tmp_path, FakeService(["ghost"]))
     mgr.load_all()
-    (row,) = mgr.status()
-    assert (row["id"], row["state"]) == ("ghost", "not_found")
+    rows = {row["id"]: row["state"] for row in mgr.status()}
+    assert rows == {"ghost": "not_found", "other": "disabled"}
     assert "_dw_ext_other" not in sys.modules
+
+
+def test_scan_lists_extensions_that_are_not_enabled(tmp_path):
+    """Check scan-based discovery: name, version, a bad manifest and two roots."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    make_ext(first, "good")
+    make_ext(first, "idle")
+    make_ext(second, "idle")
+    (first / "bad").mkdir()
+    (first / "bad" / "extension.yaml").write_text("id: wrong\n", "utf-8")
+    (first / "no_manifest").mkdir()
+    mgr = make_manager(tmp_path, FakeService(["good"]), roots=[first, second])
+    mgr.load_all()
+    rows = {row["id"]: row for row in mgr.status()}
+    assert sorted(rows) == ["bad", "good", "idle"]
+    assert rows["good"]["state"] == "loaded"
+    assert (rows["idle"]["state"], rows["idle"]["version"]) == ("disabled", "0.1.0")
+    assert rows["bad"]["state"] == "disabled" and rows["bad"]["error"]
+    assert "_dw_ext_idle" not in sys.modules
+
+
+def test_scan_accepts_a_missing_root(tmp_path):
+    """Check that a root that does not exist gives no error."""
+    mgr = make_manager(tmp_path, FakeService([]), roots=[tmp_path / "none"])
+    mgr.load_all()
+    assert mgr.status() == []
 
 
 def test_failing_setup_isolated(tmp_path):
@@ -424,10 +450,10 @@ async def test_backoff_capped(tmp_path, monkeypatch):
     svc = FakeService(["p3"], {"p3": {"mode": "raise"}})
     mgr = make_manager(tmp_path, svc)
     mgr.load_all()
+    interval = mgr._apis["p3"].pollers[0].interval_seconds
     await mgr.start()
     await real_sleep(0.1)
     await mgr.stop()
-    interval = mgr._apis["p3"].pollers[0].interval_seconds
     assert sleeps[:4] == [interval * 2, interval * 4, interval * 8, interval * 10]
     assert max(sleeps) == interval * 10
 
@@ -454,3 +480,42 @@ async def test_start_without_pollers_is_noop(tmp_path):
     await mgr.start()
     assert mgr._session is None and mgr.status() == []
     await mgr.stop()
+
+
+@pytest.mark.parametrize("failure", ["false", "raises"])
+async def test_failed_event_is_given_to_the_host_again(tmp_path, failure):
+    """Check that an event that the host did not handle stays for the next poll."""
+    make_ext(tmp_path / "bundled", "good")
+
+    class Service(FakeService):
+        async def _handle_disaster_event(self, env):
+            if failure == "raises":
+                raise RuntimeError("handler failed")
+            return False
+
+    mgr = make_manager(tmp_path, Service(["good"]))
+    assert await mgr._deliver(["a", "b"], lambda _msg: None) == ["a", "b"]
+
+
+async def test_handled_event_is_not_given_again(tmp_path):
+    """Check True and None. The host and a test service can return these values."""
+    results = iter([True, None])
+
+    class Service(FakeService):
+        async def _handle_disaster_event(self, env):
+            return next(results)
+
+    mgr = make_manager(tmp_path, Service([]))
+    assert await mgr._deliver(["a", "b"], lambda _msg: None) == []
+
+
+async def test_stop_removes_the_registrations(tmp_path):
+    """Check that a stopped extension leaves no registration in the shared host."""
+    make_ext(tmp_path / "bundled", "good")
+    reg = FakeRegistry()
+    mgr = make_manager(tmp_path, FakeService(["good"]), reg)
+    mgr.load_all()
+    reg.calls.clear()
+    await mgr.stop()
+    assert any(call[0].startswith("unreg") for call in reg.calls)
+    assert mgr.status()[0]["state"] == "loaded"

@@ -13,7 +13,7 @@
 ### ✨ New Features (新功能)
 
 - Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
-- Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension by @h0ffmann
+- Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension. It also shows the extensions on disk that are not enabled by @h0ffmann
 
 ### 🌐 Data Sources & Network (数据源与网络)
 

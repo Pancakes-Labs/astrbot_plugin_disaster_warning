@@ -23,6 +23,9 @@ An extension is a Python package. The host looks for extensions in two root dire
 If two roots contain the same `id`, the host uses the first root. The host records the
 second one as an error.
 
+The host scans both root directories. An extension on disk that is not in `enabled_ids` has the
+state `disabled` in `status()`. The host reads its manifest, but does not import its code.
+
 ```
 extensions/<id>/
   extension.yaml
@@ -156,7 +159,7 @@ class ExtensionAPI:
     A poller task does not stop because of an exception.
 - `stop()` cancels the poller tasks and closes the session.
 - `status() -> list[dict]` gives `[{id, name, version, state, error, sources}]`.
-  `state` is `"loaded"`, `"error"` or `"not_found"`. The admin command `/灾害预警扩展` shows this list.
+  `state` is `"loaded"`, `"error"`, `"not_found"` or `"disabled"`. The admin command `/灾害预警扩展` shows this list.
 
 `host_registry` is a small object with the functions of section 3. The production object is in
 `core/extensions/host_registry.py`. Tests use a fake object.

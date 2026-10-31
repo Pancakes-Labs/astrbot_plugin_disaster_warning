@@ -50,6 +50,7 @@ class ExtensionManager:
 
     MAX_BACKOFF_FACTOR = 10  # Maximum backoff, as a multiple of the polling interval
     LOG_THROTTLE_SECONDS = 600  # Minimum seconds between error logs of one polling task
+    MAX_PENDING_ENVELOPES = 100  # Maximum failed events to keep for each polling task
 
     def __init__(
         self,
@@ -146,6 +147,26 @@ class ExtensionManager:
                 self._record(ext_id, "error", f"重复的扩展 id，已忽略: {dup}")
                 logger.warning(f"[灾害预警] 扩展 {ext_id} 重复，已忽略 {dup}")
             self._load_one(ext_id, found[0], settings.get(ext_id))
+        self._record_disabled(set(enabled))
+
+    def _record_disabled(self, known: set[str]) -> None:
+        """Record each extension on disk that is not in enabled_ids. Do not import it."""
+        for root in self._get_roots():
+            if not root.is_dir():
+                continue
+            for ext_dir in sorted(root.iterdir()):
+                ext_id = ext_dir.name
+                if ext_id in known or not (ext_dir / "extension.yaml").is_file():
+                    continue
+                known.add(ext_id)  # The first root wins, as it does for a load.
+                try:
+                    manifest = load_manifest(ext_dir)
+                except Exception as e:
+                    self._record(ext_id, "disabled", f"{type(e).__name__}: {e}")
+                    continue
+                self._record(
+                    ext_id, "disabled", name=manifest.name, version=manifest.version
+                )
 
     @staticmethod
     def _purge_modules(pkg: str) -> None:
@@ -217,7 +238,11 @@ class ExtensionManager:
             )
 
     async def stop(self) -> None:
-        """Cancel all polling tasks and close the shared HTTP session."""
+        """Cancel the polling tasks, close the session and remove the registrations.
+
+        The host makes a new service after this. An extension that is not enabled in
+        the new configuration then leaves no source in the shared registries.
+        """
         tasks, self._tasks = self._tasks, []
         for t in tasks:
             t.cancel()
@@ -225,12 +250,21 @@ class ExtensionManager:
         if self._session is not None:
             await self._session.close()
             self._session = None
+        for ext_id in list(self._apis):
+            self._unregister_all(ext_id)
+        self._apis.clear()
 
     async def _run_poller(self, ext_id: str, spec: PollerSpec) -> None:
-        """Poll in a loop. Log each exception except CancelledError, then retry with backoff."""
+        """Poll in a loop. Log each exception except CancelledError, then retry with backoff.
+
+        An extension marks an event as sent before the host handles it. Thus, a failed
+        event stays in pending, and the next poll gives it to the host again.
+        """
         failures = 0
         last_log = float("-inf")
         label = f"{ext_id}/{spec.source_id}"
+
+        pending: list = []
 
         def log_throttled(msg: str) -> None:
             nonlocal last_log
@@ -241,14 +275,12 @@ class ExtensionManager:
 
         while True:
             try:
+                pending = await self._deliver(pending, log_throttled)
                 envelopes = await asyncio.wait_for(
                     spec.fetch(self._session), timeout=spec.timeout_seconds
                 )
-                for env in envelopes or []:
-                    try:
-                        await self.service._handle_disaster_event(env)
-                    except Exception as e:
-                        log_throttled(f"处理事件失败: {type(e).__name__}: {e}")
+                pending += await self._deliver(envelopes or [], log_throttled)
+                pending = pending[-self.MAX_PENDING_ENVELOPES :]
                 failures = 0
             except asyncio.CancelledError:
                 raise
@@ -257,6 +289,19 @@ class ExtensionManager:
                 log_throttled(f"拉取失败: {type(e).__name__}: {e}")
             factor = min(2**failures, self.MAX_BACKOFF_FACTOR) if failures else 1
             await asyncio.sleep(spec.interval_seconds * factor)
+
+    async def _deliver(self, envelopes: list, log_throttled) -> list:
+        """Give each envelope to the host. Return the envelopes that failed."""
+        failed = []
+        for env in envelopes:
+            try:
+                if await self.service._handle_disaster_event(env) is False:
+                    failed.append(env)
+                    log_throttled("处理事件失败，下次轮询重试")
+            except Exception as e:
+                failed.append(env)
+                log_throttled(f"处理事件失败: {type(e).__name__}: {e}")
+        return failed
 
     def status(self) -> list[dict]:
         """Return the load state of each extension for the admin command."""
