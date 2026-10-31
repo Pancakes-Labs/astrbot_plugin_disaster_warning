@@ -1023,6 +1023,9 @@ https://obs.nmefc.cn/Warning/TsunamiAdvice/202608150558_3_file/Earthquake_Pos.jp
 > [!TIP]
 > 其中 PancakesAPI 为插件自建数据源，数据服务公开可用。详情请查看[PancakesAPI文档](https://wiki.aloys23.link/wiki/PancakesAPI)。
 
+> [!NOTE]
+> An extension can add more data sources. Extensions are in separate repositories and are off by default. See the [extensions configuration](#extensions-config).
+
 ### ⏰ 数据延迟
 
 根据不同数据源的数据处理时间、API 服务的收发耗时和插件处理耗时，信息推送会产生一定的延迟：
@@ -1712,6 +1715,40 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 
 ---
 
+### <span id="extensions-config">🧩 16. Extensions (`extensions`)</span>
+
+An extension adds data sources, presenters and rules to the plugin. You do not need a fork. This repository contains the extension system, but no business extension. Each extension is in a separate repository, and its author maintains it. The plugin loads no extension by default.
+
+Community extensions:
+
+| Extension | Coverage | Author |
+| :--- | :--- | :--- |
+| [`br_south_disaster`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_disaster) | CEMADEN rain, flood and landslide alerts for the South of Brazil | [@h0ffmann](https://github.com/h0ffmann) |
+| [`br_south_waterq`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_waterq) | Bathing water quality alerts for the South of Brazil | [@h0ffmann](https://github.com/h0ffmann) |
+
+> [!WARNING]
+> An extension runs as Python code in the same process as the plugin. Install only an extension that you trust. This list is not a security review.
+
+To install an extension, put it in `extensions/<id>` in the data directory of the plugin. The directory name must be the same as the extension id. Then add the id to `enabled_ids`, and reload the plugin.
+
+- **Enabled extensions (`enabled_ids`)**: A list of extension ids. Write one id on each line, for example `my_ext`. A failed extension does not stop the plugin. Reload the plugin after a change.
+- **Extension settings (`settings`)**: JSON text. The first level is the extension id. The plugin ignores text that is not valid JSON. The default is `{}`.
+
+Example:
+
+```json
+"extensions": {
+  "enabled_ids": ["my_ext"],
+  "settings": "{\"my_ext\": {\"language\": \"en\"}}"
+}
+```
+
+The repository of each extension documents its settings.
+
+Send `/灾害预警扩展` to see the state of each extension. For the extension contract and a guide to write your own extension, see [docs/extensions/README.md](docs/extensions/README.md).
+
+---
+
 </details>
 
 ### ♨️ WebUI 配置热重载说明
@@ -1791,6 +1828,7 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 | 命令 | 别名 | 描述 |
 | :--- | :--- | :--- |
 | `/灾害预警状态` | - | 查看服务运行状态 |
+| `/灾害预警扩展` | - | Show the load state of each extension (loaded, error, not found) |
 | `/灾害预警重启` | `/灾害预警重载` | 重载插件（等价于 AstrBot WebUI 中的重载） **(仅管理员)** |
 | `/重启AstrBot` | `/重启 AstrBot` `/重载AstrBot` 等（含大小写/空格变体） | 重启整个 AstrBot 进程 **(仅管理员)** |
 | `/灾害预警重连` | - | 强制重连所有离线数据源 **(仅管理员)** |

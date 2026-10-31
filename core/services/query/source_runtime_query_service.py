@@ -98,6 +98,9 @@ class SourceRuntimeQueryService:
         entry = SOURCE_CATALOG.get((source_id or "").strip())
         if entry is None:
             return False
+        # An extension source is enabled while its extension is loaded.
+        if entry.config_group == "extensions":
+            return True
         return bool(self._group_config(entry.config_group).get("enabled", False))
 
     def is_source_enabled_any_session(self, source_id: str) -> bool:
@@ -183,6 +186,9 @@ class SourceRuntimeQueryService:
         # 若此 source_id 未在统一 catalog 目录中注册，一律判定为未启用
         if entry is None:
             return False
+        # An extension source is enabled while its extension is loaded.
+        if entry.config_group == "extensions":
+            return True
         group_cfg = self._group_config(entry.config_group)
         # 如果所属配置大类的顶级 enabled 总开关为 False，则旗下子源全部失效
         if not group_cfg.get("enabled", False):
@@ -251,6 +257,8 @@ class SourceRuntimeQueryService:
         """获取理论上应存在的连接分组及其展示名称。"""
         groups: dict[str, str] = {}
         for entry in SOURCE_CATALOG.values():
+            if entry.config_group == "extensions":
+                continue  # An extension source has no connection group
             group_key = self._canonical_group_key(self.get_connection_group_key(entry))
             groups[group_key] = CONNECTION_DISPLAY_NAMES.get(group_key, group_key)
         return groups
@@ -259,6 +267,8 @@ class SourceRuntimeQueryService:
         """构建连接分组到数据源标识列表的映射。"""
         grouped: dict[str, list[str]] = defaultdict(list)
         for source_id, entry in SOURCE_CATALOG.items():
+            if entry.config_group == "extensions":
+                continue  # An extension source has no connection group
             group_key = self._canonical_group_key(self.get_connection_group_key(entry))
             grouped[group_key].append(source_id)
         return {key: sorted(value) for key, value in grouped.items()}
@@ -267,6 +277,8 @@ class SourceRuntimeQueryService:
         """构建连接分组下各数据源的启用状态。"""
         grouped: dict[str, dict[str, bool]] = defaultdict(dict)
         for source_id, entry in SOURCE_CATALOG.items():
+            if entry.config_group == "extensions":
+                continue  # An extension source has no connection group
             group_key = self._canonical_group_key(self.get_connection_group_key(entry))
             grouped[group_key][source_id] = self.is_source_enabled(source_id)
         return dict(grouped)

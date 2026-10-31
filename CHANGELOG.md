@@ -6,6 +6,32 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+# Unreleased
+
+## 🚀 What's Changed
+
+### ✨ New Features (新功能)
+
+- Add the extension system. An extension adds data sources, presenters and rules without a fork. Extensions are off by default. The API is in `docs/extensions/design.md` by @h0ffmann
+- Add the admin command `/灾害预警扩展`. It shows the load state, the sources and the error of each extension. It also shows the extensions on disk that are not enabled by @h0ffmann
+
+### 🌐 Data Sources & Network (数据源与网络)
+
+- Use one HTTP session for all extension pollers. The session uses the `certifi` root certificates. This fixes `CERTIFICATE_VERIFY_FAILED` for new root certificates, for example GlobalSign Root R46 by @h0ffmann
+
+### ⚙️ Configuration (配置)
+
+- Add the `extensions` configuration group with the keys `enabled_ids` and `settings` by @h0ffmann
+- Add the requirements `pyyaml` and `certifi` by @h0ffmann
+
+### 📚 Documentation (文档)
+
+- Add the extension guide in `docs/extensions/` and the extension entries to the README by @h0ffmann
+
+### 🔧 Chore (杂项)
+
+- Add the pytest harness. `tests/conftest.py` replaces AstrBot with stubs. The tests load small extensions through the real host by @h0ffmann
+
 # 2026/10/05 v1.6.5
 
 ## 🚀 What's Changed

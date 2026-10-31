@@ -1527,6 +1527,25 @@
       }
     }
   },
+  "extensions": {
+    "description": "🧩 扩展",
+    "type": "object",
+    "hint": "加载独立发布的扩展包（数据源、规则、展示等）。默认不启用任何扩展，对现有行为无影响。修改后需重载插件生效",
+    "items": {
+      "enabled_ids": {
+        "description": "启用的扩展 ID 列表",
+        "type": "list",
+        "hint": "填写要加载的扩展 ID，每行一个，例如 my_ext。扩展目录位于插件目录 extensions/ 或数据目录 extensions/ 下。某个扩展加载失败只会跳过该扩展，不影响插件其他功能",
+        "default": []
+      },
+      "settings": {
+        "description": "扩展私有配置（JSON）",
+        "type": "string",
+        "hint": "JSON 文本，按扩展 ID 分组，例如 {\"my_ext\": {\"language\": \"en\"}}。格式错误时将被忽略并视为 {}",
+        "default": "{}"
+      }
+    }
+  },
   "debug_config": {
     "description": "🐛 调试配置",
     "type": "object",
