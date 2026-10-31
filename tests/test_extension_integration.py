@@ -1,70 +1,99 @@
-"""Integration test. Load br_south_disaster with the real host registries.
+"""Integration test. Load small extensions with the real host registries.
 
-A real CEMADEN alert goes through the rule chain and the presenter.
+The extensions are written in a temporary directory. Thus, the test checks that the
+host works for any third-party extension, and the repository has no business extension.
 """
 
 from __future__ import annotations
 
 import importlib
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-FIXTURES = Path(__file__).parent / "br_south_disaster" / "fixtures"
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
+FIRST, SECOND = "demo_first", "demo_second"
+
+MANIFEST = """\
+id: {ext_id}
+name: Demo
+version: 0.1.0
+api_version: 1
+min_host_version: 1.6.5
+entry: extension:setup
+description: This extension is a test extension.
+author: test
+permissions: [network]
+"""
+
+SETUP = """\
+from datetime import datetime, timezone
+
+ID = "{ext_id}"
+SOURCE = f"{{ID}}_source"
+PRESENTER = f"{{ID}}_presenter"
 
 
-class _FakeResponse:
-    def __init__(self, text: str):
-        self._text = text
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    def raise_for_status(self):
-        """Do nothing. The fake response is always successful."""
-        return None
-
-    async def text(self):
-        """Return the stored response text."""
-        return self._text
+class Presenter:
+    @classmethod
+    def present(cls, context, _options=None):
+        return f"{{ID}}: {{context.title}}"
 
 
-class _FakeSession:
-    """Return a local fixture by URL keyword. The test does not use the network."""
+def entry(api):
+    m = api.models
+    return m.SourceEntry(
+        source_id=SOURCE, source_enum=SOURCE, source_type=m.SourceType.WEATHER,
+        provider_family=m.ProviderFamily.EXTENSION, config_group="extensions",
+        config_key=SOURCE, parser_name="", presentation_type="weather",
+        text_presenter_key=PRESENTER, report_policy="none", intensity_mode="none",
+        priority=1, display_name="Demo", description="Demo", default_timezone="UTC",
+        fingerprint_prefix=SOURCE, dispatch_family=SOURCE,
+        provider_aliases=(SOURCE,), routing_tags=("extension",),
+    )
 
-    def get(self, url: str):
-        """Return a fake response for the URL. The alert times are set to the current time."""
-        if "wsAlertas2" in url:
-            # The fixture is from 2026-10-28. Set the update time to the current
-            # Brasilia time to simulate a new alert.
-            data = json.loads((FIXTURES / "cemaden_alertas.json").read_text("utf-8"))
-            now = datetime.now(timezone(timedelta(hours=-3)))
-            for alert in data["alertas"]:
-                alert["ult_atualizacao"] = now.strftime("%Y-%m-%d %H:%M:%S.000")
-            return _FakeResponse(json.dumps(data))
-        if "oni.ascii" in url:
-            return _FakeResponse((FIXTURES / "oni.ascii.txt").read_text("utf-8"))
-        return _FakeResponse((FIXTURES / "cemaden_rain_RS.json").read_text("utf-8"))
+
+def setup(api):
+    async def fetch(_session):
+        m = api.models
+        now = datetime.now(timezone.utc)
+        identity = m.EventIdentity(
+            event_id=f"{{ID}}_1", source_id=SOURCE, event_type="weather_alarm",
+            provider_family="extension", source_enum=SOURCE, published_at=now,
+        )
+        event = m.WeatherEvent(
+            title="Alert", headline="Headline", effective_at=now,
+            metadata={{"severity_level": 3}},
+        )
+        payload = m.SourcePayload(source_id=SOURCE, provider_family="extension", raw={{}})
+        return [m.EventEnvelope(identity=identity, event=event, payload=payload)]
+
+    api.register_presenter(PRESENTER, Presenter)
+    api.register_source(entry(api))
+    api.register_poller(SOURCE, fetch, interval_seconds=300)
+"""
+
+BROKEN_SETUP = """\
+def setup(api):
+    raise RuntimeError("setup failed on purpose")
+"""
 
 
 class _FakeService:
     def __init__(self, config):
         self.config = config
-        self.handled = []
-
-    async def _handle_disaster_event(self, envelope):
-        self.handled.append(envelope)
 
 
-@pytest.fixture
-def loaded_br_south_disaster(tmp_path):
-    """Load br_south_disaster through the real extension manager and host registry. Unregister it after the test."""
+def _write_extension(root: Path, ext_id: str, code: str = SETUP) -> None:
+    directory = root / ext_id
+    directory.mkdir(parents=True)
+    (directory / "extension.yaml").write_text(MANIFEST.format(ext_id=ext_id), "utf-8")
+    (directory / "__init__.py").write_text("", "utf-8")
+    (directory / "extension.py").write_text(code.format(ext_id=ext_id), "utf-8")
+
+
+def _make_manager(tmp_path, ids, roots=None):
     importlib.import_module("astrbot_plugin_disaster_warning.core.app.disaster_service")
     from astrbot_plugin_disaster_warning.core.extensions.host_registry import (
         HostRegistry,
@@ -73,46 +102,84 @@ def loaded_br_south_disaster(tmp_path):
         ExtensionManager,
     )
 
-    service = _FakeService(
-        {
-            "extensions": {
-                "enabled_ids": ["br_south_disaster"],
-                "settings": json.dumps({"br_south_disaster": {"language": "en"}}),
-            }
-        }
+    config = {"extensions": {"enabled_ids": ids, "settings": json.dumps({})}}
+    return ExtensionManager(
+        _FakeService(config), HostRegistry(), roots=roots, data_dir=tmp_path
     )
-    manager = ExtensionManager(
-        service,
-        HostRegistry(),
-        roots=[PLUGIN_DIR / "extensions"],
-        data_dir=tmp_path,
+
+
+def _cleanup(*owners: str) -> None:
+    from astrbot_plugin_disaster_warning.core.extensions.host_registry import (
+        HostRegistry,
     )
+
+    registry = HostRegistry()
+    for owner in owners:
+        registry.unregister_source_entries(owner=owner)
+        registry.unregister_presenters(owner=owner)
+
+
+@pytest.fixture
+def two_loaded(tmp_path):
+    """Load two extensions. Unregister them after the test."""
+    root = tmp_path / "root"
+    _write_extension(root, FIRST)
+    _write_extension(root, SECOND)
+    manager = _make_manager(tmp_path, [FIRST, SECOND], [root])
     manager.load_all()
     yield manager
-    HostRegistry().unregister_source_entries(owner="br_south_disaster")
-    HostRegistry().unregister_presenters(owner="br_south_disaster")
+    _cleanup(FIRST, SECOND)
 
 
-def test_br_south_disaster_loads_through_real_host(loaded_br_south_disaster):
-    """Check that br_south_disaster loads and that its two sources are in the host catalog."""
+async def _first_event(manager, ext_id):
+    (poller,) = manager._apis[ext_id].pollers
+    (envelope,) = await poller.fetch(None)
+    return envelope
+
+
+def test_repository_has_no_business_extension():
+    """Check the rule of the main repository: capability, not content."""
+    assert list(PLUGIN_DIR.glob("extensions/*/extension.yaml")) == []
+
+
+def test_extension_in_the_data_directory_loads(tmp_path):
+    """Check the path of an extension that a user installs. Use the default roots."""
+    _write_extension(tmp_path / "extensions", FIRST)
+    manager = _make_manager(tmp_path, [FIRST])
+    try:
+        manager.load_all()
+        (record,) = manager.status()
+        assert record["state"] == "loaded", record["error"]
+    finally:
+        _cleanup(FIRST)
+
+
+def test_enabled_extension_that_is_not_installed_is_reported(tmp_path):
+    """Check that a missing extension does not stop the load."""
+    manager = _make_manager(tmp_path, ["not_installed"])
+    manager.load_all()
+    (record,) = manager.status()
+    assert record["state"] == "not_found"
+
+
+def test_both_loaded_without_collision(two_loaded):
+    """Check that both extensions load and that their sources are distinct in the catalog."""
     from astrbot_plugin_disaster_warning.core.sources.source_catalog import (
         SOURCE_CATALOG,
         get_source_owner,
     )
 
-    (record,) = loaded_br_south_disaster.status()
-    assert record["state"] == "loaded", record["error"]
-    assert set(record["sources"]) == {
-        "br_south_disaster_cemaden_alerts",
-        "br_south_disaster_cemaden_rain",
-    }
-    for source_id in record["sources"]:
-        assert source_id in SOURCE_CATALOG
-        assert get_source_owner(source_id) == "br_south_disaster"
+    records = {r["id"]: r for r in two_loaded.status()}
+    assert set(records) == {FIRST, SECOND}
+    for ext_id, record in records.items():
+        assert record["state"] == "loaded", record["error"]
+        assert record["sources"] == [f"{ext_id}_source"]
+        assert record["sources"][0] in SOURCE_CATALOG
+        assert get_source_owner(record["sources"][0]) == ext_id
 
 
-async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_south_disaster):
-    """Check that a fixture alert passes the rule chain and that the presenter shows CEMADEN."""
+async def test_event_passes_rule_chain_and_renders(two_loaded):
+    """Check that an event passes the rule chain and uses the presenter of the extension."""
     from astrbot_plugin_disaster_warning.core.message.presenters.presenter_registry import (
         present_message,
     )
@@ -120,24 +187,63 @@ async def test_cemaden_alert_passes_rule_chain_and_renders(loaded_br_south_disas
         evaluate_push_decision_with_components,
     )
 
-    api = loaded_br_south_disaster._apis["br_south_disaster"]
-    poller = next(
-        p for p in api.pollers if p.source_id == "br_south_disaster_cemaden_alerts"
-    )
-    envelopes = await poller.fetch(_FakeSession())
-
-    # The fixture has 3 alerts for RS
-    assert len(envelopes) == 3
-    envelope = envelopes[0]
-    assert envelope.event.metadata["uf"] == "RS"
-    assert envelope.event.metadata["enso"]["phase"] == "el_nino"
-
+    envelope = await _first_event(two_loaded, FIRST)
     runtime_config = {"weather_config": {"weather_filter": {"enabled": True}}}
     decision = evaluate_push_decision_with_components(
         envelope, runtime_config=runtime_config, policy_state={}
     )
     assert decision.accepted, decision.reason
+    assert present_message(envelope, envelope.source_id) == f"{FIRST}: Alert"
 
-    text = present_message(envelope, envelope.source_id)
-    assert "CEMADEN" in text
-    assert envelope.event.metadata["municipio"].title() in text.title()
+
+async def test_each_event_uses_its_own_presenter(two_loaded):
+    """Check that each event is presented by the presenter of its own extension."""
+    from astrbot_plugin_disaster_warning.core.message.presenters.presenter_registry import (
+        present_message,
+    )
+
+    first = await _first_event(two_loaded, FIRST)
+    second = await _first_event(two_loaded, SECOND)
+    assert present_message(first, first.source_id).startswith(FIRST)
+    assert present_message(second, second.source_id).startswith(SECOND)
+
+
+def test_failing_extension_does_not_affect_the_others(tmp_path):
+    """Check that an extension that raises in setup is removed and the others stay."""
+    from astrbot_plugin_disaster_warning.core.sources.source_catalog import (
+        SOURCE_CATALOG,
+    )
+
+    root = tmp_path / "root"
+    _write_extension(root, FIRST)
+    _write_extension(root, "broken", BROKEN_SETUP)
+    _write_extension(root, SECOND)
+    manager = _make_manager(tmp_path, [FIRST, "broken", SECOND], [root])
+    try:
+        manager.load_all()
+        records = {r["id"]: r for r in manager.status()}
+        assert records[FIRST]["state"] == "loaded"
+        assert records[SECOND]["state"] == "loaded"
+        assert records["broken"]["state"] == "error"
+        assert "setup failed on purpose" in records["broken"]["error"]
+        assert f"{FIRST}_source" in SOURCE_CATALOG
+        assert f"{SECOND}_source" in SOURCE_CATALOG
+    finally:
+        _cleanup(FIRST, SECOND, "broken")
+
+
+async def test_unregister_one_leaves_the_other(two_loaded):
+    """Check that the removal of one extension keeps the source and presenter of the other."""
+    from astrbot_plugin_disaster_warning.core.message.presenters.presenter_registry import (
+        present_message,
+    )
+    from astrbot_plugin_disaster_warning.core.sources.source_catalog import (
+        SOURCE_CATALOG,
+        get_source_owner,
+    )
+
+    second = await _first_event(two_loaded, SECOND)
+    _cleanup(FIRST)
+    assert f"{FIRST}_source" not in SOURCE_CATALOG
+    assert get_source_owner(f"{SECOND}_source") == SECOND
+    assert present_message(second, second.source_id).startswith(SECOND)

@@ -34,8 +34,8 @@ PLUGIN_NAME = "astrbot_plugin_disaster_warning"
 def _build_ssl_context() -> ssl.SSLContext:
     """Use the certifi root certificates when they are available.
 
-    Some system stores do not have new roots, for example the GlobalSign
-    Root R46 of CEMADEN. The result is CERTIFICATE_VERIFY_FAILED.
+    Some system stores do not have new roots, for example GlobalSign Root R46.
+    The result is CERTIFICATE_VERIFY_FAILED.
     """
     try:
         import certifi

@@ -1,15 +1,20 @@
 # How to write an extension
 
 An extension adds data sources, presenters and rules to this plugin. You do not need a fork.
-The contract is in [`design.md`](design.md). The reference implementation is
-[`extensions/br_south_disaster`](../../extensions/br_south_disaster) (Brazil, South region).
-A second example is [`extensions/br_south_waterq`](../../extensions/br_south_waterq) (bathing water quality). Its data source is in
-[Brazil water quality sources](brazil-water-quality-sources.md).
+The contract is in [`design.md`](design.md).
 
-The API documents of the data sources of `br_south_disaster` are:
+This repository has the extension system, but no business extension. Each extension is in a separate
+repository, and its author maintains it.
 
-- [CEMADEN API](../CEMADEN%20API.md): the alerts and the rain gauges.
-- [NOAA CPC ONI](../NOAA%20CPC%20ONI.md): the El Niño and La Niña index.
+## Community extensions
+
+| Extension | Coverage | Author |
+| :--- | :--- | :--- |
+| [`br_south_disaster`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_disaster) | CEMADEN rain, flood and landslide alerts for the South of Brazil | [@h0ffmann](https://github.com/h0ffmann) |
+| [`br_south_waterq`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_waterq) | Bathing water quality alerts for the South of Brazil | [@h0ffmann](https://github.com/h0ffmann) |
+
+These two repositories are also complete examples. This list is not a security review. An extension
+runs as Python code in the same process as the plugin.
 
 ## 1. Enable an extension
 
@@ -17,8 +22,8 @@ Open the plugin configuration (WebUI → 🧩 扩展, key `extensions`). Set the
 
 ```json
 "extensions": {
-  "enabled_ids": ["br_south_disaster"],
-  "settings": "{\"br_south_disaster\": {\"language\": \"en\", \"alerts_interval\": 300}}"
+  "enabled_ids": ["my_ext"],
+  "settings": "{\"my_ext\": {\"language\": \"en\"}}"
 }
 ```
 
@@ -82,7 +87,7 @@ def setup(api):
     api.register_poller("my_ext_rain", fetch, interval_seconds=300)
 ```
 
-Make the envelopes in the same way as `extensions/br_south_disaster/extension.py`:
+Make the envelopes in the same way as [`envelopes.py`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_disaster/blob/main/envelopes.py) of `br_south_disaster`:
 
 - Use an `EventIdentity` with `event_type="weather_alarm"` and `provider_family="extension"`.
 - Use a `WeatherEvent`. Set `metadata["severity_level"]` to a value from 0 to 4
@@ -102,8 +107,7 @@ Make the envelopes in the same way as `extensions/br_south_disaster/extension.py
   - A longer wait after each failure (exponential backoff).
   - Not more than one error log message in each period.
 - Translation: `api.t(key, **fmt)` looks in `locale/<language>.json`, then in `locale/zh-CN.json`.
-  For numbers and dates, `br_south_disaster` reads the keys `format.decimal` and `format.time` from the locale file.
-  If it does not find the key, it gives the key itself.
+  If `api.t` does not find the key, it gives the key itself.
 
 ## 4. Tests
 
@@ -114,5 +118,26 @@ uv venv .venv && uv pip install --python .venv/bin/python -r requirements-dev.tx
 .venv/bin/python -m pytest -q
 ```
 
-For tests of parsers with recorded data and a fake `api`, see `tests/br_south_disaster/`.
+For tests of parsers with recorded data and a fake `api`, see the `tests` directory of [`br_south_disaster`](https://github.com/h0ffmann/astrbot_dw_ext_br_south_disaster/tree/main/tests).
 For a test that loads an extension through the real host, see `tests/test_extension_integration.py`.
+
+## 5. Publish an extension
+
+Put the extension in a separate repository. The repository root is the extension root:
+
+```text
+astrbot_dw_ext_<id>/
+  extension.yaml
+  __init__.py
+  extension.py
+  locale/zh-CN.json
+  README.md
+  LICENSE
+```
+
+- The repository name is `astrbot_dw_ext_<id>`. The `id` in `extension.yaml` is the same value.
+- Use underscores, not hyphens. The host imports the `id` as a Python package name.
+- Do not change an `id` after a release.
+- Make a tag `v<version>` that is the same as `version` in `extension.yaml`.
+- A zip file has one top-level directory, with the name `<id>`.
+- The README tells the data sources and the settings. It also tells that the data is for reference only.
