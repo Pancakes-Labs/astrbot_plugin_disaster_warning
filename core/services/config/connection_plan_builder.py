@@ -10,12 +10,10 @@ from typing import Any
 
 from astrbot.api import logger
 
-from ...network.websocket.fan_studio_connection_policy import (
-    ServerPreference,
-    resolve_server_urls,
-)
 from ...network.websocket.jian_project_connection_policy import (
+    ServerPreference,
     jian_project_auth_service,
+    resolve_server_urls,
 )
 from ...sources.source_catalog import SOURCE_CATALOG
 from ...sources.source_entry import SourceEntry
@@ -28,42 +26,20 @@ class ConnectionPlanBuilder:
     负责把已启用的数据源目录项转换为运行时可直接消费的连接计划。
     """
 
-    # FAN Studio 应用 ID（硬编码，不再暴露为用户配置项）。
-    FAN_STUDIO_APP_ID = "97b68b51-ec96-42c3-80d7-83d2bff70d99"
-
     @staticmethod
     def _resolve_connection_plan(
         entry: SourceEntry,
     ) -> tuple[str, dict[str, Any]] | None:
         """从单个数据源目录项解析连接分组键与连接参数。"""
-        # 构建物理连接配置计划（例如 WebSocket URL、Headers、类型等）
         plan = entry.build_connection_plan()
         group_key = str(plan.get("group_key") or "").strip()
-        # 若分组键为空，则说明此数据源无需直接建立常驻 WebSocket 物理连接
         if not group_key:
             return None
-        # 清理过滤掉空值或不需要的参数，同时剥离内部逻辑使用的 group_key
         return group_key, {
             key: value
             for key, value in plan.items()
             if key != "group_key" and value not in (None, "")
         }
-
-    @staticmethod
-    def _resolve_fan_studio_auth(config: dict[str, Any]) -> tuple[str, str]:
-        """从全局配置解析 FAN Studio 鉴权字段。
-
-        app_id 已硬编码为类常量，仅从配置读取 api_key。
-        """
-        data_sources = config.get("data_sources")
-        fan_cfg: dict[str, Any] = {}
-        if isinstance(data_sources, dict):
-            raw = data_sources.get("fan_studio")
-            if isinstance(raw, dict):
-                fan_cfg = raw
-        app_id = ConnectionPlanBuilder.FAN_STUDIO_APP_ID
-        api_key = str(fan_cfg.get("api_key") or "").strip()
-        return app_id, api_key
 
     @staticmethod
     def _resolve_jian_project_auth(config: dict[str, Any]) -> str:
@@ -77,15 +53,15 @@ class ConnectionPlanBuilder:
         return str(jp_cfg.get("login_key") or "").strip()
 
     @classmethod
-    def _resolve_fan_server_preference(cls, config: dict[str, Any]) -> str:
-        """从全局配置解析 FAN Studio 服务器偏好。"""
+    def _resolve_jian_server_preference(cls, config: dict[str, Any]) -> str:
+        """从全局配置解析 Jian Project 服务器偏好。"""
         data_sources = config.get("data_sources")
         if not isinstance(data_sources, dict):
             return ServerPreference.PRIMARY_FIRST.value
-        fan_cfg = data_sources.get("fan_studio", {})
-        if not isinstance(fan_cfg, dict):
+        jp_cfg = data_sources.get("jian_project", {})
+        if not isinstance(jp_cfg, dict):
             return ServerPreference.PRIMARY_FIRST.value
-        raw = str(fan_cfg.get("fan_server_preference") or "").strip()
+        raw = str(jp_cfg.get("server_preference") or "").strip()
         return ServerPreference.normalize(raw)
 
     @classmethod
@@ -93,41 +69,35 @@ class ConnectionPlanBuilder:
         cls,
         config: dict[str, Any],
         fan_server_pref_override: str | None = None,
+        jian_server_pref_override: str | None = None,
         session_config_manager: Any | None = None,
     ) -> dict[str, dict[str, Any]]:
         """根据统一数据源目录与启用状态构建连接计划。
 
         Args:
             config: 全局配置字典。
-            fan_server_pref_override: 可选的 FAN Studio 服务器偏好临时覆盖值。
-                传入时仅影响本次连接计划的 URL 顺序，不写入配置，
-                用于运行期临时切换（如 /服务器切换 指令）；
-                缺省时从配置读取持久化偏好。
-            session_config_manager: 可选的会话配置管理器；传入时复用它解析
-                「全局关、会话开」的子源，避免新建重复实例造成快照陈旧与并发覆盖。
+            fan_server_pref_override: 历史别名，等同 jian_server_pref_override。
+            jian_server_pref_override: 可选的 Jian Project 服务器偏好临时覆盖值。
+            session_config_manager: 可选的会话配置管理器。
         """
+        override = jian_server_pref_override
+        if override is None:
+            override = fan_server_pref_override
         if session_config_manager is not None:
             cls._session_config_manager = session_config_manager
-        # 使用运行时查询服务拉取当前的物理数据源启用列表。
-        # 优先复用主服务注入的会话配置管理器，避免每次构建都新建独立实例。
         runtime_query = SourceRuntimeQueryService(
             config,
             session_config_manager=getattr(cls, "_session_config_manager", None),
         )
         connections: dict[str, dict[str, Any]] = {}
-        fan_app_id, fan_api_key = cls._resolve_fan_studio_auth(config)
         jp_login_key = cls._resolve_jian_project_auth(config)
-        fan_server_pref = (
-            ServerPreference.normalize(fan_server_pref_override)
-            if fan_server_pref_override
-            else cls._resolve_fan_server_preference(config)
+        jp_server_pref = (
+            ServerPreference.normalize(override)
+            if override
+            else cls._resolve_jian_server_preference(config)
         )
-        fan_auth_warned = False
         jp_auth_warned = False
 
-        # 只为「组级总闸开启且全局或任一会话需要」的子源生成连接计划，
-        # 避免为完全无会话需要的数据源创建无效连接占位；
-        # 同时保证「全局关、会话开」的子源仍会建立连接，不漏采集。
         enabled_source_ids = runtime_query.get_active_source_ids()
         enabled_entries = [
             SOURCE_CATALOG[source_id]
@@ -140,39 +110,9 @@ class ConnectionPlanBuilder:
             if resolved is None:
                 continue
             group_key, plan = resolved
-            # 同一连接分组只保留一份计划，避免多个子源重复覆盖/创建同一连接。
             if group_key in connections:
                 continue
 
-            # FAN Studio 连接必须携带 appId + API Key，否则跳过建连计划。
-            if group_key.startswith("fan_studio"):
-                if not fan_app_id or not fan_api_key:
-                    if not fan_auth_warned:
-                        logger.warning(
-                            "[灾害预警] FAN Studio 相关数据源已启用，但未配置 AppID 或 API Key，已跳过 FAN 连接。"
-                            "请到开发者平台申请 Key 后填入配置。"
-                        )
-                        fan_auth_warned = True
-                    continue
-                plan["fan_app_id"] = fan_app_id
-                plan["fan_api_key"] = fan_api_key
-                # 按服务器偏好调整 URL 顺序（沿用 build 入口解析出的偏好，
-                # 支持临时覆盖值，避免此处重复读取配置导致覆盖失效）
-                plan["server_preference"] = fan_server_pref
-                original_url = str(plan.get("url") or "").strip()
-                original_backup = str(plan.get("backup_url") or "").strip()
-                first_url, second_url = resolve_server_urls(
-                    original_url,
-                    original_backup,
-                    fan_server_pref,
-                )
-                plan["url"] = first_url
-                plan["backup_url"] = second_url
-                # 记录原始 URL（供切换时恢复）
-                plan["original_url"] = original_url
-                plan["original_backup"] = original_backup
-
-            # Jian Project 连接必须携带凭证或本地有持久化凭证，否则跳过建连计划。
             if group_key == "jian_project_all" or group_key.startswith("jian_project"):
                 has_stored_token = jian_project_auth_service.has_valid_token()
                 if not jp_login_key and not has_stored_token:
@@ -185,11 +125,27 @@ class ConnectionPlanBuilder:
                     continue
                 if jp_login_key:
                     plan["credential"] = jp_login_key
+                plan["server_preference"] = jp_server_pref
+                original_url = str(plan.get("url") or "").strip()
+                original_backup = str(plan.get("backup_url") or "").strip()
+                first_url, second_url = resolve_server_urls(
+                    original_url,
+                    original_backup,
+                    jp_server_pref,
+                )
+                plan["url"] = first_url
+                plan["backup_url"] = second_url
+                plan["original_url"] = original_url
+                plan["original_backup"] = original_backup
 
             connections[group_key] = plan
 
         if connections:
-            group_list = "、".join(sorted(connections.keys()))
+            ordered = sorted(
+                connections.keys(),
+                key=lambda name: (0 if name == "jian_project_all" else 1, name),
+            )
+            group_list = "、".join(ordered)
             logger.debug(f"[灾害预警] 已配置数据连接分组: {group_list}")
 
         return connections

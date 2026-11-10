@@ -19,10 +19,10 @@ class MeasurementTypeRule(BaseRule):
     _MEASUREMENT_SOURCE_IDS: frozenset[str] = frozenset(
         {
             # 中国地震台网测定：infoTypeName 含 [正式测定] / [自动测定]
-            "cenc_fanstudio",
+            "cenc_jianproject",
             "cenc_wolfx",
             # 美国地质调查局测定：info_type 为 reviewed / automatic
-            "usgs_fanstudio",
+            "usgs_jianproject",
         }
     )
 

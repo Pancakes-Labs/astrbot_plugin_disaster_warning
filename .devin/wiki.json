@@ -179,7 +179,7 @@
     },
     {
       "title": "处理器路由注册",
-      "purpose": "讲解 handler_registry 的多源路由策略：Fan Studio initial_all/update、P2P 代码分发、Wolfx type 映射、Global Quake 解码入口。",
+      "purpose": "讲解 handler_registry 的多源路由策略：Jian Project initial_all/update、P2P 代码分发、Wolfx type 映射、Global Quake 解码入口。",
       "parent": "后端核心",
       "page_notes": [
         {
@@ -465,7 +465,7 @@
       ]
     },
     {
-      "title": "FAN Studio 数据链路",
+      "title": "Jian Project 数据链路",
       "purpose": "说明 /all 聚合连接下各子数据源（CEA/CENC/CWA/JMA/USGS/气象/海啸）的路由分发与开关控制。",
       "parent": "数据源生态",
       "page_notes": [

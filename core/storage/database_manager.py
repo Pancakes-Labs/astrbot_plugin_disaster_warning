@@ -679,8 +679,8 @@ class DatabaseManager:
     # 内容指纹一致时不抬升 update_count、不追加 event_updates。
     _TSUNAMI_DEDUPE_SOURCES = frozenset(
         {
-            "fan_studio_tsunami",
-            "china_tsunami_fanstudio",
+            "china_tsunami_jianproject",
+            "china_tsunami_jianproject",
             "china_tsunami",
             "jma_tsunami_p2p",
             "jma_tsunami",
@@ -691,12 +691,12 @@ class DatabaseManager:
         }
     )
 
-    # 气象预警源：OQ/FAN 高频重推同一预警时，同内容指纹一致则不追加 event_updates，
+    # 气象预警源：OQ/历史 高频重推同一预警时，同内容指纹一致则不追加 event_updates，
     # 避免每天 3000+ 条的气象预警在报次表中无限堆积重复快照。
     _WEATHER_DEDUPE_SOURCES = frozenset(
         {
             "china_weather_jianproject",
-            "china_weather_fanstudio",
+            "china_weather_jianproject",
             "weather_alarm",
         }
     )
@@ -2214,7 +2214,7 @@ class DatabaseManager:
                 norm_key = normalize_event_type(k) or k
                 by_type[norm_key] = by_type.get(norm_key, 0) + int(v or 0)
 
-            # 贡献统计：台风 fan/enriched → typhoon_fanstudio；
+            # 贡献统计：台风 fan/enriched → typhoon_jianproject；
             # EQSC 实时轮询 → typhoon_eqsc；
             # eqsc_rebuild → typhoon_eqsc_rebuild。
             # 注意：by_source 仍统计烈度速报，保留来源贡献可见性。

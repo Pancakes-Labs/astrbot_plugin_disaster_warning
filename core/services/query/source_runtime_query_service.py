@@ -410,7 +410,7 @@ class SourceRuntimeQueryService:
 
         # 总连接数按 catalog 期望的物理通道口径统计（含已停用但应展示的通道），
         # 避免数据源被临时关闭后从分母消失，出现 6/6 而非 6/7。
-        # expected_groups 已包含 WS（FAN/P2P/Wolfx/GQ）与 HTTP（EQSC/S-Net）。
+        # expected_groups 已包含 WS（Jian/P2P/Wolfx/Pancakes）与 HTTP（EQSC/S-Net）。
         is_connected = bool(
             pancakes_connected
             if pancakes_connected is not None

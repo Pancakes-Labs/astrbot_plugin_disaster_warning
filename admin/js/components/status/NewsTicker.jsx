@@ -231,7 +231,7 @@ function NewsTicker({ style }) {
     /**
      * 提取台风个体 ID：优先读取 ticker item 的 typhoonKey，
      * 其次读取原始事件的 typhoon_id / eqsc_id / real_event_id，
-     * 兼容 4 位 EQSC / 6 位 Fan 编号，NAMELESS 前缀保留避免与正式编号冲突。
+     * 兼容 4 位短编号 / 6 位标准编号，NAMELESS 前缀保留避免与正式编号冲突。
      */
     const getTyphoonKey = (event) => {
         const raw = String(

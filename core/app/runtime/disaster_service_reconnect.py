@@ -14,7 +14,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
+from ...network.websocket.jian_project_connection_policy import attach_jian_project_auth_from_plan
 from ...sources.display_registry import CONNECTION_DISPLAY_NAMES
 
 
@@ -130,7 +130,7 @@ class DisasterServiceReconnectService:
                 seq_map = getattr(ws_manager, "_manual_reconnect_seq", None)
                 if seq_map is not None:
                     seq_map.pop(conn_name, None)
-                # 若该连接正被 FAN 主通道暂缓（cleanup 任务在等超时），
+                # 若该连接正被暂缓（cleanup 任务在等超时），
                 # 批次清理后 cleanup 不应再发回执，一并取消。
                 cleanup_map = getattr(ws_manager, "_fan_secondary_cleanup_tasks", None)
                 if cleanup_map is not None:
@@ -200,7 +200,7 @@ class DisasterServiceReconnectService:
         if not conn_name:
             return "未知连接"
         # 优先按连接计划中的 data_source 反查展示名。
-        # data_source 通常是"子源混合代号"（如 fan_studio_mixed），
+        # data_source 通常是"子源混合代号"（如 jian_project_mixed），
         # 需要先经折叠表映射到连接组 key，再查连接组展示名。
         conn_config = self.service.connections.get(conn_name, {}) or {}
         data_source = str(conn_config.get("data_source") or "")
@@ -350,8 +350,8 @@ class DisasterServiceReconnectService:
             "backup_url": conn_config.get("backup_url"),
             "connection_config": dict(conn_config),
         }
-        # FAN Studio 鉴权字段需一并补齐，否则手动重连后无法发送 auth 包。
-        attach_fan_auth_from_plan(connection_info, conn_config)
+        # Jian Project 鉴权字段需一并补齐，否则手动重连后无法换票建连。
+        attach_jian_project_auth_from_plan(connection_info, conn_config)
         # 这里的结构与连接管理器常规建连流程保持一致，
         # 这样手动重连与自动重连在读取附加信息时不会出现字段缺失的问题。
         self.service.ws_manager.connection_info[conn_name] = {

@@ -135,7 +135,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
             return []
 
         # 本地静态 URL（/weatheralarm_logo/...）时直读 Base64 文件。
-        # 非本地 URL（Fan Studio 官方接口等远程地址）时，按 11B 完整码尝试解析本地文件，
+        # 非本地 URL（Jian Project 官方接口等远程地址）时，按 11B 完整码尝试解析本地文件，
         # 本地文件存在则优先本地发送，否则回退远程 URL 直发。
         local_path = None
         if icon_url_str.startswith("/weatheralarm_logo/"):
@@ -905,7 +905,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         lon: float = None,
         magnitude: float = None,
         depth: float = None,
-        source: str = "cea_fanstudio",
+        source: str = "cea_jianproject",
     ):
         """处理模拟灾害命令。
 
@@ -1877,7 +1877,7 @@ class PluginQueryCommandService(CommandTelemetryMixin):
     # ------------------------------------------------------------------
     # 气象站实况/历史/列表查询（/实况 /气象站 /气象站历史 /气象站列表）
     # 数据源：NMC 中央气象台（实况+近24h历史+省份城市列表）
-    #         FAN Studio（五位站号->站名映射）
+    #         Jian Project（五位站号->站名映射）
     # ------------------------------------------------------------------
 
     def _get_weather_station_service(self) -> WeatherStationQueryService:
@@ -2023,9 +2023,10 @@ class PluginQueryCommandService(CommandTelemetryMixin):
         """处理空气质量查询命令（/空气质量）。
 
         用法：
-          /空气质量 <城市名>        查询指定城市空气质量
-          /空气质量 <省份名> [等级]  查询全省各城市空气质量（可按等级过滤）
-          /空气质量 全国 [等级]      全国主要城市空气质量概览（可按等级过滤）
+          /空气质量 <市/县名>           查询单个城市或县级单位详情（含浓度）
+          /空气质量 <省份> <市/县名>    在指定省内查询单个城市/县
+          /空气质量 <省份名> [等级]     查询全省各城市空气质量（可按等级过滤）
+          /空气质量 全国 [等级]         全国主要城市空气质量概览（可按等级过滤）
         """
         try:
             result = await query_aqi(

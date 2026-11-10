@@ -155,10 +155,10 @@ async def _fetch_updates_for_event_ids(
 class HistoryDirtyDataCleanupService:
     """历史脏数据清理服务。"""
 
-    CN_SOURCE_ALIASES = ("fan_studio_tsunami", "china_tsunami_fanstudio")
+    CN_SOURCE_ALIASES = ("china_tsunami_jianproject", "china_tsunami_jianproject")
     CWA_REPORT_SOURCE_ALIASES = (
-        "cwa_fanstudio_report",
-        "fan_studio_cwa_report",
+        "cwa_report_jianproject",
+        "cwa_report_jianproject",
         "taiwan_cwa_report",
     )
 
@@ -247,7 +247,7 @@ class HistoryDirtyDataCleanupService:
             normalized = normalize_source_name(source) or source
             if normalized:
                 return normalized
-        return "china_tsunami_fanstudio"
+        return "china_tsunami_jianproject"
 
     @classmethod
     def _preferred_real_event_id(cls, rows: list[dict[str, Any]]) -> str:
@@ -314,7 +314,7 @@ class HistoryDirtyDataCleanupService:
             normalized = normalize_source_name(str(raw or "").strip())
             if normalized in cls.CWA_REPORT_SOURCE_ALIASES:
                 return True
-            if normalized == "cwa_fanstudio_report":
+            if normalized == "cwa_report_jianproject":
                 return True
         return False
 
@@ -643,7 +643,7 @@ class HistoryDirtyDataCleanupService:
         groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in rows:
             raw_source = str(row.get("source") or row.get("source_id") or "").strip()
-            # 历史别名归一化后再分组，避免 fan_studio_tsunami / china_tsunami_fanstudio 漏并
+            # 历史别名归一化后再分组，避免 china_tsunami_jianproject / china_tsunami_jianproject 漏并
             source = normalize_source_name(raw_source) or raw_source
             unique_id = str(row.get("unique_id") or "").strip()
             if not source or not unique_id:

@@ -34,7 +34,7 @@ class RoutedMessage:
 
 
 def _unwrap_nested_payload(data: dict[str, Any], max_depth: int = 3) -> dict[str, Any]:
-    """提取 FAN Studio 兼容消息中的核心载荷。
+    """提取 Jian Project 兼容消息中的核心载荷。
 
     会递归下钻常见的 `Data` 或 `data` 包裹层，便于后续统一匹配负载特征。
     """
@@ -97,7 +97,7 @@ def _payload_matches_predicate(payload: dict[str, Any], predicate: str) -> bool:
         return is_shakealert_compatible_payload(payload)
     if predicate == "typhoon_active":
         # 台风数据必须包含移动方向、风速和气压字段，且数据为数组格式
-        # FAN Studio 台风推送的 Data 字段是数组，unwrap 后可能仍为数组
+        # Jian Project 台风推送的 Data 字段是数组，unwrap 后可能仍为数组
         if isinstance(payload, list):
             return len(payload) > 0 and isinstance(payload[0], dict)
         if isinstance(payload, dict):
@@ -139,12 +139,12 @@ def _matches_payload_rule(payload: dict[str, Any], entry: SourceEntry) -> bool:
 def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
     """按提供方家族导出名称到数据源标识的映射。"""
     result: dict[str, str] = {}
-    # FAN Studio / PancakesAPI 主要按来源名映射，Wolfx 主要按消息类型映射
+    # Jian Project / PancakesAPI 主要按来源名映射，Wolfx 主要按消息类型映射
     for source_id in get_source_ids_by_family(provider_family):
         entry = SOURCE_CATALOG[source_id]
         if provider_family in (
-            ProviderFamily.FAN_STUDIO,
             ProviderFamily.GLOBAL_QUAKE,
+            ProviderFamily.JIAN_PROJECT,
         ):
             for source_name in entry.provider_source_names:
                 result.setdefault(source_name, source_id)
@@ -154,18 +154,6 @@ def get_provider_source_map(provider_family: ProviderFamily) -> dict[str, str]:
     return result
 
 
-def get_fan_studio_source_id(source_name: str) -> str | None:
-    """根据 FAN Studio 来源名称解析统一数据源标识。"""
-    source_ids = get_source_ids_by_provider_source_name((source_name or "").strip())
-    fan_source_ids = [
-        source_id
-        for source_id in source_ids
-        if (entry := SOURCE_CATALOG.get(source_id)) is not None
-        and entry.provider_family == ProviderFamily.FAN_STUDIO
-    ]
-    if not fan_source_ids:
-        return None
-    return fan_source_ids[0]
 
 
 def get_wolfx_source_id(message_type: str) -> str | None:
@@ -214,116 +202,12 @@ def get_pancakes_source_id(source_name: str | None) -> str | None:
 get_openquake_source_id = get_pancakes_source_id
 
 
-def detect_fan_studio_source_entry(data: dict[str, Any]) -> SourceEntry | None:
-    """根据消息载荷特征识别 FAN Studio 注册项。"""
-    if not isinstance(data, dict):
-        return None
-
-    payload = _unwrap_nested_payload(data)
-    # 仅挑出具备来源名声明的 FAN Studio 注册项，并按优先级排序后逐个匹配
-    fan_entries = [
-        entry
-        for source_id in get_source_ids_by_family(ProviderFamily.FAN_STUDIO)
-        if (entry := SOURCE_CATALOG[source_id]).provider_source_names
-    ]
-    # 按优先级从高到低排序，高优先级优先检测，防止通用宽松规则覆盖了精确规则
-    fan_entries.sort(key=lambda entry: (entry.priority, entry.source_id), reverse=True)
-
-    for entry in fan_entries:
-        if _matches_payload_rule(payload, entry):
-            return entry
-    return None
 
 
-def detect_fan_studio_source_id(data: dict[str, Any]) -> str | None:
-    """从 FAN Studio 兼容消息直接识别统一数据源标识。"""
-    entry = detect_fan_studio_source_entry(data)
-    if entry is None:
-        return None
-    return entry.source_id
 
-
-def route_fan_studio_message(data: dict[str, Any]) -> list[RoutedMessage]:
-    """统一解析 FAN Studio 消息并返回路由结果列表。
-
-    兼容全量初始化消息、增量更新消息以及缺少显式来源名的特征识别场景。
-    """
-    if not isinstance(data, dict):
-        return []
-
-    routed_messages: list[RoutedMessage] = []
-    msg_type = str(data.get("type") or "").strip()
-
-    # initial_all 表示一条消息里携带多个来源的初始化快照，需要逐项拆包
-    if msg_type == "initial_all":
-        for key, value in data.items():
-            if not isinstance(value, dict):
-                continue
-            source_id = get_fan_studio_source_id(key)
-            if source_id:
-                routed_messages.append(
-                    RoutedMessage(source_name=key, source_id=source_id, payload=value)
-                )
-        return routed_messages
-
-    if msg_type == "update":
-        # update 消息通常携带显式 source。
-        # 1) 已注册显式来源：直接路由，避免被宽松载荷签名覆盖
-        # 2) 未注册显式来源（如 fssn）：直接丢弃，禁止特征猜测误路由
-        # 3) 无显式来源：才按载荷特征做兼容识别
-        source_name = str(data.get("source") or "").strip()
-        if source_name:
-            source_id = get_fan_studio_source_id(source_name)
-            if source_id:
-                return [
-                    RoutedMessage(
-                        source_name=source_name, source_id=source_id, payload=data
-                    )
-                ]
-            # 显式来源存在但未适配：不猜测，避免 FSSN 等被误识别为 SA
-            return []
-
-        detected_entry = detect_fan_studio_source_entry(data)
-        if detected_entry is not None:
-            routed_source_name = (
-                detected_entry.provider_source_names[0]
-                if detected_entry.provider_source_names
-                else detected_entry.source_id
-            )
-            return [
-                RoutedMessage(
-                    source_name=routed_source_name,
-                    source_id=detected_entry.source_id,
-                    payload=data,
-                )
-            ]
-
-    explicit_source = str(data.get("source") or "").strip()
-    # 若显式来源存在却没匹配成功，则不再做特征猜测，避免误路由
-    if explicit_source:
-        return []
-
-    detected_entry = detect_fan_studio_source_entry(data)
-    # 最后一层兜底：对缺少来源字段的兼容消息尝试按载荷特征反推来源
-    if detected_entry is None:
-        return []
-
-    routed_source_name = (
-        detected_entry.provider_source_names[0]
-        if detected_entry.provider_source_names
-        else detected_entry.source_id
-    )
-    return [
-        RoutedMessage(
-            source_name=routed_source_name,
-            source_id=detected_entry.source_id,
-            payload=data,
-        )
-    ]
 
 
 # 预构建常用注册表，便于上层快速按来源名或消息类型查找统一数据源标识
-FAN_STUDIO_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.FAN_STUDIO)
 WOLFX_SOURCE_REGISTRY = get_provider_source_map(ProviderFamily.WOLFX)
 # Pancakes 聚合路由走 get_pancakes_source_id()，不预构建未使用的 registry
 
@@ -351,8 +235,7 @@ def get_jian_project_source_id(source_name: str | None) -> str | None:
 def route_jian_project_message(data: dict[str, Any]) -> list[RoutedMessage]:
     """统一解析 Jian Project 消息并返回路由结果列表。
 
-    仅提取 7 大核心数据源：
-    cea, cwa-eew, jma-eew, weather, nmefc-tsunami, cenc, usgs。
+    按 SOURCE_CATALOG 中 Jian Project 家族的 type 别名路由。
     """
     if not isinstance(data, dict):
         return []
@@ -380,16 +263,11 @@ def route_jian_project_message(data: dict[str, Any]) -> list[RoutedMessage]:
 
 __all__ = [
     "RoutedMessage",
-    "FAN_STUDIO_SOURCE_REGISTRY",
     "WOLFX_SOURCE_REGISTRY",
-    "detect_fan_studio_source_entry",
-    "detect_fan_studio_source_id",
-    "get_fan_studio_source_id",
-    "get_jian_project_source_id",
+                "get_jian_project_source_id",
     "get_openquake_source_id",
     "get_pancakes_source_id",
     "get_provider_source_map",
     "get_wolfx_source_id",
-    "route_fan_studio_message",
-    "route_jian_project_message",
+        "route_jian_project_message",
 ]

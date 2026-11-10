@@ -69,8 +69,7 @@ class WebSocketRuntimeService:
         # 统一回收该连接名下所有挂起的后台任务：
         # - reconnect_tasks：等待重试调度的重连任务
         # - _fan_secondary_wait_tasks / _fan_secondary_cleanup_tasks：
-        #   FAN 次要通道静默等待/超时清理任务，若残留会在服务器切换后
-        #   仍用捕获的旧 URI 建连，覆盖切换效果
+        #   历史次要通道等待/清理任务（若仍有残留映射则一并回收）
         # 先从任务映射中移除，再取消并等待任务真正结束，
         # 避免旧任务在响应取消前继续执行建连或发送回调。
         pending: list[asyncio.Task] = []

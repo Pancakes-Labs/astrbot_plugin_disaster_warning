@@ -109,7 +109,7 @@ def build_projection_payload(
 ) -> SourcePayload:
     """构建投影阶段使用的来源载荷对象。"""
     provider_family = ""
-    # 若注册目录中含有该数据源描述，则直接取出所属服务商家族分类（如 wolfx / fan_studio）
+    # 若注册目录中含有该数据源描述，则直接取出所属服务商家族分类（如 wolfx / jian_project）
     if source_descriptor is not None:
         provider_family = getattr(source_descriptor, "provider_family", "") or ""
     # 统一转换消息格式标志字段

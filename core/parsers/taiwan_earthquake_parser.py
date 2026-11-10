@@ -33,11 +33,11 @@ _POISON_REPORT_IDS = frozenset(
 
 
 class CwaReportParser(BaseParser):
-    """台湾中央气象署地震报告解析器，处理 FAN Studio 来源数据。"""
+    """台湾中央气象署地震报告解析器，处理 上游 来源数据。"""
 
     def __init__(self, message_logger=None):
         """初始化台湾地震报告解析器。"""
-        super().__init__("cwa_fanstudio_report", message_logger)
+        super().__init__("cwa_report_jianproject", message_logger)
 
     @staticmethod
     def _normalize_shock_key(shock_time: Any) -> str:
@@ -139,7 +139,7 @@ class CwaReportParser(BaseParser):
 
         # 报告图与震度图链接保留在元数据中，供后续媒体展示链复用。
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -174,7 +174,7 @@ class CwaReportParser(BaseParser):
             event_type="earthquake",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             published_at=domain_event.occurred_at,
             aliases=aliases,
@@ -196,7 +196,7 @@ class CwaReportParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),

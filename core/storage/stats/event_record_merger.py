@@ -140,7 +140,7 @@ class EventRecordMerger:
         if not real_event_id and not bare_unique:
             return None
 
-        cn_aliases = {"fan_studio_tsunami", "china_tsunami_fanstudio"}
+        cn_aliases = {"china_tsunami_jianproject", "china_tsunami_jianproject"}
         for i, record in enumerate(target_list):
             rec_source = str(
                 record.get("source") or record.get("source_id") or ""

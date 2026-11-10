@@ -195,7 +195,7 @@ class PluginLifecycleService:
                         f"[灾害预警] 统计模块气象 session 关闭时出错（已忽略）: {wfe}"
                     )
 
-            # 气象站查询服务（NMC + FAN 客户端）若已懒加载过，需显式关闭其 aiohttp 会话，
+            # 气象站查询服务若已懒加载过，需显式关闭其 aiohttp 会话，
             # 避免插件重载时残留未关闭连接导致会话泄漏。
             weather_station_service = getattr(
                 self.plugin, "_weather_station_query_service", None

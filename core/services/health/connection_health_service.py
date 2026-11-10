@@ -2,7 +2,7 @@
 连接健康采样、日聚合与自动事故服务。
 
 语义约定（管理端 Statuspage 风格）：
-- 行 = 物理连接组（fan_studio_all / fan_studio_cenc_ir / p2p_main ...）
+- 行 = 物理连接组（jian_project_all / cenc_ir_eqsc / p2p_main ...）
 - degraded 不扣 uptime；partial_outage / major_outage 按 100% 计入中断
 - 未启用 (not_monitored) 不进 uptime 分母、不进总横幅
 - 闪断 < OPEN_INCIDENT_SECONDS 只记采样，不开 Past Incidents

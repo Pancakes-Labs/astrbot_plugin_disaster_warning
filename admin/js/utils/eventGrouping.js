@@ -77,7 +77,7 @@
 
         // Step 1: 扫描并依据事件 ID 划分群组
         // 台风事件优先使用 real_event_id（台风编号）作为分组键，
-        // 因为台风的 event_id 可能因数据形态（Fan/EQSC）不同而变化，
+        // 因为台风的 event_id 可能因数据形态（Jian/EQSC）不同而变化，
         // 但 real_event_id（如 202609）在同一台风生命周期内保持稳定。
         for (const evt of safeEvents) {
             const evtType = String(evt.type || evt._groupType || '').toLowerCase();
@@ -99,17 +99,17 @@
                     || evt.code
                     || ''
                 ).trim();
-                // 规范化中国海啸历史别名，避免 fan_studio_tsunami 与
-                // china_tsunami_fanstudio 被拆成两个分组。
+                // 规范化中国海啸历史别名，避免 china_tsunami_jianproject 与
+                // china_tsunami_jianproject 被拆成两个分组。
                 const rawSource = String(evt.source || evt.source_id || '').trim();
                 const sourceKey = (() => {
                     const lower = rawSource.toLowerCase();
                     if (
-                        lower === 'fan_studio_tsunami'
+                        lower === 'china_tsunami_jianproject'
                         || lower === 'china_tsunami'
-                        || lower === 'china_tsunami_fanstudio'
+                        || lower === 'china_tsunami_jianproject'
                     ) {
-                        return 'china_tsunami_fanstudio';
+                        return 'china_tsunami_jianproject';
                     }
                     if (
                         lower === 'jma_tsunami_p2p'

@@ -14,19 +14,13 @@ from astrbot.api import logger
 from ...utils.plugin_logger import plugin_logger
 from ..services.telemetry.telemetry_utils import track_error_safely
 from ..sources.source_catalog import get_source_entry, get_source_ids_by_dispatch_family
-from ..sources.source_entry import ProviderFamily
 from ..sources.source_router import (
     get_pancakes_source_id,
     get_provider_source_map,
     get_wolfx_source_id,
-    route_fan_studio_message,
     route_jian_project_message,
 )
 from .websocket.websocket_manager import WebSocketManager
-
-# 从服务路由器预加载 FAN Studio 数据源名称到系统 ID 的双向映射表
-FAN_STUDIO_PROVIDER_SOURCE_MAP = get_provider_source_map(ProviderFamily.FAN_STUDIO)
-
 
 def _build_connection_metadata(connection_name, connection_info, source_channel=None):
     """整理连接元数据，写入事件附加信息。"""
@@ -67,11 +61,6 @@ def _resolve_config_key(source_id: str) -> str:
     return source_entry.config_key
 
 
-# FAN Studio 自 2026-07 起：未鉴权时 /all 仅放行 fssn / fssn-cmt。
-# 建连后常先收到仅含这两路的半量 initial_all，鉴权成功后再推完整快照。
-_FAN_PREAUTH_FREE_SOURCE_NAMES = frozenset({"fssn", "fssn-cmt"})
-
-
 class SourceMessageRouter:
     """WebSocket 消息路由装配器。"""
 
@@ -92,7 +81,6 @@ class SourceMessageRouter:
     def register_all(self, ws_manager: WebSocketManager):
         """把各连接族处理器注册到 WebSocket 管理器。"""
         # 将各不同协议族的消息接收回调挂载到 WebSocket 连接管理器中
-        ws_manager.register_handler("fan_studio", self._create_fan_studio_handler())
         ws_manager.register_handler("p2p", self._create_p2p_handler())
         ws_manager.register_handler("wolfx", self._create_wolfx_handler())
         ws_manager.register_handler("pancakes_api", self._create_pancakes_handler())
@@ -277,187 +265,9 @@ class SourceMessageRouter:
                 )
         return False
 
-    def _ensure_fan_studio_parser_mapping(self) -> None:
-        """首次处理 FAN 消息前校验路由表与解析器是否对应齐全。"""
-        if self._parser_map_checked:
-            return
-        # 遍历静态数据源配置中的所有 fan studio 定义，校验其解析器是否存在
-        for source_name, source_id in FAN_STUDIO_PROVIDER_SOURCE_MAP.items():
-            if source_id and not self._has_parser(source_id):
-                # FAN Studio 映射包含气象/台风/海啸等子源，按 source_id 解析事件流标签，
-                # 避免固定为 earthquake 绕过对应事件流的日志策略。
-                stream_tag = self._resolve_stream_by_source_id(source_id)
-                plugin_logger.warning(
-                    f"[灾害预警] Source ID '{source_id}' (源: {source_name}) 未注册解析器，"
-                    f"请检查 core/app/disaster_service.py 中的初始化。",
-                    is_event_linked=True,
-                    event_stream=stream_tag,
-                )
-        self._parser_map_checked = True
 
-    @staticmethod
-    def _fan_initial_all_known_source_keys(data: dict) -> list[str]:
-        """提取 initial_all 中已注册的 FAN 数据源键。"""
-        keys: list[str] = []
-        for key, value in data.items():
-            if key == "type" or not isinstance(value, dict):
-                continue
-            # 仅认 FAN provider 源名映射，避免把元数据键算进去
-            if key in FAN_STUDIO_PROVIDER_SOURCE_MAP:
-                keys.append(key)
-        return keys
 
-    @classmethod
-    def _is_fan_preauth_partial_initial_all(cls, data: dict) -> bool:
-        """判断是否为鉴权前半量 initial_all（仅 fssn / fssn-cmt）。
 
-        FAN Studio 文档：未鉴权时 /all 仅放行这两路；鉴权成功后会再推完整快照。
-        若把半量包当正式 bootstrap 解析，会出现 fssn-cmt 解析日志刷两次。
-        """
-        if str(data.get("type") or "").strip() != "initial_all":
-            return False
-        source_keys = cls._fan_initial_all_known_source_keys(data)
-        if not source_keys:
-            return False
-        return all(key in _FAN_PREAUTH_FREE_SOURCE_NAMES for key in source_keys)
-
-    def _create_fan_studio_handler(self):
-        """创建 FAN Studio 连接的消息处理器。"""
-
-        async def fan_studio_handler(
-            message, connection_name=None, connection_info=None
-        ):
-            self._log_received_message(
-                "FAN Studio",
-                message,
-                connection_name=connection_name,
-                connection_info=connection_info,
-            )
-
-            try:
-                try:
-                    data = json.loads(message)
-                except json.JSONDecodeError as error:
-                    # 避免非 JSON 报文引起程序崩溃
-                    plugin_logger.error(f"[灾害预警] JSON解析失败: {error}")
-                    return None
-
-                msg_type = (
-                    str(data.get("type") or "").strip()
-                    if isinstance(data, dict)
-                    else ""
-                )
-
-                # 鉴权成功回执：不进入业务解析
-                if msg_type in {"auth_success", "auth_ok", "authenticated"}:
-                    return None
-
-                # FAN Studio 会以业务错误包表达限流/策略拒绝；收到后主动关闭，尽快释放上游配额
-                if msg_type == "error":
-                    error_message = str(
-                        data.get("message") or data.get("msg") or ""
-                    ).strip()
-                    plugin_logger.warning(
-                        f"[灾害预警] FAN Studio 返回错误包，连接为 {connection_name or '未知'}："
-                        f"{error_message or data}"
-                    )
-                    ws_manager = getattr(self.service, "ws_manager", None)
-                    if connection_name and ws_manager is not None:
-                        try:
-                            apply_policy = getattr(
-                                ws_manager, "_apply_fan_quota_policy_on_error", None
-                            )
-                            if callable(apply_policy):
-                                await apply_policy(
-                                    connection_name,
-                                    RuntimeError(
-                                        error_message or "FAN Studio policy error"
-                                    ),
-                                )
-                            websocket = ws_manager.connections.get(connection_name)
-                            if websocket is not None and not websocket.closed:
-                                close_reason = (
-                                    error_message or "FAN Studio policy error"
-                                ).encode("utf-8")[:120]
-                                await websocket.close(code=1000, message=close_reason)
-                        except Exception as close_error:
-                            plugin_logger.debug(
-                                f"[灾害预警] 关闭 FAN Studio 错误连接失败: {close_error}"
-                            )
-                    return None
-
-                # 鉴权前半量 initial_all（仅 fssn/fssn-cmt）：直接丢弃等待鉴权后的完整快照，
-                # 不再通知静默协调器标记已收到 bootstrap，避免导致门闩提前放行。
-                if isinstance(data, dict) and self._is_fan_preauth_partial_initial_all(
-                    data
-                ):
-                    return None
-
-                # 先校验路由映射，再把一条总线消息拆成多个候选数据源消息
-                self._ensure_fan_studio_parser_mapping()
-                routed_messages = route_fan_studio_message(data)
-                messages_to_process = [
-                    (item.source_name, item.source_id, item.payload)
-                    for item in routed_messages
-                ]
-                if msg_type == "initial_all":
-                    coordinator = getattr(self.service, "startup_silence", None)
-                    if coordinator is not None:
-                        try:
-                            coordinator.note_bootstrap_payload(
-                                connection_name=connection_name,
-                                kind="fan_initial_all",
-                            )
-                        except Exception as exc:
-                            plugin_logger.debug(
-                                f"[灾害预警] FAN initial_all 通知静默协调器失败: {exc}"
-                            )
-                # 遍历被分配出来的数据源及负载，分别尝试分发
-                for source, source_id, payload in messages_to_process:
-                    if not self._is_source_routable(source_id, source):
-                        continue
-
-                    plugin_logger.info(
-                        f"[灾害预警] 处理 {source} 数据 ({_resolve_config_key(source_id)})",
-                        is_event_linked=True,
-                        event_stream=self._resolve_stream_by_source_id(source_id),
-                        is_silent_window=True,
-                    )
-                    await self._parse_and_dispatch(
-                        source_id=source_id,
-                        source_label=source,
-                        parser_input=json.dumps(payload),
-                        connection_name=connection_name,
-                        connection_info=connection_info,
-                        source_channel=source,
-                        parser_log_label=source,
-                    )
-
-                # 没有任何子消息被路由：心跳/未知包均属常态，无需逐条打日志，
-                # 避免高频未知消息刷屏。真正的异常由上层 error 日志承担。
-                return None
-
-            except Exception as error:
-                connection_uri = (
-                    connection_info.get("uri") if connection_info else "未知地址"
-                )
-                connection_type = (
-                    connection_info.get("connection_type")
-                    if connection_info
-                    else "未知类型"
-                )
-                plugin_logger.error(
-                    f"[灾害预警] FAN Studio 处理器解析来自 {connection_name or '未知连接'} 的消息失败，连接地址为 {connection_uri}，连接类型为 {connection_type}，错误为 {error}",
-                    exc_info=True,
-                )
-                # 路由异常遥测
-                await self._track_router_error(
-                    error,
-                    module="core.source_message_router.fan_studio_handler",
-                )
-                raise
-
-        return fan_studio_handler
 
     def _create_p2p_handler(self):
         """创建 P2P WebSocket 连接的消息处理器。"""

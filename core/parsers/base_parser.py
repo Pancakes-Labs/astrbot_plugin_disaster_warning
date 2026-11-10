@@ -161,11 +161,11 @@ class BaseParser:
 
         # 规则 2：根据各数据源特定的必填字段，检查是否大面积为空
         critical_fields = {
-            "usgs_fanstudio": ["id", "magnitude", "placeName"],
-            "sa_fanstudio": ["id", "magnitude", "placeName"],
-            "fssn_cmt_fanstudio": ["id", "eventId", "shockTime"],
-            "china_tsunami_fanstudio": ["warningInfo", "code", "timeInfo"],
-            "china_weather_fanstudio": ["title", "description"],
+            "usgs_jianproject": ["id", "magnitude", "placeName"],
+            "sa_jianproject": ["id", "magnitude", "placeName"],
+            "usgs_jianproject": ["id", "eventId", "shockTime"],
+            "china_tsunami_jianproject": ["warningInfo", "code", "timeInfo"],
+            "china_weather_jianproject": ["title", "description"],
             "china_weather_jianproject": ["title", "description"],
         }
 

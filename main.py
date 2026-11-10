@@ -273,7 +273,7 @@ class DisasterWarningPlugin(Star):
                 "• /气象站实况 <站点代码|站名>（别名 /实况 /气象站）\n"
                 "• /气象站历史 <站点> [时次]\n"
                 "• /气象站列表 [省份]\n"
-                "• /空气质量 <城市|省份|全国> [等级]（别名 /AQI）\n"
+                "• /空气质量 <市县|省份|全国> [等级|市县]（别名 /AQI）\n"
                 "• /空气质量排行 [最好|最差]\n"
                 "• /空气质量列表 [省份]"
             ),
@@ -292,7 +292,7 @@ class DisasterWarningPlugin(Star):
                 "• 海啸：/灾害预警模拟 <标题> <等级> <位置> [源震级] [源]\n"
                 "• 气象：/灾害预警模拟 <标题> <正文> [预警编码] [源]\n"
                 "• 台风：/灾害预警模拟 <编号> <名称> [强度] [源]\n"
-                "例：/灾害预警模拟 30.6 103.0 5.2 10 cea_fanstudio"
+                "例：/灾害预警模拟 30.6 103.0 5.2 10 cea_jianproject"
             ),
             # 9. 运维管理
             (
@@ -305,7 +305,7 @@ class DisasterWarningPlugin(Star):
                 "• /灾害预警配置 查看 [全局|当前|<会话UMO>]\n"
                 "• /设置所在地 [纬度] [经度] [地名] [范围]\n"
                 "• /灾害预警日志 / 日志导出 [数量] / 日志开关 / 日志清除\n"
-                "• /服务器切换 - 查看/切换数据源主备服务器\n"
+                "• /服务器切换 [主服务器|备用服务器] - 切换 Jian Project 主备\n"
                 "• /重启AstrBot - 重启整个 AstrBot 进程\n"
                 "──────────────\n"
                 "📚 更多信息请查阅插件 README 文档"
@@ -652,7 +652,7 @@ class DisasterWarningPlugin(Star):
         keyword: str = None,
         optional_a: str = None,
     ):
-        """查询城市/省份/全国空气质量（FAN Studio AQI）"""
+        """查询城市/省份/全国空气质量（Jian Project AQI）"""
         async for result in self._query_command_service.handle_query_aqi(
             event, keyword=keyword, optional_a=optional_a
         ):
@@ -855,7 +855,7 @@ class DisasterWarningPlugin(Star):
     async def server_switch(
         self, event: AstrMessageEvent, data_source: str = None, preference: str = None
     ):
-        """切换数据源主备服务器。"""
+        """查看或切换 Jian Project 主备服务器。"""
         async for result in self._admin_command_service.handle_server_switch(
             event, data_source, preference
         ):

@@ -445,7 +445,7 @@ def register_simulation_routes(app, disaster_service, config: dict[str, Any]):
         请求体：
         {
             "disaster_type": "earthquake",
-            "source_id": "cea_fanstudio",
+            "source_id": "cea_jianproject",
             "params": { ... },        # 数据源示例参数（默认取自 schema）
             "runtime_config": { ... }, # 前端编辑中的配置草稿（未保存）
             "target_session": ""       # 可选：会话级配置合并用

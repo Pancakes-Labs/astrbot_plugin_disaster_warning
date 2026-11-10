@@ -17,7 +17,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Image
 
-from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
+from ....utils.map_tile_sources import get_tile_fallback_url, get_tile_subdomains, get_tile_url_js
 from ..presenters.global_quake_display_context import GlobalQuakeDisplayContextBuilder
 
 

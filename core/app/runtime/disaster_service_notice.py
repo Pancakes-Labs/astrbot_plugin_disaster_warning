@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ...network.websocket.fan_studio_connection_policy import (
+from ...network.websocket.jian_project_connection_policy import (
     resolve_active_server_label,
 )
 from ...services.config.config_service import ConfigAccessor
@@ -32,9 +32,9 @@ class DisasterServiceNoticeService:
     # 避免通道展示名在各模块重复维护；折叠规则本身属于通知场景的有意设计
     # （用户只需知道哪个通道离线，无需细分到子源），保留在此处。
     _SOURCE_GROUP_KEY_MAP: dict[str, str] = {
-        "fan_studio_mixed": "fan_studio_all",
-        # cenc_ir_fanstudio 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
-        "cenc_ir_fanstudio": "fan_studio_cenc_ir",
+        "jian_project_mixed": "jian_project_all",
+        # cenc_ir_eqsc 走独立连接（/cenc-ir），离线时折叠到烈度速报子通道展示名
+        "cenc_ir_eqsc": "cenc_ir_eqsc",
         "wolfx_mixed": "wolfx_all",
         "pancakes_mixed": "pancakes_api",
         "openquake_mixed": "pancakes_api",

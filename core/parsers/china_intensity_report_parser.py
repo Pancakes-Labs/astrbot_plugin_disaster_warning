@@ -1,6 +1,6 @@
 """
 中国地震台网烈度速报解析器。
-负责把 FAN Studio /cenc-ir 推送转换为统一领域事件。
+负责把中国地震台网烈度速报详情转换为统一领域事件（供 EQSC 等通道复用）。
 """
 
 from __future__ import annotations
@@ -37,10 +37,10 @@ _CONTOUR_INTENSITY_KEYS: tuple[str, ...] = (
 
 
 class CencIntensityReportParser(BaseParser):
-    """中国地震台网烈度速报解析器（FAN Studio `/cenc-ir`）。"""
+    """中国地震台网烈度速报解析器基类（由 EQSC 等通道继承）。"""
 
     def __init__(self, message_logger=None):
-        super().__init__("cenc_ir_fanstudio", message_logger)
+        super().__init__("cenc_ir_eqsc", message_logger)
 
     @staticmethod
     def _first_present(mapping: dict[str, Any], *keys: str) -> Any:
@@ -237,7 +237,7 @@ class CencIntensityReportParser(BaseParser):
         occurred_at = self._parse_datetime(msg_data.get("oriTime", ""))
 
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -279,7 +279,7 @@ class CencIntensityReportParser(BaseParser):
             event_type="earthquake",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             published_at=published_at or occurred_at,
             aliases=tuple(item for item in (source_record_id, uni_event_id) if item),
@@ -299,7 +299,7 @@ class CencIntensityReportParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),

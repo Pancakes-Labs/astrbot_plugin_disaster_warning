@@ -152,14 +152,14 @@
    ========================================================================== */
 .status-connections-grid {
     display: grid;
-    /* 固定 5 列：第 2 列 P2P+S-Net，第 5 列 PancakesAPI+EQSC 上下堆叠 */
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    /* 固定 4 列：第 1 列 Jian Project，第 2 列 P2P+S-Net，第 4 列 PancakesAPI+EQSC 上下堆叠 */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
     align-items: stretch;
 }
 
 .status-connections-grid.connections-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* 堆叠列：P2P+S-Net / PancakesAPI+EQSC 共享高度 */
@@ -648,7 +648,7 @@ body.dark-theme .connection-sub-source-off-badge {
 }
 
 /* ==========================================================================
-   5. FAN Studio 翻转卡片 (Front: 主通道 / Back: CENC 烈度速报独立 WS)
+   5. 可翻转连接卡片样式（Jian Project：正面主通道 / 背面扩接剩余源）
    ========================================================================== */
 .connection-item--flippable {
     /* 翻转壳：保留原 connection-item 命中区域，内部做 3D 翻面 */

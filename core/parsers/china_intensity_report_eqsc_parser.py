@@ -1,7 +1,7 @@
 """
 EQSC CENC 烈度速报解析器。
 
-把 /intensityReportCENC.json 详情适配为与 FAN /cenc-ir 同形的中间结构，
+把 /intensityReportCENC.json 详情适配为与 标准烈度速报中间结构 同形的中间结构，
 再复用 CencIntensityReportParser 的 envelope 构建与最高烈度推导逻辑。
 """
 
@@ -21,7 +21,7 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
     """中国地震台网烈度速报解析器（EQSC HTTP 详情）。"""
 
     def __init__(self, message_logger=None):
-        # 复用 FAN 解析器实现，仅切换 source_id / provider 语义
+        # 复用基类解析实现，切换为 EQSC source_id
         super().__init__(message_logger)
         self.source_id = "cenc_ir_eqsc"
         self.source_entry = get_source_entry(self.source_id)
@@ -67,7 +67,7 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
 
     @classmethod
     def _adapt_stations(cls, raw_stations: Any) -> list[dict[str, Any]]:
-        """把 EQSC stations 适配为 FAN instrument_intensity_json 近似结构。"""
+        """把 EQSC stations 适配为 instrument_intensity_json 近似结构。"""
         if not isinstance(raw_stations, list):
             return []
 
@@ -146,7 +146,7 @@ class CencIntensityReportEqscParser(CencIntensityReportParser):
     def adapt_eqsc_detail_to_fan_shape(
         cls, detail: dict[str, Any]
     ) -> dict[str, Any] | None:
-        """将 EQSC 详情映射为 FAN /cenc-ir 同形字典，供共享 envelope 构建。"""
+        """将 EQSC 详情映射为 标准烈度速报中间结构 同形字典，供共享 envelope 构建。"""
         if not isinstance(detail, dict) or not detail:
             return None
 

@@ -343,17 +343,17 @@ function SimulationView() {
         eq_multi_report: {
             label: '地震多报演进', icon: '🌍',
             desc: '同事件键 3 报递进',
-            type: 'earthquake', source: 'cea_fanstudio', prefix: 'eq',
+            type: 'earthquake', source: 'cea_jianproject', prefix: 'eq',
         },
         eq_final: {
             label: '地震最终测定', icon: '📋',
             desc: '单次 CENC 正式测定报',
-            type: 'earthquake', source: 'cenc_fanstudio', prefix: 'eq',
+            type: 'earthquake', source: 'cenc_jianproject', prefix: 'eq',
         },
         typhoon_track: {
             label: '台风路径演进', icon: '🌀',
             desc: '台风轨迹 + 最终强度',
-            type: 'typhoon', source: 'typhoon_fanstudio', prefix: 'ty',
+            type: 'typhoon', source: 'typhoon_jianproject', prefix: 'ty',
         },
     };
 

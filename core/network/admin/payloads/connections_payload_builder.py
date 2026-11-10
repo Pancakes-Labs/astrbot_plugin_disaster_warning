@@ -258,17 +258,17 @@ class ConnectionsPayloadBuilder:
             "last_timestamp": last_ts,
         }
 
-    def _enrich_fan_server_info(self, connections: dict[str, dict[str, Any]]) -> None:
-        """为 FAN Studio 连接条目补充活跃服务器信息。"""
+    def _enrich_jian_server_info(self, connections: dict[str, dict[str, Any]]) -> None:
+        """为 Jian Project 连接条目补充活跃服务器信息。"""
         ws_manager = getattr(self.disaster_service, "ws_manager", None)
         if ws_manager is None:
             return
         for conn_key, conn_info in connections.items():
             if not isinstance(conn_info, dict):
                 continue
-            # 判断是否为 FAN Studio 连接
+            # 判断是否为 Jian Project 连接
             group_key = str(conn_info.get("group_key") or "").strip()
-            if not group_key.startswith("fan_studio"):
+            if not group_key.startswith("jian_project"):
                 continue
             # 从 ws_manager 获取原始连接信息中的 active_server 字段
             raw_info = ws_manager.connection_info.get(group_key, {})
@@ -321,8 +321,8 @@ class ConnectionsPayloadBuilder:
         connections[self.EQSC_DISPLAY_NAME] = self._build_eqsc_connection_info()
         # 覆盖 catalog 占位条目，附带轮询运行态与 HTTP 语义
         connections[self.SNET_DISPLAY_NAME] = self._build_snet_connection_info()
-        # 补充 FAN Studio 服务器信息
-        self._enrich_fan_server_info(connections)
+        # 补充 Jian Project 服务器信息
+        self._enrich_jian_server_info(connections)
         return connections
 
     def build_api_payload(

@@ -19,7 +19,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ....core.services.telemetry.telemetry_utils import track_error_safely
-from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
+from ....utils.map_tile_sources import get_tile_fallback_url, get_tile_subdomains, get_tile_url_js
 from ....utils.time_converter import TimeConverter
 from ....utils.version import get_plugin_version
 from ...domain.event_models import TyphoonEvent

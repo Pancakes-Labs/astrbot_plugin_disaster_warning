@@ -17,7 +17,7 @@ import re
 # 凭据类字段键名模式（允许 -/_ 分隔符，大小写不敏感），
 # 覆盖 snake_case / camelCase / kebab-case 变体（如 refreshToken、apiKey）。
 # 在 TelemetryManager._CREDENTIAL_URL_KEY_PATTERN 基础上补充本插件特有的
-# login_key（Jian Project）与 fan_api_key（FAN Studio）。
+# login_key（Jian Project）等敏感字段。
 _CREDENTIAL_FIELD_PATTERN = (
     r"(?:token|key|secret|password|pwd|cookie|authorization|"
     r"api[-_]?key|refresh[-_]?token|access[-_]?token|app[-_]?key|"

@@ -54,7 +54,7 @@ def is_cenc_intensity_report(
     震级分布与时间序列；但仍保留来源贡献统计与事件列表落库。
     """
     normalized = normalize_source_name(source or "")
-    if normalized in {"cenc_ir_fanstudio", "cenc_ir_eqsc"}:
+    if normalized in {"cenc_ir_eqsc", "cenc_ir_eqsc"}:
         return True
     info_text = str(info_type or "").strip()
     return "烈度速报" in info_text
@@ -70,7 +70,7 @@ def is_fssn_cmt_report(
     与烈度速报同口径：保留 by_source / 事件列表，不计入 total_events、by_type、震级分布与时间序列。
     """
     normalized = normalize_source_name(source or "")
-    if normalized == "fssn_cmt_fanstudio":
+    if normalized == "usgs_jianproject":
         return True
     info_text = str(info_type or "").strip().upper()
     return info_text == "CMT" or "矩心矩张量" in str(info_type or "")
@@ -89,9 +89,9 @@ def is_earthquake_supplement_product(
 
 def fssn_cmt_report_source_keys() -> tuple[str, ...]:
     """返回可识别为 FSSN CMT 的 source/source_id 键集合。"""
-    keys: set[str] = {"fssn_cmt_fanstudio"}
+    keys: set[str] = {"usgs_jianproject"}
     for alias, target in SOURCE_ALIAS_MAP.items():
-        if target == "fssn_cmt_fanstudio":
+        if target == "usgs_jianproject":
             keys.add(str(alias).strip().lower())
     return tuple(sorted(keys))
 
@@ -134,9 +134,9 @@ def cenc_intensity_report_source_keys() -> tuple[str, ...]:
     包含规范 key 与历史别名，供 SQL 侧过滤与 Python 判定保持一致。
     统一折叠为 strip + lower 形态，避免大小写/空白导致 SQL 与 Python 分叉。
     """
-    keys: set[str] = {"cenc_ir_fanstudio", "cenc_ir_eqsc"}
+    keys: set[str] = {"cenc_ir_eqsc", "cenc_ir_eqsc"}
     for alias, target in SOURCE_ALIAS_MAP.items():
-        if target in {"cenc_ir_fanstudio", "cenc_ir_eqsc"}:
+        if target in {"cenc_ir_eqsc", "cenc_ir_eqsc"}:
             keys.add(str(alias).strip().lower())
     return tuple(sorted(keys))
 
@@ -179,14 +179,14 @@ def build_source_stats_key(
 
     策略：
     - 普通源：规范 source_id
-    - 台风 FAN 实时 / Fan+EQSC 富化：typhoon_fanstudio
+    - 台风 历史 实时 / Fan+EQSC 富化：typhoon_jianproject
     - 台风 EQSC 实时轮询：typhoon_eqsc
     - 台风 EQSC 历史重建：typhoon_eqsc_rebuild
     """
     normalized = normalize_source_name(source or "")
     type_key = str(event_type or "").strip().lower()
     is_typhoon = normalized in {
-        "typhoon_fanstudio",
+        "typhoon_jianproject",
         "typhoon_eqsc",
         "typhoon_eqsc_rebuild",
     } or (type_key == "typhoon")
@@ -198,7 +198,7 @@ def build_source_stats_key(
         return "typhoon_eqsc_rebuild"
     if mode == "eqsc" or normalized == "typhoon_eqsc":
         return "typhoon_eqsc"
-    return "typhoon_fanstudio"
+    return "typhoon_jianproject"
 
 
 def format_typhoon_source_name(
@@ -211,7 +211,7 @@ def format_typhoon_source_name(
     注意：贡献榜仅用 format_source_name；
     本函数用于事件列表/详情，可显示 Fan / Fan+EQSC / EQSC 实时 / EQSC 历史。
     """
-    normalized = normalize_source_name(source or "typhoon_fanstudio")
+    normalized = normalize_source_name(source or "typhoon_jianproject")
     mode = resolve_data_mode(info_type, default="")
     if mode == "enriched":
         return "中国气象局：实时活跃台风 - Fan+EQSC"
@@ -234,7 +234,7 @@ def format_event_source_name(
     normalized = normalize_source_name(source or "")
     type_key = str(event_type or "").strip().lower()
     if (
-        normalized in {"typhoon_fanstudio", "typhoon_eqsc", "typhoon_eqsc_rebuild"}
+        normalized in {"typhoon_jianproject", "typhoon_eqsc", "typhoon_eqsc_rebuild"}
         or type_key == "typhoon"
     ):
         return format_typhoon_source_name(source, info_type=info_type)

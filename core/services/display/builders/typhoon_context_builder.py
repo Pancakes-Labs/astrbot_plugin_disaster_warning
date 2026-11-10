@@ -134,7 +134,7 @@ def _extract_typhoon_projection_details(metadata, source_payload, domain_event=N
             first_non_empty(
                 metadata.get("data_source") if isinstance(metadata, dict) else None,
                 projection_view.get("data_source"),
-                "fan_studio",
+                "jian_project",
             )
         ).strip(),
         "updated_at": first_non_empty(
@@ -202,14 +202,14 @@ def build_typhoon_display_context(projection: dict, options: dict | None = None)
     wind_circle = dict(payload_details["wind_circle"] or {})
     history_track = list(payload_details["history_track"] or [])
     future_track = list(payload_details["future_track"] or [])
-    data_source = str(payload_details["data_source"] or "fan_studio").strip()
+    data_source = str(payload_details["data_source"] or "jian_project").strip()
     if not allow_eqsc_enrichment:
         # 会话关闭台风富化：仅保留 Fan 单值风圈语义，去掉 EQSC 富化痕迹。
         wind_circle = {}
         history_track = []
         future_track = []
-        data_source = "fan_studio"
-        display_metadata["data_source"] = "fan_studio"
+        data_source = "jian_project"
+        display_metadata["data_source"] = "jian_project"
         display_metadata["info_type"] = "fan"
         display_metadata["typhoon_data_mode"] = "fan"
 

@@ -40,6 +40,7 @@ _TEXT_PRESENTER_REGISTRY = {
     "cenc_ir_report": CencIntensityReportPresenter,
     "jma_report": JmaEarthquakeInfoPresenter,
     "usgs_report": UsgsEarthquakePresenter,
+    "sa_eew": ShakeAlertEewPresenter,
     "shakealert_eew": ShakeAlertEewPresenter,
     "fssn_cmt": FssnCmtPresenter,
     "snet": SnetPresenter,

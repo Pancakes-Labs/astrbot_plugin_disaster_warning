@@ -22,7 +22,6 @@ class SourceType(Enum):
 class ProviderFamily(Enum):
     """连接与提供方家族。"""
 
-    FAN_STUDIO = "fan_studio"  # FAN Studio WebSocket 聚合源
     P2P = "p2p"  # 日本 P2P 地震情报网
     WOLFX = "wolfx"  # Wolfx API
     GLOBAL_QUAKE = "global_quake"  # Global Quake 自建或公共服务器
@@ -89,7 +88,7 @@ class SourceEntry:
     provider_message_types: tuple[str, ...] = ()  # 该源支持匹配的原始协议消息列表
     provider_source_names: tuple[
         str, ...
-    ] = ()  # FAN Studio 等聚合平台定义的底层原始来源标识
+    ] = ()  # Jian Project 等聚合平台定义的底层原始来源标识
     provider_aliases: tuple[str, ...] = ()  # 解析与路由时支持的别名集合
     routing_tags: tuple[str, ...] = ()  # 供决策树和日志分类使用的特征标签
     payload_signatures: tuple[tuple[str, ...], ...] = ()  # 载荷特征签名

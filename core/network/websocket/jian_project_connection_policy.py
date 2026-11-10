@@ -1,7 +1,14 @@
 """
 Jian Project WebSocket 连接策略与鉴权服务。
-负责管理 Jian Project (api.sismotide.top) 的登录密钥 (lk_...) 兑换长期 Token (rt_...)，
-以及长期 Token 持久化与换取短期 Access Token (at_...) 的全生命周期管理。
+
+负责：
+1. 登录密钥 (lk_...) 兑换长期 Token (rt_...) 并持久化；
+2. 长期 Token 换取短期 Access Token (at_...)；
+3. 主/备服务器偏好与 URL 顺序解析；
+4. 按目标 API 主机选择对应鉴权换票地址。
+
+主服务器：api.sismotide.top / auth.sismotide.top
+备服务器：api.jianproject.cloud / auth.jianproject.cloud
 """
 
 from __future__ import annotations
@@ -9,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -20,12 +29,24 @@ from astrbot.api.star import StarTools
 # 连接组名称常量
 JIAN_PROJECT_PRIMARY_CONNECTION = "jian_project_all"
 
-# 鉴权接口地址
-JIAN_PROJECT_REFRESH_URL = "https://auth.sismotide.top/api/refresh"
-JIAN_PROJECT_ACCESS_URL = "https://auth.sismotide.top/api/access"
+# 主/备 API 主机
+JIAN_PROJECT_PRIMARY_WS_HOST = "api.sismotide.top"
+JIAN_PROJECT_BACKUP_WS_HOST = "api.jianproject.cloud"
+JIAN_PROJECT_PRIMARY_AUTH_BASE = "https://auth.sismotide.top"
+JIAN_PROJECT_BACKUP_AUTH_BASE = "https://auth.jianproject.cloud"
 
-# 默认基础 WebSocket 地址
-JIAN_PROJECT_DEFAULT_WS_URL = "wss://api.sismotide.top/all"
+# 登录密钥换长期 Token：固定走主鉴权站（发钥页同源）
+JIAN_PROJECT_REFRESH_URL = f"{JIAN_PROJECT_PRIMARY_AUTH_BASE}/api/refresh"
+# 默认访问令牌换票（主服务器）；备服务器见 resolve_jian_access_url
+JIAN_PROJECT_ACCESS_URL = f"{JIAN_PROJECT_PRIMARY_AUTH_BASE}/api/access"
+
+# 默认 WebSocket 地址
+JIAN_PROJECT_DEFAULT_WS_URL = f"wss://{JIAN_PROJECT_PRIMARY_WS_HOST}/all"
+JIAN_PROJECT_BACKUP_WS_URL = f"wss://{JIAN_PROJECT_BACKUP_WS_HOST}/all"
+
+# 服务器类型标签
+SERVER_TYPE_PRIMARY = "primary"
+SERVER_TYPE_BACKUP = "backup"
 
 # 鉴权持久化文件名
 JIAN_PROJECT_TOKEN_FILENAME = "jian_project_token.json"
@@ -81,9 +102,10 @@ class JianProjectAuthService:
         self._max_connections: int = 3
         self._last_used_login_key: str | None = None
 
-        # 内存短期 Access Token 缓存
+        # 内存短期 Access Token 缓存（按鉴权主机区分）
         self._access_token: str | None = None
         self._at_expires_at: float = 0.0
+        self._access_token_auth_base: str | None = None
 
         self._lock = asyncio.Lock()
         self._is_loaded = False
@@ -155,6 +177,7 @@ class JianProjectAuthService:
         self._rt_expires_at = 0.0
         self._access_token = None
         self._at_expires_at = 0.0
+        self._access_token_auth_base = None
         self._save_to_disk()
 
     async def exchange_login_key(
@@ -209,6 +232,7 @@ class JianProjectAuthService:
                     self._last_used_login_key = clean_key
                     self._access_token = None
                     self._at_expires_at = 0.0
+                    self._access_token_auth_base = None
                     self._save_to_disk()
 
                     days = int(exp_min / 1440)
@@ -247,11 +271,19 @@ class JianProjectAuthService:
         self,
         refresh_token: str,
         session: aiohttp.ClientSession | None = None,
+        *,
+        access_url: str | None = None,
     ) -> str:
-        """使用长期 Token (rt_...) 换取短期访问令牌 (at_...)。"""
+        """使用长期 Token (rt_...) 换取短期访问令牌 (at_...)。
+
+        access_url 须与当前连接的 API 主机一致（主/备鉴权站不同）。
+        """
         clean_rt = str(refresh_token or "").strip()
         if not clean_rt:
             raise ValueError("长期 Token 为空，无法换取 Access Token")
+
+        target_access_url = str(access_url or JIAN_PROJECT_ACCESS_URL).strip()
+        auth_base = target_access_url.rsplit("/api/access", 1)[0] or JIAN_PROJECT_PRIMARY_AUTH_BASE
 
         headers = {
             "Authorization": f"Bearer {clean_rt}",
@@ -269,9 +301,10 @@ class JianProjectAuthService:
         try:
             logger.debug(
                 "[灾害预警] 正在使用长期 Token 换取 Jian Project 短期访问令牌 (at_...)..."
+                f" auth={auth_base}"
             )
             async with client_session.post(
-                JIAN_PROJECT_ACCESS_URL, headers=headers
+                target_access_url, headers=headers
             ) as resp:
                 status = resp.status
                 try:
@@ -291,6 +324,7 @@ class JianProjectAuthService:
                     exp_sec = float(data.get("expires_after_sec") or 3600)
                     self._access_token = token
                     self._at_expires_at = time.time() + exp_sec
+                    self._access_token_auth_base = auth_base
                     self._max_connections = int(
                         data.get("max_connections") or self._max_connections
                     )
@@ -324,6 +358,7 @@ class JianProjectAuthService:
         configured_credential: str | None = None,
         session: aiohttp.ClientSession | None = None,
         force_refresh: bool = False,
+        ws_uri: str | None = None,
     ) -> str:
         """获取用于 WebSocket 握手的短期访问令牌 (at_...)。
 
@@ -331,10 +366,13 @@ class JianProjectAuthService:
             configured_credential: 用户配置中传入的凭证字符串（可以是 lk_ 开头的登录密钥，也可以是 rt_ 开头的长期 Token，留空则沿用持久化 Token）。
             session: 可选的 aiohttp 会话。
             force_refresh: 是否强制换取新的访问令牌（用于重连或过期处理）。
+            ws_uri: 目标 WebSocket 地址；用于选择主/备鉴权换票主机。
         """
         async with self._lock:
             self._ensure_loaded()
             raw_cred = str(configured_credential or "").strip()
+            access_url = resolve_jian_access_url(ws_uri)
+            auth_base = access_url.rsplit("/api/access", 1)[0]
 
             # 1. 用户填入了 lk_ 开头的登录密钥
             if raw_cred.startswith("lk_"):
@@ -360,26 +398,116 @@ class JianProjectAuthService:
                 )
 
             # 4. 检查内存中短期 Access Token 是否依然有效（提前 5 分钟刷新）
+            # 且必须与当前目标主机对应的鉴权站一致。
             if (
                 not force_refresh
                 and self._access_token
+                and self._access_token_auth_base == auth_base
                 and (time.time() + 300 < self._at_expires_at)
             ):
                 return self._access_token
 
             # 5. 使用长期 Token 换取新的短期访问令牌
             return await self.exchange_refresh_token(
-                self._refresh_token, session=session
+                self._refresh_token,
+                session=session,
+                access_url=access_url,
             )
 
     def invalidate_token(self) -> None:
         """使当前短期访问令牌失效（握手被拒绝时调用）。"""
         self._access_token = None
         self._at_expires_at = 0.0
+        self._access_token_auth_base = None
 
 
 # 全局单例鉴权服务
 jian_project_auth_service = JianProjectAuthService()
+
+
+class ServerPreference(Enum):
+    """Jian Project 服务器偏好枚举。"""
+
+    PRIMARY_FIRST = "主服务器优先"
+    BACKUP_FIRST = "备用服务器优先"
+    AUTO = "自动"
+
+    @classmethod
+    def from_config(cls, value: str) -> ServerPreference:
+        """从配置值解析偏好枚举，无效值回退到主服务器优先。"""
+        if not value:
+            return cls.PRIMARY_FIRST
+        text = str(value).strip()
+        for member in cls:
+            if member.value == text:
+                return member
+        return cls.PRIMARY_FIRST
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        """规范化配置值。"""
+        return cls.from_config(value).value
+
+    @classmethod
+    def parse_strict(cls, value: str | None) -> ServerPreference | None:
+        """严格解析偏好枚举；无效值返回 None。"""
+        if not value:
+            return None
+        text = str(value).strip()
+        for member in cls:
+            if member.value == text:
+                return member
+        return None
+
+
+def resolve_jian_access_url(ws_uri: str | None) -> str:
+    """按目标 WebSocket 主机选择访问令牌换票地址。"""
+    host = ""
+    raw = str(ws_uri or "").strip()
+    if raw:
+        try:
+            host = str(urlsplit(raw).hostname or "").strip().lower()
+        except Exception:
+            host = ""
+    if host == JIAN_PROJECT_BACKUP_WS_HOST or host.endswith(".jianproject.cloud"):
+        return f"{JIAN_PROJECT_BACKUP_AUTH_BASE}/api/access"
+    return JIAN_PROJECT_ACCESS_URL
+
+
+def resolve_server_urls(
+    connection_url: str,
+    backup_url: str,
+    preference: str | ServerPreference,
+) -> tuple[str, str]:
+    """按偏好解析主备 URL 顺序，返回 (first_try_url, second_try_url)。"""
+    pref = (
+        preference
+        if isinstance(preference, ServerPreference)
+        else ServerPreference.from_config(preference)
+    )
+    primary = str(connection_url or "").strip()
+    backup = str(backup_url or "").strip()
+    if not primary:
+        return (backup, backup)
+    if not backup:
+        return (primary, primary)
+    if pref == ServerPreference.BACKUP_FIRST:
+        return (backup, primary)
+    return (primary, backup)
+
+
+def resolve_active_server_label(
+    connection_info: dict[str, Any] | None,
+) -> str:
+    """从连接信息解析当前活跃的服务器标签。"""
+    if not isinstance(connection_info, dict):
+        return "未知"
+    server_type = str(connection_info.get("active_server") or "").strip()
+    if server_type == SERVER_TYPE_PRIMARY:
+        return "主服务器"
+    if server_type == SERVER_TYPE_BACKUP:
+        return "备用服务器"
+    return "未知"
 
 
 def is_jian_project_connection(name: str) -> bool:
@@ -404,16 +532,84 @@ def attach_jian_project_auth_from_plan(
     connection_info["base_url"] = base_url
 
 
+def is_tls_blocked_signal(text: str | Exception | None) -> bool:
+    """识别 TLS/连接被中间设备 RST 阻断的信号，便于尽快切到另一台服务器。"""
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return False
+    keywords = (
+        "10054",
+        "10022",
+        "connectionreseterror",
+        "远程主机强迫关闭了一个现有的连接",
+        "指定的网络名不再可用",
+        "connection reset by peer",
+        "tls handshake failed",
+        "ssl: default",
+        "ssl:default",
+        "ssl handshake",
+        "certificate verify failed",
+        "certificate_verify_failed",
+        "ssl证书",
+        "ssl 证书",
+    )
+    return any(token in raw for token in keywords)
+
+
+def is_fan_secondary_connection(name: str) -> bool:
+    """历史兼容：FAN 次要通道已移除，恒为 False。"""
+    del name
+    return False
+
+
+def is_primary_fan_connected(manager: Any) -> bool:
+    """历史兼容名：判断 Jian Project /all 主连接是否在线。"""
+    connections = getattr(manager, "connections", {}) or {}
+    websocket = connections.get(JIAN_PROJECT_PRIMARY_CONNECTION)
+    if websocket is None:
+        return False
+    try:
+        return not bool(getattr(websocket, "closed", True))
+    except Exception:
+        return False
+
+
+def resolve_secondary_reconnect_interval(
+    *,
+    default_interval: int,
+    quota_hit: bool,
+    primary_online: bool,
+) -> int:
+    """历史兼容：无次要通道配额策略时直接返回默认间隔。"""
+    del quota_hit, primary_online
+    return max(1, int(default_interval or 10))
+
+
 __all__ = [
     "JIAN_PROJECT_PRIMARY_CONNECTION",
+    "JIAN_PROJECT_PRIMARY_WS_HOST",
+    "JIAN_PROJECT_BACKUP_WS_HOST",
+    "JIAN_PROJECT_PRIMARY_AUTH_BASE",
+    "JIAN_PROJECT_BACKUP_AUTH_BASE",
     "JIAN_PROJECT_REFRESH_URL",
     "JIAN_PROJECT_ACCESS_URL",
     "JIAN_PROJECT_DEFAULT_WS_URL",
+    "JIAN_PROJECT_BACKUP_WS_URL",
     "JIAN_PROJECT_TOKEN_FILENAME",
+    "SERVER_TYPE_PRIMARY",
+    "SERVER_TYPE_BACKUP",
     "AUTH_ERROR_MESSAGES",
+    "ServerPreference",
     "get_jian_project_storage_path",
     "JianProjectAuthService",
     "jian_project_auth_service",
+    "resolve_jian_access_url",
+    "resolve_server_urls",
+    "resolve_active_server_label",
     "is_jian_project_connection",
     "attach_jian_project_auth_from_plan",
+    "is_tls_blocked_signal",
+    "is_fan_secondary_connection",
+    "is_primary_fan_connected",
+    "resolve_secondary_reconnect_interval",
 ]

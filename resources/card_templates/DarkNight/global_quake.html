@@ -330,6 +330,7 @@
         // 注意：此处必须让子域名以字符串注入再用 split 还原为数组，
         // 不能让 Jinja 变量落在 JS 表达式位置（模板语法会报错）。
         const TILE_SUBDOMAINS = '{{ tile_subdomains_csv }}'.split(',').filter(Boolean);
+        const TILE_FALLBACK_URL = '{{ tile_fallback_url }}';
         const tileLayer = L.tileLayer('{{ tile_url }}', {
             maxZoom: 18,
             minZoom: 1,
@@ -338,6 +339,30 @@
             updateWhenZooming: false,
             subdomains: TILE_SUBDOMAINS
         }).addTo(map);
+
+        // FAN 瓦片失败时回退 Jian Project（无回退 URL 则保持原层）
+        if (TILE_FALLBACK_URL) {
+            var _tileFallbackSwitched = false;
+            tileLayer.on('tileerror', function () {
+                if (_tileFallbackSwitched) return;
+                _tileFallbackSwitched = true;
+                try { map.removeLayer(tileLayer); } catch (_e) {}
+                var fb = L.tileLayer(TILE_FALLBACK_URL, {
+                    maxZoom: 18,
+                    minZoom: 0,
+                    keepBuffer: 2,
+                    updateWhenIdle: true,
+                    updateWhenZooming: false,
+                    subdomains: TILE_SUBDOMAINS
+                }).addTo(map);
+                setupStableTileRender(map, fb, {
+                    readyDebounceMs: 120,
+                    readyFallbackMs: 2200,
+                    readyClass: 'map-ready',
+                    debug: true
+                });
+            });
+        }
 
         // 统一调用共享 helper：瓦片计数 + 防抖收敛 + 超时兜底
         setupStableTileRender(map, tileLayer, {

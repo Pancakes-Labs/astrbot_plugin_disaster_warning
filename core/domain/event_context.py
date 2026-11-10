@@ -169,7 +169,7 @@ class TyphoonDisplayContext:
     # 移动信息
     move_direction: str = ""
     move_speed: float | None = None
-    # 风圈半径（单值，FAN Studio 格式）
+    # 风圈半径（单值，Jian Project 格式）
     radius7: int | None = None
     radius10: int | None = None
     # 四象限风圈（EQSC 富化格式）
@@ -177,8 +177,8 @@ class TyphoonDisplayContext:
     # EQSC 富化轨迹数据（供地图渲染使用，文本展示不直接消费）
     history_track: list[dict[str, Any]] = field(default_factory=list)
     future_track: list[dict[str, Any]] = field(default_factory=list)
-    # 数据来源标记：fan_studio / eqsc / enriched
-    data_source: str = "fan_studio"
+    # 数据来源标记：jian_project / eqsc / enriched
+    data_source: str = "jian_project"
     updated_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     options: dict[str, Any] = field(default_factory=dict)

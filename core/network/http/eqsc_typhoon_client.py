@@ -76,7 +76,7 @@ class EqscTyphoonClient(EqscHttpClient):
         """按台风 ID 查询台风详细数据。
 
         EQSC 的台风 ID 格式为 4 位（年份后2位+编号2位），
-        FAN Studio 的台风 ID 格式为 6 位（年份4位+编号2位），
+        Jian Project 的台风 ID 格式为 6 位（年份4位+编号2位），
         调用方需在传入前完成 ID 转换。
 
         Args:

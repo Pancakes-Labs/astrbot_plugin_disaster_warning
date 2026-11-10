@@ -31,18 +31,22 @@ MAP_SOURCE_SUBDOMAINS = {
 MAP_TILE_SOURCES = {
     # 高德地图（直接访问官方服务器，{s} 为 Leaflet 原生子域名占位符）
     "amap": "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
-    # PetalMap 矢量图（FAN Studio 瓦片代理）
-    # 重要：FAN Studio(2026-08-22 01时左右)已将瓦片坐标从旧式 z/y/x 改为标准 z/x/y(Web Mercator XYZ)。
-    # 若沿用 {z}/{y}/{x} 会将 x/y 互换，导致取到错误地理位置瓦片（整片陆地/海洋/破碎错位地形）。
-    "petallight": "https://tilemap.fanstudio.tech/petallight/{z}/{x}/{y}",  # PetalMap 矢量图 亮
-    "petaldark": "https://tilemap.fanstudio.tech/petaldark/{z}/{x}/{y}",  # PetalMap 矢量图 暗
-    # ArcGIS 系列（FAN Studio 瓦片代理；同为标准 z/x/y）
+    # PetalMap / ArcGIS：优先 tilemap.fanstudio.tech；不可用时回退 Jian Project（见 FALLBACK）。
+    # 坐标为标准 z/x/y（Web Mercator XYZ）。
+    "petallight": "https://tilemap.fanstudio.tech/petallight/{z}/{x}/{y}",  # PetalMap 矢量图 亮（FAN 独有，无 Jian 回退）
+    "petaldark": "https://tilemap.fanstudio.tech/petaldark/{z}/{x}/{y}",  # PetalMap 矢量图 暗（FAN 独有，无 Jian 回退）
     "arcwi": "https://tilemap.fanstudio.tech/arcwi/{z}/{x}/{y}",  # ArcGIS 卫星影像
     "arcwob": "https://tilemap.fanstudio.tech/arcwob/{z}/{x}/{y}",  # ArcGIS 地形图
     "arcwh": "https://tilemap.fanstudio.tech/arcwh/{z}/{x}/{y}",  # ArcGIS 山影图
-    # 中科星图（FAN Studio 瓦片代理；上游已下架，返回"未找到名为 geovis 的地图源"）
-    # 保留列表项以便配置兼容，但被标记为不可用；通过 fallback 兜底到可用的源。
-    "geovis": "https://tilemap.fanstudio.tech/geovis/{z}/{x}/{y}",  # 中科星图 卫星影像（上游已失效，勿选）
+    # 中科星图：上游已下架；保留配置兼容，命中时回退默认源。
+    "geovis": "https://tilemap.fanstudio.tech/geovis/{z}/{x}/{y}",
+}
+
+# Jian Project 瓦片回退（仅文档已列源）；FAN 独有源不写回退。
+MAP_TILE_FALLBACK_SOURCES = {
+    "arcwi": "https://tilemap.sismotide.top/arcwi/{z}/{x}/{y}",
+    "arcwob": "https://tilemap.sismotide.top/arcwob/{z}/{x}/{y}",
+    "arcwh": "https://tilemap.sismotide.top/arcwh/{z}/{x}/{y}",
 }
 
 
@@ -117,6 +121,14 @@ def get_tile_url_js(map_source: str) -> str:
     return get_tile_url(map_source)
 
 
+def get_tile_fallback_url(map_source: str) -> str | None:
+    """获取地图源的 Jian Project 瓦片回退 URL；无回退则返回 None。"""
+    source_id = normalize_map_source(map_source)
+    if source_id in UNAVAILABLE_SOURCES:
+        return None
+    return MAP_TILE_FALLBACK_SOURCES.get(source_id)
+
+
 # ── 代理绕过（proxy bypass）──────────────────────────────────────────────
 # Playwright 启动的 Chromium 默认继承 AstrBot 进程的环境变量。当进程带有
 # ALL_PROXY=socks5://... / HTTPS_PROXY=http://... 这类代理设置时（容器、systemd
@@ -139,8 +151,9 @@ MAP_TILE_BYPASS_DOMAINS = {
 DEFAULT_PROXY_BYPASS_DOMAINS: tuple[str, ...] = (
     "*.autonavi.com",
     "*.amap.com",
-    # FAN Studio 瓦片代理（PetalMap / ArcGIS 系列共用）
+    # 瓦片优先域名（FAN）与 Jian Project 回退域名
     "*.fanstudio.tech",
+    "*.sismotide.top",
 )
 
 # Chromium --proxy-bypass-list 以分号分隔。

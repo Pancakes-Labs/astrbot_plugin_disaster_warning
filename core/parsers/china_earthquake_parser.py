@@ -1,6 +1,6 @@
 """
 中国地震情报解析器。
-负责把 FAN Studio 与 Wolfx 来源的中国地震测定数据转换为统一领域事件。
+负责把 上游 与 Wolfx 来源的中国地震测定数据转换为统一领域事件。
 """
 
 from __future__ import annotations
@@ -19,10 +19,10 @@ from .base_parser import BaseParser
 
 
 class CencEarthquakeParser(BaseParser):
-    """中国地震台网地震测定解析器，处理 FAN Studio 来源数据。"""
+    """中国地震台网地震测定解析器，处理 上游 来源数据。"""
 
     def __init__(self, message_logger=None):
-        super().__init__("cenc_fanstudio", message_logger)
+        super().__init__("cenc_jianproject", message_logger)
 
     def _build_envelope(self, msg_data: dict[str, Any]) -> EventEnvelope:
         """把中国地震测定原始字典封装为统一事件包裹体。"""
@@ -40,7 +40,7 @@ class CencEarthquakeParser(BaseParser):
 
         # 整理事件的元数据字典，包含来源族、数据源静态标识、信息类别及事件ID
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -67,7 +67,7 @@ class CencEarthquakeParser(BaseParser):
             event_type="earthquake",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             published_at=domain_event.occurred_at,
             aliases=tuple(
@@ -90,7 +90,7 @@ class CencEarthquakeParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),

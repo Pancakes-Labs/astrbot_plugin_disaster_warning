@@ -11,7 +11,7 @@ from typing import Any
 from .....utils.version import get_plugin_version
 from ....services.display import build_admin_statistics_projection
 from ....services.query.source_runtime_query_service import SourceRuntimeQueryService
-from ...websocket.fan_studio_connection_policy import (
+from ...websocket.jian_project_connection_policy import (
     resolve_active_server_label,
 )
 from .connections_payload_builder import ConnectionsPayloadBuilder
@@ -106,8 +106,8 @@ class RealtimePayloadBuilder:
         if not snapshot:
             return {}
 
-        # 解析 FAN Studio 服务器信息
-        fan_server_info = self._resolve_fan_server_info()
+        # 解析 Jian Project 服务器信息
+        jian_server_info = self._resolve_jian_server_info()
 
         return {
             "running": snapshot.get("running", False),
@@ -122,20 +122,19 @@ class RealtimePayloadBuilder:
             "eew_query_status": self.disaster_service.get_eew_query_status_data(),
             "start_time": snapshot.get("start_time"),
             "version": get_plugin_version(),
-            "fan_server_info": fan_server_info,
+            "jian_server_info": jian_server_info,
         }
 
-    def _resolve_fan_server_info(self) -> dict[str, str]:
-        """解析 FAN Studio 连接的活跃服务器信息。"""
+    def _resolve_jian_server_info(self) -> dict[str, str]:
+        """解析 Jian Project 连接的活跃服务器信息。"""
         result: dict[str, str] = {}
         if not self.disaster_service or not self.disaster_service.ws_manager:
             return result
         ws_manager = self.disaster_service.ws_manager
-        fan_connections = {
-            "fan_studio_all": "FAN Studio",
-            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        jian_connections = {
+            "jian_project_all": "Jian Project",
         }
-        for conn_name, display_name in fan_connections.items():
+        for conn_name, display_name in jian_connections.items():
             info = ws_manager.connection_info.get(conn_name, {})
             if isinstance(info, dict):
                 label = resolve_active_server_label(info)

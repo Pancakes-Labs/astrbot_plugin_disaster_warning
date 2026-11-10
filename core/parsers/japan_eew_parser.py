@@ -1,6 +1,6 @@
 """
 日本地震预警解析器。
-负责把 FAN Studio、P2P 与 Wolfx 来源的日本地震预警数据统一转换为领域事件。
+负责把 上游、P2P 与 Wolfx 来源的日本地震预警数据统一转换为领域事件。
 """
 
 from __future__ import annotations
@@ -40,31 +40,90 @@ def _extract_payload_dict(data: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     return data, data
 
 
-class JmaEewFanStudioParser(BaseParser):
-    """日本气象厅地震预警解析器 - FAN Studio。"""
+
+def _truthy_flag(value: Any) -> bool:
+    """兼容 bool / 0-1 / 常见真值字符串。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _resolve_jma_is_final(msg_data: dict[str, Any]) -> bool:
+    """识别最终报：isFinal / final / isLastInfo / 标题含「最終」。"""
+    if not isinstance(msg_data, dict):
+        return False
+    for key in ("isFinal", "is_final", "final", "isLastInfo", "is_last_info"):
+        if _truthy_flag(msg_data.get(key)):
+            return True
+    title = str(
+        msg_data.get("Title")
+        or msg_data.get("title")
+        or msg_data.get("infoTypeName")
+        or msg_data.get("InfoType")
+        or ""
+    )
+    if "最終" in title or "最终" in title:
+        return True
+    flag = msg_data.get("Flag") or msg_data.get("flag")
+    if isinstance(flag, dict):
+        for key in ("isFinal", "is_final", "final", "isLastInfo", "is_last_info"):
+            if _truthy_flag(flag.get(key)):
+                return True
+    return False
+
+
+def _resolve_jma_is_cancel(msg_data: dict[str, Any]) -> bool:
+    """识别取消报。"""
+    if not isinstance(msg_data, dict):
+        return False
+    for key in ("isCancel", "is_cancel", "cancel", "isCanceled"):
+        if _truthy_flag(msg_data.get(key)):
+            return True
+    title = str(
+        msg_data.get("Title")
+        or msg_data.get("title")
+        or msg_data.get("infoTypeName")
+        or msg_data.get("CodeType")
+        or ""
+    )
+    if "取消" in title:
+        return True
+    flag = msg_data.get("Flag") or msg_data.get("flag")
+    if isinstance(flag, dict):
+        for key in ("isCancel", "is_cancel", "cancel", "isCanceled"):
+            if _truthy_flag(flag.get(key)):
+                return True
+    return False
+
+class JmaEewLegacyParser(BaseParser):
+    """日本气象厅地震预警解析器 - 上游。"""
 
     def __init__(self, message_logger=None):
-        """初始化 FAN Studio 日本预警解析器。"""
-        super().__init__("jma_fanstudio", message_logger)
+        """初始化 上游 日本预警解析器。"""
+        super().__init__("jma_jianproject", message_logger)
 
     def _build_envelope(self, msg_data: dict[str, Any]) -> EventEnvelope:
-        """把 FAN Studio 日本预警原始字典封装为统一事件包裹体。"""
+        """把 上游 日本预警原始字典封装为统一事件包裹体。"""
         source_entry = get_source_entry(self.source_id)
-        # FAN Studio 报次字段通常来自 updates，这里统一规整为整数
+        # 上游 报次字段通常来自 updates，这里统一规整为整数
         report_num = (
             msg_data.get("updates", 1)
             if isinstance(msg_data.get("updates"), int)
             else 1
         )
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
             else "earthquake_warning",
             "report_num": report_num,
-            "is_final": bool(msg_data.get("final", False)),
-            "is_cancel": bool(msg_data.get("cancel", False)),
+            "is_final": _resolve_jma_is_final(msg_data),
+            "is_cancel": _resolve_jma_is_cancel(msg_data),
             "info_type": msg_data.get("infoTypeName", ""),
             "create_time": self._parse_datetime(msg_data.get("createTime", "")),
             "jma_warning_areas": [],
@@ -92,11 +151,11 @@ class JmaEewFanStudioParser(BaseParser):
             event_type="earthquake_warning",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             report_num=report_num,
             published_at=created_at or domain_event.occurred_at,
-            is_final=bool(msg_data.get("final", False)),
+            is_final=_resolve_jma_is_final(msg_data),
             aliases=tuple(
                 item for item in (str(msg_data.get("id", "") or "").strip(),) if item
             ),
@@ -117,7 +176,7 @@ class JmaEewFanStudioParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),
@@ -126,7 +185,7 @@ class JmaEewFanStudioParser(BaseParser):
         )
 
     def _parse_data(self, data: dict[str, Any]) -> EventEnvelope | None:
-        """解析 FAN Studio 日本气象厅地震预警数据。"""
+        """解析 上游 日本气象厅地震预警数据。"""
         try:
             msg_data = self._extract_data(data)
             if not msg_data:
@@ -138,7 +197,7 @@ class JmaEewFanStudioParser(BaseParser):
                 return None
 
             # 取消报在当前推送链中不作为正式地震事件继续向后处理
-            if msg_data.get("cancel", False):
+            if _resolve_jma_is_cancel(msg_data):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 收到取消报，跳过",
                     is_event_linked=True,
@@ -156,8 +215,8 @@ class JmaEewFanStudioParser(BaseParser):
             envelope.metadata.update(
                 {
                     "report_num": report_num,
-                    "is_final": bool(msg_data.get("final", False)),
-                    "is_cancel": bool(msg_data.get("cancel", False)),
+                    "is_final": _resolve_jma_is_final(msg_data),
+                    "is_cancel": _resolve_jma_is_cancel(msg_data),
                     "info_type": msg_data.get("infoTypeName", ""),
                     "create_time": self._parse_datetime(msg_data.get("createTime", "")),
                 }
@@ -733,8 +792,8 @@ class JmaEewJianProjectParser(BaseParser):
 
             intensity_raw = str(msg_data.get("intensity") or "").strip()
             scale = ScaleConverter.parse_jma_cwa_scale(intensity_raw)
-            is_final = bool(msg_data.get("isFinal", False))
-            is_cancel = bool(msg_data.get("isCancel", False))
+            is_final = _resolve_jma_is_final(msg_data)
+            is_cancel = _resolve_jma_is_cancel(msg_data)
             info_type = str(msg_data.get("infoTypeName") or "").strip()
             warn_area = msg_data.get("warnArea", [])
 

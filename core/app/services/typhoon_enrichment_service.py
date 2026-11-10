@@ -1,16 +1,16 @@
 """
 台风富化服务。
 
-负责在收到 FAN Studio 台风推送后，向 EQSC API 拉取台风详细数据
+负责在收到 Jian Project 台风推送后，向 EQSC API 拉取台风详细数据
 （历史轨迹、预测路径、四象限风圈），并合并到事件中供展示使用。
 
 EQSC 通道级能力（鉴权、保活、健康、熔断）由 EqscChannelService 统一提供，
 本服务只保留台风业务相关逻辑：Fan 触发路径的富化合并与台风查询入口。
 
 核心策略：
-1. 同步阻塞等待 EQSC 查询完成才推送，只有一直匹配不上才回退到 FAN Studio 基础数据。
+1. 同步阻塞等待 EQSC 查询完成才推送，只有一直匹配不上才回退到 Jian Project 基础数据。
 2. 指数退避重试，最多约5分钟。
-3. 最大等待上限：300秒后强制放弃，以 FAN Studio 基础数据回退。
+3. 最大等待上限：300秒后强制放弃，以 Jian Project 基础数据回退。
 4. 熔断器：连续失败后短路（通道级，由 EqscChannelService 维护）。
 5. 按台风 ID 缓存 EQSC 结果（5分钟 TTL），避免重复请求。
 """
@@ -105,8 +105,8 @@ class TyphoonEnrichmentService:
 
         风圈提取策略：
         1. 优先取历史轨迹末节点（通常为最新观测）。
-        2. 若提供了 FAN Studio 观测时间，则优先匹配时间最接近且不晚于该时刻的节点。
-        3. 以 FAN Studio 的 radius7/radius10 空值作为权威约束，避免把历史风圈误补到当前报文。
+        2. 若提供了 Jian Project 观测时间，则优先匹配时间最接近且不晚于该时刻的节点。
+        3. 以 Jian Project 的 radius7/radius10 空值作为权威约束，避免把历史风圈误补到当前报文。
         """
         history_track = typhoon_data.get("historyTrack", []) or []
         future_track = typhoon_data.get("futureTrack", []) or []
@@ -122,7 +122,7 @@ class TyphoonEnrichmentService:
                     selected_node.get("windCircle", {}) or {}
                 )
 
-        # FAN Studio 当前观测若明确没有对应等级风圈，则不允许 EQSC 历史节点补回
+        # Jian Project 当前观测若明确没有对应等级风圈，则不允许 EQSC 历史节点补回
         wind_circle = constrain_wind_circle_by_fan_radius(
             wind_circle,
             fan_radius7=fan_radius7,
@@ -160,7 +160,7 @@ class TyphoonEnrichmentService:
             node_dt = self._coerce_datetime(node.get("time"))
             if node_dt is None:
                 continue
-            # 允许轻微时钟偏差，但优先不晚于 FAN Studio 观测时间的节点
+            # 允许轻微时钟偏差，但优先不晚于 Jian Project 观测时间的节点
             delta_seconds = (reference_dt - node_dt).total_seconds()
             if delta_seconds < -1800:
                 continue
@@ -342,7 +342,7 @@ class TyphoonEnrichmentService:
         """对台风事件进行 EQSC 富化（同步阻塞模式）。
 
         同步等待 EQSC 查询完成才返回，走完整个指数退避重试链。
-        只有全部重试失败后才返回原始事件（FAN Studio 回退）。
+        只有全部重试失败后才返回原始事件（Jian Project 回退）。
         富化成功则返回包含 EQSC 轨迹与风圈数据的更新事件。
 
         Args:
@@ -391,7 +391,7 @@ class TyphoonEnrichmentService:
                 self._channel_service.record_success()
                 logger.info(
                     f"[灾害预警] 台风 {typhoon_id} 在 EQSC 未命中（编号/名称均不匹配），"
-                    f"直接使用 FAN Studio 基础数据"
+                    f"直接使用 Jian Project 基础数据"
                 )
                 return envelope
         except Exception as e:
@@ -438,7 +438,7 @@ class TyphoonEnrichmentService:
                     self._channel_service.record_success()
                     logger.info(
                         f"[灾害预警] 台风 {typhoon_id} 在 EQSC 未命中（编号/名称均不匹配），"
-                        f"中止重试并使用 FAN Studio 基础数据"
+                        f"中止重试并使用 Jian Project 基础数据"
                     )
                     return envelope
             except Exception as e:
@@ -449,10 +449,10 @@ class TyphoonEnrichmentService:
             # 指数退避：delay = min(delay * 2, max_delay)
             delay = min(delay * 2, float(self._max_delay))
 
-        # 所有重试均失败，回退到 FAN Studio 基础数据
+        # 所有重试均失败，回退到 Jian Project 基础数据
         self._channel_service.record_failure()
         logger.warning(
-            f"[灾害预警] 台风 {typhoon_id} EQSC 富化失败，已用 FAN Studio 基础数据回退"
+            f"[灾害预警] 台风 {typhoon_id} EQSC 富化失败，已用 Jian Project 基础数据回退"
         )
         return envelope
 

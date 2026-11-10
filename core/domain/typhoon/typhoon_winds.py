@@ -63,7 +63,7 @@ def constrain_wind_circle_by_fan_radius(
     fan_radius7: Any = None,
     fan_radius10: Any = None,
 ) -> dict[str, Any]:
-    """用 FAN Studio 当前风圈空值约束 EQSC 四象限风圈。
+    """用 Jian Project 当前风圈空值约束 EQSC 四象限风圈。
 
     30KTS ≈ 7 级，50KTS ≈ 10 级，64KTS ≈ 12 级。
     FAN 当前观测若明确没有对应等级，则不允许历史节点补回。
