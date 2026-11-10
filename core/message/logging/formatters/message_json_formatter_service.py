@@ -32,7 +32,7 @@ class MessageJsonFormatterService:
         "updated_at": "更新时间",
         "started_at": "开始时间",
         "expire": "过期时间",
-        # 🌀 台风相关字段（Fan Studio / EQSC）
+        # 🌀 台风相关字段（Jian Project / EQSC）
         "typhoon": "台风列表",
         "nameEN": "英文名",
         "nameCN": "中文名",
@@ -86,7 +86,7 @@ class MessageJsonFormatterService:
         "maxScale": "最大震度(原始)",
         "MaxIntensity": "最大烈度/震度",  # JMA/Wolfx格式
         "maxIntensity": "最大烈度",  # Wolfx格式
-        "epiIntensity": "预估烈度",  # FAN Studio格式
+        "epiIntensity": "预估烈度",  # Jian Project格式
         "intensity": "烈度",
         "shindo": "震度",  # JMA格式
         "scale": "震度值",  # P2P格式
@@ -99,7 +99,7 @@ class MessageJsonFormatterService:
         "eventId": "事件ID",
         "EventID": "事件ID",  # JMA格式
         "event_id": "事件ID",  # 下划线版本
-        "EventId": "事件编码",  # FAN Studio格式
+        "EventId": "事件编码",  # Jian Project格式
         "uniEventId": "事件唯一ID",  # CENC 烈度速报
         "locName": "震中地名",
         "nameByInfo": "报告标题",
@@ -120,14 +120,14 @@ class MessageJsonFormatterService:
         "originTimeMs": "发震时间(MS)",
         "originTimeIso": "发震时间(ISO)",
         "lastUpdateMs": "最后更新(MS)",
-        "effective": "生效时间",  # FAN Studio格式
+        "effective": "生效时间",  # Jian Project格式
         "issue_time": "发布时间",
         "arrivalTime": "到达时间",  # 海啸
         # 🎯 状态标志
         "isFinal": "最终报",
-        "final": "最终报",  # FAN Studio格式
+        "final": "最终报",  # Jian Project格式
         "isCancel": "取消报",
-        "cancel": "取消报",  # FAN Studio格式
+        "cancel": "取消报",  # Jian Project格式
         "is_final": "最终报",
         "is_cancel": "取消报",
         "cancelled": "取消标志",  # P2P格式
@@ -139,13 +139,13 @@ class MessageJsonFormatterService:
         "isWarn": "警报标志",  # Wolfx格式
         "immediate": "紧急标志",  # 海啸
         # 📰 内容描述
-        "headline": "预警标题",  # FAN Studio格式
-        "description": "详细描述",  # FAN Studio格式
-        "infoTypeName": "信息类型",  # FAN Studio格式
+        "headline": "预警标题",  # Jian Project格式
+        "description": "详细描述",  # Jian Project格式
+        "infoTypeName": "信息类型",  # Jian Project格式
         "correct": "订正信息",
         "issue": "发布信息",
         # 🗺️ 地理区域
-        "province": "省份",  # FAN Studio格式
+        "province": "省份",  # Jian Project格式
         "pref": "都道府县",  # P2P格式
         "addr": "观测点地址",  # P2P格式
         "location": "震源地",  # Wolfx格式
@@ -190,8 +190,8 @@ class MessageJsonFormatterService:
         "user-agent": "客户端标识",
         "count": "计数",
         "area_confidences": "区域置信度",
-        "autoFlag": "自动标志",  # FAN Studio格式
-        "earthtype": "地震类型",  # FAN Studio格式
+        "autoFlag": "自动标志",  # Jian Project格式
+        "earthtype": "地震类型",  # Jian Project格式
         "md5": "校验码",
         "revisionId": "修订版本号",
         "maxPGA": "最大地表加速度",
@@ -217,7 +217,7 @@ class MessageJsonFormatterService:
         "server": "服务器",
         "port": "端口",
         "status_code": "状态码",
-        # 🌐 协议/封装层字段 (Global Quake / PancakesAPI / Fan Studio)
+        # 🌐 协议/封装层字段 (Global Quake / PancakesAPI / Jian Project)
         "timestampMs": "时间戳(毫秒)",
         "payload": "数据载荷",
         "protobuf": "Protobuf格式",
@@ -272,7 +272,7 @@ class MessageJsonFormatterService:
         "scaleTo": "震度上限",  # P2P格式
         "reduceName": "简略地域名",  # P2P格式
         "display": "显示标识",  # P2P格式
-        # Fan Studio 子源分组键
+        # Jian Project 子源分组键
         "fssn": "FSSN地震速报",
         "fssn-cmt": "FSSN矩心矩张量解",
         "weatheralarm": "气象预警",
@@ -297,14 +297,14 @@ class MessageJsonFormatterService:
         "kma-eew": "韩国地震速报",
         "sa": "美国 ShakeAlert",
         "gq": "Global Quake",
-        # Fan Studio 常规字段补充
-        "magnitudel": "震级",  # FAN Studio云南格式
-        "placeName_zh": "中文地名",  # FAN Studio格式
-        "citystring": "城市描述",  # HKO/FAN Studio格式
-        "verify": "核实标志",  # HKO/FAN Studio格式
+        # Jian Project 常规字段补充
+        "magnitudel": "震级",  # Jian Project云南格式
+        "placeName_zh": "中文地名",  # Jian Project格式
+        "citystring": "城市描述",  # HKO/Jian Project格式
+        "verify": "核实标志",  # HKO/Jian Project格式
         "imageURI": "图片地址",  # CWA格式
         "shakemapURI": "等震度图地址",  # CWA格式
-        # 📐 CENC 烈度速报 (Fan Studio cenc-ir)
+        # 📐 CENC 烈度速报 (Jian Project cenc-ir)
         "epiLon": "震中经度",
         "epiLat": "震中纬度",
         "raw_event_json": "原始事件数据",

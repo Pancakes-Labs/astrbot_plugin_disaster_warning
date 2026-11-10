@@ -5,7 +5,6 @@
 
 # 从当前包中导出基础解析器与注册表函数
 from .base_parser import BaseParser
-from .fssn_cmt_parser import FssnCmtParser
 from .parser_registry import (
     create_parser_for_source,
     resolve_parser_class,
@@ -14,7 +13,6 @@ from .parser_registry import (
 
 __all__ = [
     "BaseParser",
-    "FssnCmtParser",
     "create_parser_for_source",
     "resolve_parser_class",
     "validate_catalog_parser_names",

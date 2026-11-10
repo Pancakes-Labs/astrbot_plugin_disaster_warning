@@ -11,9 +11,9 @@ from typing import Any
 
 from astrbot.api import logger
 
-from .fan_studio_connection_policy import (
+from .jian_project_connection_policy import (
     is_fan_secondary_connection,
-    is_fan_studio_connection,
+    is_jian_project_connection,
     is_primary_fan_connected,
     is_tls_blocked_signal,
     resolve_secondary_reconnect_interval,
@@ -103,10 +103,10 @@ class WebSocketReconnectService:
                 f"[灾害预警] {name} 遇到关键错误，将直接进入兜底重连阶段: {error}"
             )
 
-        # FAN Studio TLS 阻断信号：目标地址 TCP 可达但 TLS 握手（携带 SNI）被
-        # 中间设备 RST（如 ws.fanstudio.hk 在部分网络被 SNI 阻断）。继续在同一
+        # Jian Project TLS 阻断信号：目标地址 TCP 可达但 TLS 握手（携带 SNI）被
+        # 中间设备 RST（如 ws.jianproject.hk 在部分网络被 SNI 阻断）。继续在同一
         # 地址上短时重试没有意义，应尽快切换到另一台服务器（主/备）。
-        if is_fan_studio_connection(name) and is_tls_blocked_signal(error):
+        if is_jian_project_connection(name) and is_tls_blocked_signal(error):
             max_retries = self.manager.config.get("max_reconnect_retries", 3)
             current = self.manager.connection_retry_counts.get(name, 0)
             # 已切换过一次（current 已越过第一优先地址的计数段）仍被阻断，
@@ -199,7 +199,7 @@ class WebSocketReconnectService:
             has_backup = connection_info and connection_info.get("backup_url")
             # 存在备用地址时，短时最大重试次数翻倍（主地址试完后在备用地址再试同等次数）
             total_max_retries = max_retries * 2 if has_backup else max_retries
-            # 读取 FAN Studio 服务器偏好，按偏好顺序重试
+            # 读取 Jian Project 服务器偏好，按偏好顺序重试
             conn_config = (
                 connection_info.get("connection_config", {})
                 if isinstance(connection_info, dict)
@@ -208,7 +208,7 @@ class WebSocketReconnectService:
             server_pref_str = conn_config.get("server_preference", "")
             if server_pref_str and is_fan_secondary_connection(name):
                 # 对于 FAN 次要通道，优先跟随主通道的偏好
-                primary_info = self.manager.connection_info.get("fan_studio_all", {})
+                primary_info = self.manager.connection_info.get("jian_project_all", {})
                 primary_config = (
                     primary_info.get("connection_config", {})
                     if isinstance(primary_info, dict)

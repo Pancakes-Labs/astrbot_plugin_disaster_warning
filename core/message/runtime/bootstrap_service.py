@@ -77,7 +77,7 @@ class MessageManagerBootstrapService:
 
         playwright_mode = msg_config.get("playwright_mode", "local")
         playwright_server_url = msg_config.get("playwright_server_url", "")
-        # 仅本地模式生效：部分瓦片源（如 FAN Studio）证书过期时，
+        # 仅本地模式生效：部分瓦片源（如 Jian Project）证书过期时，
         # 开启后可继续加载底图；会信任自签/过期证书，默认关闭。
         ignore_https_errors = bool(msg_config.get("browser_ignore_https_errors", False))
         # 代理绕过（默认开启）：进程带 ALL_PROXY / HTTPS_PROXY 时，Chromium 会继承
@@ -110,9 +110,9 @@ class MessageManagerBootstrapService:
         snet_cfg = (
             data_sources.get("snet", {}) if isinstance(data_sources, dict) else {}
         )
-        # 台风源：FAN 遗留开关 + EQSC 独立轮询开关
-        fan_studio_cfg = (
-            data_sources.get("fan_studio", {}) if isinstance(data_sources, dict) else {}
+        # 台风源：Jian china_typhoon + EQSC 独立轮询开关
+        jian_project_cfg = (
+            data_sources.get("jian_project", {}) if isinstance(data_sources, dict) else {}
         )
         eqsc_cfg = (
             data_sources.get("eqsc", {}) if isinstance(data_sources, dict) else {}
@@ -127,8 +127,8 @@ class MessageManagerBootstrapService:
             # 台风路径图查询/推送也依赖 Playwright，启用台风源且开启路径图时一并预热。
             or (
                 bool(
-                    isinstance(fan_studio_cfg, dict)
-                    and fan_studio_cfg.get("china_typhoon", False)
+                    isinstance(jian_project_cfg, dict)
+                    and jian_project_cfg.get("china_typhoon", False)
                 )
                 and bool(
                     isinstance(self.manager.config.get("typhoon_config", {}), dict)

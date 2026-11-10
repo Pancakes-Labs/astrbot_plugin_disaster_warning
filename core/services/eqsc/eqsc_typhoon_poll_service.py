@@ -1,7 +1,7 @@
 """
 EQSC 台风独立轮询服务。
 
-不依赖 FAN Studio 触发：周期性拉取 /typhoonNMC.json，
+不依赖 Jian Project 触发：周期性拉取 /typhoonNMC.json，
 对活跃台风按核心参数指纹去重后进入统一事件流水线。
 """
 

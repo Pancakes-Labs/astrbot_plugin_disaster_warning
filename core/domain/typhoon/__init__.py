@@ -8,11 +8,15 @@ from .typhoon_display_format import (
     get_typhoon_level_emoji,
     is_valid_radius_value,
 )
-from .typhoon_event_adapter import build_typhoon_event_envelope
+from .typhoon_event_adapter import (
+    build_jian_typhoon_event_envelope,
+    build_typhoon_event_envelope,
+)
 from .typhoon_ids import (
     is_eqsc_placeholder_id,
     normalize_typhoon_id,
     to_eqsc_id,
+    to_canonical_typhoon_id,
     to_fan_id,
 )
 from .typhoon_levels import (
@@ -42,6 +46,7 @@ __all__ = [
     "WIND_CIRCLE_LABELS",
     "build_td_fallback_names",
     "build_typhoon_event_envelope",
+    "build_jian_typhoon_event_envelope",
     "clean_name_text",
     "clean_text",
     "clean_wind_circle",
@@ -65,6 +70,7 @@ __all__ = [
     "resolve_data_mode",
     "resolve_storage_peak_fields",
     "to_eqsc_id",
+    "to_canonical_typhoon_id",
     "to_fan_id",
     "to_float",
     "to_int",

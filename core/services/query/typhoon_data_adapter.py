@@ -19,7 +19,7 @@ from ...domain.typhoon import (
     format_display_name,
     resolve_data_mode,
     to_eqsc_id,
-    to_fan_id,
+    to_canonical_typhoon_id,
     to_float,
     to_int,
 )
@@ -201,7 +201,7 @@ def normalize_eqsc_typhoon(
     if not eqsc_id:
         return None
 
-    fan_id = to_fan_id(eqsc_id)
+    canon_id = to_canonical_typhoon_id(eqsc_id)
     # 先分别清洗每个候选值，再取第一个非空结果：
     # 避免 nameCN 为占位字符串（如 "NULL"/"NAMELESS"）时屏蔽有效的 name 备用值。
     name_cn = clean_name_text(raw.get("nameCN")) or clean_name_text(raw.get("name"))
@@ -254,11 +254,11 @@ def normalize_eqsc_typhoon(
         is_active = True
 
     item: TyphoonQueryItem = {
-        "typhoon_id": fan_id,
-        "eqsc_id": eqsc_id if len(eqsc_id) == 4 else to_eqsc_id(fan_id),
+        "typhoon_id": canon_id,
+        "eqsc_id": eqsc_id if len(eqsc_id) == 4 else to_eqsc_id(canon_id),
         "name": name_cn,
         "name_en": name_en,
-        "display_name": format_display_name(name_cn, name_en, fan_id or eqsc_id),
+        "display_name": format_display_name(name_cn, name_en, canon_id or eqsc_id),
         "typhoon_type": typhoon_type,
         "is_active": bool(is_active),
         "latitude": latitude,
@@ -332,7 +332,7 @@ def normalize_local_typhoon(
     typhoon_type = clean_text(raw.get("level"))
 
     item: TyphoonQueryItem = {
-        "typhoon_id": to_fan_id(real_event_id),
+        "typhoon_id": to_canonical_typhoon_id(real_event_id),
         "eqsc_id": to_eqsc_id(real_event_id),
         "name": name_cn,
         "name_en": name_en,

@@ -27,12 +27,12 @@ from .base_parser import BaseParser
 class WeatherAlarmParser(BaseParser):
     """中国气象局气象预警解析器。
 
-    支持 FAN Studio、Jian Project 等气象数据源载荷格式。
+    支持 上游、Jian Project 等气象数据源载荷格式。
     构造时按 source_id 区分数据源，各源维护独立的短窗去重队列，
     跨源不去重。
     """
 
-    def __init__(self, source_id: str = "china_weather_fanstudio", message_logger=None):
+    def __init__(self, source_id: str = "china_weather_jianproject", message_logger=None):
         """初始化气象预警解析器与短期重复记录缓存。"""
         super().__init__(source_id, message_logger)
         # 短窗去重缓存：{预警 id: 最近处理时间戳}。
@@ -47,14 +47,14 @@ class WeatherAlarmParser(BaseParser):
             # PancakesAPI RealtimeEvent 解包：外层有 source/type/action/payload
             # 返回 (payload, is_realtime)；is_realtime=True 表示已确认是 RealtimeEvent
             # 但被丢弃（如 action=remove / 非 weather 类型），此时不再回退到
-            # FAN Studio 扁平载荷提取，避免把 RealtimeEvent 外层当扁平预警误处理。
+            # 上游 扁平载荷提取，避免把 RealtimeEvent 外层当扁平预警误处理。
             realtime_result = self._extract_realtime_payload(data)
             if realtime_result is not None:
                 msg_data, is_realtime = realtime_result
                 if not is_realtime:
                     return None
             else:
-                # 非 RealtimeEvent 结构：回退到 FAN Studio 扁平/嵌套载荷提取
+                # 非 RealtimeEvent 结构：回退到 上游 扁平/嵌套载荷提取
                 msg_data = self._extract_data(data)
             if not msg_data:
                 return None
@@ -171,7 +171,7 @@ class WeatherAlarmParser(BaseParser):
                 "description": description,
                 "source_family": source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 "source_enum": source_entry.source_enum if source_entry else "",
                 "source_type": source_entry.source_type.value
                 if source_entry
@@ -194,7 +194,7 @@ class WeatherAlarmParser(BaseParser):
                 event_type="weather_alarm",
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 source_enum=source_entry.source_enum if source_entry else "",
                 published_at=issue_time or effective_time,
                 attributes={
@@ -213,7 +213,7 @@ class WeatherAlarmParser(BaseParser):
                     source_id=self.source_id,
                     provider_family=source_entry.provider_family.value
                     if source_entry
-                    else "fan_studio",
+                    else "jian_project",
                     message_type=str(msg_data.get("type") or "weatheralert").strip(),
                     raw=dict(msg_data),
                     attributes=dict(metadata),
@@ -271,7 +271,7 @@ class WeatherAlarmParser(BaseParser):
 
         返回 (payload, is_realtime)：
         - 返回 None：非 RealtimeEvent 结构（无 payload 字段），
-          由调用方回退到 FAN Studio 扁平载荷提取。
+          由调用方回退到 上游 扁平载荷提取。
         - 返回 (None, True)：已确认是 RealtimeEvent 但被丢弃
           （action=remove / 非 weather 类型 / payload 非 dict），
           调用方不应回退到扁平载荷解析。

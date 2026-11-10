@@ -1,6 +1,6 @@
 """
 台湾地震预警解析器。
-负责把 FAN Studio 与 Wolfx 来源的台湾地震预警数据统一转换为领域事件。
+负责把 上游 与 Wolfx 来源的台湾地震预警数据统一转换为领域事件。
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ from .base_parser import BaseParser
 
 
 class CwaEewParser(BaseParser):
-    """台湾中央气象署地震预警解析器 - FAN Studio。"""
+    """台湾中央气象署地震预警解析器 - 上游。"""
 
     def __init__(self, message_logger=None):
-        """初始化 FAN Studio 台湾地震预警解析器。"""
-        super().__init__("cwa_fanstudio", message_logger)
+        """初始化 上游 台湾地震预警解析器。"""
+        super().__init__("cwa_jianproject", message_logger)
 
     def _build_envelope(self, msg_data: dict[str, Any]) -> EventEnvelope:
         """把台湾地震预警原始字典封装为统一事件包裹体。"""
@@ -59,7 +59,7 @@ class CwaEewParser(BaseParser):
 
         source_entry = get_source_entry(self.source_id)
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -93,7 +93,7 @@ class CwaEewParser(BaseParser):
             event_type="earthquake_warning",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             report_num=int(msg_data.get("updates", 1) or 1),
             published_at=created_at or occurred_at,
@@ -116,7 +116,7 @@ class CwaEewParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),
@@ -359,7 +359,7 @@ class CwaEewJianProjectParser(BaseParser):
             }
 
             # Jian Project CWA 载荷以 maxIntensity / epiIntensity 承载最大震度，
-            # 写入 scale 供震度过滤规则判定（与 FAN Studio CWA 解析口径一致）。
+            # 写入 scale 供震度过滤规则判定（与 上游 CWA 解析口径一致）。
             # 先解析再回退：首选字段为空字符串时解析结果为 None，此时才使用备用字段。
             scale = ScaleConverter.parse_jma_cwa_scale(msg_data.get("maxIntensity"))
             if scale is None:

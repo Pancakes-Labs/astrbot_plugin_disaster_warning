@@ -27,7 +27,7 @@ class WebSocketDispatchService:
 
     # 协议级严重错误且通常不可恢复的代码集合，这类情况短时重试意义不大
     # 注意：1008（Policy Violation）不在此列。
-    # FAN Studio 等上游会用 1008 表达限流/策略拒绝，连接配额释放后仍可恢复。
+    # Jian Project 等上游会用 1008 表达限流/策略拒绝，连接配额释放后仍可恢复。
     _NO_RECONNECT_CODES = {
         1002,
         1003,

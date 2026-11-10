@@ -1,18 +1,17 @@
 const { Box, Typography } = MaterialUI;
-const { useMemo, useState, useCallback } = React;
+const { useMemo, useState } = React;
 
 /**
  * 连接状态网格组件 (ConnectionsGrid)
- * 显示主流数据源（FAN Studio / P2P / Wolfx / PancakesAPI / Jian Project）与 HTTP 辅助通道
+ * 显示主流数据源（Jian Project / P2P / Wolfx / PancakesAPI）与 HTTP 辅助通道
  * （EQSC API、NIED S-Net）的实时连接状态、协议信息及子源分布。
  *
  * 布局策略：
- * - 大屏（>= 1024px）：固定 5 列均匀分布
- * - - 第 1 列：FAN Studio（卡片背面为烈度速报独立 WS）
+ * - 大屏（>= 1024px）：固定 4 列均匀分布
+ * - - 第 1 列：Jian Project（可翻转：正面沿用原 FAN Studio 子源顺序，背面展示扩接剩余源）
  * - - 第 2 列：P2P 地震情报 + NIED S-Net 上下堆叠
  * - - 第 3 列：Wolfx
- * - - 第 4 列：Jian Project
- * - - 第 5 列：PancakesAPI + EQSC API 上下堆叠（EQSC 为 HTTP 轮询模式）
+ * - - 第 4 列：PancakesAPI + EQSC API 上下堆叠
  * 延迟评级：
  * - < 150ms  fast (绿色)
  * - < 460ms  medium (黄色)
@@ -21,36 +20,88 @@ const { useMemo, useState, useCallback } = React;
 function ConnectionsGrid() {
     const { state } = useAppContext();
     const { connections, dataLoaded } = state;
-    // FAN 卡片翻转：仅点击触发，默认正面展示主通道子源
-    const [fanFlipped, setFanFlipped] = useState(false);
+    // Jian Project 卡片翻转：仅点击触发；正面=原 FAN Studio 顺序，背面=扩接剩余源
+    const [jianFlipped, setJianFlipped] = useState(false);
 
-    /**
-     * 烈度速报相关子源 / 连接键识别集合。
-     * 烈度速报走独立 WS（fan_studio_cenc_ir），不应混入 FAN 主通道正面列表。
-     */
-    const INTENSITY_SUB_SOURCE_KEYS = useMemo(() => new Set([
-        'china_cenc_intensity_report',
-        'cenc_ir_fanstudio',
-        'cenc_ir',
-        'cenc-ir',
-        'fan_studio_cenc_ir',
-    ]), []);
+    // 正面顺序对齐历史 FAN Studio 主通道子源顺序
+    const JIAN_FRONT_ORDER = [
+        'china_earthquake_warning',
+        'china_earthquake_warning_provincial',
+        'taiwan_cwa_earthquake',
+        'taiwan_cwa_report',
+        // CWA 报告下方接 JMA 紧急地震速报，其下接震度情报与长周期
+        'japan_jma_eew',
+        'japan_jma_earthquake',
+        'japan_jma_lpgm',
+        'china_cenc_earthquake',
+        // CENC 下方紧接四个地方局速报
+        'yunnan_earthquake',
+        'shanxi_earthquake',
+        'beijing_earthquake',
+        'ningxia_earthquake',
+        'usgs_earthquake',
+        'usa_shakealert',
+        'china_weather_alarm',
+        'china_tsunami',
+        'china_typhoon',
+    ];
+    // 背面：其余扩接子源
+    const JIAN_BACK_ORDER = [
+        'japan_jma_tsunami',
+        'emsc_earthquake',
+    ];
+    const JIAN_KEY_ALIASES = {
+        cea_jianproject: 'china_earthquake_warning',
+        cea_pr_jianproject: 'china_earthquake_warning_provincial',
+        cwa_jianproject: 'taiwan_cwa_earthquake',
+        cwa_report_jianproject: 'taiwan_cwa_report',
+        cenc_jianproject: 'china_cenc_earthquake',
+        usgs_jianproject: 'usgs_earthquake',
+        sa_jianproject: 'usa_shakealert',
+        china_weather_jianproject: 'china_weather_alarm',
+        china_tsunami_jianproject: 'china_tsunami',
+        typhoon_jianproject: 'china_typhoon',
+        jma_jianproject: 'japan_jma_eew',
+        jma_tsunami_jianproject: 'japan_jma_tsunami',
+        jma_report_jianproject: 'japan_jma_earthquake',
+        jma_lpgm_jianproject: 'japan_jma_lpgm',
+        yunnan_jianproject: 'yunnan_earthquake',
+        shanxi_jianproject: 'shanxi_earthquake',
+        beijing_jianproject: 'beijing_earthquake',
+        ningxia_jianproject: 'ningxia_earthquake',
+        emsc_jianproject: 'emsc_earthquake',
+    };
 
-    const isFanIntensityConnectionKey = useCallback((key) => {
-        const k = String(key || '').toLowerCase().trim();
-        if (!k) return false;
-        if (k.includes('烈度')) return true;
-        if (k.includes('cenc_ir') || k.includes('cenc-ir')) return true;
-        if (k.includes('intensity') && k.includes('fan')) return true;
-        return false;
-    }, []);
+    const canonicalizeJianKey = (key) => {
+        const raw = String(key || '').trim();
+        if (!raw) return raw;
+        if (JIAN_KEY_ALIASES[raw]) return JIAN_KEY_ALIASES[raw];
+        return raw;
+    };
 
-    const isFanPrimaryConnectionKey = useCallback((key) => {
-        const k = String(key || '').toLowerCase().trim();
-        if (!k) return false;
-        if (!k.includes('fan') || k.includes('eqsc')) return false;
-        return !isFanIntensityConnectionKey(k);
-    }, [isFanIntensityConnectionKey]);
+    const splitJianSubSources = (subSources) => {
+        const entries = Object.entries(subSources || {});
+        const front = {};
+        const back = {};
+        const frontRank = new Map(JIAN_FRONT_ORDER.map((k, i) => [k, i]));
+        const backRank = new Map(JIAN_BACK_ORDER.map((k, i) => [k, i]));
+        const frontItems = [];
+        const backItems = [];
+        entries.forEach(([key, enabled]) => {
+            const canon = canonicalizeJianKey(key);
+            if (frontRank.has(canon)) {
+                frontItems.push([key, enabled, frontRank.get(canon)]);
+            } else {
+                const rank = backRank.has(canon) ? backRank.get(canon) : 1000 + backItems.length;
+                backItems.push([key, enabled, rank]);
+            }
+        });
+        frontItems.sort((a, b) => a[2] - b[2]);
+        backItems.sort((a, b) => a[2] - b[2]);
+        frontItems.forEach(([key, enabled]) => { front[key] = enabled; });
+        backItems.forEach(([key, enabled]) => { back[key] = enabled; });
+        return { front, back };
+    };
 
     /**
      * 将后端连接条目规范为前端展示模型。
@@ -128,7 +179,7 @@ function ConnectionsGrid() {
             if (info.sub_sources) {
                 Object.assign(allSubSources, info.sub_sources);
             }
-            // 提取活跃服务器信息（FAN Studio 主备）
+            // 提取活跃服务器信息（若有主备标签）
             if (info.active_server) {
                 activeServer = info.active_server;
             } else if (info.active_server_label) {
@@ -147,22 +198,6 @@ function ConnectionsGrid() {
             ]);
             Object.keys(allSubSources).forEach((key) => {
                 if (!eqscAllowedKeys.has(key)) {
-                    delete allSubSources[key];
-                }
-            });
-        }
-
-        // FAN 主通道正面：剔除烈度速报子源（其属于独立 WS，展示在卡片背面）
-        if (target.id === 'fan') {
-            Object.keys(allSubSources).forEach((key) => {
-                const normalized = String(key || '').trim().toLowerCase();
-                if (
-                    INTENSITY_SUB_SOURCE_KEYS.has(normalized)
-                    || INTENSITY_SUB_SOURCE_KEYS.has(key)
-                    || normalized.includes('intensity')
-                    || normalized.includes('cenc_ir')
-                    || String(key || '').includes('烈度')
-                ) {
                     delete allSubSources[key];
                 }
             });
@@ -211,10 +246,18 @@ function ConnectionsGrid() {
     const displayColumns = useMemo(() => {
         const targets = [
             {
-                id: 'fan',
-                displayName: 'FAN Studio',
-                // 仅匹配主通道；烈度速报独立连接单独解析为 flipSide
-                matcher: isFanPrimaryConnectionKey,
+                id: 'jian_project',
+                displayName: 'Jian Project',
+                matcher: (key) => {
+                    const k = String(key || '').toLowerCase().trim();
+                    const normalized = k.replace(/[\s_-]+/g, '');
+                    return (
+                        normalized === 'jianprojectall'
+                        || normalized === 'jianproject'
+                        || normalized.includes('jianproject')
+                        || k.includes('sismotide')
+                    );
+                },
             },
             {
                 id: 'p2p',
@@ -259,23 +302,6 @@ function ConnectionsGrid() {
                 compact: true,
             },
             {
-                id: 'jian_project',
-                displayName: 'Jian Project',
-                matcher: (key) => {
-                    const k = String(key || '').toLowerCase().trim();
-                    // 后端连接表以展示名 "Jian Project"（含空格）为键，
-                    // 而 catalog 连接组键为 "jian_project_all"（含下划线）。
-                    // 这里归一化空格 / 下划线 / 连字符后再匹配，避免两种形态失配。
-                    const normalized = k.replace(/[\s_-]+/g, '');
-                    return (
-                        normalized === 'jianprojectall'
-                        || normalized === 'jianproject'
-                        || normalized.includes('jianproject')
-                        || k.includes('sismotide')
-                    );
-                },
-            },
-            {
                 id: 'eqsc',
                 displayName: 'EQSC API',
                 connectionType: 'http',
@@ -295,37 +321,6 @@ function ConnectionsGrid() {
             return normalizeConnection(target, matchedEntries);
         });
 
-        // 解析 CENC 烈度速报独立连接，挂到 FAN 卡片背面
-        const intensityEntries = Object.entries(connections || {}).filter(([key]) =>
-            isFanIntensityConnectionKey(key)
-        );
-        const intensityConn = normalizeConnection(
-            {
-                id: 'fan_cenc_ir',
-                displayName: 'FAN Studio（烈度速报）',
-                connectionType: 'websocket',
-            },
-            intensityEntries
-        );
-
-        // 背面若无任何 sub_sources，补一条展示项，避免空白
-        if (
-            (!intensityConn.sub_sources || Object.keys(intensityConn.sub_sources).length === 0)
-            && intensityConn.status !== 'disabled'
-        ) {
-            intensityConn.sub_sources = {
-                cenc_ir_fanstudio: intensityConn.status === 'online' || intensityConn.status === 'offline',
-            };
-        } else if (
-            (!intensityConn.sub_sources || Object.keys(intensityConn.sub_sources).length === 0)
-            && intensityEntries.length === 0
-        ) {
-            // 配置侧可能仍有开关，但连接尚未出现在 payload：给禁用占位
-            intensityConn.sub_sources = {
-                cenc_ir_fanstudio: false,
-            };
-        }
-
         // 按 id 建立展示模型索引：列布局直接按 id 取用，
         // 避免与 targets 数组下标耦合（新增数据源时下标漂移会静默丢卡片）。
         const connById = {};
@@ -333,22 +328,33 @@ function ConnectionsGrid() {
             connById[conn.id] = conn;
         });
 
-        connById.fan = {
-            ...connById.fan,
-            flippable: true,
-            flipSide: intensityConn,
-        };
+        // Jian Project：按 FAN Studio 顺序拆成正/背面
+        const jianConn = connById.jian_project;
+        if (jianConn) {
+            const { front, back } = splitJianSubSources(jianConn.sub_sources);
+            const backConn = {
+                ...jianConn,
+                id: 'jian_project_extra',
+                name: 'Jian Project（扩展子源）',
+                sub_sources: back,
+            };
+            connById.jian_project = {
+                ...jianConn,
+                sub_sources: front,
+                flippable: true,
+                flipSide: backConn,
+            };
+        }
 
-        // 第 1 列 FAN；第 2 列 P2P + S-Net；第 3 列 Wolfx；
-        // 第 4 列 Jian Project；第 5 列 PancakesAPI + EQSC
+        // 第 1 列 Jian Project（主源，可翻转）；第 2 列 P2P + S-Net；
+        // 第 3 列 Wolfx；第 4 列 PancakesAPI + EQSC
         return [
-            { type: 'single', items: [connById.fan] },
+            { type: 'single', items: [connById.jian_project] },
             { type: 'stack', items: [connById.p2p, connById.snet] },
             { type: 'single', items: [connById.wolfx] },
-            { type: 'single', items: [connById.jian_project] },
             { type: 'stack', items: [connById.gq, connById.eqsc] },
         ];
-    }, [connections, isFanPrimaryConnectionKey, isFanIntensityConnectionKey, INTENSITY_SUB_SOURCE_KEYS]);
+    }, [connections]);
 
     /**
      * 网络延迟区间着色器类映射
@@ -369,41 +375,6 @@ function ConnectionsGrid() {
         if (!rawKey) return rawKey;
 
         const scopedSourceMap = {
-            'FAN Studio': {
-                china_earthquake_warning: '中国地震预警网 (CEA)',
-                china_earthquake_warning_provincial: '中国地震预警网 (省级)',
-                taiwan_cwa_earthquake: '台湾中央气象署: 强震即时警报',
-                taiwan_cwa_report: '台湾中央气象署: 地震报告',
-                china_cenc_earthquake: '中国地震台网 (CENC)',
-                china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
-                cenc_ir_fanstudio: '中国地震台网 (CENC) 烈度速报',
-                usgs_earthquake: '美国地质调查局 (USGS)',
-                usa_shakealert: '美国 ShakeAlert 地震预警',
-                fssn_cmt: 'FSSN 矩心矩张量解 (CMT)',
-                china_weather_alarm: '中国气象局: 气象预警',
-                china_tsunami: '自然资源部海啸预警中心',
-                china_typhoon: '中国气象局：实时活跃台风',
-                typhoon_fanstudio: '中国气象局：实时活跃台风',
-                japan_jma_eew: '日本气象厅: 紧急地震速报',
-                // source_id 形态（后端 connection group status 使用）
-                cea_fanstudio: '中国地震预警网 (CEA)',
-                cea_pr_fanstudio: '中国地震预警网 (省级)',
-                cwa_fanstudio: '台湾中央气象署: 强震即时警报',
-                cwa_fanstudio_report: '台湾中央气象署: 地震报告',
-                cenc_fanstudio: '中国地震台网 (CENC)',
-                usgs_fanstudio: '美国地质调查局 (USGS)',
-                sa_fanstudio: '美国 ShakeAlert 地震预警',
-                fssn_cmt_fanstudio: 'FSSN 矩心矩张量解 (CMT)',
-                china_weather_fanstudio: '中国气象局: 气象预警',
-                china_tsunami_fanstudio: '自然资源部海啸预警中心',
-                jma_fanstudio: '日本气象厅: 紧急地震速报',
-            },
-            'FAN Studio（烈度速报）': {
-                china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
-                cenc_ir_fanstudio: '中国地震台网 (CENC) 烈度速报',
-                cenc_ir: '中国地震台网 (CENC) 烈度速报',
-                'cenc-ir': '中国地震台网 (CENC) 烈度速报',
-            },
             'P2P地震情報': {
                 japan_jma_eew: '日本气象厅: 紧急地震速报',
                 japan_jma_earthquake: '日本气象厅: 地震情报',
@@ -442,26 +413,60 @@ function ConnectionsGrid() {
                 // 与 P2P 子源展示名一致，仅展示一个海啸入口
                 jma_tsunami: '日本气象厅: 海啸予报',
                 japan_jma_tsunami: '日本气象厅: 海啸予报',
-                // EQSC HTTP 轮询的 CENC 烈度速报（与 FAN 独立 WS 并列）
+                // EQSC HTTP 轮询的 CENC 烈度速报
                 china_cenc_intensity_report: '中国地震台网 (CENC) 烈度速报',
                 cenc_ir_eqsc: '中国地震台网 (CENC) 烈度速报',
             },
             'Jian Project': {
+                // 正面：对齐历史 FAN Studio 主通道顺序
                 china_earthquake_warning: '中国地震预警网 (CEA)',
+                china_earthquake_warning_provincial: '中国地震预警网 (省级)',
                 taiwan_cwa_earthquake: '台湾中央气象署: 强震即时警报',
+                taiwan_cwa_report: '台湾中央气象署: 地震报告',
                 japan_jma_eew: '日本气象厅: 紧急地震速报',
+                japan_jma_earthquake: '日本气象厅: 震源·震度情报',
+                japan_jma_lpgm: '日本气象厅: 长周期地震动',
+                china_cenc_earthquake: '中国地震台网 (CENC)',
+                yunnan_earthquake: '云南地震局速报',
+                shanxi_earthquake: '山西地震局速报',
+                beijing_earthquake: '北京地震局速报',
+                ningxia_earthquake: '宁夏地震局速报',
+                usgs_earthquake: '美国地质调查局 (USGS)',
+                usa_shakealert: '美国 ShakeAlert 地震预警',
                 china_weather_alarm: '中国气象局: 气象预警',
                 china_tsunami: '自然资源部海啸预警中心',
-                china_cenc_earthquake: '中国地震台网 (CENC)',
-                usgs_earthquake: '美国地质调查局 (USGS)',
+                china_typhoon: '中国气象局：实时活跃台风',
+                // 背面：扩接剩余源
+                japan_jma_tsunami: '日本气象厅: 海啸情报',
+                emsc_earthquake: '欧洲地中海地震中心 (EMSC)',
+                // source_id 形态
                 cea_jianproject: '中国地震预警网 (CEA)',
+                cea_pr_jianproject: '中国地震预警网 (省级)',
                 cwa_jianproject: '台湾中央气象署: 强震即时警报',
-                jma_jianproject: '日本气象厅: 紧急地震速报',
-                china_weather_jianproject: '中国气象局: 气象预警',
-                china_tsunami_jianproject: '自然资源部海啸预警中心',
+                cwa_report_jianproject: '台湾中央气象署: 地震报告',
                 cenc_jianproject: '中国地震台网 (CENC)',
                 usgs_jianproject: '美国地质调查局 (USGS)',
+                sa_jianproject: '美国 ShakeAlert 地震预警',
+                china_weather_jianproject: '中国气象局: 气象预警',
+                china_tsunami_jianproject: '自然资源部海啸预警中心',
+                typhoon_jianproject: '中国气象局：实时活跃台风',
+                jma_jianproject: '日本气象厅: 紧急地震速报',
+                jma_tsunami_jianproject: '日本气象厅: 海啸情报',
+                yunnan_jianproject: '云南地震局速报',
+                shanxi_jianproject: '山西地震局速报',
+                beijing_jianproject: '北京地震局速报',
+                ningxia_jianproject: '宁夏地震局速报',
+                jma_report_jianproject: '日本气象厅: 震源·震度情报',
+                jma_lpgm_jianproject: '日本气象厅: 长周期地震动',
+                emsc_jianproject: '欧洲地中海地震中心 (EMSC)',
             },
+            'Jian Project（扩展子源）': {
+                japan_jma_tsunami: '日本气象厅: 海啸情报',
+                emsc_earthquake: '欧洲地中海地震中心 (EMSC)',
+                jma_tsunami_jianproject: '日本气象厅: 海啸情报',
+                emsc_jianproject: '欧洲地中海地震中心 (EMSC)',
+            },
+
         };
 
         const scopedName = scopedSourceMap[connectionName]?.[rawKey];
@@ -472,7 +477,7 @@ function ConnectionsGrid() {
             : rawKey;
 
         return String(formattedName)
-            .replace(/\s+-\s+(Fan|P2P|Wolfx|EQSC|S-Net|SNET)$/i, '')
+            .replace(/\s+-\s+(Jian|P2P|Wolfx|EQSC|S-Net|SNET)$/i, '')
             .trim();
     };
 
@@ -517,6 +522,24 @@ function ConnectionsGrid() {
                     <Box className="connection-sub-source-list">
                         {Object.entries(conn.sub_sources)
                             .sort(([keyA, enabledA], [keyB, enabledB]) => {
+                                // Jian Project：正面按 FAN Studio 顺序，背面按扩接顺序
+                                if (
+                                    conn.name === 'Jian Project'
+                                    || displayName === 'Jian Project'
+                                    || conn.name === 'Jian Project（扩展子源）'
+                                    || displayName === 'Jian Project（扩展子源）'
+                                ) {
+                                    const order = (
+                                        displayName === 'Jian Project（扩展子源）'
+                                        || conn.name === 'Jian Project（扩展子源）'
+                                    ) ? JIAN_BACK_ORDER : JIAN_FRONT_ORDER;
+                                    const rank = new Map(order.map((k, i) => [k, i]));
+                                    const a = rank.get(canonicalizeJianKey(keyA));
+                                    const b = rank.get(canonicalizeJianKey(keyB));
+                                    if (a !== undefined || b !== undefined) {
+                                        return (a ?? 999) - (b ?? 999);
+                                    }
+                                }
                                 // EQSC：台风 → 海啸 → CENC 烈度速报；其余仍优先展示已启用项
                                 if (conn.name === 'EQSC API' || displayName === 'EQSC API') {
                                     const eqscOrder = {
@@ -572,8 +595,9 @@ function ConnectionsGrid() {
      * 渲染卡片顶栏（标题 / 重试 / 可选翻转按钮 / 状态灯）
      */
     const renderServerBadge = (conn) => {
-        // 仅在 FAN Studio 相关连接上显示主备服务器标签
-        if (!conn.name || !conn.name.includes('FAN')) return null;
+        // 仅在仍带主备标签的连接上显示
+        if (!conn.name) return null;
+        if (!conn.active_server && !conn.active_server_label) return null;
         const activeServer = conn.active_server || conn.active_server_label;
         if (!activeServer) return null;
         const isPrimary = activeServer === 'primary' || activeServer === '主服务器';
@@ -653,55 +677,49 @@ function ConnectionsGrid() {
     );
 
     /**
-     * FAN Studio 可翻转卡片：正面主通道，背面 CENC 烈度速报独立连接
+     * Jian Project 可翻转卡片：正面=原 FAN Studio 顺序，背面=扩接剩余子源
      */
-    const renderFanFlipCard = (conn) => {
+    const renderJianFlipCard = (conn) => {
         const back = conn.flipSide || {
-            id: 'fan_cenc_ir',
-            name: 'FAN Studio（烈度速报）',
-            status: 'disabled',
-            status_label: '未启用',
+            id: 'jian_project_extra',
+            name: 'Jian Project（扩展子源）',
+            status: conn.status,
+            status_label: conn.status_label,
             retry_count: 0,
-            sub_sources: { cenc_ir_fanstudio: false },
-            latency: undefined,
-            connection_type: 'websocket',
-            circuit_open: false,
+            sub_sources: {},
+            latency: conn.latency,
+            connection_type: conn.connection_type,
+            circuit_open: conn.circuit_open,
+            active_server: conn.active_server,
         };
-
-        // 外壳状态色跟随当前可见面，避免翻转后色调与内容不一致。
-        // 正/背面各自独立 normalize：主通道只看 fan_studio_all，烈度速报只看 fan_studio_cenc_ir。
-        const visibleStatus = fanFlipped ? back.status : conn.status;
-        const flipTitle = fanFlipped
-            ? '返回 FAN Studio 主通道'
-            : '查看 FAN Studio（烈度速报）独立连接';
-
-        const handleFlip = () => setFanFlipped((prev) => !prev);
+        const visibleStatus = jianFlipped ? back.status : conn.status;
+        const flipTitle = jianFlipped
+            ? '返回 Jian Project 主通道子源'
+            : '查看扩接剩余子源';
+        const handleFlip = () => setJianFlipped((prev) => !prev);
 
         return (
             <Box
                 key={conn.id || conn.name}
                 className={`connection-item connection-item-${visibleStatus} connection-item--flippable`}
             >
-                <div className={`connection-flip-inner${fanFlipped ? ' is-flipped' : ''}`}>
-                    {/* 正面：FAN 主通道 */}
+                <div className={`connection-flip-inner${jianFlipped ? ' is-flipped' : ''}`}>
                     <div className={`connection-flip-face connection-flip-face--front connection-item-${conn.status}`}>
                         {renderCardBody(conn, {
                             showFlipButton: true,
                             flipTitle,
                             onFlip: handleFlip,
-                            // 仅当前可见面的 ⇋ 进入 Tab 序，避免隐藏面焦点“消失”
-                            flipButtonTabbable: !fanFlipped,
+                            flipButtonTabbable: !jianFlipped,
                         })}
                     </div>
-
-                    {/* 背面：FAN Studio（烈度速报）独立 WS */}
                     <div className={`connection-flip-face connection-flip-face--back connection-item-${back.status}`}>
                         {renderCardBody(back, {
                             showFlipButton: true,
                             flipTitle,
                             onFlip: handleFlip,
-                            nameOverride: 'FAN Studio（烈度速报）',
-                            flipButtonTabbable: fanFlipped,
+                            flipButtonTabbable: jianFlipped,
+                            nameOverride: 'Jian Project（扩展子源）',
+                            extraNote: '背面展示扩接子源',
                         })}
                     </div>
                 </div>
@@ -713,10 +731,9 @@ function ConnectionsGrid() {
      * 渲染单张连接卡片
      */
     const renderConnectionCard = (conn) => {
-        if (conn.flippable && conn.flipSide) {
-            return renderFanFlipCard(conn);
+        if (conn && conn.flippable) {
+            return renderJianFlipCard(conn);
         }
-
         const compactClass = conn.compact ? ' connection-item--compact' : '';
         return (
             <Box
@@ -728,7 +745,7 @@ function ConnectionsGrid() {
         );
     };
 
-    // 骨架屏：第 1/3/4 列单卡，第 2/5 列双卡堆叠（P2P+S-Net / PancakesAPI+EQSC）
+    // 骨架屏：第 1/3 列单卡，第 2/4 列双卡堆叠（P2P+S-Net / PancakesAPI+EQSC）
     if (!dataLoaded) {
         return (
             <div className="connections-grid status-connections-grid">
@@ -750,14 +767,6 @@ function ConnectionsGrid() {
                             <div className="skeleton status-skeleton-subtitle status-skeleton-subtitle--short"></div>
                         </div>
                     ))}
-                </div>
-                <div className="status-connection-skeleton-card">
-                    <div className="status-skeleton-row">
-                        <div className="skeleton status-skeleton-title"></div>
-                        <div className="skeleton status-skeleton-badge"></div>
-                    </div>
-                    <div className="skeleton status-skeleton-subtitle"></div>
-                    <div className="skeleton status-skeleton-subtitle status-skeleton-subtitle--short"></div>
                 </div>
                 <div className="status-connection-skeleton-card">
                     <div className="status-skeleton-row">

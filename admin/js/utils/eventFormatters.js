@@ -296,9 +296,9 @@
         }
         if (
             infoType.includes('cn')
-            || source.includes('fan')
+            || source.includes('jian')
             || source.includes('china')
-            || source.includes('tsunami_fan')
+            || source.includes('nmefc')
         ) {
             return 'china';
         }
@@ -1040,7 +1040,7 @@
     /**
      * 判断图片元素加载结果是否为无效内容。
      *
-     * Fan Studio 图标接口对不存在的编码会返回 HTTP 200 的 HTML 伪图片，
+     * 气象预警图标接口对不存在的编码可能返回 HTTP 200 的 HTML 伪图片，
      * 浏览器 <img> 不会触发 onError，但加载的内容不是有效图片。
      * 通过 naturalWidth/naturalHeight 是否为 0 来识别这种伪图片。
      *
@@ -1057,7 +1057,7 @@
      *
      * 触发时机：
      * - onError：图片加载失败（404 等）
-     * - onLoad：图片加载成功但内容无效（如 Fan Studio 返回 HTTP 200 的 HTML 伪图片，
+     * - onLoad：图片加载成功但内容无效（如返回 HTTP 200 的 HTML 伪图片，
      *   naturalWidth=0，onError 不会触发但 onLoad 会触发）
      *
      * 回退顺序：

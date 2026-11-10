@@ -49,7 +49,7 @@ class BrowserManager:
             mode: 运行模式，local 或 remote。
             server_url: 远程浏览器服务地址。
             ignore_https_errors: 是否忽略 HTTPS 证书错误（仅本地模式生效）。
-                默认关闭。某些地图瓦片源（如 FAN Studio ）证书过期时，
+                默认关闭。某些地图瓦片源（如 Jian Project ）证书过期时，
                 开启后底图可继续加载；但会信任自签/过期证书，请谨慎使用。
             bypass_proxy_for_map_tiles: 是否让地图瓦片域名绕过代理直连
                 （仅本地模式生效）。默认开启。

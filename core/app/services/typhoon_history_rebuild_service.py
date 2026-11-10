@@ -49,7 +49,7 @@ class TyphoonHistoryRebuildService:
         self,
         typhoon_list: list[dict[str, Any]],
         *,
-        source_id: str = "typhoon_fanstudio",
+        source_id: str = "typhoon_jianproject",
         db: Any | None = None,
     ) -> int:
         """把 EQSC 原始列表转换为领域事件后入库。"""
@@ -104,7 +104,7 @@ class TyphoonHistoryRebuildService:
         cls,
         typhoon: dict[str, Any],
         *,
-        source_id: str = "typhoon_fanstudio",
+        source_id: str = "typhoon_jianproject",
     ) -> dict[str, Any] | None:
         """通过领域事件与记录工厂生成 EQSC 历史数据库记录。"""
         envelope = build_typhoon_event_envelope(typhoon, source_id=source_id)

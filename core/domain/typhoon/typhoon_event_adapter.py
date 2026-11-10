@@ -9,7 +9,7 @@ from ....utils.time_converter import TimeConverter
 from ..event_identity import EventIdentity
 from ..event_models import EventEnvelope, TyphoonEvent
 from ..event_payload import SourcePayload
-from .typhoon_ids import to_fan_id
+from .typhoon_ids import to_canonical_typhoon_id
 from .typhoon_levels import level_weight
 from .typhoon_names import build_td_fallback_names
 from .typhoon_values import clean_name_text, clean_text, is_nullish, to_float
@@ -111,7 +111,7 @@ def _extract_peak_values(nodes: list[dict[str, Any]]) -> dict[str, Any]:
 def build_typhoon_event_envelope(
     raw: dict[str, Any],
     *,
-    source_id: str = "typhoon_fanstudio",
+    source_id: str = "typhoon_jianproject",
     data_mode: str = "eqsc_rebuild",
 ) -> EventEnvelope | None:
     """将单个 EQSC 台风对象转换为领域事件。
@@ -133,7 +133,7 @@ def build_typhoon_event_envelope(
     is_live = mode in {"eqsc", "eqsc_live", "eqsc_poll"}
 
     # 对外领域身份继续使用 6 位编号，便于跨源去重与查询。
-    fan_id = to_fan_id(eqsc_id)
+    canon_id = to_canonical_typhoon_id(eqsc_id)
     # 先分别清洗每个候选值，再取第一个非空结果：
     # 避免 nameCN 为占位字符串（如 "NULL"/"NAMELESS"）时屏蔽有效的 name 备用值。
     name_cn = clean_name_text(raw.get("nameCN")) or clean_name_text(raw.get("name"))
@@ -218,13 +218,13 @@ def build_typhoon_event_envelope(
 
     # EventEnvelope.metadata 只记录流水线形态，原始 EQSC 字典留在 SourcePayload。
     identity = EventIdentity(
-        event_id=fan_id,
+        event_id=canon_id,
         source_id=source_id,
         event_type="typhoon",
         provider_family="eqsc",
     )
     domain_event = TyphoonEvent(
-        typhoon_id=fan_id,
+        typhoon_id=canon_id,
         name=name_cn,
         name_en=name_en,
         typhoon_type=level,
@@ -277,4 +277,147 @@ def build_typhoon_event_envelope(
     )
 
 
-__all__ = ["build_typhoon_event_envelope"]
+
+
+def build_jian_typhoon_event_envelope(
+    raw: dict[str, Any],
+    *,
+    source_id: str = "typhoon_jianproject",
+) -> EventEnvelope | None:
+    """将 Jian Project GET /typhoon.php 单条活跃台风转为领域事件。
+
+    仅使用文档字段：id/name/name_en/latitude/longitude/moveDirection/
+    moveSpeed/power/pressure/windSpeed/type/radius7/radius10/updateTime/points。
+    上游缺字段则省略，不补造业务值。
+    """
+    if not isinstance(raw, dict):
+        return None
+    raw_id = clean_text(raw.get("id"))
+    if not raw_id:
+        return None
+
+    canon_id = to_canonical_typhoon_id(raw_id)
+    name_cn = clean_name_text(raw.get("name"))
+    name_en = clean_name_text(raw.get("name_en"))
+    level = clean_text(raw.get("type"))
+    latitude = to_float(raw.get("latitude"))
+    longitude = to_float(raw.get("longitude"))
+    pressure_value = to_float(raw.get("pressure"))
+    if pressure_value is not None and pressure_value <= 0:
+        pressure_value = None
+    wind_speed_value = to_float(raw.get("windSpeed"))
+    if wind_speed_value is not None and wind_speed_value <= 0:
+        wind_speed_value = None
+    power_value = to_float(raw.get("power"))
+    power_int: int | None = None
+    if power_value is not None and power_value > 0:
+        power_int = int(power_value) if float(power_value).is_integer() else int(power_value)
+    move_direction = clean_text(raw.get("moveDirection"))
+    move_speed = to_float(raw.get("moveSpeed"))
+    if move_speed is not None and move_speed <= 0:
+        move_speed = None
+
+    # 四象限风圈原样保留字符串；单值则写入半径字段。
+    radius7_raw = raw.get("radius7")
+    radius10_raw = raw.get("radius10")
+    radius7: int | None = None
+    radius10: int | None = None
+    wind_circle: dict[str, Any] = {}
+    if isinstance(radius7_raw, str) and "|" in radius7_raw:
+        wind_circle["radius7"] = radius7_raw.strip()
+    else:
+        r7 = to_float(radius7_raw)
+        if r7 is not None and r7 > 0:
+            radius7 = int(r7) if float(r7).is_integer() else int(r7)
+    if isinstance(radius10_raw, str) and "|" in radius10_raw:
+        wind_circle["radius10"] = radius10_raw.strip()
+    else:
+        r10 = to_float(radius10_raw)
+        if r10 is not None and r10 > 0:
+            radius10 = int(r10) if float(r10).is_integer() else int(r10)
+
+    time_text, updated_at = _normalize_time(raw.get("updateTime"))
+    if updated_at is None:
+        return None
+
+    points = raw.get("points")
+    history_track: list[dict[str, Any]] = []
+    if isinstance(points, list):
+        for pt in points:
+            if isinstance(pt, dict):
+                history_track.append(dict(pt))
+    # 无路径点时用当前实况合成单点，满足下游对 history 的最低要求。
+    if not history_track:
+        node: dict[str, Any] = {"time": time_text}
+        if latitude is not None:
+            node["latitude"] = latitude
+        if longitude is not None:
+            node["longitude"] = longitude
+        if wind_speed_value is not None:
+            node["windSpeed"] = wind_speed_value
+        if pressure_value is not None:
+            node["pressure"] = pressure_value
+        if level:
+            node["typeNameCN"] = level
+        if move_direction:
+            node["directionCN"] = move_direction
+        if move_speed is not None:
+            node["speed"] = move_speed
+        history_track = [node]
+
+    if not name_cn and not name_en and raw_id:
+        fallback_cn, fallback_en = build_td_fallback_names(raw_id, level)
+        if fallback_cn:
+            name_cn = fallback_cn
+        if fallback_en:
+            name_en = fallback_en
+
+    identity = EventIdentity(
+        event_id=canon_id,
+        source_id=source_id,
+        event_type="typhoon",
+        provider_family="jian_project",
+    )
+    domain_event = TyphoonEvent(
+        typhoon_id=canon_id,
+        name=name_cn,
+        name_en=name_en,
+        typhoon_type=level,
+        latitude=latitude,
+        longitude=longitude,
+        pressure=(
+            int(pressure_value)
+            if pressure_value is not None and float(pressure_value).is_integer()
+            else pressure_value
+        ),
+        wind_speed=wind_speed_value,
+        power=power_int,
+        move_direction=move_direction,
+        move_speed=move_speed,
+        radius7=radius7,
+        radius10=radius10,
+        is_active=True,
+        updated_at=updated_at,
+        history_track=history_track,
+        future_track=[],
+        wind_circle=wind_circle,
+        metadata={},
+    )
+    return EventEnvelope(
+        identity=identity,
+        event=domain_event,
+        payload=SourcePayload(
+            source_id=source_id,
+            provider_family="jian_project",
+            message_type="typhoon",
+            raw=dict(raw),
+        ),
+        metadata={
+            "data_source": "jian_project",
+            "typhoon_data_mode": "jian_live",
+            "info_type": "jian_live",
+        },
+    )
+
+
+__all__ = ["build_typhoon_event_envelope", "build_jian_typhoon_event_envelope"]

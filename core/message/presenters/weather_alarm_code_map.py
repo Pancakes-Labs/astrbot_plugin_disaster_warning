@@ -2,7 +2,7 @@
 气象预警编码映射表。
 
 负责把 CMA 预警地图 API 的 p 编码（如 p0002003）转换为
-Fan Studio 图标接口兼容的 11B 编码（如 11B03_yellow），
+Jian Project 图标接口兼容的 11B 编码（如 11B03_yellow），
 并提供标题兜底映射能力。
 
 设计原则：有什么图标用什么，不强行映射。
@@ -10,7 +10,7 @@ Fan Studio 图标接口兼容的 11B 编码（如 11B03_yellow），
 
 图标路径策略（本地优先）：
 1. 优先使用本地 resources/weatheralarm_logo 目录下的图标文件；
-2. 本地文件缺失时再回退到 Fan Studio 官方图标接口。
+2. 本地文件缺失时再回退到 Jian Project 官方图标接口。
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ _P_CODE_SKIP_GENERIC: frozenset[str] = frozenset(
 _TITLE_TYPE_TO_11B_BASE: list[tuple[str, str]] = [
     # ------------------------------------------------------------------
     # ⚠️ 插件私有扩展码（11B73~11B99）：
-    # 0016~0044 段类型在 Fan Studio 无对应 11B 码；其 p 码虽有官方定义，
+    # 0016~0044 段类型在 Jian Project 无对应 11B 码；其 p 码虽有官方定义，
     # 但部分类型（如强对流/雷暴大风/地质灾害/山洪灾害）在数据源中实际只出现
     # 短 p 码（p0000001~p0000004，仅编码颜色无法区分类型），因此这里通过
     # 标题兜底映射到自研扩展码段。注意：11B73~11B99 并非任何官方气象预警
@@ -260,7 +260,7 @@ def _is_p_code(code: str) -> bool:
 
 
 def _is_11b_code(code: str) -> bool:
-    """判断是否为 Fan Studio 11B/11E 编码格式。"""
+    """判断是否为 Jian Project 11B/11E 编码格式。"""
     return code.startswith("11B") or code.startswith("11E")
 
 
@@ -269,7 +269,7 @@ def _normalize_compact_11b_code(code: str) -> str | None:
 
     紧凑格式形如 11B2001（末两位 01/02/03/04 表示蓝/黄/橙/红），
     标准化后为 11B20_blue，便于命中本地图标文件（11B20_blue.png）
-    及向 Fan Studio 图标接口传递正确编码。
+    及向 Jian Project 图标接口传递正确编码。
 
     仅接受 7 位紧凑格式（11B + 2 位类型码 + 2 位颜色码），
     避免传统完整码（如 11B01）被误拆成 base=11B + 颜色码=01。
@@ -300,7 +300,7 @@ def resolve_weather_icon_code(
     title: str = "",
     headline: str = "",
 ) -> str | None:
-    """把气象预警编码解析为 Fan Studio 图标接口兼容的 11B 完整码。
+    """把气象预警编码解析为 Jian Project 图标接口兼容的 11B 完整码。
 
     解析优先级：
     1. 已有 11B 编码：下划线格式（11B20_yellow）直接使用，
@@ -603,12 +603,12 @@ def build_local_weather_fallback_url(icon_code: str) -> str | None:
 
 
 def build_weather_icon_url(icon_code: str) -> str | None:
-    """构建气象预警图标 URL（本地优先，缺失时回退 Fan Studio 官方接口）。
+    """构建气象预警图标 URL（本地优先，缺失时回退 Jian Project 官方接口）。
 
     图标使用策略：
     1. 本地 resources/weatheralarm_logo 目录存在对应文件 → 返回本地静态 URL；
     2. 本地文件缺失 → 回退本地通用颜色图标 /weatheralarm_logo/fallback_{color}.png；
-    3. 颜色也无法解析 → 返回 Fan Studio 官方图标接口 URL 兜底。
+    3. 颜色也无法解析 → 返回 Jian Project 官方图标接口 URL 兜底。
 
     优先返回本地静态资源可避免远程接口返回“伪图片”（HTTP 200 的 HTML）
     导致浏览器无法触发 img onError 而显示破图的问题。
@@ -631,7 +631,7 @@ def build_weather_icon_url(icon_code: str) -> str | None:
     if fallback_url:
         return fallback_url
 
-    return f"https://api.fanstudio.tech/we/img/alarm_icon.php?type={code}"
+    return f"https://weather.cma.cn/assets/img/alarm/{code}.png"
 
 
 # 同义类型族：族内类型可互相覆盖（不触发纠偏），仅收录「基础码相同、

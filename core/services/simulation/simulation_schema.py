@@ -18,9 +18,8 @@
             "label": "地震", "icon": "🌍",
             "sources": [
                 {
-                    "source_id": "cea_fanstudio",
+                    "source_id": "cea_jianproject",
                     "label": "中国地震预警网 (CEA)",
-                    "family_label": "FAN Studio",
                     "supports_report_semantics": true,
                     "fields": [ ...全部字段（合并顺序：base→time→source→orchestration）... ],
                     "base_fields": [...],      // 分组视图，前端优先使用
@@ -69,8 +68,7 @@ _SOURCE_TYPE_TO_DISASTER_TYPE: dict[SourceType, str] = {
 
 # 提供方家族 -> 中文后缀（前端下拉框用于区分同名键）
 _FAMILY_LABELS: dict[ProviderFamily, str] = {
-    ProviderFamily.FAN_STUDIO: "FAN Studio",
-    ProviderFamily.P2P: "P2P",
+        ProviderFamily.P2P: "P2P",
     ProviderFamily.WOLFX: "Wolfx",
     ProviderFamily.GLOBAL_QUAKE: "PancakesAPI",
     ProviderFamily.EQSC: "EQSC",
@@ -80,8 +78,7 @@ _FAMILY_LABELS: dict[ProviderFamily, str] = {
 
 # 提供方家族 -> 组内排序权重（数值越大越靠后）。
 _FAMILY_SORT_RANK: dict[ProviderFamily, int] = {
-    ProviderFamily.FAN_STUDIO: 0,
-    ProviderFamily.P2P: 1,
+        ProviderFamily.P2P: 1,
     ProviderFamily.WOLFX: 2,
     ProviderFamily.GLOBAL_QUAKE: 3,
     ProviderFamily.EQSC: 4,
@@ -126,9 +123,9 @@ def _resolve_source_region(source_id: str) -> str:
         return "china"
     if source_id in (
         "global_quake",
-        "usgs_fanstudio",
-        "fssn_cmt_fanstudio",
-        "sa_fanstudio",
+        "usgs_jianproject",
+        "usgs_jianproject",
+        "sa_jianproject",
     ):
         return "global"
     return "global"
@@ -571,50 +568,41 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
 
     # 各源文档示例默认值（place_name, latitude, longitude, magnitude, depth）
     # 数据来源索引：
-    # - cea_fanstudio / cea_pr_fanstudio：FAN WebSocket /cea、/cea-pr 示例
     # - cea_wolfx：Wolfx cenc_eew
-    # - cwa_fanstudio / cwa_wolfx：FAN /cwa-eew 示例（高雄市桃源區）
-    # - cwa_fanstudio_report：FAN /cwa 示例（屏東縣近海）
-    # - jma_fanstudio / jma_wolfx：FAN /jma 示例（能登半島沖 M5.0）
     # - jma_p2p：P2P v2 EEW(556) 示例（宗谷地方北部）
     # - global_quake：PancakesAPI 示例（日本关东地区 M6.5）
-    # - cenc_fanstudio / cenc_wolfx：FAN /cenc 示例（堪察加东岸附近海域）
-    # - cenc_ir_fanstudio：FAN /cenc-ir 示例（新疆吐鲁番市托克逊县）
     # - cenc_ir_eqsc：EQSC intensityReportCENC 示例（青海海西州都兰县）
     # - jma_p2p_info / jma_wolfx_info：P2P v2 JMAQuake(551) 示例（宮古島近海）
-    # - usgs_fanstudio：FAN /usgs 示例（Idyllwild）
-    # - fssn_cmt_fanstudio：FAN /fssn-cmt 示例（斐济群岛地区）
-    # - sa_fanstudio：FAN /sa 示例（Olancha）
     # - *_jianproject：Jian Project 聚合源，默认值取自官方文档示例
     #   https://api.sismotide.top/api（CEA / CWA / JMA / CENC / USGS 各节示例数据）
     # - jma_pancakes / jma_eqlist_pancakes / usgs_pancakes：PancakesAPI 地震子源，
     #   无独立文档示例，沿用同上游（JMA / USGS）示例数据
     _source_base_defaults: dict[str, tuple[str, float, float, float, float]] = {
-        "cea_fanstudio": ("四川甘孜州雅江县", 29.43, 101.09, 4.0, 8.0),
-        "cea_pr_fanstudio": ("四川阿坝州红原县", 33.002, 102.89, 4.4, 5.0),
+        "cea_jianproject": ("四川甘孜州雅江县", 29.43, 101.09, 4.0, 8.0),
+        "cea_pr_jianproject": ("四川阿坝州红原县", 33.002, 102.89, 4.4, 5.0),
         "cea_wolfx": ("四川甘孜州雅江县", 29.43, 101.09, 4.0, 8.0),
-        "cwa_fanstudio": ("高雄市桃源區", 23.33, 120.82, 4.5, 10.0),
+        "cwa_jianproject": ("高雄市桃源區", 23.33, 120.82, 4.5, 10.0),
         "cwa_wolfx": ("高雄市桃源區", 23.33, 120.82, 4.5, 10.0),
-        "cwa_fanstudio_report": (
+        "cwa_report_jianproject": (
             "屏東縣政府南南東方 103.2 公里 (位於屏東縣近海)",
             21.8,
             120.8,
             4.6,
             23.9,
         ),
-        "jma_fanstudio": ("能登半島沖", 37.1, 136.6, 5.0, 10.0),
+        "jma_jianproject": ("能登半島沖", 37.1, 136.6, 5.0, 10.0),
         "jma_p2p": ("宗谷地方北部", 44.9, 142.1, 5.5, 10.0),
         "jma_wolfx": ("能登半島沖", 37.1, 136.6, 5.0, 10.0),
         "global_quake": ("日本关东地区", 35.0, 140.0, 6.5, 10.0),
-        "cenc_fanstudio": ("堪察加东岸附近海域", 51.8, 159.5, 6.1, 30.0),
+        "cenc_jianproject": ("堪察加东岸附近海域", 51.8, 159.5, 6.1, 30.0),
         "cenc_wolfx": ("堪察加东岸附近海域", 51.8, 159.5, 6.1, 30.0),
-        "cenc_ir_fanstudio": ("新疆吐鲁番市托克逊县", 43.21, 87.71, 4.7, 25.0),
+        "cenc_ir_eqsc": ("新疆吐鲁番市托克逊县", 43.21, 87.71, 4.7, 25.0),
         "cenc_ir_eqsc": ("青海海西州都兰县", 36.75, 96.48, 4.0, 10.0),
         "jma_p2p_info": ("宮古島近海", 24.4, 125.2, 4.0, 50.0),
         "jma_wolfx_info": ("宮古島近海", 24.4, 125.2, 4.0, 50.0),
-        "usgs_fanstudio": ("6 km SW of Idyllwild, CA", 33.7043, -116.7712, 2.62, 16.33),
-        "fssn_cmt_fanstudio": ("斐济群岛地区", -21.8973, -179.5057, 6.1, 612.0),
-        "sa_fanstudio": ("12 km SSW of Olancha, CA", 36.1743, -118.0322, 3.98, 2.0),
+        "usgs_jianproject": ("6 km SW of Idyllwild, CA", 33.7043, -116.7712, 2.62, 16.33),
+        "usgs_jianproject": ("斐济群岛地区", -21.8973, -179.5057, 6.1, 612.0),
+        "sa_jianproject": ("12 km SSW of Olancha, CA", 36.1743, -118.0322, 3.98, 2.0),
         # Jian Project 聚合源：默认值取自 https://api.sismotide.top/api 各源示例数据
         "cea_jianproject": ("山东菏泽市郓城县", 35.789, 115.7, 4.1, 16.0),
         "cwa_jianproject": ("宜蘭縣東部外海", 24.49, 122.38, 5.2, 60.0),
@@ -724,7 +712,6 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
                     group="source",
                 )
             )
-    # 烈度速报源：补充最大烈度（FAN 与 EQSC 两套解析器都支持；源特有 → 右列）。
     if (
         "cenc_ir" in source_id
         or parser_name == "china_intensity_report_parser"
@@ -733,7 +720,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
         # 烈度速报源：事件名称 nameByInfo 对齐文档示例。
         name_by_info_default = (
             "新疆吐鲁番市托克逊县4.7级地震"
-            if source_id == "cenc_ir_fanstudio"
+            if source_id == "cenc_ir_eqsc"
             else "青海海西州都兰县4.0级地震"
         )
         fields.append(
@@ -758,7 +745,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
             )
         )
         # 烈度速报源特有数据：按数据源实际字段差异动态渲染。
-        is_fan_ir = source_id == "cenc_ir_fanstudio"
+        is_fan_ir = source_id == "cenc_ir_eqsc"
         fields.append(
             _text(
                 "intensity_info_text",
@@ -950,7 +937,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
     # CEA 地震预警源：补省份（驱动标题行『XX地震局』，先于烈度）与预估烈度 epiIntensity。
     # 说明：Jian Project 的 CEA 载荷不含 epiIntensity（解析器从 placeName 前缀推导省份），
     # 故 cea_jianproject 只暴露省份，不暴露预估烈度，保持与真实解析链路一致。
-    if source_id in ("cea_fanstudio", "cea_pr_fanstudio", "cea_wolfx"):
+    if source_id in ("cea_jianproject", "cea_pr_jianproject", "cea_wolfx"):
         fields.append(
             _text(
                 "province",
@@ -965,7 +952,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
             _num(
                 "epi_intensity",
                 "预估最大烈度",
-                default=5.5 if source_id != "cea_pr_fanstudio" else 6.1,
+                default=5.5 if source_id != "cea_pr_jianproject" else 6.1,
                 min_value=0.0,
                 max_value=12.0,
                 step=0.1,
@@ -1315,7 +1302,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
     # _build_snet_simulation_fields 单独推导，不再走此通用两列模板分支。
 
     # CWA EEW 源：补影响区域与震度制式（台湾；源特有 → 右列）。
-    if source_id in ("cwa_fanstudio", "cwa_wolfx"):
+    if source_id in ("cwa_jianproject", "cwa_wolfx"):
         # locationDesc 为影响区域列表
         fields.append(
             _text(
@@ -1331,7 +1318,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
     # JMA EEW 源：补情报类型（源特有 → 右列）。
     # 覆盖 Jian Project / PancakesAPI 接收的日本气象厅紧急地震速报版本。
     if source_id in (
-        "jma_fanstudio",
+        "jma_jianproject",
         "jma_p2p",
         "jma_wolfx",
         "jma_jianproject",
@@ -1402,9 +1389,8 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
         )
 
     # CENC 报告源：补信息类型（源特有 → 右列）。
-    # 默认值对齐 FAN /cenc 示例：infoTypeName=[正式测定]、placeName=堪察加东岸附近海域。
     # cenc_jianproject 解析器同样读取 infoTypeName，故一并暴露。
-    if source_id in ("cenc_fanstudio", "cenc_wolfx", "cenc_jianproject"):
+    if source_id in ("cenc_jianproject", "cenc_wolfx", "cenc_jianproject"):
         fields.append(
             _select_field(
                 "info_type_name",
@@ -1416,10 +1402,9 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
             )
         )
         # 最大烈度填写入口：仅对真实解析器会产出 intensity 的来源暴露
-        # （Wolfx cenc_eqlist 文档含 intensity，FAN /cenc 展示链路统一支持）。
         # cenc_jianproject 解析器不产出 intensity，若暴露会使其预览出现
         # 真实该源事件不会展示的「最大烈度」行，故不暴露。
-        if source_id in ("cenc_fanstudio", "cenc_wolfx"):
+        if source_id in ("cenc_jianproject", "cenc_wolfx"):
             fields.append(
                 _num(
                     "intensity",
@@ -1434,7 +1419,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
             )
 
     # CWA 正式报告源：补报告图片与等震度图附件（源特有 → 右列）。
-    if source_id == "cwa_fanstudio_report":
+    if source_id == "cwa_report_jianproject":
         fields.append(
             _text(
                 "image_uri",
@@ -1456,9 +1441,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
             )
         )
 
-    # JMA EEW 源（FAN / Jian Project / PancakesAPI）：仅补取消报标记。
-    # 三者的解析器都从载荷读取取消标记（FAN cancel / Jian isCancel / Pancakes title·action）。
-    if source_id in ("jma_fanstudio", "jma_jianproject", "jma_pancakes"):
+    if source_id in ("jma_jianproject", "jma_jianproject", "jma_pancakes"):
         fields.append(_bool_field("is_cancel", "取消报", group="source"))
 
     # JMA EEW 源（P2P 556）：训练/PLUM/取消标记 + 警报区域（areas）。
@@ -1659,10 +1642,10 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
     #   - usgs_jianproject 解析器只读取 infoTypeName
     #   - usgs_pancakes 解析器读取 url 与 magnitudeType
     #
-    # url 字段仅对真实解析器会输出该元数据的来源暴露：usgs_fanstudio / usgs_pancakes。
+    # url 字段仅对真实解析器会输出该元数据的来源暴露：usgs_jianproject / usgs_pancakes。
     # UsgsEarthquakeJianProjectParser 不读取也不产出 URL，若对其暴露 url，
     # 用户填写后模拟通知会带上真实 Jian Project 解析路径不可能产生的元数据，故不暴露。
-    if source_id in ("usgs_fanstudio", "usgs_pancakes"):
+    if source_id in ("usgs_jianproject", "usgs_pancakes"):
         fields.append(
             _text(
                 "url",
@@ -1673,7 +1656,7 @@ def _build_earthquake_fields(source_id: str) -> list[dict[str, Any]]:
                 group="source",
             )
         )
-    if source_id in ("usgs_fanstudio", "usgs_jianproject", "usgs_pancakes"):
+    if source_id in ("usgs_jianproject", "usgs_jianproject", "usgs_pancakes"):
         # 官方文档 USGS 示例 infoTypeName=Automatic；Jian Project 版本据此设置默认值。
         status_default = "automatic" if source_id == "usgs_jianproject" else "reviewed"
         fields.append(
@@ -1709,11 +1692,9 @@ def _build_tsunami_fields(source_id: str) -> list[dict[str, Any]]:
     默认值对齐 docs 海啸数据源文档
     """
     # 中国海啸源：level 为颜色等级制（红/橙/黄/蓝 + 信息/解除），
-    # 对齐 FAN /tsunami 文档 warningInfo.level 语义（"黄色"/"橙色"…）。
     # china_tsunami_jianproject 为同一机构海啸预警的 Jian Project 接收版本，同属中国颜色等级制。
-    is_china = source_id in ("china_tsunami_fanstudio", "china_tsunami_jianproject")
+    is_china = source_id in ("china_tsunami_jianproject", "china_tsunami_jianproject")
     # 默认值：Jian Project 版本取自官方文档 nmefc-tsunami 示例（福克斯群岛海域·海啸信息）；
-    # 其余中国源沿用 FAN /tsunami 文档示例；日本源沿用 JMA 津波警报示例。
     if source_id == "china_tsunami_jianproject":
         title_default = "海啸信息 · 福克斯群岛海域"
         level_default = "信息"
@@ -1849,9 +1830,8 @@ def _build_tsunami_fields(source_id: str) -> list[dict[str, Any]]:
                 group="source",
             )
         )
-    # FAN /tsunami 特有：海啸预报区 / 水位监测站 / 图件附件（JSON 编辑）。
     # Jian Project 的 nmefc-tsunami 载荷仅含标题/等级/震参/正文，无这些结构化字段，故不暴露。
-    if source_id == "china_tsunami_fanstudio":
+    if source_id == "china_tsunami_jianproject":
         fields.append(
             _json_field(
                 "forecasts",
@@ -2030,7 +2010,6 @@ def _build_weather_fields(source_id: str) -> list[dict[str, Any]]:
 
     默认值逐源对齐 docs 文档示例：
     - china_weather_jianproject：Jian Project 气象预警示例（铜山区强对流黄色预警）
-    - 其余 FAN 气象源：靖远县雷雨大风黄色预警示例
     """
     is_jian = source_id == "china_weather_jianproject"
     title_default = (
@@ -2053,7 +2032,6 @@ def _build_weather_fields(source_id: str) -> list[dict[str, Any]]:
             "预计6小时内，我县部分乡镇可能受雷雨大风影响，阵风可达7级以上，并伴有短时强降水，请注意防范。"
         )
     )
-    # 预警编码：Jian Project 透传 CMA 原 type 编码（p0000003）；FAN 用紧凑 11B 编码（11B2002）。
     code_default = "p0000003" if is_jian else "11B2002"
     lat_default = 34.1929 if is_jian else 36.5623
     lon_default = 117.1839 if is_jian else 104.67786
@@ -2225,7 +2203,7 @@ def _build_typhoon_fields(source_id: str) -> list[dict[str, Any]]:
         ),
     ]
     # 台风轨迹与四象限风圈（JSON 编辑；缺省由 builder 生成默认轨迹）。
-    if source_id != "typhoon_fanstudio":
+    if source_id != "typhoon_jianproject":
         fields.append(
             _json_field(
                 "history_track",

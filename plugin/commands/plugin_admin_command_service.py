@@ -569,24 +569,20 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             bot_name = "灾害预警"
 
             # 对应展示名称映射（命令文本场景投影）。
-            # connection_label_map / source_group_label_map 的多数值与
-            # display_registry.CONNECTION_DISPLAY_NAMES 一致，但命令文本保留了两处
-            # 有意差异：fan_studio_cenc_ir 用空格（"FAN Studio 烈度速报"）而非括号；
-            # snet_msil 用"日本海沟 S-Net 海底震度计"。
+            # connection_label_map / source_group_label_map 与
+            # display_registry.CONNECTION_DISPLAY_NAMES 对齐；
+            # snet_msil 用「日本海沟 S-Net 海底震度计」为命令侧有意差异。
             # 修改展示名时请同时核对 display_registry.py 与下方各投影表。
             connection_label_map = OrderedDict(
                 [
-                    ("fan_studio_all", "FAN Studio"),
-                    ("fan_studio_cenc_ir", "FAN Studio 烈度速报"),
+                    ("jian_project_all", "Jian Project"),
                     ("p2p_main", "P2P地震情報"),
                     ("wolfx_all", "Wolfx"),
                     ("pancakes_api", "PancakesAPI"),
-                    ("jian_project_all", "Jian Project"),
                 ]
             )
             source_group_label_map = OrderedDict(
                 [
-                    ("fan_studio", "FAN Studio"),
                     ("jian_project", "Jian Project"),
                     ("p2p_earthquake", "P2P地震情報"),
                     ("wolfx", "Wolfx"),
@@ -603,27 +599,44 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                 "weather": "中国气象局",
                 "earthquake": "中国地震台网",
                 "usgs": "USGS",
+                "emsc": "EMSC",
                 "eew": "紧急地震速报",
                 "earthquake_info": "地震情报",
                 "global_quake": "Global Quake",
                 "china_typhoon": "中国气象局：实时活跃台风",
+                "yunnan_earthquake": "云南地震局速报",
+                "shanxi_earthquake": "山西地震局速报",
+                "beijing_earthquake": "北京地震局速报",
+                "ningxia_earthquake": "宁夏地震局速报",
+                "taiwan_cwa_report": "台湾中央气象署: 地震报告",
+                "japan_jma_earthquake": "日本气象厅: 震源·震度情报",
+                "japan_jma_lpgm": "日本气象厅: 长周期地震动",
+                "japan_jma_tsunami": "日本气象厅: 海啸情报",
+                "emsc_earthquake": "欧洲地中海地震中心 (EMSC)",
+                "usa_shakealert": "美国 ShakeAlert 地震预警",
                 "snet_msil": "日本海沟 S-Net 海底震度计",
             }
             scoped_sub_source_label_map = {
-                "FAN Studio": {
+                "Jian Project": {
                     "china_earthquake_warning": "中国地震预警网 (CEA)",
                     "china_earthquake_warning_provincial": "中国地震预警网 (省级)",
-                    "taiwan_cwa_earthquake": "台湾中央气象署: 强震即时警报",
-                    "taiwan_cwa_report": "台湾中央气象署: 地震报告",
-                    "china_cenc_earthquake": "中国地震台网 (CENC)",
-                    "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
-                    "usgs_earthquake": "美国地质调查局 (USGS)",
-                    "fssn_cmt": "FSSN 矩心矩张量解 (CMT)",
                     "usa_shakealert": "美国 ShakeAlert 地震预警",
-                    "china_weather_alarm": "中国气象局: 气象预警",
-                    "china_tsunami": "自然资源部海啸预警中心",
-                    "china_typhoon": "中国气象局：实时活跃台风",
+                    "taiwan_cwa_earthquake": "台湾中央气象署: 强震即时警报",
                     "japan_jma_eew": "日本气象厅: 紧急地震速报",
+                    "china_cenc_earthquake": "中国地震台网 (CENC)",
+                    "yunnan_earthquake": "云南地震局速报",
+                    "shanxi_earthquake": "山西地震局速报",
+                    "beijing_earthquake": "北京地震局速报",
+                    "ningxia_earthquake": "宁夏地震局速报",
+                    "taiwan_cwa_report": "台湾中央气象署: 地震报告",
+                    "japan_jma_earthquake": "日本气象厅: 震源·震度情报",
+                    "japan_jma_lpgm": "日本气象厅: 长周期地震动",
+                    "usgs_earthquake": "美国地质调查局 (USGS)",
+                    "emsc_earthquake": "欧洲地中海地震中心 (EMSC)",
+                    "china_tsunami": "自然资源部海啸预警中心",
+                    "japan_jma_tsunami": "日本气象厅: 海啸情报",
+                    "china_weather_alarm": "中国气象局: 气象预警",
+                    "china_typhoon": "中国气象局：实时活跃台风",
                 },
                 "P2P地震情報": {
                     "japan_jma_eew": "日本气象厅: 紧急地震速报",
@@ -646,22 +659,16 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     "usgs_earthquake": "美国地质调查局 (USGS)",
                     "usgs_pancakes": "美国地质调查局 (USGS)",
                 },
-                "Jian Project": {
-                    "china_earthquake_warning": "中国地震预警网 (CEA)",
-                    "taiwan_cwa_earthquake": "台湾中央气象署: 强震即时警报",
-                    "japan_jma_eew": "日本气象厅: 紧急地震速报",
-                    "china_weather_alarm": "中国气象局: 气象预警",
-                    "china_tsunami": "自然资源部海啸预警中心",
-                    "china_cenc_earthquake": "中国地震台网 (CENC)",
-                    "usgs_earthquake": "美国地质调查局 (USGS)",
-                },
                 "EQSC API": {
                     "typhoon": "中国气象局：实时活跃台风",
+                    "china_typhoon": "中国气象局：实时活跃台风",
                     "jma_tsunami": "日本气象厅: 海啸予报",
+                    "japan_jma_tsunami": "日本气象厅: 海啸予报",
                     "china_cenc_intensity_report": "中国地震台网 (CENC) 烈度速报",
                 },
                 "NIED S-Net": {
                     "enabled": "日本海沟 S-Net 海底震度计",
+                    "snet_msil": "日本海沟 S-Net 海底震度计",
                 },
             }
 
@@ -773,8 +780,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             else:
                 snet_state_text = "🔴 未启动"
 
-            # 解析 FAN Studio 服务器信息
-            fan_server_info = status.get("fan_server_info", {})
+            # 解析 Jian Project 服务器信息
+            jian_server_info = status.get("jian_server_info", {})
 
             # 1. 总体概览行（active/total 已由 status 服务计入 EQSC + S-Net）
             overview_lines = [
@@ -790,7 +797,7 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             conn_details = status.get("connection_details", {})
             # 从 connections 视图提取各连接分组的配置启用状态，
             # 用于区分"未启用 / 异常 / 正常"三种状态，避免将未启用的
-            # 连接（如 FAN Studio 烈度速报）误显示为"异常"。
+            # 连接（如 EQSC 烈度速报）误显示为"异常"。
             connections_view = status.get("connections", {})
             group_enabled_map: dict[str, bool] = {}
             for conn_info in connections_view.values():
@@ -814,8 +821,8 @@ class PluginAdminCommandService(CommandTelemetryMixin):
                     state_text = "🟢 正常"
                 else:
                     state_text = "🔴 异常"
-                # FAN Studio 连接附加主备服务器信息
-                server_label = fan_server_info.get(conn_name)
+                # 附加活跃服务器标签（若有）
+                server_label = jian_server_info.get(conn_name)
                 if server_label:
                     state_text += f"（{server_label}）"
                 connection_lines.append(f"• {display_name}：{state_text}")
@@ -1580,7 +1587,6 @@ class PluginAdminCommandService(CommandTelemetryMixin):
         self, event, data_source: str = None, preference: str = None
     ):
         """处理 /服务器切换 指令。"""
-        # 管理类命令统一在入口先做管理员校验（与同文件其余管理命令保持一致）
         if not await self.plugin.is_plugin_admin(event):
             yield event.plain_result("🚫 权限不足：此命令仅限管理员使用。")
             return
@@ -1589,84 +1595,68 @@ class PluginAdminCommandService(CommandTelemetryMixin):
             yield event.plain_result("❌ 灾害预警服务未启动")
             return
 
-        # 无参数时展示当前服务器状态
-        if not data_source:
+        if not data_source and not preference:
             status = self.plugin.disaster_service.get_service_status()
-            fan_info = status.get("fan_server_info", {})
+            jian_info = status.get("jian_server_info", {})
             lines = [
                 "🖥️ 数据源服务器状态",
                 "",
+                f"  • Jian Project：{jian_info.get('jian_project_all', '未知')}",
+                "",
+                "📌 用法：/服务器切换 [主服务器|备用服务器]",
+                "💡 示例：/服务器切换 主服务器",
             ]
-            for conn_name, display_name in [
-                ("fan_studio_all", "FAN Studio"),
-                ("fan_studio_cenc_ir", "FAN Studio（烈度速报）"),
-            ]:
-                label = fan_info.get(conn_name, "未知")
-                lines.append(f"  • {display_name}：{label}")
-            lines.append("")
-            lines.append("📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>")
-            lines.append("💡 示例：/服务器切换 FAN 主服务器")
             yield event.plain_result("\n".join(lines))
             return
 
-        # 如果 data_source 实际上是 preference（兼容单参数用法）
-        data_source_lower = str(data_source or "").strip().lower()
-        pref_candidates = ("主服务器", "备用服务器", "主", "备")
-        if data_source_lower in {c.lower() for c in pref_candidates}:
-            source = "FAN"
-            raw_pref = str(data_source).strip()
-        else:
-            source = str(data_source).strip()
-            raw_pref = str(preference or "").strip()
+        raw_pref = str(preference or "").strip()
+        raw_source = str(data_source or "").strip()
+        pref_candidates = (
+            "主服务器",
+            "备用服务器",
+            "主",
+            "备",
+            "主服务器优先",
+            "备用服务器优先",
+        )
+        if not raw_pref and raw_source.lower() in {c.lower() for c in pref_candidates}:
+            raw_pref = raw_source
+            raw_source = "Jian Project"
 
-        # 规范化偏好值
         raw_pref_lower = raw_pref.lower()
-        if raw_pref_lower in ("主服务器", "主"):
+        if raw_pref_lower in ("主服务器", "主", "主服务器优先"):
             preference_full = "主服务器优先"
             preference_short = "主服务器"
-        elif raw_pref_lower in ("备用服务器", "备"):
+        elif raw_pref_lower in ("备用服务器", "备", "备用服务器优先"):
             preference_full = "备用服务器优先"
             preference_short = "备用服务器"
         else:
             yield event.plain_result(
                 "❌ 无效参数。\n\n"
-                "📌 用法：/服务器切换 <数据源> <主服务器|备用服务器>\n"
-                "💡 示例：/服务器切换 FAN 主服务器\n"
-                "  或：/服务器切换 FAN 备用服务器"
+                "📌 用法：/服务器切换 [主服务器|备用服务器]\n"
+                "💡 示例：/服务器切换 主服务器"
             )
             return
 
-        # 判断数据源
-        source_lower = source.lower()
-        if source_lower not in ("fan", "fan studio", "fan_studio", "fanstudio"):
-            yield event.plain_result(f"❌ 暂不支持数据源「{source}」的服务器切换。")
+        source_norm = raw_source.strip().lower().replace(" ", "").replace("_", "")
+        if source_norm and source_norm not in ("jian", "jianproject"):
+            yield event.plain_result(
+                "❌ 当前仅支持切换 Jian Project 主备服务器。\n\n"
+                "💡 示例：/服务器切换 主服务器"
+            )
             return
 
-        yield event.plain_result(f"🔄 正在切换 FAN Studio 至 {preference_short}...")
+        yield event.plain_result(
+            f"⏳ 正在将 Jian Project 切换为{preference_short}优先…"
+        )
+        results = await self.plugin.disaster_service.switch_jian_server_preference(
+            preference_full
+        )
+        if "error" in results:
+            yield event.plain_result(f"❌ {results['error']}")
+            return
+        lines = ["✅ Jian Project 服务器切换结果", ""]
+        for name, msg in results.items():
+            lines.append(f"  • {name}：{msg}")
+        yield event.plain_result("\n".join(lines))
 
-        try:
-            results = await self.plugin.disaster_service.switch_fan_server_preference(
-                preference_full
-            )
-            lines = ["🖥️ FAN Studio 服务器切换结果："]
-            for conn_name, status in results.items():
-                display_name = self._resolve_fan_conn_display(conn_name)
-                if "失败" in status:
-                    lines.append(f"  ❌ {display_name}：{status}")
-                else:
-                    # 只保留首个 ✅，去掉结果中的重复 emoji
-                    clean_status = status.replace("✅ ", "")
-                    lines.append(f"  ✅ {display_name}：{clean_status}")
-            yield event.plain_result("\n".join(lines))
-        except Exception as e:
-            logger.error(f"[灾害预警] 切换 FAN Studio 服务器失败: {e}")
-            yield event.plain_result(f"❌ 切换失败: {str(e)}")
-
-    @staticmethod
-    def _resolve_fan_conn_display(conn_name: str) -> str:
-        """解析 FAN 连接展示名。"""
-        names = {
-            "fan_studio_all": "FAN Studio",
-            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
-        }
-        return names.get(conn_name, conn_name)

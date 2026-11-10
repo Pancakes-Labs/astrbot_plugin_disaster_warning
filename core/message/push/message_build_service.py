@@ -46,7 +46,7 @@ class MessageBuildService:
     TSUNAMI_MEDIA_KEYS: tuple[str, ...] = ("earthquake", "amplitude", "coastal")
 
     # 气象预警颜色 → 本地回退图标路径映射。
-    # 当 Fan Studio 官方图标接口无法返回有效图标时，根据编码中的颜色后缀回退到通用图标。
+    # 当 Jian Project 官方图标接口无法返回有效图标时，根据编码中的颜色后缀回退到通用图标。
     _WEATHER_ICON_FALLBACK_MAP: dict[str, str] = {
         "blue": "resources/weatheralarm_logo/fallback_blue.png",
         "yellow": "resources/weatheralarm_logo/fallback_yellow.png",
@@ -191,7 +191,7 @@ class MessageBuildService:
             return flags
 
         # 3. FSSN CMT 震源球（无开关；有节面数据才渲染）
-        if source_id == "fssn_cmt_fanstudio":
+        if source_id == "usgs_jianproject":
             plane1 = meta.get("nodal_plane1")
             if (
                 isinstance(plane1, dict)
@@ -203,7 +203,7 @@ class MessageBuildService:
             return flags
 
         # 4. 台风路径图（缺省开）
-        if source_id in ("typhoon_fanstudio", "typhoon_eqsc"):
+        if source_id in ("typhoon_jianproject", "typhoon_eqsc"):
             typhoon_cfg = (
                 cfg.get("typhoon_config")
                 if isinstance(cfg.get("typhoon_config"), dict)
@@ -221,7 +221,7 @@ class MessageBuildService:
             return flags
 
         # 5. CWA 台湾正式地震报告图件（无开关；有图件 URI 才附加）
-        if source_id == "cwa_fanstudio_report":
+        if source_id == "cwa_report_jianproject":
             has_report_media = any(
                 isinstance(meta.get(key), str) and str(meta.get(key)).strip()
                 for key in ("image_uri", "shakemap_uri")
@@ -547,7 +547,7 @@ class MessageBuildService:
         return json.dumps(key_obj, sort_keys=True, ensure_ascii=False)
 
     # 气象预警图标接口返回伪图片（HTTP 200 + content_type=image/png 但实际为 HTML）的特征关键词。
-    # 上游 Fan Studio 图标接口对不存在的编码会返回 HTML 错误页而非真实图片，
+    # 上游 Jian Project 图标接口对不存在的编码会返回 HTML 错误页而非真实图片，
     # 这类失败稳定触发，降级为 DEBUG 避免控制台刷屏。
     _PSEUDO_IMAGE_ERROR_MARKERS: tuple[str, ...] = (
         "响应体不是有效图片",
@@ -703,7 +703,7 @@ class MessageBuildService:
             active_config=active_config,
         )
         # 地图渲染与插入（S-Net、CMT 跳过，避免重复或误附加通用地图）
-        if source_id not in ("snet_msil", "fssn_cmt_fanstudio"):
+        if source_id not in ("snet_msil", "usgs_jianproject"):
             await self._append_map_if_needed(
                 chain,
                 event,
@@ -1143,7 +1143,7 @@ class MessageBuildService:
 
         metadata = self._get_event_metadata(event)
         # 从多层元数据中提取气象预警类型编码。
-        # Fan Studio 格式如 11B20_yellow；PancakesAPI CMA 格式如 p0002003。
+        # Jian Project 格式如 11B20_yellow；PancakesAPI CMA 格式如 p0002003。
         raw_weather_code = (
             metadata.get("weather_code")
             or metadata.get("type")
@@ -1156,7 +1156,7 @@ class MessageBuildService:
 
         raw_weather_code = raw_weather_code.strip()
 
-        # 统一解析为 Fan Studio 图标接口兼容的 11B 完整码。
+        # 统一解析为 Jian Project 图标接口兼容的 11B 完整码。
         # p 编码（PancakesAPI CMA）会通过映射表转换为 11B 码；
         # 已有 11B 码直接使用；无法映射的返回 None 走本地回退。
         title_text = getattr(domain_event, "title", "") or metadata.get("title", "")
@@ -1187,7 +1187,7 @@ class MessageBuildService:
                 )
 
         # 2. 本地颜色回退：本地具体图标缺失时，优先按颜色后缀/紧凑编码/标题颜色提示
-        #    回退到本地通用图标（fallback_{color}.png）。这样即使 Fan Studio 接口
+        #    回退到本地通用图标（fallback_{color}.png）。这样即使 Jian Project 接口
         #    对某些编码返回"伪成功"（真实占位图）也不会吞掉颜色回退。
         color_hint_candidates = [
             metadata.get("severity_color"),
@@ -1219,7 +1219,7 @@ class MessageBuildService:
                     f"[灾害预警] 本地回退图标读取失败: {fallback_path}, 错误信息: {e}"
                 )
 
-        # 3. Fan Studio 官方接口兜底：本地图标与本地颜色回退均不可用时，
+        # 3. Jian Project 官方接口兜底：本地图标与本地颜色回退均不可用时，
         #    才请求外部图标接口（如 11B20_blue 这类本地与颜色回退均无匹配的类型）。
         if icon_code:
             icon_url = build_weather_icon_url(icon_code)
@@ -1266,7 +1266,7 @@ class MessageBuildService:
         source_id: str,
     ) -> None:
         """按需附加台湾地震报告相关等震度报告图件。"""
-        if source_id != "cwa_fanstudio_report":
+        if source_id != "cwa_report_jianproject":
             return
 
         metadata = self._get_event_metadata(event)
@@ -1299,7 +1299,7 @@ class MessageBuildService:
         source_id: str,
     ) -> None:
         """为 FSSN CMT 地震事件动态渲染并附加沙滩球图片。"""
-        if source_id != "fssn_cmt_fanstudio":
+        if source_id != "usgs_jianproject":
             return
 
         domain_event = self._get_domain_event(event)

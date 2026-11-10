@@ -17,7 +17,7 @@ from typing import Any
 
 from ....utils.converters import safe_float_convert
 
-FSSN_CMT_SOURCE_ID = "fssn_cmt_fanstudio"
+FSSN_CMT_SOURCE_ID = "usgs_jianproject"
 CMT_INFO_TYPE = "CMT"
 
 # 展示用主震级优先序（文案括号内补充项）
@@ -83,7 +83,7 @@ def is_fssn_cmt_source(
     text = str(source or "").strip().lower()
     if text in {
         FSSN_CMT_SOURCE_ID,
-        "fan_studio_fssn_cmt",
+        "legacy_fssn_cmt",
         "fssn-cmt",
         "fssn_cmt",
     }:
@@ -372,7 +372,7 @@ def resolve_fssn_cmt_event_ids(
 ) -> tuple[str, str]:
     """返回 (cmt_id, fssn_event_id)。
 
-    eventId 为软必填：FAN Studio 可能推送尚未关联 FSSN 事件的独立 CMT 解，
+    eventId 为软必填：Jian Project 可能推送尚未关联 FSSN 事件的独立 CMT 解，
     此时用 cmt_id 兜底，保证事件身份与去重主键仍然稳定。
     """
     payload = raw_payload if isinstance(raw_payload, Mapping) else {}
@@ -386,7 +386,7 @@ def build_cmt_metadata(
     raw_payload: Mapping[str, Any],
     source_enum: str = "",
     source_type: str = "earthquake_info",
-    source_family: str = "fan_studio",
+    source_family: str = "jian_project",
 ) -> dict[str, Any]:
     """从原始 CMT 载荷构建标准化 metadata。"""
     cmt_id, fssn_event_id = resolve_fssn_cmt_event_ids(raw_payload)

@@ -57,7 +57,7 @@ class EventDeduplicationService:
         # CENC 烈度速报跨源去重：
         # key = soft fingerprint（发震时间+震级+位置网格）
         # value = {"source_id", "priority", "event_id", "ts"}
-        # EQSC 优先级更高：同内容后到的 FAN 会被吞掉。
+        # EQSC 优先级更高：同内容后到的 历史 会被吞掉。
         self._cenc_ir_cache: dict[str, dict[str, Any]] = {}
         self._cenc_ir_cache_max_size = 256
 
@@ -171,7 +171,7 @@ class EventDeduplicationService:
         移动速度（move_speed）以及风圈半径（radius7/radius10）。
         当这些参数完全一致时，指纹相同，视为重复数据。
 
-        说明：多台风共舞时，FAN Studio 会在“任意一个台风变化”时整包重推数组。
+        说明：多台风共舞时，Jian Project 会在“任意一个台风变化”时整包重推数组。
         因此指纹必须按单台风 ID 粒度稳定比较，不能因为数组内其他台风变化而失效。
         """
         return "|".join(
@@ -186,7 +186,7 @@ class EventDeduplicationService:
                 cls._normalize_fingerprint_value(typhoon.radius7),
                 cls._normalize_fingerprint_value(typhoon.radius10),
                 # 活跃状态参与指纹：停编（isActive 翻转）即使核心参数未变化
-                # 也视为变化放行，用于推送停编通知。FAN 数据不含活跃状态，
+                # 也视为变化放行，用于推送停编通知。历史 数据不含活跃状态，
                 # 事件 is_active 恒为 True，不受影响。
                 "1" if bool(typhoon.is_active) else "0",
             ]
@@ -539,7 +539,7 @@ class EventDeduplicationService:
     @classmethod
     def _is_cenc_intensity_report_source(cls, source_id: str) -> bool:
         """是否为 CENC 烈度速报双源之一。"""
-        return source_id in {"cenc_ir_eqsc", "cenc_ir_fanstudio"}
+        return source_id in {"cenc_ir_eqsc", "cenc_ir_eqsc"}
 
     def _build_cenc_ir_soft_fingerprint(
         self,
@@ -605,7 +605,7 @@ class EventDeduplicationService:
         domain_eq: EarthquakeEvent,
         source_id: str,
     ) -> bool:
-        """CENC 烈度速报跨源去重（FAN / EQSC，EQSC 优先）。
+        """CENC 烈度速报跨源去重（历史 / EQSC，EQSC 优先）。
 
         软指纹仅含发震时间/震级/粗网格，不含报次与内容版本；
         因此只过滤跨源重复，同源更新放行给下游。
@@ -828,7 +828,7 @@ class EventDeduplicationService:
         metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
         source_id = self._get_source_id(event)
 
-        # CENC 烈度速报：FAN / EQSC 跨源软去重（EQSC 优先）
+        # CENC 烈度速报：历史 / EQSC 跨源软去重（EQSC 优先）
         if self._is_cenc_intensity_report_source(source_id):
             if not self._should_push_cenc_intensity_report(
                 envelope, domain_eq, source_id
@@ -1036,7 +1036,7 @@ class EventDeduplicationService:
             or self._extract_issue_type_from_earthquake(domain_eq, active_metadata)
             or ""
         ).lower()
-        if source_id == "usgs_fanstudio":
+        if source_id == "usgs_jianproject":
             existing_info_type = (existing_event.get("info_type", "") or "").lower()
             if existing_info_type == "automatic" and current_info_type == "reviewed":
                 plugin_logger.debug(

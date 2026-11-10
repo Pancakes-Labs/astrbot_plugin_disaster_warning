@@ -314,7 +314,7 @@ async def query_weather_alarm_data(
             guideline_idx = body_text.find("防御指南")
             guideline_text = body_text[guideline_idx:].strip()
 
-        # CMA p 编码需先经统一映射转为 Fan Studio 图标接口兼容的 11B 码，
+        # CMA p 编码需先经统一映射转为 Jian Project 图标接口兼容的 11B 码，
         # 直接拼接原始 p 编码会导致图标接口返回“伪图片”错误页。
         icon_code = (
             resolve_weather_icon_code(

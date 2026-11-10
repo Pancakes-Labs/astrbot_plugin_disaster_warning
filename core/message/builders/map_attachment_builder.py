@@ -14,7 +14,7 @@ from jinja2 import Template
 
 from astrbot.api import logger
 
-from ....utils.map_tile_sources import get_tile_subdomains, get_tile_url_js
+from ....utils.map_tile_sources import get_tile_fallback_url, get_tile_subdomains, get_tile_url_js
 
 
 class MapAttachmentBuilder:

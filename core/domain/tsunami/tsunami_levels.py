@@ -176,7 +176,7 @@ def resolve_tsunami_region(
     sid = str(source_id or "").strip().lower()
     if family in {"eqsc", "p2p"} or "jma" in sid or "japan" in sid:
         return "japan"
-    if family in {"fan_studio", "fanstudio"} or "china" in sid or "fan" in sid:
+    if family in {"jian_project", "jianproject"} or "china" in sid or "fan" in sid:
         return "china"
     # 回退：看等级形态
     level = str(meta.get("level") or "").strip()

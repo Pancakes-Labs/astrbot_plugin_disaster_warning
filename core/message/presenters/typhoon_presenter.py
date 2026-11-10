@@ -4,7 +4,7 @@
 该模块负责把台风展示上下文转换为适合发送的文本内容。
 支持两种数据来源：
 1. EQSC 富化数据（含四象限风圈、移动速度方向等丰富信息）
-2. FAN Studio 基础数据（回退用，仅含单值风圈半径）
+2. Jian Project 基础数据（回退用，仅含单值风圈半径）
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from .base_presenter import BasePresenter
 class TyphoonPresenter(BasePresenter):
     """台风文本展示器。
 
-    根据 data_source 字段自动选择 EQSC 富化版或 FAN Studio 回退版展示逻辑。
+    根据 data_source 字段自动选择 EQSC 富化版或 Jian Project 回退版展示逻辑。
     """
 
     presenter_name = "typhoon_presenter"
@@ -208,7 +208,7 @@ class TyphoonPresenter(BasePresenter):
         elif cls._is_valid_radius_value(
             display_context.radius7
         ) or cls._is_valid_radius_value(display_context.radius10):
-            # 回退到 FAN Studio 单值风圈，紧凑对齐展示
+            # 回退到 Jian Project 单值风圈，紧凑对齐展示
             lines.append("")
             lines.append("🌪️风圈半径：")
             if cls._is_valid_radius_value(display_context.radius7):

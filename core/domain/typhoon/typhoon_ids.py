@@ -30,7 +30,7 @@ def is_eqsc_placeholder_id(typhoon_id: object) -> bool:
     return bool(_PLACEHOLDER_ID_FORMAT.match(_clean_id(typhoon_id)))
 
 
-# FAN Studio 标准年份前缀：19xx / 20xx。仅此类纯数字编号才按
+# Jian Project 标准年份前缀：19xx / 20xx。仅此类纯数字编号才按
 # 「年份后 2 位 + 编号末 2 位」重组，避免把任意长数字（如 99999）
 # 误当作带年份前缀的正式编号而产出错误结果。
 _YEAR_PREFIX_RE = re.compile(r"^(?:19|20)\d{2}")
@@ -39,7 +39,7 @@ _YEAR_PREFIX_RE = re.compile(r"^(?:19|20)\d{2}")
 def to_eqsc_id(typhoon_id: object) -> str:
     """转换为 EQSC 4 位编号（年份后 2 位 + 编号 2 位）。
 
-    覆盖 FAN Studio 台风 id 的三种形态：
+    覆盖 Jian Project 台风 id 的三种形态：
 
     - 标准 6 位编号（202624）：年份后 2 位 + 编号末 2 位 -> 2624；
     - 无名热带低压的 8 位编号（20260027，4 位编号 0027 拼 4 位年份）
@@ -64,8 +64,8 @@ def to_eqsc_id(typhoon_id: object) -> str:
     return text
 
 
-def to_fan_id(typhoon_id: object) -> str:
-    """将 4 位 EQSC 编号转换为 Fan 6 位形式。
+def to_canonical_typhoon_id(typhoon_id: object) -> str:
+    """将 4 位短编号转换为 6 位标准编号（补 20 前缀）。
 
     占位编号（如 26XX）不是纯数字，不补 20 前缀，原样返回，
     避免生成 2026XX 这类无效编号污染去重键与展示。
@@ -76,6 +76,10 @@ def to_fan_id(typhoon_id: object) -> str:
     if len(text) == 4 and text.isdigit():
         return f"20{text}"
     return text
+
+
+# 历史别名：旧调用点逐步迁移到 to_canonical_typhoon_id
+to_fan_id = to_canonical_typhoon_id
 
 
 def extract_td_short_id(typhoon_id: object) -> str:
@@ -113,7 +117,7 @@ def normalize_typhoon_id(typhoon_id: object) -> str:
     - 纯数字编号（202607 / 2607）：统一为 4 位年份短编号（2607）；
     - 无名低压（NAMELESS_07 / NAMELESS-2604 / TD07 等合法格式）：
       统一为 TD + 两位短编号（TD07 / TD04），
-      与 FAN Studio 侧 TDxx 编号归一到同一去重键，避免同源台风重复推送；
+      与 Jian Project 侧 TDxx 编号归一到同一去重键，避免同源台风重复推送；
     - EQSC 占位编号（26XX / 2026XX）：归一化为 "TD" + 原始占位编号，
       因其尚未分配正式编号，与裸 NAMELESS / TD 同属无名低压族，
       但保留原始占位编号作为后缀以区分不同物理台风，

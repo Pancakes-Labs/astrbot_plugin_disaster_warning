@@ -6,6 +6,29 @@
 <!-- markdownlint-disable MD041 -->
 # ChangeLog
 
+# 2026/11/10 v1.7.0
+
+## 🚀 What's Changed
+
+### 🌐 Data Sources & Network (数据源与网络)
+
+- 空气质量支持单独查询市级/县级详情，并兼容「省 市名」「省+市名」写法（如 `/空气质量 银川`、`/空气质量 宁夏 银川`）
+- 修复直辖市空气质量查询误走省级摘要，并在单城详情中展示上游已有污染物浓度（PM2.5/PM10/SO2/NO2/CO/O3 等）
+- 修复 ShakeAlert `sa_eew` 缺少文本展示器注册，以及 Jian 台风首轮轮询未通知启动静默协调器导致超时放行
+- 移除 FAN Studio 业务数据通道；保留 Wolfx / P2P / PancakesAPI / EQSC / NMC
+- Jian Project 默认启用，并扩接省级预警、地方局速报、CWA/JMA 速报、长周期、EMSC、海啸等子源
+- 台风 / 气象站 / AQI 查询改用 Jian Project
+- 地图瓦片继续使用 `tilemap.fanstudio.tech`，必要时回退 `tilemap.sismotide.top`
+- Jian Project 接入主备服务器（`api.sismotide.top` / `api.jianproject.cloud`），支持服务器偏好与 `/服务器切换`
+
+### 💻 WebUI / Frontend (前端)
+
+- 状态页连接矩阵以 Jian Project 为主列；卡片可翻转，正面按原 FAN Studio 子源顺序，背面展示扩接剩余源
+- 模拟页默认数据源改为 Jian Project
+- 清理遗留 FAN Studio 设置项
+
+---
+
 # 2026/10/05 v1.6.5
 
 ## 🚀 What's Changed

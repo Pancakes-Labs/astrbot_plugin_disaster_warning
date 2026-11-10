@@ -1026,6 +1026,7 @@ try {
 var tileLayer = null;
 try {
     if (map && TILE_URL) {
+        var TILE_FALLBACK_URL = '{{ tile_fallback_url }}';
         tileLayer = L.tileLayer(TILE_URL, {
             maxZoom: 18,
             minZoom: 0,
@@ -1040,11 +1041,27 @@ try {
 }
 
 if (tileLayer) {
+    var _tileFallbackSwitched = false;
     tileLayer.on('tileerror', function(e) {
         var img = e.tile;
         if (!img || !img.src) return;
         var retries = parseInt(img.dataset.retryCount || '0', 10);
-        if (retries >= 3) return;
+        if (retries >= 3) {
+            // 主链多次失败后切 Jian Project 瓦片回退（若配置了 fallback）
+            if (!_tileFallbackSwitched && TILE_FALLBACK_URL) {
+                _tileFallbackSwitched = true;
+                try { map.removeLayer(tileLayer); } catch (_err) {}
+                tileLayer = L.tileLayer(TILE_FALLBACK_URL, {
+                    maxZoom: 18,
+                    minZoom: 0,
+                    keepBuffer: 2,
+                    updateWhenIdle: true,
+                    updateWhenZooming: false,
+                    subdomains: TILE_SUBDOMAINS
+                }).addTo(map);
+            }
+            return;
+        }
         img.dataset.retryCount = String(retries + 1);
         var delay = (retries + 1) * 1000;
         var coords = img._coords || {};

@@ -368,7 +368,7 @@ class UsgsEarthquakeParser(BaseParser):
     """美国地质调查局地震情报解析器。"""
 
     def __init__(self, message_logger=None):
-        super().__init__("usgs_fanstudio", message_logger)
+        super().__init__("usgs_jianproject", message_logger)
 
     @staticmethod
     def _get_field(data: dict[str, Any], field_name: str):
@@ -458,7 +458,7 @@ class UsgsEarthquakeParser(BaseParser):
             raw_payload = dict(msg_data)
             update_time = self._parse_datetime(self._get_field(msg_data, "updateTime"))
             metadata = {
-                "source_family": "fan_studio",
+                "source_family": "jian_project",
                 "source_enum": source_entry.source_enum if source_entry else "",
                 "source_type": source_entry.source_type.value
                 if source_entry
@@ -489,7 +489,7 @@ class UsgsEarthquakeParser(BaseParser):
                 event_type="earthquake",
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 source_enum=source_entry.source_enum if source_entry else "",
                 published_at=update_time or domain_event.occurred_at,
                 aliases=tuple(item for item in (str(usgs_id or "").strip(),) if item),
@@ -510,7 +510,7 @@ class UsgsEarthquakeParser(BaseParser):
                     source_id=self.source_id,
                     provider_family=source_entry.provider_family.value
                     if source_entry
-                    else "fan_studio",
+                    else "jian_project",
                     message_type=str(msg_data.get("type") or "update").strip(),
                     raw=raw_payload,
                     attributes=dict(metadata),
@@ -532,10 +532,10 @@ class UsgsEarthquakeParser(BaseParser):
 
 
 class ShakeAlertEewParser(BaseParser):
-    """美国 ShakeAlert 地震预警解析器 - FAN Studio。"""
+    """美国 ShakeAlert 地震预警解析器 - 上游。"""
 
     def __init__(self, message_logger=None):
-        super().__init__("sa_fanstudio", message_logger)
+        super().__init__("sa_jianproject", message_logger)
 
     @staticmethod
     def _get_field(data: dict[str, Any], field_name: str):
@@ -630,7 +630,7 @@ class ShakeAlertEewParser(BaseParser):
             source_entry = get_source_entry(self.source_id)
             raw_payload = dict(msg_data)
             metadata = {
-                "source_family": "fan_studio",
+                "source_family": "jian_project",
                 "source_enum": source_entry.source_enum if source_entry else "",
                 "source_type": source_entry.source_type.value
                 if source_entry
@@ -658,7 +658,7 @@ class ShakeAlertEewParser(BaseParser):
                 event_type="earthquake_warning",
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 source_enum=source_entry.source_enum if source_entry else "",
                 published_at=domain_event.occurred_at,
                 aliases=tuple(
@@ -680,7 +680,7 @@ class ShakeAlertEewParser(BaseParser):
                     source_id=self.source_id,
                     provider_family=source_entry.provider_family.value
                     if source_entry
-                    else "fan_studio",
+                    else "jian_project",
                     message_type=str(msg_data.get("type") or "update").strip(),
                     raw=raw_payload,
                     attributes=dict(metadata),

@@ -366,14 +366,14 @@ function formatSessionDisplayLabel(sessionOrUmo) {
 /**
  * 数据源展示名场景投影覆盖表（唯一真源之外的少量有意差异）。
  * 前端仅在此覆盖个别场景展示口径：
- * - cenc_ir_fanstudio：子源列表展示口径有意剥掉通道后缀 "- Fan"，
+ * - cenc_ir_eqsc：子源列表展示口径有意剥掉通道后缀，
  *   与后端完整通道名存在既有差异，勿强行对齐；
  * - snet_msil：后端 SOURCE_DISPLAY_MAP 未注册该键，保留前端既有文案，
  *   避免回退显示原始内部 key。
  * 其余 key 全部由 meta 提供，新增/改名数据源只需改后端一处。
  */
 const SOURCE_DISPLAY_OVERRIDES = {
-    'cenc_ir_fanstudio': '中国地震台网 (CENC) - 烈度速报',
+    'cenc_ir_eqsc': '中国地震台网 (CENC) - 烈度速报',
     'snet_msil': '日本海沟 S-Net 海底震度计',
 };
 
@@ -396,7 +396,7 @@ function formatSourceName(source) {
 /**
  * 解析台风数据形态标签。
  * @param {string|Object} infoTypeOrEvent - info_type 或事件对象
- * @returns {'fan'|'enriched'|'eqsc_rebuild'|''}
+ * @returns {'jian'|'enriched'|'eqsc_rebuild'|''}
  */
 function resolveTyphoonDataMode(infoTypeOrEvent) {
     let raw = '';
@@ -418,36 +418,36 @@ function resolveTyphoonDataMode(infoTypeOrEvent) {
 
     const key = raw.toLowerCase();
     if (!key) return '';
-    if (['enriched', 'fan+eqsc', 'fan_eqsc', 'eqsc_enriched'].includes(key)) {
+    if (['enriched', 'fan+eqsc', 'fan_eqsc', 'eqsc_enriched', 'jian+eqsc', 'jian_eqsc'].includes(key)) {
         return 'enriched';
     }
     if (['eqsc_rebuild', 'eqsc', 'eqsc_history', 'history_rebuild', 'rebuild'].includes(key)) {
         return 'eqsc_rebuild';
     }
-    if (['fan', 'fan_studio', 'fanstudio'].includes(key)) {
-        return 'fan';
+    if (['fan', 'jian', 'jian_project', 'jianproject', 'jian_live'].includes(key)) {
+        return 'jian';
     }
     return '';
 }
 
 /**
- * 台风来源展示名：统一 source_id=typhoon_fanstudio，按数据形态追加后缀。
+ * 台风来源展示名：统一 source_id=typhoon_jianproject，按数据形态追加后缀。
  * @param {string} source
  * @param {string|Object} [infoTypeOrEvent]
  * @returns {string}
  */
 function formatTyphoonSourceName(source, infoTypeOrEvent) {
     // 事件详情按数据形态细分；贡献榜请用 formatSourceName（中性实时名）
-    const normalized = normalizeSourceName(source || 'typhoon_fanstudio');
+    const normalized = normalizeSourceName(source || 'typhoon_jianproject');
     const mode = resolveTyphoonDataMode(infoTypeOrEvent);
     if (mode === 'enriched') {
-        return '中国气象局：实时活跃台风 - Fan+EQSC';
+        return '中国气象局：实时活跃台风 - Jian+EQSC';
     }
     if (mode === 'eqsc_rebuild' || normalized === 'typhoon_eqsc_rebuild') {
         return '中国气象局：台风历史 - EQSC';
     }
-    // fan 或缺省：事件详情仍标明 Fan 触发
-    return '中国气象局：实时活跃台风 - Fan';
+    // jian 或缺省：事件详情标明 Jian GET 触发
+    return '中国气象局：实时活跃台风 - Jian';
 }
 
 /**
@@ -465,11 +465,11 @@ function formatEventSourceName(eventOrSource) {
         const normalized = normalizeSourceName(source);
         const type = String(eventOrSource.type || eventOrSource.event_type || '').toLowerCase();
         if (
-            normalized === 'typhoon_fanstudio'
+            normalized === 'typhoon_jianproject'
             || normalized === 'typhoon_eqsc_rebuild'
             || type === 'typhoon'
         ) {
-            return formatTyphoonSourceName(source || 'typhoon_fanstudio', eventOrSource);
+            return formatTyphoonSourceName(source || 'typhoon_jianproject', eventOrSource);
         }
         return formatSourceName(source);
     }

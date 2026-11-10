@@ -459,7 +459,7 @@ function HorizontalTimeline({ style }) {
 
     /**
      * 获取数据源规范化中文名
-     * 台风会按 info_type 细分为 Fan / Fan+EQSC / EQSC
+     * 台风会按 info_type 细分为 Jian / Jian+EQSC / EQSC
      */
     const getSourceLabel = (event) => {
         const payload = event && typeof event === 'object'

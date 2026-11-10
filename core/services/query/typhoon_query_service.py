@@ -22,7 +22,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from ...domain.typhoon import clean_text, to_fan_id
+from ...domain.typhoon import clean_text, to_canonical_typhoon_id
 from .typhoon_data_adapter import (
     filter_items,
     normalize_eqsc_typhoon,
@@ -187,10 +187,10 @@ async def _query_local(
         if callable(finder):
             raw = await finder(typhoon_id)
         if not raw:
-            fan_id = to_fan_id(typhoon_id)
+            canon_id = to_canonical_typhoon_id(typhoon_id)
             find_by_real = getattr(db, "find_event_by_real_id", None)
             if callable(find_by_real):
-                raw = await find_by_real(fan_id, "typhoon_fanstudio")
+                raw = await find_by_real(canon_id, "typhoon_jianproject")
         if not raw:
             return {
                 "success": False,

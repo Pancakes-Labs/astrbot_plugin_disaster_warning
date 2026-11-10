@@ -31,7 +31,7 @@ class TsunamiParser(BaseParser):
 
     def __init__(self, message_logger=None):
         """初始化中国海啸预警解析器。"""
-        super().__init__("china_tsunami_fanstudio", message_logger)
+        super().__init__("china_tsunami_jianproject", message_logger)
 
     def _build_envelope(self, tsunami_data: dict[str, Any]) -> EventEnvelope | None:
         """把海啸原始字典封装为统一事件包裹体。"""
@@ -155,7 +155,7 @@ class TsunamiParser(BaseParser):
                 "amplitude": maps.get("amplitudeMapUrl", ""),
                 "coastal": maps.get("coastalMapUrl", ""),
             },
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -177,7 +177,7 @@ class TsunamiParser(BaseParser):
             event_type="tsunami",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             published_at=issue_time,
             aliases=tuple(
@@ -200,7 +200,7 @@ class TsunamiParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(tsunami_data.get("type") or message_type).strip(),
                 raw=dict(tsunami_data),
                 attributes=dict(metadata),

@@ -64,7 +64,7 @@ def _enrich_event_list(events: list[dict]) -> None:
             weather_type_code = str(event.get("weather_type_code") or "").strip()
             # 本地优先：p 编码经统一映射转为 11B 码
             # 内部优先返回 /weatheralarm_logo/ 静态 URL，本地文件缺失时依次回退
-            # 本地通用颜色图标（fallback_{color}.png）与 Fan Studio 官方接口，
+            # 本地通用颜色图标（fallback_{color}.png）与 Jian Project 官方接口，
             # 避免远程接口返回伪图片导致前端无法回退。
             if weather_type_code:
                 title_text = str(event.get("description") or "").strip()
@@ -83,7 +83,7 @@ def _enrich_event_list(events: list[dict]) -> None:
             info_type = str(event.get("info_type") or "").strip()
             event["data_mode"] = resolve_data_mode(info_type, default="fan")
             event["source_label"] = format_event_source_name(
-                event.get("source_id") or event.get("source") or "typhoon_fanstudio",
+                event.get("source_id") or event.get("source") or "typhoon_jianproject",
                 event_type="typhoon",
                 info_type=info_type,
             )

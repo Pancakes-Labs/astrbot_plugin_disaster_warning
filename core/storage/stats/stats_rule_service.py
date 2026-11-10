@@ -101,7 +101,7 @@ class StatsRuleService:
                     is_reliable = True
                 elif "震源" in info_type or "各地" in info_type:
                     is_reliable = True
-                elif envelope.source_id == "fssn_cmt_fanstudio" and info_type == "CMT":
+                elif envelope.source_id == "usgs_jianproject" and info_type == "CMT":
                     # CMT 虽是补充产品，但在 record_earthquake_stats 外层已被 is_earthquake_supplement_product 过滤掉。
                     # 这里保持逻辑一致即可。
                     is_reliable = False
@@ -152,7 +152,7 @@ class StatsRuleService:
         if not isinstance(data, EarthquakeEvent):
             return False
         source_id = event.source_id or ""
-        if source_id not in {"cenc_fanstudio", "cenc_wolfx"}:
+        if source_id not in {"cenc_jianproject", "cenc_wolfx"}:
             return False
         event_metadata = getattr(data, "metadata", None)
         if not isinstance(event_metadata, dict):

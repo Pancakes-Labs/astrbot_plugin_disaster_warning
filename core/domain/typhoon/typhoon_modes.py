@@ -17,8 +17,8 @@ MODE_ALIASES: dict[str, str] = {
     "history_rebuild": "eqsc_rebuild",
     "rebuild": "eqsc_rebuild",
     "fan": "fan",
-    "fan_studio": "fan",
-    "fanstudio": "fan",
+    "jian_project": "fan",
+    "jianproject": "fan",
 }
 
 

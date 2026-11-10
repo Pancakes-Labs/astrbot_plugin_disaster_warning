@@ -123,7 +123,13 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_tsunami_poll is not None:
                     await eqsc_tsunami_poll.start()
-                # EQSC 台风 HTTP 独立轮询（不依赖 FAN 触发）
+                # Jian Project 台风 GET 主轮询
+                jian_typhoon_poll = getattr(
+                    self.service, "jian_typhoon_poll_service", None
+                )
+                if jian_typhoon_poll is not None:
+                    await jian_typhoon_poll.start()
+                # EQSC 台风 HTTP 独立轮询
                 eqsc_typhoon_poll = getattr(
                     self.service, "eqsc_typhoon_poll_service", None
                 )
@@ -275,6 +281,12 @@ class DisasterServiceLifecycleService:
             and getattr(eqsc_tsunami, "is_enabled", lambda: False)()
         ):
             expected_polls.append("eqsc_tsunami")
+        jian_typhoon = getattr(self.service, "jian_typhoon_poll_service", None)
+        if (
+            jian_typhoon is not None
+            and getattr(jian_typhoon, "is_enabled", lambda: False)()
+        ):
+            expected_polls.append("jian_typhoon")
         eqsc_typhoon = getattr(self.service, "eqsc_typhoon_poll_service", None)
         if (
             eqsc_typhoon is not None
@@ -407,6 +419,11 @@ class DisasterServiceLifecycleService:
                 )
                 if eqsc_tsunami_poll is not None:
                     await eqsc_tsunami_poll.stop()
+                jian_typhoon_poll = getattr(
+                    self.service, "jian_typhoon_poll_service", None
+                )
+                if jian_typhoon_poll is not None:
+                    await jian_typhoon_poll.stop()
                 eqsc_typhoon_poll = getattr(
                     self.service, "eqsc_typhoon_poll_service", None
                 )

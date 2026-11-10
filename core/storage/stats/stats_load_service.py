@@ -319,7 +319,7 @@ class StatsLoadService:
     def _is_cenc_official_record(self, event: dict[str, Any]) -> bool:
         """判断数据库记录是否属于 CENC 正式测定统计口径。"""
         source_key = str(event.get("source_id") or event.get("source") or "").strip()
-        if source_key not in {"cenc_fanstudio", "cenc_wolfx"}:
+        if source_key not in {"cenc_jianproject", "cenc_wolfx"}:
             return False
 
         info_type = str(event.get("info_type") or "").strip()

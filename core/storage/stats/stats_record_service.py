@@ -165,14 +165,14 @@ class StatsRecordService:
                         unique_id,
                         bare,
                         f"{source}|{bare}" if source and bare else "",
-                        f"china_tsunami_fanstudio|{bare}" if bare else "",
-                        f"fan_studio_tsunami|{bare}" if bare else "",
+                        f"china_tsunami_jianproject|{bare}" if bare else "",
+                        f"china_tsunami_jianproject|{bare}" if bare else "",
                     ]
                 ):
                     if not candidate:
                         continue
                     for src in dict.fromkeys(
-                        [source, "china_tsunami_fanstudio", "fan_studio_tsunami"]
+                        [source, "china_tsunami_jianproject", "china_tsunami_jianproject"]
                     ):
                         if not src:
                             continue

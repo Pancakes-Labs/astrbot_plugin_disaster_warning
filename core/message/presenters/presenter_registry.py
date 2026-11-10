@@ -51,6 +51,7 @@ _TEXT_KEY_PRESENTER_REGISTRY: dict[str, type[BasePresenter]] = {
     "cenc_ir_report": CencIntensityReportPresenter,
     "jma_report": JmaEarthquakeInfoPresenter,
     "usgs_report": UsgsEarthquakePresenter,
+    "sa_eew": ShakeAlertEewPresenter,
     "shakealert_eew": ShakeAlertEewPresenter,
     "fssn_cmt": FssnCmtPresenter,
     "snet": SnetPresenter,

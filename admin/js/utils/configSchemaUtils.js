@@ -10,17 +10,13 @@
 
     // 仅允许全局配置修改的嵌套路径（会话模式隐藏且保存时剥离）
     // S-Net 轮询间隔、EQSC 通道鉴权参数影响全局运行态；
-    // eqsc.typhoon 允许会话差异（部分会话只要 Fan，部分要 EQSC 富化）。
+    // eqsc.typhoon 允许会话差异（部分会话只要 Jian 台风，部分要 EQSC 富化）。
     // 允许会话级覆盖，会话级关闭仅屏蔽该会话内全部子源，不影响全局通道建连。
     const CONFIG_SESSION_GLOBAL_ONLY_PATHS = [
         ['data_sources', 'snet', 'poll_interval_seconds'],
         ['data_sources', 'eqsc', 'refresh_token'],
         // EQSC 统一轮询间隔影响全局运行态，会话模式隐藏且保存时剥离
         ['data_sources', 'eqsc', 'poll_interval_seconds'],
-        // FAN Studio 鉴权影响全局 WebSocket 建连，会话模式隐藏且保存时剥离
-        ['data_sources', 'fan_studio', 'api_key'],
-        // FAN Studio 主备服务器偏好影响全局连接策略，会话模式隐藏且保存时剥离
-        ['data_sources', 'fan_studio', 'fan_server_preference'],
         // Jian Project 鉴权影响全局 WebSocket 建连，会话模式隐藏且保存时剥离
         ['data_sources', 'jian_project', 'login_key'],
         // 浏览器页面池大小影响全局运行态，会话模式隐藏且保存时剥离

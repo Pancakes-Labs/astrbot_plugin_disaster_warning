@@ -27,14 +27,10 @@ from .source_catalog import (
 )
 from .source_entry import ProviderFamily, SourceEntry, SourceType
 from .source_router import (
-    detect_fan_studio_source_entry,
-    detect_fan_studio_source_id,
-    get_fan_studio_source_id,
     get_openquake_source_id,
     get_pancakes_source_id,
     get_provider_source_map,
     get_wolfx_source_id,
-    route_fan_studio_message,
 )
 
 __all__ = [
@@ -59,12 +55,8 @@ __all__ = [
     "get_source_ids_by_provider_source_name",
     "get_source_ids_by_routing_tag",
     "get_source_ids_by_type",
-    "detect_fan_studio_source_entry",
-    "detect_fan_studio_source_id",
-    "get_fan_studio_source_id",
     "get_openquake_source_id",
     "get_pancakes_source_id",
     "get_provider_source_map",
     "get_wolfx_source_id",
-    "route_fan_studio_message",
 ]

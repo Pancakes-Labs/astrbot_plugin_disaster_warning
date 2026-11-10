@@ -1,6 +1,6 @@
 """
 中国地震预警解析器。
-负责把 FAN Studio 与 Wolfx 来源的中国地震预警数据转换为统一领域事件。
+负责把 Wolfx / Jian Project 来源的中国地震预警数据转换为统一领域事件。
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from .base_parser import BaseParser
 
 
 class CEAEEWParser(BaseParser):
-    """中国地震预警网解析器，处理 FAN Studio 来源数据。"""
+    """中国地震预警网解析器基类（历史信封结构）。"""
 
-    def __init__(self, message_logger=None, source_id: str = "cea_fanstudio"):
+    def __init__(self, message_logger=None, source_id: str = "cea_jianproject"):
         super().__init__(source_id, message_logger)
 
     def _build_envelope(self, msg_data: dict[str, Any]) -> EventEnvelope:
@@ -42,7 +42,7 @@ class CEAEEWParser(BaseParser):
 
         # 整理元数据
         metadata = {
-            "source_family": "fan_studio",
+            "source_family": "jian_project",
             "source_enum": source_entry.source_enum if source_entry else "",
             "source_type": source_entry.source_type.value
             if source_entry
@@ -74,7 +74,7 @@ class CEAEEWParser(BaseParser):
             event_type="earthquake_warning",
             provider_family=source_entry.provider_family.value
             if source_entry
-            else "fan_studio",
+            else "jian_project",
             source_enum=source_entry.source_enum if source_entry else "",
             report_num=report_num,
             aliases=tuple(
@@ -97,7 +97,7 @@ class CEAEEWParser(BaseParser):
                 source_id=self.source_id,
                 provider_family=source_entry.provider_family.value
                 if source_entry
-                else "fan_studio",
+                else "jian_project",
                 message_type=str(msg_data.get("type") or "update").strip(),
                 raw=dict(msg_data),
                 attributes=dict(metadata),
@@ -152,10 +152,10 @@ class CEAEEWParser(BaseParser):
 
 
 class CEAEEWPRParser(CEAEEWParser):
-    """中国地震预警网省级解析器，处理 FAN Studio 来源数据。"""
+    """中国地震预警网省级解析器，处理 上游 来源数据。"""
 
     def __init__(self, message_logger=None):
-        super().__init__(message_logger=message_logger, source_id="cea_pr_fanstudio")
+        super().__init__(message_logger=message_logger, source_id="cea_pr_jianproject")
 
 
 class CEAEEWWolfxParser(BaseParser):

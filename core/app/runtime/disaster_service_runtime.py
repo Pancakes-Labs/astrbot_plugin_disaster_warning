@@ -11,7 +11,6 @@ import json
 
 from astrbot.api import logger
 
-from ...network.websocket.fan_studio_connection_policy import attach_fan_auth_from_plan
 from ...network.websocket.jian_project_connection_policy import (
     attach_jian_project_auth_from_plan,
 )
@@ -63,7 +62,7 @@ class DisasterServiceRuntimeService:
             except Exception as e:
                 logger.error(f"[灾害预警] WebSocket 连接任务 {name} 异常终止: {e}")
 
-        # FAN Studio 先主后次：优先启动 /all，再启动独立次要通道。
+        # Jian Project 主通道优先：先建 jian_project_all，再其它通道。
         ordered_items = [
             (conn_name, self.service.connections[conn_name])
             for conn_name in names
@@ -71,11 +70,7 @@ class DisasterServiceRuntimeService:
         ]
         ordered_items.sort(
             key=lambda item: (
-                0
-                if item[0] == "fan_studio_all"
-                else 1
-                if str(item[0]).startswith("fan_studio_")
-                else 2,
+                0 if item[0] == "jian_project_all" else 1,
                 item[0],
             )
         )
@@ -84,12 +79,11 @@ class DisasterServiceRuntimeService:
             # 这里只处理由连接计划生成的 WebSocket 连接；
             # 具体断线重连、备用地址切换等细节由连接管理器内部负责。
             if conn_config["handler"] in [
-                "fan_studio",
+                "jian_project",
                 "p2p",
                 "wolfx",
                 "pancakes_api",
                 "openquake_api",
-                "jian_project",
             ]:
                 # 这份连接附加信息会一路传入连接管理器，作为连接状态展示、重连通知、
                 # 管理端查询等场景的上下文信息。
@@ -101,8 +95,6 @@ class DisasterServiceRuntimeService:
                     "backup_url": conn_config.get("backup_url"),
                     "connection_config": dict(conn_config),
                 }
-                # FAN Studio 鉴权凭证随连接上下文传递，供建连后发送 auth 包。
-                attach_fan_auth_from_plan(connection_info, conn_config)
                 # Jian Project 鉴权凭证随连接上下文传递，供建连前换取 Access Token。
                 attach_jian_project_auth_from_plan(connection_info, conn_config)
 

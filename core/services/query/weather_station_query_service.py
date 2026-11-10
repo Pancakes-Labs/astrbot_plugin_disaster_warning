@@ -3,13 +3,13 @@
 
 统一承接命令侧（/实况 /气象站 /气象站历史 /实况历史 /气象站列表）的查询编排：
 - 站点解析：支持五位站号（59270）或中文站名（怀集/广东怀集）
-- 映射链路：FAN station_all（站号->站名） + NMC 省份城市表（站名->NMC城市码）
+- 映射链路：Jian Project station_all（站号->站名） + NMC 省份城市表（站名->NMC城市码）
 - 实况查询：NMC /rest/weather 返回的 real（温度/24h变温/气压/湿度/风向/风速/降水/体感）
 - 历史查询：NMC /rest/weather 返回的 passedchart（近24h逐小时观测），可选指定时次
 - 列表查询：NMC /rest/province/all + /rest/province/{pcode} 精确按省过滤，附五位数码
 
 数据源：
-- FAN Studio：https://api.fanstudio.tech/we/station_all.php?type=temperature
+- Jian Project：https://api.sismotide.top/we/station_all.php?type=temperature
 - NMC 中央气象台：https://www.nmc.cn/rest/weather?stationid={code}
 
 缺测值 9999 统一显示为「-」。
@@ -28,7 +28,7 @@ from ....utils.china_regions import (
 )
 from ....utils.text_format_utils import MISSING_VALUE
 from ....utils.text_format_utils import norm_value as _norm_value
-from ...network.http.fan_studio_station_client import FanStudioStationClient
+from ...network.http.jian_station_client import JianStationClient
 from ...network.http.nmc_weather_client import NmcWeatherClient
 
 # 风向角度 -> 16 方位中文（用于历史数据的 windDirection 角度转中文风向）。
@@ -211,15 +211,15 @@ class WeatherStationQueryService:
         self,
         *,
         nmc_client: NmcWeatherClient | None = None,
-        fan_client: FanStudioStationClient | None = None,
+        station_client: JianStationClient | None = None,
     ) -> None:
         self._nmc = nmc_client or NmcWeatherClient()
-        self._fan = fan_client or FanStudioStationClient()
+        self._stations = station_client or JianStationClient()
 
     async def close(self) -> None:
         """关闭底层 HTTP 会话。"""
         await self._nmc.close()
-        await self._fan.close()
+        await self._stations.close()
 
     # ------------------------------------------------------------------
     # 站点解析
@@ -229,7 +229,7 @@ class WeatherStationQueryService:
         """解析用户输入的站点关键词为 NMC 可查询的城市信息。
 
         支持：
-        - 五位站号（59270）        -> FAN 映射站名 -> NMC 城市匹配
+        - 五位站号（59270）        -> Jian Project 映射站名 -> NMC 城市匹配
         - 中文站名（怀集）          -> 直接 NMC 城市匹配（需省份上下文）
         - 「省+站名」（广东怀集）    -> 精确按省过滤后匹配
 
@@ -248,10 +248,10 @@ class WeatherStationQueryService:
 
         # ---- 分支1：五位站号 ----
         if _looks_like_station_code(raw):
-            fan_station = await self._fan.find_station(raw)
-            if not fan_station:
+            station_meta = await self._stations.find_station(raw)
+            if not station_meta:
                 return {"success": False, "error": f"未找到站号 {raw} 对应的站点"}
-            sta_name = fan_station["sta_name"]
+            sta_name = station_meta["sta_name"]
             # 用站名在 NMC 全量城市中匹配（可能跨省，返回候选）
             matched = await self._match_nmc_city(sta_name)
             if not matched.get("success"):
@@ -259,7 +259,7 @@ class WeatherStationQueryService:
                     f"站号 {raw}（{sta_name}）未能在中央气象台站点表中找到对应城市"
                 )
                 return matched
-            matched["station"]["fan_stationid"] = raw
+            matched["station"]["station_metaid"] = raw
             matched["display_name"] = (
                 f"{matched['station'].get('province', '')}{sta_name}"
             )
@@ -288,15 +288,15 @@ class WeatherStationQueryService:
         elif province_short and province_short != city_name:
             display_city = f"{province_short}{city_name}"
         matched["display_name"] = display_city
-        # 补查 FAN 站号，让站名查询的历史/实况输出也能带五位数码
-        fan_sid = await self._find_fan_sid_by_name(city_name)
-        if fan_sid:
-            matched["station"]["fan_stationid"] = fan_sid
+        # 补查站号，让站名查询的历史/实况输出也能带五位数码
+        station_sid = await self._find_station_sid_by_name(city_name)
+        if station_sid:
+            matched["station"]["station_metaid"] = station_sid
         return matched
 
-    async def _find_fan_sid_by_name(self, city_name: str) -> str | None:
-        """按站名在 FAN 全站表中反查站点代码（5 位数字或 G/Q/S 区域站号）。"""
-        stations, error = await self._fan.fetch_stations()
+    async def _find_station_sid_by_name(self, city_name: str) -> str | None:
+        """按站名在全站表中反查站点代码（5 位数字或 G/Q/S 区域站号）。"""
+        stations, error = await self._stations.fetch_stations()
         if error is not None:
             return None
         for s in stations:
@@ -421,7 +421,7 @@ class WeatherStationQueryService:
         """
         city = station.get("city") or ""
         province = station.get("province") or ""
-        fan_sid = station.get("fan_stationid") or ""
+        station_sid = station.get("station_metaid") or ""
         province_short = _province_short(province)
         if province_short and city:
             if province_short == city:
@@ -430,8 +430,8 @@ class WeatherStationQueryService:
                 base = f"{province_short}{city}"
         else:
             base = city or code
-        if fan_sid:
-            return f"{base}（{fan_sid}）"
+        if station_sid:
+            return f"{base}（{station_sid}）"
         return base
 
     def _format_real(self, resolved: dict[str, Any], data: dict[str, Any]) -> str:
@@ -630,19 +630,19 @@ class WeatherStationQueryService:
     async def _build_fan_name_to_sid(
         self, nmc_city_names: set[str] | None = None
     ) -> tuple[dict[str, str], str | None]:
-        """构建「FAN 站名 -> 站点代码」映射（含去除「站」后缀的键）。
+        """构建「站名 -> 站点代码」映射（含去除「站」后缀的键）。
 
         站点代码兼容：5 位数字国家站号（59270）与 G/Q/S 等字母开头的区域站号
         （如 G8419 阳山、Q6404 南海、S3648 和平），全部保留。
 
         若传入 nmc_city_names（NMC 城市名集合），则只保留「站名能匹配 NMC 城市」
-        的站：FAN 全量 2.1w+ 站中混有大量台湾站（繁体名）、街镇级自动站（* 开头），
+        的站：全量站表中混有大量台湾站（繁体名）、街镇级自动站（* 开头），
         这些站 NMC 城市表里不存在，保留只会污染映射表，还可能用繁体同名站错误覆盖大陆站号。
 
         Returns:
             (mapping, error)：网络失败时 mapping 为空、error 为明确错误描述。
         """
-        stations, error = await self._fan.fetch_stations()
+        stations, error = await self._stations.fetch_stations()
         mapping: dict[str, str] = {}
         if error is not None:
             return mapping, error
@@ -681,11 +681,11 @@ class WeatherStationQueryService:
             或 {"success": False, "error": "..."}
         """
         # 构建站名 -> 站号映射（全国列表与省份列表共用）。
-        # FAN 全站数据接口超时/失败时，明确提示稍后重试，而不是输出无站号的残缺列表。
+        # 全站数据接口超时/失败时，明确提示稍后重试，而不是输出无站号的残缺列表。
         # 反向用 NMC 城市名过滤：只保留能匹配 NMC 城市的站，剔除台湾/街镇自动站污染。
         nmc_city_names: set[str] = set()
         provinces_all = await self._nmc.fetch_provinces()
-        # 首轮拉取各省城市：既用于反向过滤 FAN 站名，也作为后续列表数据源复用。
+        # 首轮拉取各省城市：既用于反向过滤站名，也作为后续列表数据源复用。
         # fetch_cities 失败时返回空列表，与「该省无数据」无法区分，因此把未取到
         # 城市的省份记录为加载失败，避免全国列表静默缺省误导用户。
         province_cities: dict[str, list[dict[str, Any]]] = {}

@@ -169,9 +169,8 @@ def print_banner() -> None:
 # 与 display_registry.CONNECTION_DISPLAY_NAMES（管理端口径）存在有意差异，
 # 此处保留大屏专用文案，修改展示名时请同时检查两处。
 _CONNECTION_LABELS: dict[str, str] = {
-    "fan_studio_all": "FAN Studio 数据源",
-    "fan_studio_cenc_ir": "FAN Studio 烈度速报",
-    "p2p_main": "P2P 地震情报",
+    "jian_project_all": "Jian Project 数据源",
+        "p2p_main": "P2P 地震情报",
     "wolfx_all": "Wolfx 数据源",
     "pancakes_api": "Pancakes API",
     "openquake_api": "Pancakes API",
@@ -364,6 +363,7 @@ class StartupSummaryPanel:
                     "snet_msil": getattr(service, "snet_poll_service", None),
                     "eqsc_tsunami": getattr(service, "eqsc_tsunami_poll_service", None),
                     "eqsc_typhoon": getattr(service, "eqsc_typhoon_poll_service", None),
+                    "jian_typhoon": getattr(service, "jian_typhoon_poll_service", None),
                     "eqsc_cenc_ir": getattr(
                         service, "eqsc_cenc_intensity_poll_service", None
                     ),

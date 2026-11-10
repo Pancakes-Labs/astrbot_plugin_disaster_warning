@@ -144,7 +144,7 @@ function SimulationRunConsole({ runId, getRun, onCancel, steps, selectedStepId, 
 
     /**
      * 把结果卡片中的灾种/数据源原始键名解析为可读展示文本。
-     * 例如 "earthquake · cea_fanstudio" → "🌍 地震 · 中国地震预警网 (CEA) · FAN Studio"
+     * 例如 "earthquake · cea_jianproject" → "🌍 地震 · 中国地震预警网 (CEA) · Jian Project"
      * 解析不到时回退原始键名。
      */
     const formatResultTitle = (result) => {

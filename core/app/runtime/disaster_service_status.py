@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ...network.websocket.fan_studio_connection_policy import (
+from ...network.websocket.jian_project_connection_policy import (
     resolve_active_server_label,
 )
 from ...services.query.source_runtime_query_service import SourceRuntimeQueryService
@@ -76,28 +76,27 @@ class DisasterServiceStatusService:
             except Exception:
                 silence_status = None
 
-        # 解析 FAN Studio 连接的活跃服务器信息
-        fan_server_info = self._resolve_fan_server_info(connection_status)
+        # 解析 Jian Project 连接的活跃服务器信息
+        jian_server_info = self._resolve_jian_server_info(connection_status)
 
         return {
             **snapshot,
             # 统计摘要直接挂在顶层，便于管理端一次请求同时拿到运行状态与统计概览。
             "statistics_summary": self.service.statistics_manager.get_summary(),
             "startup_silence": silence_status,
-            "fan_server_info": fan_server_info,
+            "jian_server_info": jian_server_info,
         }
 
-    def _resolve_fan_server_info(
+    def _resolve_jian_server_info(
         self,
         connection_status: dict[str, dict[str, Any]],
     ) -> dict[str, str]:
-        """解析 FAN Studio 连接的活跃服务器信息。"""
+        """解析 Jian Project 连接的活跃服务器信息。"""
         result: dict[str, str] = {}
-        fan_connections = {
-            "fan_studio_all": "FAN Studio",
-            "fan_studio_cenc_ir": "FAN Studio（烈度速报）",
+        jian_connections = {
+            "jian_project_all": "Jian Project",
         }
-        for conn_name, display_name in fan_connections.items():
+        for conn_name, display_name in jian_connections.items():
             info = connection_status.get(conn_name, {})
             if isinstance(info, dict):
                 label = resolve_active_server_label(info)
