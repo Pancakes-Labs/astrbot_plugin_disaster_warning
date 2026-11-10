@@ -799,7 +799,8 @@ SOURCE_CATALOG: dict[str, SourceEntry] = {
         presentation_type="earthquake_eew",
         text_presenter_key="sa_eew",
         report_policy="cea_cwa",
-        intensity_mode="magnitude",
+        # 预警仅受数据源开关控制，不走震级阈值（与 USGS 速报过滤器分离）
+        intensity_mode="none",
         priority=2,
         display_name="美国 ShakeAlert",
         description="美国 ShakeAlert 地震预警 - Jian Project WebSocket",

@@ -660,7 +660,7 @@
       "magnitude_only_filter": {
         "description": "震级过滤器",
         "type": "object",
-        "hint": "适用于 USGS、ShakeAlert 等仅依赖震级阈值、无烈度/震度字段的数据源",
+        "hint": "适用于 USGS 等仅依赖震级阈值、无烈度/震度字段的速报/测定源；ShakeAlert 预警不受此过滤器控制，仅受数据源开关控制",
         "items": {
           "enabled": {
             "description": "启用震级过滤器",

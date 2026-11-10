@@ -362,11 +362,9 @@ class EarthquakeThresholdRule(BaseRule):
                     )
             return RuleDecision.accept(reason="S-Net规则通过")
 
-        # 模式 5：仅依赖震级阈值的来源统一走这一分支（USGS / ShakeAlert 等）。
-        if (
-            source_id in {"usgs_jianproject", "sa_jianproject"}
-            or intensity_mode == "magnitude"
-        ):
+        # 模式 5：仅依赖震级阈值的速报/测定源（如 USGS）。
+        # ShakeAlert 等预警源 intensity_mode=none，只受数据源开关控制，不进本分支。
+        if source_id in {"usgs_jianproject"} or intensity_mode == "magnitude":
             runtime_filter = policy_state.get("magnitude_filter") or {}
             if runtime_filter.get("enabled", True):
                 min_magnitude = runtime_filter.get("min_magnitude", 4.5)

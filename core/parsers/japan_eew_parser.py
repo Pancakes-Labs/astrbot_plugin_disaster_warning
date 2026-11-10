@@ -40,6 +40,65 @@ def _extract_payload_dict(data: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     return data, data
 
 
+
+def _truthy_flag(value: Any) -> bool:
+    """兼容 bool / 0-1 / 常见真值字符串。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _resolve_jma_is_final(msg_data: dict[str, Any]) -> bool:
+    """识别最终报：isFinal / final / isLastInfo / 标题含「最終」。"""
+    if not isinstance(msg_data, dict):
+        return False
+    for key in ("isFinal", "is_final", "final", "isLastInfo", "is_last_info"):
+        if _truthy_flag(msg_data.get(key)):
+            return True
+    title = str(
+        msg_data.get("Title")
+        or msg_data.get("title")
+        or msg_data.get("infoTypeName")
+        or msg_data.get("InfoType")
+        or ""
+    )
+    if "最終" in title or "最终" in title:
+        return True
+    flag = msg_data.get("Flag") or msg_data.get("flag")
+    if isinstance(flag, dict):
+        for key in ("isFinal", "is_final", "final", "isLastInfo", "is_last_info"):
+            if _truthy_flag(flag.get(key)):
+                return True
+    return False
+
+
+def _resolve_jma_is_cancel(msg_data: dict[str, Any]) -> bool:
+    """识别取消报。"""
+    if not isinstance(msg_data, dict):
+        return False
+    for key in ("isCancel", "is_cancel", "cancel", "isCanceled"):
+        if _truthy_flag(msg_data.get(key)):
+            return True
+    title = str(
+        msg_data.get("Title")
+        or msg_data.get("title")
+        or msg_data.get("infoTypeName")
+        or msg_data.get("CodeType")
+        or ""
+    )
+    if "取消" in title:
+        return True
+    flag = msg_data.get("Flag") or msg_data.get("flag")
+    if isinstance(flag, dict):
+        for key in ("isCancel", "is_cancel", "cancel", "isCanceled"):
+            if _truthy_flag(flag.get(key)):
+                return True
+    return False
+
 class JmaEewLegacyParser(BaseParser):
     """日本气象厅地震预警解析器 - 上游。"""
 
@@ -63,8 +122,8 @@ class JmaEewLegacyParser(BaseParser):
             if source_entry
             else "earthquake_warning",
             "report_num": report_num,
-            "is_final": bool(msg_data.get("final", False)),
-            "is_cancel": bool(msg_data.get("cancel", False)),
+            "is_final": _resolve_jma_is_final(msg_data),
+            "is_cancel": _resolve_jma_is_cancel(msg_data),
             "info_type": msg_data.get("infoTypeName", ""),
             "create_time": self._parse_datetime(msg_data.get("createTime", "")),
             "jma_warning_areas": [],
@@ -96,7 +155,7 @@ class JmaEewLegacyParser(BaseParser):
             source_enum=source_entry.source_enum if source_entry else "",
             report_num=report_num,
             published_at=created_at or domain_event.occurred_at,
-            is_final=bool(msg_data.get("final", False)),
+            is_final=_resolve_jma_is_final(msg_data),
             aliases=tuple(
                 item for item in (str(msg_data.get("id", "") or "").strip(),) if item
             ),
@@ -138,7 +197,7 @@ class JmaEewLegacyParser(BaseParser):
                 return None
 
             # 取消报在当前推送链中不作为正式地震事件继续向后处理
-            if msg_data.get("cancel", False):
+            if _resolve_jma_is_cancel(msg_data):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 收到取消报，跳过",
                     is_event_linked=True,
@@ -156,8 +215,8 @@ class JmaEewLegacyParser(BaseParser):
             envelope.metadata.update(
                 {
                     "report_num": report_num,
-                    "is_final": bool(msg_data.get("final", False)),
-                    "is_cancel": bool(msg_data.get("cancel", False)),
+                    "is_final": _resolve_jma_is_final(msg_data),
+                    "is_cancel": _resolve_jma_is_cancel(msg_data),
                     "info_type": msg_data.get("infoTypeName", ""),
                     "create_time": self._parse_datetime(msg_data.get("createTime", "")),
                 }
@@ -733,8 +792,8 @@ class JmaEewJianProjectParser(BaseParser):
 
             intensity_raw = str(msg_data.get("intensity") or "").strip()
             scale = ScaleConverter.parse_jma_cwa_scale(intensity_raw)
-            is_final = bool(msg_data.get("isFinal", False))
-            is_cancel = bool(msg_data.get("isCancel", False))
+            is_final = _resolve_jma_is_final(msg_data)
+            is_cancel = _resolve_jma_is_cancel(msg_data)
             info_type = str(msg_data.get("infoTypeName") or "").strip()
             warn_area = msg_data.get("warnArea", [])
 

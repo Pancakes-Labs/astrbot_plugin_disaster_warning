@@ -1270,9 +1270,10 @@ Jian Project 提供的聚合 WebSocket 数据源，单条 `/all` 连接即可按
 
 #### 📖 USGS 震级过滤器 (Magnitude Only)
 
-适用于仅提供震级信息的源（如 USGS）。
+适用于仅提供震级信息的**速报/测定**源（如 USGS）。
 
 - **最小震级 (`min_magnitude`)**: 适用范围 `0.0 - 10.0`，低于此值的消息将被过滤。
+- **说明**: 美国 ShakeAlert **预警**不受此过滤器控制，仅受数据源开关（`usa_shakealert`）控制。
 
 #### 📖 Global Quake 专用过滤器
 

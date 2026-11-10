@@ -610,7 +610,7 @@ class ConfigValidator:
             ConfigValidator._ensure_bool(snet_filter, "enabled", True)
             cfg["snet_filter"] = snet_filter
 
-        # 5. 震级过滤器（配置键 magnitude_only_filter，适用于 USGS / ShakeAlert 等）
+        # 5. 震级过滤器（配置键 magnitude_only_filter，适用于 USGS 等速报/测定源）
         mag_filter = cfg.get("magnitude_only_filter", {})
         if isinstance(mag_filter, dict):
             min_mag = mag_filter.get("min_magnitude")
