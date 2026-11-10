@@ -466,6 +466,80 @@ class CwaReportJianProjectParser(BaseParser):
             return None
 
 
+
+# Jian /jma：infoType=发表形态（発表/訂正/取消）；情报类别看 title / telegram（对齐 P2P issue.type）
+_JMA_TELEGRAM_TO_ISSUE: dict[str, str] = {
+    "VXSE51": "ScalePrompt",
+    "VXSE52": "Destination",
+    "VXSE53": "ScaleAndDestination",
+    "VXSE61": "Destination",
+    "VXSE62": "Other",
+}
+
+_JMA_TITLE_TO_ISSUE: dict[str, str] = {
+    "震度速報": "ScalePrompt",
+    "震源に関する情報": "Destination",
+    "震源・震度に関する情報": "ScaleAndDestination",
+    "震源・震度情報": "ScaleAndDestination",
+    "各地の震度に関する情報": "DetailScale",
+    "遠地地震に関する情報": "Foreign",
+    "顕著な地震の震源要素更新のお知らせ": "Destination",
+    "長周期地震動に関する観測情報": "Other",
+}
+
+_JMA_PUBLISH_STATUS = frozenset({"発表", "訂正", "取消", "訂正報", "取消報"})
+
+
+def _resolve_jian_jma_issue_type(
+    *,
+    title: str,
+    telegram: str,
+    info_type_name: str,
+    is_distant: bool,
+) -> str:
+    """解析展示用情报类别，输出与 P2P issue.type 对齐的枚举。"""
+    for raw in (title, info_type_name):
+        key = str(raw or "").strip()
+        if key in _JMA_TITLE_TO_ISSUE:
+            return _JMA_TITLE_TO_ISSUE[key]
+        if key in _JMA_PUBLISH_STATUS:
+            continue
+    tel = str(telegram or "").strip().upper()
+    if tel in _JMA_TELEGRAM_TO_ISSUE:
+        issue = _JMA_TELEGRAM_TO_ISSUE[tel]
+        if is_distant and issue == "ScaleAndDestination":
+            return "Foreign"
+        return issue
+    if is_distant:
+        return "Foreign"
+    return "ScaleAndDestination"
+
+
+def _resolve_jian_jma_revision(info_type: str) -> str:
+    """发表形态 → 订正文案；発表为空。"""
+    status = str(info_type or "").strip()
+    if status in {"訂正", "訂正報"}:
+        return "订正"
+    return ""
+
+
+def _jian_intensity_areas_to_points(areas: Any) -> list[dict[str, Any]]:
+    """intensityAreas → presenter 使用的 jma_points({addr, scale})。"""
+    points: list[dict[str, Any]] = []
+    if not isinstance(areas, list):
+        return points
+    for area in areas:
+        if not isinstance(area, dict):
+            continue
+        addr = str(area.get("name") or "").strip()
+        intensity = str(area.get("intensity") or "").strip()
+        if not addr or not intensity:
+            continue
+        scale = ScaleConverter.parse_jma_cwa_scale(intensity)
+        points.append({"addr": addr, "scale": scale if scale is not None else intensity})
+    return points
+
+
 class JmaReportJianProjectParser(BaseParser):
     """日本气象厅震源・震度情报 (jma) - Jian Project。"""
 
@@ -497,6 +571,57 @@ class JmaReportJianProjectParser(BaseParser):
             except (TypeError, ValueError):
                 serial = 1
 
+            title = str(msg_data.get("title") or "").strip()
+            telegram = str(msg_data.get("telegram") or "").strip()
+            publish_status = str(msg_data.get("infoType") or "").strip()
+            info_type_name = str(msg_data.get("infoTypeName") or "").strip()
+            is_distant = bool(msg_data.get("isDistant", False))
+            hypocenter_unknown = bool(msg_data.get("hypocenterUnknown", False))
+            magnitude_unknown = bool(msg_data.get("magnitudeUnknown", False))
+            is_cancel = publish_status in {"取消", "取消報"}
+            revision = _resolve_jian_jma_revision(publish_status)
+            # 对齐 P2P：info_type = issue.type；infoType(発表/訂正/取消) 不是情报类别
+            issue_type = _resolve_jian_jma_issue_type(
+                title=title,
+                telegram=telegram,
+                info_type_name=info_type_name,
+                is_distant=is_distant,
+            )
+
+            intensity_areas = (
+                msg_data.get("intensityAreas")
+                if isinstance(msg_data.get("intensityAreas"), list)
+                else []
+            )
+            jma_points = _jian_intensity_areas_to_points(intensity_areas)
+            tsunami_comment = str(msg_data.get("tsunamiComment") or "").strip()
+
+            latitude = (
+                None
+                if hypocenter_unknown
+                else safe_float_convert(msg_data.get("latitude"))
+            )
+            longitude = (
+                None
+                if hypocenter_unknown
+                else safe_float_convert(msg_data.get("longitude"))
+            )
+            magnitude = (
+                None
+                if magnitude_unknown
+                else safe_float_convert(msg_data.get("magnitude"))
+            )
+            depth = (
+                None
+                if hypocenter_unknown
+                else safe_float_convert(msg_data.get("depth"))
+            )
+            place_name = (
+                "调查中"
+                if hypocenter_unknown
+                else str(msg_data.get("placeName") or "").strip()
+            )
+
             source_entry = get_source_entry(self.source_id)
             metadata = {
                 "source_family": "jian_project",
@@ -507,30 +632,36 @@ class JmaReportJianProjectParser(BaseParser):
                 if source_entry
                 else "earthquake_info",
                 "event_id": event_id,
-                "telegram": str(msg_data.get("telegram") or "").strip(),
-                "title": str(msg_data.get("title") or "").strip(),
-                "info_type": str(msg_data.get("infoType") or "").strip(),
-                "info_type_name": str(msg_data.get("infoTypeName") or "").strip(),
+                "telegram": telegram,
+                "title": title,
+                "info_type": issue_type,
+                "info_type_name": info_type_name or title,
+                "publish_status": publish_status,
+                "revision": revision or None,
+                "is_cancel": is_cancel,
                 "serial": serial,
                 "headline": str(msg_data.get("headline") or "").strip(),
                 "magnitude_type": str(msg_data.get("magnitudeType") or "").strip(),
                 "area_code": str(msg_data.get("areaCode") or "").strip(),
-                "tsunami_comment": str(msg_data.get("tsunamiComment") or "").strip(),
-                "is_distant": bool(msg_data.get("isDistant", False)),
-                "hypocenter_unknown": bool(msg_data.get("hypocenterUnknown", False)),
-                "magnitude_unknown": bool(msg_data.get("magnitudeUnknown", False)),
-                "intensity_areas": msg_data.get("intensityAreas")
-                if isinstance(msg_data.get("intensityAreas"), list)
-                else [],
+                "tsunami_comment": tsunami_comment,
+                "jma_comment": tsunami_comment,
+                "domestic_tsunami": tsunami_comment,
+                "is_distant": is_distant,
+                "hypocenter_unknown": hypocenter_unknown,
+                "magnitude_unknown": magnitude_unknown,
+                "intensity_areas": intensity_areas,
+                "jma_points": jma_points,
+                "jma_warning_areas": [],
+                "jma_warning_area_ranges": [],
             }
 
             domain_event = EarthquakeEvent(
                 occurred_at=occurred_at,
-                latitude=safe_float_convert(msg_data.get("latitude")),
-                longitude=safe_float_convert(msg_data.get("longitude")),
-                place_name=str(msg_data.get("placeName") or "").strip(),
-                magnitude=safe_float_convert(msg_data.get("magnitude")),
-                depth=safe_float_convert(msg_data.get("depth")),
+                latitude=latitude,
+                longitude=longitude,
+                place_name=place_name,
+                magnitude=magnitude,
+                depth=depth,
                 scale=scale,
                 metadata=dict(metadata),
             )

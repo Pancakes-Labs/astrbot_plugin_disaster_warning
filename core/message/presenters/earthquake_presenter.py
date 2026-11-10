@@ -1016,13 +1016,24 @@ class JmaEarthquakeInfoPresenter(BasePresenter):
     def _determine_info_type(data: EarthquakeDisplayContext) -> str:
         """推断日本气象厅地震情报的展示类别。"""
         info_type = data.jma_issue_type or ""
+        # 发表形态（発表/訂正/取消）不是情报类别，展示时忽略
+        if info_type in {"発表", "訂正", "取消", "訂正報", "取消報"}:
+            info_type = ""
         type_mapping = {
             "ScalePrompt": "震度速报",
             "Destination": "震源相关情报",
-            "ScaleAndDestination": "震度・震源相关情报",
+            "ScaleAndDestination": "震源・震度情报",
             "DetailScale": "各地震度相关情报",
             "Foreign": "远地地震相关情报",
             "Other": "其他情报",
+            "震度速報": "震度速报",
+            "震源に関する情報": "震源相关情报",
+            "震源・震度に関する情報": "震源・震度情报",
+            "震源・震度情報": "震源・震度情报",
+            "各地の震度に関する情報": "各地震度相关情报",
+            "遠地地震に関する情報": "远地地震相关情报",
+            "顕著な地震の震源要素更新のお知らせ": "震源相关情报",
+            "長周期地震動に関する観測情報": "长周期地震动观测情报",
         }
 
         if info_type in type_mapping:
