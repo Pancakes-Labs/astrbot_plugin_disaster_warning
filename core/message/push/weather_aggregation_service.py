@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -97,6 +98,8 @@ class WeatherAggregationService:
         # 各会话"强制发送全部"标记：延期条目滞留达到上限时置位，
         # 本轮 flush 忽略 fill_nodes 判定，发送全部条目。
         self._force_send_all_sessions: set[str] = set()
+        self._flush_locks = defaultdict(asyncio.Lock)
+        self._rate_limit_deadlines: dict[str, float] = {}
 
     def set_flush_callback(self, callback) -> None:
         """注入推送回调。
@@ -120,6 +123,15 @@ class WeatherAggregationService:
     def update_config(self, config: dict[str, Any]) -> None:
         """更新配置（支持运行时热更新）。"""
         self._config = config
+        if not self._get_aggregation_config().get("rate_limit_enabled", False):
+            # 关闭限频后唤醒原先等待额度的会话；发送前仍会复核会话覆写。
+            for session in list(self._rate_limit_deadlines):
+                self._rate_limit_deadlines.pop(session, None)
+                timer = self._flush_timers.pop(session, None)
+                if timer is not None:
+                    timer.cancel()
+                if self._buffers.get(session):
+                    self._spawn_flush_task(session)
 
     def _get_aggregation_config(
         self, runtime_config: dict[str, Any] | None = None
@@ -313,6 +325,7 @@ class WeatherAggregationService:
         这样从第一条事件进入缓冲区开始计时，窗口到期后必定触发推送，
         避免高频事件持续到达导致定时器被不断重置、窗口永远不到期。
         """
+        delay = max(delay, self._rate_limit_deadlines.get(session, 0) - time.monotonic())
         # 已有定时器则不重置
         if session in self._flush_timers:
             return
@@ -339,10 +352,20 @@ class WeatherAggregationService:
 
     async def _flush_session(self, session: str) -> None:
         """执行指定会话的缓冲区推送。"""
+        async with self._flush_locks[session]:
+            await self._flush_session_locked(session)
+
+    async def _flush_session_locked(self, session: str) -> None:
         # 取消定时器
         timer = self._flush_timers.pop(session, None)
         if timer is not None:
             timer.cancel()
+
+        remaining = self._rate_limit_deadlines.get(session, 0) - time.monotonic()
+        if remaining > 0:
+            self._schedule_flush(session, remaining)
+            return
+        self._rate_limit_deadlines.pop(session, None)
 
         buffer = self._buffers.pop(session, None)
         if not buffer:
@@ -357,6 +380,31 @@ class WeatherAggregationService:
         # 统一走合并转发，平台是否支持由框架层处理
         await self._flush_via_forward(session, entries, agg_config)
 
+    def defer_rate_limited(self, event, session, runtime_config, retry_after):
+        """普通推送达到天气限额时，缓冲事件并在额度恢复后复核。"""
+        level, color = self._resolve_color_level(event)
+        entry = WeatherBufferEntry(event=event, color_level=level, color_name=color)
+        self.defer_rate_limited_entries(session, [entry], retry_after)
+
+    def defer_rate_limited_entries(self, session, entries, retry_after):
+        """额度延期不计发送失败或凑满延期，也不允许强制刷新绕过限额。"""
+        buffer = self._buffers.setdefault(session, {})
+        for entry in entries:
+            event_id = str(entry.event.id or "")
+            if event_id:
+                # 新入队消息可替换旧报；旧刷新批次回队不得覆盖期间的新报。
+                current = buffer.get(event_id)
+                if current is None or entry.received_at >= current.received_at:
+                    buffer[event_id] = entry
+        deadline = time.monotonic() + max(0.01, retry_after)
+        self._rate_limit_deadlines[session] = max(
+            self._rate_limit_deadlines.get(session, 0), deadline
+        )
+        timer = self._flush_timers.pop(session, None)
+        if timer is not None:
+            timer.cancel()
+        self._schedule_flush(session, max(0.01, retry_after))
+
     async def _flush_via_forward(
         self,
         session: str,
@@ -365,7 +413,7 @@ class WeatherAggregationService:
     ) -> None:
         """通过合并转发方式推送。
 
-        先尝试合并转发，成功则不限流。
+        合并转发和逐条发送均由发送器按会话执行限频。
         合并转发失败时记录错误、保留合并转发语义，不自动降级限流——
         一次发送失败不代表平台不支持合并转发（如插件停止/网络瞬时异常），
         盲目降级会错误启用限流配置，把大量预警直接丢弃。
@@ -396,7 +444,7 @@ class WeatherAggregationService:
         #   缓冲区等待下次推送窗口凑满的条目；
         # - failed_entries：发送失败节点内的条目，按失败重试路径回收。
         try:
-            # 先尝试合并转发，成功则不限流。
+            # 回调按会话执行限频；超过额度的条目另行缓冲，不计发送失败。
             # 注：传入的 config 为全局配置兜底，回调（EventPipeline._flush_weather_buffer）
             # 内部会通过 session_config_manager 重新解析会话级生效配置，
             # 因此会话级差异配置（如 max_batch_size）在 flush 阶段仍能生效。
@@ -482,7 +530,9 @@ class WeatherAggregationService:
             for entry in entries:
                 event_id = str(entry.event.id or "")
                 if event_id:
-                    buffer[event_id] = entry
+                    current = buffer.get(event_id)
+                    if current is None or entry.received_at >= current.received_at:
+                        buffer[event_id] = entry
             self._force_send_all_sessions.add(session)
             self._deferred_stall_counts.pop(session, None)
             self._spawn_flush_task(session)
@@ -499,7 +549,9 @@ class WeatherAggregationService:
         for entry in entries:
             event_id = str(entry.event.id or "")
             if event_id:
-                buffer[event_id] = entry
+                current = buffer.get(event_id)
+                if current is None or entry.received_at >= current.received_at:
+                    buffer[event_id] = entry
 
         # 重新排定一次定时推送：等待下个聚合窗口到期后再尝试凑满。
         # 优先使用缓冲时保存的会话级时间窗口（与 should_aggregate 一致），
@@ -544,7 +596,9 @@ class WeatherAggregationService:
         for entry in entries:
             event_id = str(entry.event.id or "")
             if event_id:
-                buffer[event_id] = entry
+                current = buffer.get(event_id)
+                if current is None or entry.received_at >= current.received_at:
+                    buffer[event_id] = entry
         # 停机 flush_all 批次中：事件循环即将关闭，重新排定定时器不会执行，
         # 只会让条目残留在缓冲区（插件卸载后消失，造成"已入库但从未推送"）。
         # 停机场景不再重试，条目已放回缓冲区供停机汇总准确统计（计为未发出）。

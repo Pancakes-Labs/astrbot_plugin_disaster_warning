@@ -24,6 +24,7 @@ from ...message.presenters.weather_constants import (
     resolve_weather_emoji,
 )
 from ...message.push.weather_aggregation_service import WeatherBufferEntry
+from ...message.push.session_sender import WeatherRateLimitedError
 
 
 def _resolve_event_occurred_time(event: EventEnvelope):
@@ -99,6 +100,7 @@ class EventPipeline:
     def set_weather_aggregation_service(self, service) -> None:
         """注入气象预警聚合推送服务。"""
         self._weather_aggregation = service
+        self.service.message_manager.weather_aggregation_service = service
         if service is not None:
             service.set_flush_callback(self._flush_weather_buffer)
 
@@ -306,6 +308,11 @@ class EventPipeline:
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
+        if (
+            session not in self.service.session_config_manager.list_target_sessions()
+            or not runtime_config.get("push_enabled", True)
+        ):
+            return 0, [], []
         # 统一会话日志字符串（私聊/群聊 ID (备注名)），与推送执行链保持一致。
         session_log = message_manager._get_session_log_str(session)
 
@@ -315,6 +322,8 @@ class EventPipeline:
         )
         if not isinstance(agg_config, dict):
             agg_config = {}
+        if not agg_config.get("enabled", True):
+            mode = "single"
         max_batch = int(agg_config.get("max_batch_size", 20) or 20)
         if max_batch < 1:
             max_batch = 20
@@ -431,6 +440,7 @@ class EventPipeline:
             # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
             # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
             sent_entry_count = 0
+            quota_deferred = False
 
             for batch_idx in range(node_count):
                 batch = built_messages[
@@ -457,10 +467,29 @@ class EventPipeline:
 
                 chain = MessageChain([nodes])
                 try:
-                    await message_manager.session_sender.send(session, chain)
+                    current_config = session_config_getter(session)
+                    if (
+                        session not in self.service.session_config_manager.list_target_sessions()
+                        or not current_config.get("push_enabled", True)
+                    ):
+                        return sent_entry_count, [], failed_entries + build_failed_entries
+                    current_limits = current_config.get("push_frequency_control", {}).get(
+                        "weather_aggregation", {}
+                    )
+                    await message_manager.session_sender.send(
+                        session, chain, weather_rate_limit=current_limits
+                    )
                     sent_nodes += 1
                     # 该节点发送成功：节点内实际加入内容的条目即为成功发出
                     sent_entry_count += len(batch)
+                except WeatherRateLimitedError as e:
+                    self._weather_aggregation.defer_rate_limited_entries(
+                        session,
+                        [entry for entry, _ in built_messages[batch_idx * max_batch :]],
+                        e.retry_after,
+                    )
+                    quota_deferred = True
+                    break
                 except Exception as e:
                     # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
@@ -488,7 +517,7 @@ class EventPipeline:
 
             # 节点未满回退：完整节点之后剩余的条目
             # 本轮未发送，放回缓冲区等待下次推送窗口凑满后再发。
-            deferred_entries = [
+            deferred_entries = [] if quota_deferred else [
                 entry for entry, _ in built_messages[full_batch_count * max_batch :]
             ]
 
@@ -524,14 +553,33 @@ class EventPipeline:
             return sent_entry_count, deferred_entries, failed_entries
         else:
             # 逐条发送（降级路径）
-            for entry, message in built_messages:
+            sent_count = 0
+            failed_entries = list(build_failed_entries)
+            for index, (entry, message) in enumerate(built_messages):
                 try:
-                    await message_manager.session_sender.send(session, message)
+                    current_config = session_config_getter(session)
+                    if (
+                        session not in self.service.session_config_manager.list_target_sessions()
+                        or not current_config.get("push_enabled", True)
+                    ):
+                        return sent_count, [], failed_entries
+                    current_limits = current_config.get("push_frequency_control", {}).get(
+                        "weather_aggregation", {}
+                    )
+                    await message_manager.session_sender.send(
+                        session, message, weather_rate_limit=current_limits
+                    )
+                    sent_count += 1
+                except WeatherRateLimitedError as e:
+                    self._weather_aggregation.defer_rate_limited_entries(
+                        session, [item for item, _ in built_messages[index:]], e.retry_after
+                    )
+                    break
                 except Exception as e:
                     logger.error(
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"
                     )
-                    raise
+                    failed_entries.append(entry)
             # 返回实际成功发送的条目数（供聚合服务统计真实转发量）；
             # 构建失败条目同样并入失败重试路径，避免瞬时构建错误把预警静默丢弃。
-            return len(built_messages), [], build_failed_entries
+            return sent_count, [], failed_entries
