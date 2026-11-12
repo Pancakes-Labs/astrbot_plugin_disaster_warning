@@ -6,6 +6,8 @@ Global Quake 卡片构建器。
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -44,7 +46,10 @@ class GlobalQuakeCardBuilder:
         """构建 Global Quake 卡片消息。"""
         try:
             display_timezone = active_config.get("display_timezone", "UTC+8")
-            options = {"timezone": display_timezone}
+            options = {
+                "timezone": display_timezone,
+                "local_monitoring": active_config.get("local_monitoring", {}),
+            }
             # 展示上下文由 presenter 子系统提供，builder 只补充模板与地图相关参数。
             context = GlobalQuakeDisplayContextBuilder.build(earthquake, options)
 
@@ -107,12 +112,16 @@ class GlobalQuakeCardBuilder:
                 message_format_config,
                 display_timezone,
             )
+            # 同一震源/报次在不同会话可有不同本地预估，缓存和输出文件均需隔离。
+            local_key = json.dumps(
+                context.get("local_estimation"), ensure_ascii=False, sort_keys=True
+            )
+            card_cache_key += "|local_estimation:" + local_key
+            render_token = hashlib.sha256(card_cache_key.encode()).hexdigest()[:16]
 
             async def render_gq_card() -> str | None:
                 # 真实去重依赖外层 cache_key，这里的文件名只要保证落盘时基本唯一即可。
-                image_filename = (
-                    f"gq_card_{earthquake.id}_{int(datetime.now().timestamp())}.png"
-                )
+                image_filename = f"gq_card_{earthquake.id}_{render_token}_{int(datetime.now().timestamp())}.png"
                 image_path = os.path.join(self.temp_dir, image_filename)
                 return await self.browser_manager.render_card(
                     html_content,

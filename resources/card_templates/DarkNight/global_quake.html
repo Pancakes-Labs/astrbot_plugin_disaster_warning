@@ -218,6 +218,18 @@
             background-color: var(--color-mag-high);
         }
 
+        .local-estimation {
+            margin: 12px 0;
+            padding: 10px 12px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 8px;
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            line-height: 1.55;
+            overflow-wrap: anywhere;
+        }
+
         /* --- 地图容器 --- */
         #map-container {
             height: 150px;
@@ -300,6 +312,14 @@
 
             <!-- 地图容器 -->
             <div id="map-container"></div>
+
+            {% if local_estimation %}
+            <div class="local-estimation">
+                {{ local_estimation.place_name|e }}预估{{ local_estimation.unit|e }}
+                <strong>{{ local_estimation.intensity_text|e }}</strong>
+                · 距震中 {{ local_estimation.distance_text|e }} km
+            </div>
+            {% endif %}
 
             <div class="card-footer">
                 <span>ID: {{ event_id }}</span>

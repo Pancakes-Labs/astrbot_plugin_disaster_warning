@@ -7,6 +7,7 @@ Global Quake 展示上下文构建器。
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ....utils.time_converter import TimeConverter
@@ -38,6 +39,37 @@ def _format_coordinates(latitude: float, longitude: float) -> str:
 
 class GlobalQuakeDisplayContextBuilder:
     """构建 Global Quake 卡片展示上下文。"""
+
+    @staticmethod
+    def build_local_estimation(earthquake, options: dict | None = None) -> dict | None:
+        """按当前会话纯计算，避免复用其他会话写入的事件元数据。"""
+        local_config = (options or {}).get("local_monitoring")
+        if not isinstance(local_config, dict) or not local_config.get("enabled", False):
+            return None
+        from ..runtime.local_monitor import LocalMonitor
+
+        result = LocalMonitor(local_config).evaluate(
+            earthquake, kind=LocalMonitor.KIND_INFO
+        )
+        if not isinstance(result, dict):
+            return None
+        intensity = result.get("intensity")
+        distance = result.get("distance")
+        if intensity is None or distance is None:
+            return None
+        intensity, distance = float(intensity), float(distance)
+        if not math.isfinite(intensity) or not math.isfinite(distance):
+            return None
+        system = str(result.get("system") or "cenc").strip().lower()
+        return {
+            "place_name": str(result.get("place_name") or "本地"),
+            "intensity": intensity,
+            "distance": distance,
+            "system": system,
+            "unit": "震度" if system == "jma" else "烈度",
+            "intensity_text": f"{intensity:.1f}",
+            "distance_text": f"{distance:.1f}",
+        }
 
     @staticmethod
     def build(
@@ -176,6 +208,9 @@ class GlobalQuakeDisplayContextBuilder:
             else False
         )
         return {
+            "local_estimation": GlobalQuakeDisplayContextBuilder.build_local_estimation(
+                domain_event, options
+            ),
             "magnitude": f"{mag:.1f}",
             "mag_class": mag_class,
             "intensity": domain_event.intensity if domain_event.intensity else "",
