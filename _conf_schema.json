@@ -557,6 +557,39 @@
       }
     }
   },
+  "event_deduplication": {
+    "description": "跨渠道推送去重",
+    "type": "object",
+    "hint": "同一机构的转发渠道按群去重，只记录已成功送达的版本；独立机构、预警与正式测定分开保留",
+    "items": {
+      "cross_source_enabled": {
+        "description": "启用跨渠道去重",
+        "type": "bool",
+        "default": false
+      },
+      "retention_minutes": {
+        "description": "已送达记录保留分钟数",
+        "type": "int",
+        "default": 60
+      },
+      "time_window_minutes": {
+        "description": "事件时间匹配容差（分钟）",
+        "type": "int",
+        "default": 1,
+        "hint": "原有同源去重窗口；跨渠道不同ID匹配额外限制为10秒以内"
+      },
+      "location_tolerance_km": {
+        "description": "事件关联距离容差（公里）",
+        "type": "float",
+        "default": 20.0
+      },
+      "magnitude_tolerance": {
+        "description": "事件关联震级容差",
+        "type": "float",
+        "default": 0.5
+      }
+    }
+  },
   "earthquake_filters": {
     "description": "🔍 地震信息过滤配置",
     "type": "object",

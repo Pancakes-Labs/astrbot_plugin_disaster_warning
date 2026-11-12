@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -20,8 +22,95 @@ from ...utils.time_converter import TimeConverter
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, WeatherEvent
 from ..domain.event_payload import SourcePayload
+from ..domain.tsunami.jma_tsunami_normalize import coerce_bool
+from ..services.identity.event_identity import EventIdentityService
 from ..sources.source_catalog import get_source_entry
 from .base_parser import BaseParser
+
+
+def _weather_business_fields(data: dict[str, Any], source_id: str) -> dict[str, Any]:
+    """Stable report content, excluding transport/receipt clocks and IDs."""
+
+    def first(*keys):
+        return next((data[key] for key in keys if data.get(key) not in (None, "")), "")
+
+    def text(*keys):
+        return str(first(*keys)).strip()
+
+    def date(*keys):
+        raw = first(*keys)
+        resolved = (
+            EventIdentityService.ensure_utc_datetime(raw, source_id)
+            if raw != ""
+            else None
+        )
+        return resolved.isoformat() if resolved is not None else str(raw).strip()
+
+    status = text("status", "alert_status", "alertStatus").lower()
+    cancelled = any(
+        coerce_bool(data.get(key))
+        for key in (
+            "is_cancel",
+            "is_cancelled",
+            "isCancel",
+            "isCancelled",
+            "cancel",
+            "cancelled",
+            "canceled",
+        )
+    ) or status in {"cancelled", "canceled", "cancel", "解除", "取消"}
+    if status in {"new", "update", "updated", "active"}:
+        status = ""
+    return {
+        "title": text("title", "name"),
+        "headline": text("headline"),
+        "description": text("description"),
+        "weather_code": text(
+            "weather_type", "weatherType", "alertCode", "alert_code", "code", "type"
+        ),
+        "level": text(
+            "level",
+            "alert_level",
+            "alertLevel",
+            "severity_color",
+            "severity",
+            "color",
+            "warning_level",
+        ),
+        "effective": date("effective", "effectiveTime", "onset", "originTime"),
+        "issued": date(
+            "originTime",
+            "issue_time",
+            "issueTime",
+            "issued",
+            "sent",
+            "publishTime",
+            "publish_time",
+        ),
+        "expires": date("relieveTime", "expires", "expiry", "endTime"),
+        "province": text("province"),
+        "city": text("city"),
+        "district": text("district"),
+        "adcode": text("adcode"),
+        "latitude": safe_float_convert(data.get("latitude")),
+        "longitude": safe_float_convert(data.get("longitude")),
+        "is_cancel": cancelled,
+        "status": "cancelled" if cancelled else status,
+    }
+
+
+def _weather_content_version(fields: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _weather_cache_key(weather_id: str, version: str = "") -> str:
+    # The empty default retains compatibility for callers of the old ID helpers.
+    return (
+        json.dumps([weather_id, version], ensure_ascii=False) if version else weather_id
+    )
 
 
 class WeatherAlarmParser(BaseParser):
@@ -35,7 +124,7 @@ class WeatherAlarmParser(BaseParser):
     def __init__(self, source_id: str = "china_weather_fanstudio", message_logger=None):
         """初始化气象预警解析器与短期重复记录缓存。"""
         super().__init__(source_id, message_logger)
-        # 短窗去重缓存：{预警 id: 最近处理时间戳}。
+        # 短窗去重缓存：{预警 id + 业务内容版本: 最近处理时间戳}。
         # 带时间窗 + 容量上限，避免高频重推旧预警在重载后被反复放行。
         self._processed_weather_ids: dict[str, float] = {}
         self._WEATHER_DEDUPE_WINDOW_SECONDS = 600  # 10 分钟短窗
@@ -65,8 +154,10 @@ class WeatherAlarmParser(BaseParser):
 
             # 内存中判定当前事件ID是否已被处理过，避免同一预警短时多次派发
             # 这里也属于去重阶段的日志，如果提示检测到重复，应由 plugin_logger 输出
-            weather_id = msg_data.get("id")
-            if weather_id and self._is_weather_duplicate(str(weather_id)):
+            weather_id = str(msg_data.get("id") or "").strip()
+            business = _weather_business_fields(msg_data, self.source_id)
+            version = _weather_content_version(business)
+            if weather_id and self._is_weather_duplicate(weather_id, version):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
                     is_event_linked=True,
@@ -90,7 +181,7 @@ class WeatherAlarmParser(BaseParser):
 
             # 预警发布时间优先尝试从标识尾部编码中提取，失败时回退到生效时间。
             issue_time = None
-            id_str = msg_data.get("id", "")
+            id_str = weather_id
             if "_" in id_str:
                 time_part = id_str.split("_")[-1]
                 if len(time_part) >= 12:
@@ -169,6 +260,12 @@ class WeatherAlarmParser(BaseParser):
                 "title": title,
                 "headline": headline,
                 "description": description,
+                "level": business["level"],
+                "alert_level": business["level"],
+                "severity_color": business["level"],
+                "is_cancel": business["is_cancel"],
+                "status": business["status"],
+                "weather_business_fields": dict(business),
                 "source_family": source_entry.provider_family.value
                 if source_entry
                 else "fan_studio",
@@ -223,7 +320,7 @@ class WeatherAlarmParser(BaseParser):
 
             # 加入防重去噪队列中
             if envelope.id:
-                self._remember_weather_id(str(envelope.id))
+                self._remember_weather_id(str(envelope.id), version)
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 生效时间: {issue_time}",
@@ -239,20 +336,24 @@ class WeatherAlarmParser(BaseParser):
             )
             return None
 
-    def _is_weather_duplicate(self, weather_id: str) -> bool:
+    def _is_weather_duplicate(self, weather_id: str, version: str = "") -> bool:
         """判断预警 id 是否处于短窗去重窗口内。"""
         if not weather_id:
             return False
-        last_ts = self._processed_weather_ids.get(weather_id)
+        last_ts = self._processed_weather_ids.get(
+            _weather_cache_key(weather_id, version)
+        )
         if last_ts is None:
             return False
         return (time.monotonic() - last_ts) <= self._WEATHER_DEDUPE_WINDOW_SECONDS
 
-    def _remember_weather_id(self, weather_id: str) -> None:
+    def _remember_weather_id(self, weather_id: str, version: str = "") -> None:
         """登记预警 id 的处理时间，并控制缓存容量。"""
         if not weather_id:
             return
-        self._processed_weather_ids[weather_id] = time.monotonic()
+        self._processed_weather_ids[_weather_cache_key(weather_id, version)] = (
+            time.monotonic()
+        )
         if len(self._processed_weather_ids) > self._WEATHER_DEDUPE_MAX_ENTRIES:
             # 超出容量上限时清理最旧的记录，避免内存无限增长。
             oldest_key = min(
@@ -288,15 +389,26 @@ class WeatherAlarmParser(BaseParser):
         msg_type = str(data.get("type") or "").strip().lower()
         action = str(data.get("action") or "").strip().lower()
 
-        # 仅处理气象预警新增事件；其余情况确认是 RealtimeEvent 但直接丢弃
+        # 完整预警的业务更新/取消也需进入内容版本判定。
+        # remove 可能只是列表过期清理，不能擅自解释为解除通知。
         if msg_type and msg_type != "weather":
             return None, True
-        if action and action not in ("new", ""):
+        if action not in (
+            "new",
+            "update",
+            "updated",
+            "cancel",
+            "cancelled",
+            "canceled",
+            "",
+        ):
             return None, True
 
         payload = data.get("payload")
         if not isinstance(payload, dict):
             return None, True
+        if action in {"cancel", "cancelled", "canceled"}:
+            payload = {**payload, "is_cancel": True, "status": "cancelled"}
         return payload, True
 
 
@@ -311,7 +423,7 @@ class WeatherAlarmJianProjectParser(BaseParser):
         self._WEATHER_DEDUPE_WINDOW_SECONDS = 600
         self._WEATHER_DEDUPE_MAX_ENTRIES = 512
 
-    def _is_weather_duplicate(self, weather_id: str) -> bool:
+    def _is_weather_duplicate(self, weather_id: str, version: str = "") -> bool:
         """判断预警 id 是否处于短窗去重窗口内。"""
         if not weather_id:
             return False
@@ -320,13 +432,15 @@ class WeatherAlarmJianProjectParser(BaseParser):
         self._processed_weather_ids = {
             k: t for k, t in self._processed_weather_ids.items() if t > cutoff
         }
-        return weather_id in self._processed_weather_ids
+        return _weather_cache_key(weather_id, version) in self._processed_weather_ids
 
-    def _remember_weather_id(self, weather_id: str) -> None:
+    def _remember_weather_id(self, weather_id: str, version: str = "") -> None:
         """登记预警 id 的处理时间，并控制缓存容量。"""
         if not weather_id:
             return
-        self._processed_weather_ids[weather_id] = datetime.now(timezone.utc).timestamp()
+        self._processed_weather_ids[_weather_cache_key(weather_id, version)] = (
+            datetime.now(timezone.utc).timestamp()
+        )
         if len(self._processed_weather_ids) >= self._WEATHER_DEDUPE_MAX_ENTRIES:
             oldest_key = min(
                 self._processed_weather_ids, key=self._processed_weather_ids.get
@@ -343,7 +457,9 @@ class WeatherAlarmJianProjectParser(BaseParser):
             if not weather_id:
                 return None
 
-            if self._is_weather_duplicate(weather_id):
+            business = _weather_business_fields(msg_data, self.source_id)
+            version = _weather_content_version(business)
+            if self._is_weather_duplicate(weather_id, version):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
                     is_event_linked=True,
@@ -398,6 +514,12 @@ class WeatherAlarmJianProjectParser(BaseParser):
                 "title": title,
                 "headline": headline,
                 "description": description,
+                "level": business["level"],
+                "alert_level": business["level"],
+                "severity_color": business["level"],
+                "is_cancel": business["is_cancel"],
+                "status": business["status"],
+                "weather_business_fields": dict(business),
                 "source_family": "jian_project",
                 "source_enum": source_entry.source_enum
                 if source_entry
@@ -453,7 +575,7 @@ class WeatherAlarmJianProjectParser(BaseParser):
 
             # 加入防重去噪队列中：仅在事件装配成功后登记，
             # 避免后续字段缺失等原因导致解析丢弃时污染短窗去重窗口（补发内容会被误判为重复）
-            self._remember_weather_id(weather_id)
+            self._remember_weather_id(weather_id, version)
 
             plugin_logger.info(
                 f"[灾害预警] 气象预警解析成功: {domain_event.title or domain_event.headline}, 时间: {issue_time}",

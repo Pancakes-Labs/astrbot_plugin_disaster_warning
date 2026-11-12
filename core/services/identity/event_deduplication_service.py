@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -68,17 +70,152 @@ class EventDeduplicationService:
     ) -> str:
         """统一提取日本地震情报类型，优先读取元数据字段。"""
         active_metadata = metadata if isinstance(metadata, dict) else {}
+        domain_metadata = (
+            earthquake.metadata if isinstance(earthquake.metadata, dict) else {}
+        )
         info_type = str(
             active_metadata.get("info_type")
             or active_metadata.get("issue_type")
-            or getattr(getattr(earthquake, "metadata", {}), "get", lambda *_: "")(
-                "info_type"
-            )
+            or active_metadata.get("status")
+            or domain_metadata.get("info_type")
+            or domain_metadata.get("issue_type")
+            or domain_metadata.get("status")
             or ""
         ).strip()
         if info_type:
             return info_type
         return ""
+
+    @classmethod
+    def _earthquake_version(
+        cls,
+        event: EventEnvelope,
+        earthquake: EarthquakeEvent,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compare business updates, without reception/transport timestamps."""
+        active = (
+            dict(earthquake.metadata) if isinstance(earthquake.metadata, dict) else {}
+        )
+        active.update(metadata if isinstance(metadata, dict) else {})
+        cancel_keys = (
+            "is_cancel",
+            "is_cancelled",
+            "cancelled",
+            "canceled",
+            "isCancel",
+            "isCancelled",
+            "cancel",
+        )
+        info_type = cls._extract_issue_type_from_earthquake(earthquake, active)
+        content = {
+            field: getattr(earthquake, field)
+            for field in (
+                "occurred_at",
+                "latitude",
+                "longitude",
+                "magnitude",
+                "depth",
+                "intensity",
+                "scale",
+                "place_name",
+                "headline",
+                "province",
+            )
+        }
+        if earthquake.occurred_at is not None:
+            content["occurred_at"] = EventIdentityService.ensure_utc_datetime(
+                earthquake.occurred_at, cls._get_source_id(event)
+            )
+        # Only actual report fields participate. timestamp_ms/last_update_ms,
+        # received_at and other transport bookkeeping must not create revisions.
+        content["metadata"] = {
+            key: active[key]
+            for key in (
+                "info_type",
+                "issue_type",
+                "status",
+                "revision",
+                "description",
+                "magnitude_type",
+                "max_scale",
+                "max_intensity",
+                "domestic_tsunami",
+                "foreign_tsunami",
+                "jma_points",
+                "jma_comment",
+                "jma_warn_area",
+                "jma_warning_areas",
+                "jma_warning_area_ranges",
+                "jma_warning_area_groups",
+                "warn_area",
+                "is_warn",
+                "is_training",
+                "is_assumption",
+                "is_sea",
+                "title",
+                "headline",
+                "telegram",
+                "max_pga",
+                "stations",
+                "quality",
+                "fixed_depth",
+            )
+            if key in active
+        }
+        encoded = json.dumps(
+            content,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+        return {
+            "content_version": hashlib.sha256(encoded.encode()).hexdigest(),
+            "info_type": info_type,
+            "issue_type": info_type,
+            "is_final": coerce_bool(getattr(event.identity, "is_final", False))
+            or any(
+                coerce_bool(active.get(key)) for key in ("is_final", "isFinal", "final")
+            ),
+            "is_cancel": any(coerce_bool(active.get(key)) for key in cancel_keys),
+            "cancel_specified": any(key in active for key in cancel_keys),
+        }
+
+    def _earthquake_record(
+        self,
+        event: EventEnvelope,
+        earthquake: EarthquakeEvent,
+        source_id: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "timestamp": self._to_utc(earthquake.occurred_at, source_id),
+            "source": source_id,
+            "latitude": earthquake.latitude,
+            "longitude": earthquake.longitude,
+            "magnitude": earthquake.magnitude,
+            "processed_reports": {self._resolve_report_num(event, metadata)},
+            **self._earthquake_version(event, earthquake, metadata),
+        }
+
+    def _update_earthquake_record(
+        self,
+        existing: dict[str, Any],
+        event: EventEnvelope,
+        earthquake: EarthquakeEvent,
+        source_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        record = self._earthquake_record(event, earthquake, source_id, metadata)
+        record["processed_reports"].update(existing.get("processed_reports") or ())
+        record["is_final"] = record["is_final"] or existing.get("is_final", False)
+        if not record["cancel_specified"]:
+            record["is_cancel"] = existing.get("is_cancel", False)
+        for field in ("info_type", "issue_type"):
+            if not record[field]:
+                record[field] = existing.get(field, "")
+        existing.update(record)
 
     @staticmethod
     def _get_domain_earthquake(event: EventEnvelope) -> EarthquakeEvent | None:
@@ -757,42 +894,17 @@ class EventDeduplicationService:
         metadata = event.metadata if isinstance(event.metadata, dict) else {}
         source_id = self._get_source_id(event)
         event_fingerprint = self.generate_event_fingerprint(event, domain_eq, source_id)
-        current_time = self._to_utc(domain_eq.occurred_at, source_id)
-        current_report = self._resolve_report_num(event, metadata)
-        issue_type = self._extract_issue_type_from_earthquake(domain_eq, metadata)
-        record = {
-            "timestamp": current_time,
-            "source": source_id,
-            "latitude": domain_eq.latitude or 0,
-            "longitude": domain_eq.longitude or 0,
-            "magnitude": domain_eq.magnitude or 0,
-            "info_type": metadata.get("info_type")
-            or self._extract_issue_type_from_earthquake(domain_eq, metadata)
-            or "",
-            "issue_type": issue_type,
-            "processed_reports": {current_report},
-            "is_final": bool(metadata.get("is_final", False)),
-        }
+        record = self._earthquake_record(event, domain_eq, source_id, metadata)
         if event_fingerprint in self.recent_events:
             source_events = self.recent_events[event_fingerprint]
             if source_id in source_events:
                 existing = source_events[source_id]
-                processed = existing.get("processed_reports", set())
-                if not isinstance(processed, set):
-                    processed = {existing.get("updates", 1)}
-                processed.add(current_report)
-                existing["processed_reports"] = processed
-                existing["timestamp"] = current_time
-                existing["is_final"] = existing.get("is_final", False) or bool(
-                    metadata.get("is_final", False)
-                )
-                # 状态一致性：静默播种时同步回写最新 info_type / issue_type，
-                # 避免旧状态（如 automatic）残留导致静默结束后 reviewed 被误判为升级重复放行。
-                if issue_type:
-                    existing["issue_type"] = issue_type
-                current_info_type = metadata.get("info_type") or issue_type or ""
-                if current_info_type:
-                    existing["info_type"] = current_info_type
+                if self._should_allow_update(
+                    event, domain_eq, existing, source_id, metadata=metadata
+                ):
+                    self._update_earthquake_record(
+                        existing, event, domain_eq, source_id, metadata
+                    )
             else:
                 source_events[source_id] = record
         else:
@@ -852,7 +964,8 @@ class EventDeduplicationService:
                     (current_time - existing_timestamp).total_seconds() / 60
                 )
                 # 仍在允许的去重时间滑动窗口之内
-                if time_diff <= self.time_window.total_seconds() / 60:
+                stable_id = str(getattr(event.identity, "event_id", "") or "").strip()
+                if stable_id or time_diff <= self.time_window.total_seconds() / 60:
                     if self._should_allow_update(
                         event,
                         domain_eq,
@@ -863,31 +976,9 @@ class EventDeduplicationService:
                         plugin_logger.debug(
                             f"[灾害预警] 允许同一数据源更新: {source_id}"
                         )
-                        current_report = self._resolve_report_num(event, metadata)
-                        # 将当前的报数加入历史已处理的报数集合中，规避重复推送
-                        existing_event["processed_reports"].add(current_report)
-                        existing_event["timestamp"] = current_time
-                        existing_event["is_final"] = existing_event["is_final"] or bool(
-                            metadata.get("is_final", False)
+                        self._update_earthquake_record(
+                            existing_event, event, domain_eq, source_id, metadata
                         )
-                        # 关键修复：状态升级放行（如 USGS automatic -> reviewed）后，
-                        # 必须把最新 info_type / issue_type 回写缓存。
-                        # 否则缓存始终停留在旧状态（如 automatic），
-                        # 后续每条 reviewed 都会再次触发“升级放行”而被重复推送。
-                        current_info_type = (
-                            metadata.get("info_type")
-                            or self._extract_issue_type_from_earthquake(
-                                domain_eq, metadata
-                            )
-                            or ""
-                        )
-                        if current_info_type:
-                            existing_event["info_type"] = current_info_type
-                        current_issue_type = self._extract_issue_type_from_earthquake(
-                            domain_eq, metadata
-                        )
-                        if current_issue_type:
-                            existing_event["issue_type"] = current_issue_type
                         return True
                     plugin_logger.info(
                         f"[灾害预警] 同一数据源重复事件，过滤: {source_id}",
@@ -902,39 +993,13 @@ class EventDeduplicationService:
                 is_event_linked=True,
                 event_stream=self._resolve_event_stream_by_source_id(source_id),
             )
-            current_report = self._resolve_report_num(event, metadata)
-            issue_type = self._extract_issue_type_from_earthquake(domain_eq, metadata)
-            self.recent_events[event_fingerprint][source_id] = {
-                "timestamp": current_time,
-                "source": source_id,
-                "latitude": domain_eq.latitude or 0,
-                "longitude": domain_eq.longitude or 0,
-                "magnitude": domain_eq.magnitude or 0,
-                "info_type": metadata.get("info_type")
-                or self._extract_issue_type_from_earthquake(domain_eq, metadata)
-                or "",
-                "issue_type": issue_type,
-                "processed_reports": {current_report},
-                "is_final": bool(metadata.get("is_final", False)),
-            }
+            self.recent_events[event_fingerprint][source_id] = self._earthquake_record(
+                event, domain_eq, source_id, metadata
+            )
             return True
 
-        current_report = self._resolve_report_num(event, metadata)
-        issue_type = self._extract_issue_type_from_earthquake(domain_eq, metadata)
         self.recent_events[event_fingerprint] = {
-            source_id: {
-                "timestamp": current_time,
-                "source": source_id,
-                "latitude": domain_eq.latitude or 0,
-                "longitude": domain_eq.longitude or 0,
-                "magnitude": domain_eq.magnitude or 0,
-                "info_type": metadata.get("info_type")
-                or self._extract_issue_type_from_earthquake(domain_eq, metadata)
-                or "",
-                "issue_type": issue_type,
-                "processed_reports": {current_report},
-                "is_final": bool(metadata.get("is_final", False)),
-            }
+            source_id: self._earthquake_record(event, domain_eq, source_id, metadata)
         }
         return True
 
@@ -1009,65 +1074,64 @@ class EventDeduplicationService:
         if not isinstance(processed_reports, set):
             old_updates = existing_event.get("updates", 1)
             processed_reports = {old_updates}
+        highest_report = max(
+            (number for number in processed_reports if isinstance(number, int)),
+            default=0,
+        )
 
-        # 新报数到达允许放行更新，例如第 1 报 -> 第 2 报
-        if current_report not in processed_reports:
-            current_is_final = bool(active_metadata.get("is_final", False))
-            plugin_logger.info(
-                f"[灾害预警] 新报数: 第 {current_report} 报 {'(最终报)' if current_is_final else ''}"
-                f" (已处理: {sorted(processed_reports)})",
-                is_event_linked=True,
-                event_stream=self._resolve_event_stream_by_source_id(source_id),
-            )
+        version = self._earthquake_version(event, domain_eq, active_metadata)
+        # 取消/恢复是独立生命周期变化，包括 GQ 不带震源参数的第0报。
+        if (
+            version["cancel_specified"]
+            and version["is_cancel"] != existing_event.get("is_cancel", False)
+            and (version["is_cancel"] or current_report >= highest_report)
+        ):
             return True
 
-        # 若是最终报，且历史已推送记录中未判定为最终报，则放行更新
-        current_is_final = bool(active_metadata.get("is_final", False))
-        if current_is_final and not existing_event.get("is_final", False):
-            plugin_logger.info(
-                "[灾害预警] 最终报更新: 非最终报 -> 最终报",
-                is_event_linked=True,
-                event_stream=self._resolve_event_stream_by_source_id(source_id),
-            )
+        # 最终报可能只在 identity 或领域 metadata 上标记。
+        if version["is_final"] and not existing_event.get("is_final", False):
             return True
 
-        current_info_type = str(
-            active_metadata.get("info_type")
-            or self._extract_issue_type_from_earthquake(domain_eq, active_metadata)
-            or ""
-        ).lower()
-        if source_id == "usgs_fanstudio":
-            existing_info_type = (existing_event.get("info_type", "") or "").lower()
-            if existing_info_type == "automatic" and current_info_type == "reviewed":
-                plugin_logger.debug(
-                    "[灾害预警] 允许USGS状态升级: automatic -> reviewed"
-                )
-                return True
+        current_info_type = version["info_type"].lower()
+        existing_info_type = str(existing_event.get("info_type") or "").lower()
+
+        def measurement_phase(value: str) -> int:
+            if "正式" in value or value == "reviewed":
+                return 2
+            if "自动" in value or value == "automatic":
+                return 1
+            return 0
+
+        current_phase = measurement_phase(current_info_type)
+        existing_phase = measurement_phase(existing_info_type)
+        if current_phase > existing_phase and current_phase == 2:
+            return True
 
         jma_types = ["ScalePrompt", "Destination", "ScaleAndDestination", "DetailScale"]
-        current_issue_type = self._extract_issue_type_from_earthquake(
-            domain_eq, active_metadata
-        )
+        current_issue_type = version["issue_type"]
         existing_issue_type = existing_event.get("issue_type", "")
         if current_issue_type in jma_types and existing_issue_type in jma_types:
-            try:
-                curr_idx = jma_types.index(current_issue_type)
-                prev_idx = jma_types.index(existing_issue_type)
-                # 情报优先级提升时（例如震度速报 -> 地震报告），允许放行更新
-                if curr_idx > prev_idx:
-                    plugin_logger.debug(
-                        f"[灾害预警] 允许JMA情报升级: {existing_issue_type} -> {current_issue_type}"
-                    )
-                    return True
-            except ValueError:
-                pass
+            current_rank = jma_types.index(current_issue_type)
+            previous_rank = jma_types.index(existing_issue_type)
+            if current_rank > previous_rank:
+                return True
+            if current_rank < previous_rank:
+                return False
 
-        existing_info_type = (existing_event.get("info_type", "") or "").lower()
-        # 允许由“自动测定”状态跃升为“正式测定”状态的更新推送
-        if "自动" in existing_info_type and "正式" in current_info_type:
-            plugin_logger.debug(
-                f"[灾害预警] 允许状态升级: {existing_info_type} -> {current_info_type}"
-            )
+        # 同内容的乱序旧报不能用“从没见过此报号”再次放行。
+        if current_report < highest_report:
+            return False
+        if current_phase and existing_phase and current_phase < existing_phase:
+            return False
+        if current_report > highest_report:
+            return True
+
+        # 相同报次也可能是震源、震级、警戒区域或正文订正。
+        previous_version = existing_event.get("content_version")
+        if (
+            previous_version is not None
+            and version["content_version"] != previous_version
+        ):
             return True
 
         plugin_logger.debug(f"[灾害预警] 报数 {current_report} 已处理过，跳过")
