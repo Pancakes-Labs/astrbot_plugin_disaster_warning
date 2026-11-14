@@ -137,6 +137,20 @@ class EventPipeline:
                 runtime_config = (
                     self.service.session_config_manager.get_effective_config(session)
                 )
+                # 先按会话无状态预筛，再允许聚合服务修改缓冲区或触发红色刷新。
+                # 外地、过期、未订阅来源等预警不能提前冲刷本会话已有的预警；
+                # 预筛不提交报次状态，真正发送前仍由原有路径再次复核。
+                if not runtime_config.get("push_enabled", True):
+                    continue
+                decision = self.service.message_manager.evaluate_push_decision(
+                    event,
+                    runtime_config=runtime_config,
+                    session_id=session,
+                    emit_filter_log=False,
+                    commit_state=False,
+                )
+                if not decision.accepted:
+                    continue
                 if self._weather_aggregation.should_aggregate(
                     event, session, runtime_config
                 ):
@@ -177,7 +191,7 @@ class EventPipeline:
                 )
             elif not non_aggregated_sessions:
                 # 没有会话进入聚合缓冲、也没有非聚合会话需要推送：
-                # 说明全部会话在 should_aggregate 阶段就被放行（非 WeatherEvent 不会走到这）
+                # 所有目标会话均被无状态预筛拒绝，或没有订阅会话。
                 plugin_logger.debug(
                     f"[灾害预警] 气象预警 {envelope.id} 无会话进入聚合缓冲区，"
                     f"目标会话 {len(target_sessions)} 个",
