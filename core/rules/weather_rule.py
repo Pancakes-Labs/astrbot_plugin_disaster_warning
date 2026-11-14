@@ -44,14 +44,24 @@ class WeatherRule(BaseRule):
             if isinstance(context.envelope.metadata, dict)
             else {}
         )
-        title_text = (
-            getattr(domain_event, "title", "")
-            or getattr(domain_event, "headline", "")
-            or metadata.get("title", "")
-            or metadata.get("headline", "")
-            or payload.get("title", "")
-            or payload.get("headline", "")
-            or ""
+        domain_metadata = (
+            domain_event.metadata if isinstance(domain_event.metadata, dict) else {}
+        )
+        # 颜色仍按原有标题优先级识别，不把正文中的其他颜色当作本次预警等级。
+        title_text = next(
+            (
+                text
+                for text in (
+                    getattr(domain_event, "title", ""),
+                    getattr(domain_event, "headline", ""),
+                    metadata.get("title", ""),
+                    metadata.get("headline", ""),
+                    payload.get("title", ""),
+                    payload.get("headline", ""),
+                )
+                if isinstance(text, str) and text
+            ),
+            "",
         )
         min_color_level = weather_filter.get("min_color_level", "白色")
 
@@ -92,14 +102,22 @@ class WeatherRule(BaseRule):
                 },
             )
 
-        # 整理气象灾害具体描述文本
-        headline_text = (
-            getattr(domain_event, "headline", "")
-            or metadata.get("headline", "")
-            or metadata.get("description", "")
-            or payload.get("headline", "")
-            or payload.get("description", "")
-            or ""
+        # 地区匹配需检查所有标题、摘要和完整正文，不能让非空摘要遮蔽正文。
+        # 仅收集字符串，且用换行隔开字段，避免字段间拼出并不存在的地区关键词。
+        headline_text = "\n".join(
+            dict.fromkeys(
+                text
+                for text in (
+                    getattr(domain_event, "title", ""),
+                    getattr(domain_event, "headline", ""),
+                    *(
+                        source.get(key, "")
+                        for source in (domain_metadata, metadata, payload)
+                        for key in ("title", "headline", "description")
+                    ),
+                )
+                if isinstance(text, str) and text
+            )
         )
 
         # 白名单关键词校验：要求标题、灾害描述正文或解析出的地区归属中命中关键词
