@@ -51,6 +51,7 @@ class WeatherBufferEntry:
     color_name: str = "白色"
     title: str = ""
     received_at: float = field(default_factory=time.time)
+    bypass_node_fill: bool = False
 
 
 class WeatherAggregationService:
@@ -327,7 +328,7 @@ class WeatherAggregationService:
         """
         delay = max(delay, self._rate_limit_deadlines.get(session, 0) - time.monotonic())
         # 已有定时器则不重置
-        if session in self._flush_timers:
+        if self._in_flush_batch or session in self._flush_timers:
             return
 
         try:
@@ -363,7 +364,8 @@ class WeatherAggregationService:
 
         remaining = self._rate_limit_deadlines.get(session, 0) - time.monotonic()
         if remaining > 0:
-            self._schedule_flush(session, remaining)
+            if not self._in_flush_batch:
+                self._schedule_flush(session, remaining)
             return
         self._rate_limit_deadlines.pop(session, None)
 
@@ -383,7 +385,12 @@ class WeatherAggregationService:
     def defer_rate_limited(self, event, session, runtime_config, retry_after):
         """普通推送达到天气限额时，缓冲事件并在额度恢复后复核。"""
         level, color = self._resolve_color_level(event)
-        entry = WeatherBufferEntry(event=event, color_level=level, color_name=color)
+        received = getattr(event, "received_at", None)
+        entry = WeatherBufferEntry(
+            event=event, color_level=level, color_name=color,
+            received_at=received.timestamp() if isinstance(received, datetime) else time.time(),
+            bypass_node_fill=True,
+        )
         self.defer_rate_limited_entries(session, [entry], retry_after)
 
     def defer_rate_limited_entries(self, session, entries, retry_after):

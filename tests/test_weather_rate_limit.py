@@ -323,7 +323,7 @@ class WeatherAggregationQuotaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.service._buffers[GROUP_A][entry.event.id], entry)
         self.assertNotIn(GROUP_A, self.service._flush_retry_counts)
         self.assertNotIn(GROUP_A, self.service._deferred_stall_counts)
-        self.assert_timer_waits(GROUP_A, 1)
+        self.assertNotIn(GROUP_A, self.service._flush_timers)
         self.clock.advance(1)
         await self.service._flush_session(GROUP_A)
         callback.assert_awaited_once_with(GROUP_A, [entry], self.config, mode="forward")
@@ -414,6 +414,27 @@ class WeatherAggregationQuotaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, [[entry], [entry]])
         self.assertEqual(len(context.delivered), 2)
         self.assertNotIn(GROUP_A, self.service._buffers)
+
+
+    async def test_shutdown_quota_wait_never_rearms_a_retired_timer(self):
+        entry = self.entry()
+        callback = AsyncMock(return_value=(1, [], []))
+        self.service.set_flush_callback(callback)
+        self.service.defer_rate_limited_entries(GROUP_A, [entry], 900)
+        await self.service.flush_all()
+        callback.assert_not_awaited()
+        self.assertFalse(self.service._flush_timers)
+        self.assertFalse(self.service._background_tasks)
+        self.assertIn(entry.event.id, self.service._buffers[GROUP_A])
+
+    async def test_late_deferral_uses_original_receipt_time_before_newer_buffer(self):
+        from datetime import timedelta
+        old, new = self.entry(), self.entry()
+        old.event.received_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+        new.event.received_at = datetime.now(timezone.utc)
+        self.service.defer_rate_limited(new.event, GROUP_A, self.config, 600)
+        self.service.defer_rate_limited(old.event, GROUP_A, self.config, 600)
+        self.assertIs(self.service._buffers[GROUP_A][old.event.id].event, new.event)
 
 
 if __name__ == "__main__":

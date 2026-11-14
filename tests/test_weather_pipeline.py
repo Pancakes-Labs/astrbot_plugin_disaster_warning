@@ -202,5 +202,21 @@ class WeatherPipelineTests(unittest.IsolatedAsyncioTestCase):
 
 
 
+    async def test_direct_red_quota_deferral_does_not_wait_for_twenty_node_fill(self):
+        self.settings.update(fill_nodes=True, max_batch_size=20, rate_limit_max_messages=1)
+        await self.sender.send(SESSION, MessageChain([Plain("already delivered")]),
+                               weather_rate_limit=self.settings)
+        self.context.send_message.reset_mock()
+        entry = self.entries(1)[0]
+        entry.event.event.title = "合肥市暴雨红色预警"
+        self.aggregation.defer_rate_limited(entry.event, SESSION, self.config, 900)
+        queued = list(self.aggregation._buffers[SESSION].values())
+        self.assertTrue(queued[0].bypass_node_fill)
+        self.now += 900
+        sent, deferred, failed = await self.flush(queued)
+        self.assertEqual((sent, deferred, failed), (1, [], []))
+        self.assertEqual(self.context.send_message.await_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -441,7 +441,10 @@ class EventPipeline:
                 self._weather_aggregation is not None
                 and self._weather_aggregation.should_force_send_all(session)
             )
-            if fill_nodes and not is_flush_all and not force_send_all:
+            # A direct warning deferred only by quota must not wait to fill a
+            # forward node after its allowance recovers.
+            bypass_node_fill = any(entry.bypass_node_fill for entry, _ in built_messages)
+            if fill_nodes and not is_flush_all and not force_send_all and not bypass_node_fill:
                 full_batch_count = total // max_batch
             else:
                 full_batch_count = (total + max_batch - 1) // max_batch
