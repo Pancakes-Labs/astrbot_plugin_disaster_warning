@@ -127,6 +127,8 @@ class EventDeduplicationService:
             content["occurred_at"] = EventIdentityService.ensure_utc_datetime(
                 earthquake.occurred_at, cls._get_source_id(event)
             )
+        if coerce_bool(active.get("origin_time_generated")):
+            content.pop("occurred_at", None)
         # Only actual report fields participate. timestamp_ms/last_update_ms,
         # received_at and other transport bookkeeping must not create revisions.
         content["metadata"] = {

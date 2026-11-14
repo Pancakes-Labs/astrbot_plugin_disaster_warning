@@ -7,6 +7,7 @@ import sys
 from types import SimpleNamespace
 import unittest
 
+from _source_loader import module as load_real_module
 import _delivery_fixtures as fixtures
 import test_cross_source_dedup as dedup_fixtures
 
@@ -20,12 +21,9 @@ class DeliveryDedupTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         cls.modules = fixtures.load_dispatch_modules()
-        name = "_disaster_delivery_dedup_test"
-        spec = importlib.util.spec_from_file_location(name, dedup_fixtures.SOURCE)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        cls.deduplicator_class = module.CrossSourceDeduplicator
+        cls.deduplicator_class = load_real_module(
+            "core.message.push.cross_source_dedup"
+        ).CrossSourceDeduplicator
 
     def setUp(self):
         fixtures.WeatherPipelineTests.setUp(self)
@@ -156,6 +154,37 @@ class DeliveryDedupTests(unittest.IsolatedAsyncioTestCase):
         relay = self.quake("jma_p2p", "p2p-id")
         results = await asyncio.gather(self.execute(first), self.execute(relay))
         self.assertEqual(sum(result["push_success_count"] for result in results), 1)
+        self.assertEqual(self.context.send_message.await_count, 1)
+
+
+    async def test_simulation_does_not_consume_real_delivery_record(self):
+        simulation = self.quake("jma_wolfx", "wolfx-id")
+        simulation.metadata["simulation"] = True
+        self.assertTrue((await self.execute(simulation))["success"])
+        self.assertFalse(self.duplicate(self.quake("jma_p2p", "p2p-id")))
+
+    async def test_noncommitting_send_does_not_consume_real_delivery_record(self):
+        first = self.quake("jma_wolfx", "wolfx-id")
+        result = await self.modules.execution.PushExecutionService(self.manager).execute(
+            first, target_sessions=[SESSION],
+            session_config_getter=self.service.session_config_manager.get_effective_config,
+            commit_state=False,
+        )
+        self.assertTrue(result["success"])
+        self.assertFalse(self.duplicate(self.quake("jma_p2p", "p2p-id")))
+
+    async def test_empty_chain_in_mixed_batch_is_never_marked_delivered(self):
+        empty = self.weather("china_weather_fanstudio", "empty-id")
+        sent = self.weather("china_weather_fanstudio", "sent-id")
+        sent.event.title = "合肥市大雾黄色预警"
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+        self.builder.side_effect = lambda event, **kwargs: MessageChain(
+            [] if event.id == empty.id else [Plain("synthetic delivered warning")]
+        )
+        self.assertEqual(await self.flush([empty, sent]), (1, [], []))
+        self.assertFalse(self.duplicate(empty))
+        self.assertTrue(self.duplicate(sent))
         self.assertEqual(self.context.send_message.await_count, 1)
 
 

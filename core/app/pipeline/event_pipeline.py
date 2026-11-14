@@ -383,6 +383,8 @@ class EventPipeline:
             if isinstance(result, tuple) and len(result) == 2 and result[0] == "failed":
                 build_failed_entries.append(result[1])
                 continue
+            if not list(getattr(result[1], "chain", []) or []):
+                continue
             if dedup is not None and dedup.is_duplicate(
                 session, result[0].event, runtime_config,
                 pending=[entry.event for entry, _ in built_messages],

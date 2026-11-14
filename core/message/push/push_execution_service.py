@@ -455,7 +455,7 @@ class PushExecutionService:
 
         async def push_to_session(session, runtime_config):
             dedup = getattr(self.manager, "cross_source_deduplicator", None)
-            if dedup is None or not dedup.enabled(runtime_config):
+            if not commit_state or dedup is None or not dedup.enabled(runtime_config):
                 return await push_to_session_once(session, runtime_config)
             async with dedup.lock(session):
                 if dedup.is_duplicate(session, event, runtime_config):

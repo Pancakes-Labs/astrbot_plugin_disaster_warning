@@ -16,6 +16,8 @@ import time
 import json
 import hashlib
 
+from ....utils.weather_report import canonical_weather_report
+
 
 GROUPS = {
     **dict.fromkeys(
@@ -127,6 +129,11 @@ class CrossSourceDeduplicator:
             **(getattr(event, "metadata", None) or {}),
             **(getattr(envelope, "metadata", None) or {}),
         }
+        # Synthetic previews must never consume real delivery records.
+        attributes = getattr(identity, "attributes", None) or {}
+        if any(_flag(layer.get(key)) for layer in (metadata, attributes)
+               for key in ("test", "simulation")):
+            return None
         final = bool(getattr(identity, "is_final", False)) or _flag(
             metadata.get("is_final")
         )
@@ -180,10 +187,16 @@ class CrossSourceDeduplicator:
             return {
                 **common,
                 "kind": "weather",
-                "time": _timestamp(getattr(event, "effective_at", None), group),
+                "time": _timestamp(metadata.get(
+                    "weather_source_effective_at", getattr(event, "effective_at", None)
+                ), group),
                 "content": (title, body),
                 "business": json.dumps(
                     business, ensure_ascii=False, sort_keys=True, default=str
+                ),
+                "same_id_report": canonical_weather_report(
+                    business,
+                    effective_is_issued=metadata.get("weather_effective_is_issue") is True,
                 ),
                 "geo": tuple(
                     _text(metadata.get(key)) for key in ("province", "city", "district")
@@ -329,6 +342,16 @@ class CrossSourceDeduplicator:
     @staticmethod
     def _covered(current, previous):
         if current["kind"] == "weather":
+            # Only an already established ID/alias gets relay-format tolerance.
+            # Cross-ID identity matching above still uses the original title,
+            # full body and structured event time without this normalization.
+            if (current["id"]
+                    and current["id"] in previous.get("aliases", {previous["id"]})
+                    and current.get("same_id_report") is not None
+                    and previous.get("same_id_report") is not None):
+                return all(current[key] == previous[key] for key in (
+                    "same_id_report", "geo", "cancelled", "final"
+                ))
             return all(
                 current[key] == previous[key]
                 for key in ("content", "business", "time", "geo", "cancelled", "final")

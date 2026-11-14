@@ -19,6 +19,7 @@ from ...utils.china_regions import (
 from ...utils.converters import safe_float_convert
 from ...utils.plugin_logger import plugin_logger
 from ...utils.time_converter import TimeConverter
+from ...utils.weather_report import canonical_weather_report
 from ..domain.event_identity import EventIdentity
 from ..domain.event_models import EventEnvelope, WeatherEvent
 from ..domain.event_payload import SourcePayload
@@ -113,6 +114,27 @@ def _weather_cache_key(weather_id: str, version: str = "") -> str:
     )
 
 
+def _weather_comparison_fields(data, business):
+    effective_is_issued = not any(
+        data.get(key) not in (None, "") for key in ("effective", "effectiveTime", "onset")
+    )
+    normalized = canonical_weather_report(
+        business, effective_is_issued=effective_is_issued
+    )
+    return normalized or business, effective_is_issued
+
+
+def _replace_weather_cache_version(cache, weather_id, version, timestamp):
+    # Only the current version may suppress input. An active -> cancelled ->
+    # active transition must not hit a historical pre-cancellation version.
+    if version:
+        prefix = json.dumps([weather_id], ensure_ascii=False)[:-1] + ","
+        for key in tuple(cache):
+            if key.startswith(prefix):
+                cache.pop(key)
+    cache[_weather_cache_key(weather_id, version)] = timestamp
+
+
 class WeatherAlarmParser(BaseParser):
     """中国气象局气象预警解析器。
 
@@ -156,7 +178,8 @@ class WeatherAlarmParser(BaseParser):
             # 这里也属于去重阶段的日志，如果提示检测到重复，应由 plugin_logger 输出
             weather_id = str(msg_data.get("id") or "").strip()
             business = _weather_business_fields(msg_data, self.source_id)
-            version = _weather_content_version(business)
+            comparison, effective_is_issued = _weather_comparison_fields(msg_data, business)
+            version = _weather_content_version(comparison)
             if weather_id and self._is_weather_duplicate(weather_id, version):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
@@ -266,6 +289,7 @@ class WeatherAlarmParser(BaseParser):
                 "is_cancel": business["is_cancel"],
                 "status": business["status"],
                 "weather_business_fields": dict(business),
+                "weather_effective_is_issue": effective_is_issued,
                 "source_family": source_entry.provider_family.value
                 if source_entry
                 else "fan_studio",
@@ -351,8 +375,8 @@ class WeatherAlarmParser(BaseParser):
         """登记预警 id 的处理时间，并控制缓存容量。"""
         if not weather_id:
             return
-        self._processed_weather_ids[_weather_cache_key(weather_id, version)] = (
-            time.monotonic()
+        _replace_weather_cache_version(
+            self._processed_weather_ids, weather_id, version, time.monotonic()
         )
         if len(self._processed_weather_ids) > self._WEATHER_DEDUPE_MAX_ENTRIES:
             # 超出容量上限时清理最旧的记录，避免内存无限增长。
@@ -438,8 +462,9 @@ class WeatherAlarmJianProjectParser(BaseParser):
         """登记预警 id 的处理时间，并控制缓存容量。"""
         if not weather_id:
             return
-        self._processed_weather_ids[_weather_cache_key(weather_id, version)] = (
-            datetime.now(timezone.utc).timestamp()
+        _replace_weather_cache_version(
+            self._processed_weather_ids, weather_id, version,
+            datetime.now(timezone.utc).timestamp(),
         )
         if len(self._processed_weather_ids) >= self._WEATHER_DEDUPE_MAX_ENTRIES:
             oldest_key = min(
@@ -458,7 +483,8 @@ class WeatherAlarmJianProjectParser(BaseParser):
                 return None
 
             business = _weather_business_fields(msg_data, self.source_id)
-            version = _weather_content_version(business)
+            comparison, effective_is_issued = _weather_comparison_fields(msg_data, business)
+            version = _weather_content_version(comparison)
             if self._is_weather_duplicate(weather_id, version):
                 plugin_logger.info(
                     f"[灾害预警] {self.source_id} 检测到重复的气象预警ID: {weather_id}，忽略",
@@ -478,6 +504,11 @@ class WeatherAlarmJianProjectParser(BaseParser):
             issue_time = TimeConverter.parse_datetime(origin_time_raw) or datetime.now(
                 timezone.utc
             )
+            source_issue_time = issue_time
+            if comparison is not business:
+                # The validated body header is the station's publication clock;
+                # originTime can instead contain a relay's one-minute list clock.
+                issue_time = datetime.fromisoformat(comparison["issued"])
             relieve_time = TimeConverter.parse_datetime(msg_data.get("relieveTime"))
             weather_code = str(msg_data.get("type") or "").strip()
 
@@ -501,6 +532,7 @@ class WeatherAlarmJianProjectParser(BaseParser):
             source_entry = get_source_entry(self.source_id)
             metadata = {
                 "issue_time": issue_time,
+                "weather_source_effective_at": source_issue_time,
                 "relieve_time": relieve_time,
                 "weather_type": weather_code,
                 "weather_code": weather_code,
@@ -520,6 +552,7 @@ class WeatherAlarmJianProjectParser(BaseParser):
                 "is_cancel": business["is_cancel"],
                 "status": business["status"],
                 "weather_business_fields": dict(business),
+                "weather_effective_is_issue": effective_is_issued,
                 "source_family": "jian_project",
                 "source_enum": source_entry.source_enum
                 if source_entry

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 
 
-from _source_loader import SOURCE as ROOT
+from _source_loader import SOURCE as ROOT, module as load_real_module
 SOURCE = ROOT / "core/message/push/cross_source_dedup.py"
 
 SESSION = "test:GroupMessage:synthetic-a"
@@ -81,12 +81,9 @@ def weather(
 class CrossSourceDedupTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        name = "_disaster_cross_source_dedup_test"
-        spec = importlib.util.spec_from_file_location(name, SOURCE)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        cls.deduplicator_class = module.CrossSourceDeduplicator
+        cls.deduplicator_class = load_real_module(
+            "core.message.push.cross_source_dedup"
+        ).CrossSourceDeduplicator
 
     def setUp(self):
         self.now = 1000.0
