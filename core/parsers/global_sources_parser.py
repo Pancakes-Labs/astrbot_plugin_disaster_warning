@@ -121,6 +121,7 @@ class GlobalQuakeParser(BaseParser):
             if source_entry
             else "earthquake_warning",
             "is_cancel": True,
+            "origin_time_generated": True,
             "report_num": 0,
         }
 

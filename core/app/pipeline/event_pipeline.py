@@ -268,7 +268,14 @@ class EventPipeline:
             session_config_getter=self.service.session_config_manager.get_effective_config,
         )
 
-    async def _flush_weather_buffer(
+    async def _flush_weather_buffer(self, session, entries, config, *, mode="forward"):
+        dedup = getattr(self.service.message_manager, "cross_source_deduplicator", None)
+        if dedup is None:
+            return await self._flush_weather_buffer_locked(session, entries, config, mode=mode)
+        async with dedup.lock(session):
+            return await self._flush_weather_buffer_locked(session, entries, config, mode=mode)
+
+    async def _flush_weather_buffer_locked(
         self,
         session: str,
         entries: list,
@@ -306,6 +313,7 @@ class EventPipeline:
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
+        dedup = getattr(message_manager, "cross_source_deduplicator", None)
         # 统一会话日志字符串（私聊/群聊 ID (备注名)），与推送执行链保持一致。
         session_log = message_manager._get_session_log_str(session)
 
@@ -374,6 +382,13 @@ class EventPipeline:
                 continue
             if isinstance(result, tuple) and len(result) == 2 and result[0] == "failed":
                 build_failed_entries.append(result[1])
+                continue
+            if not list(getattr(result[1], "chain", []) or []):
+                continue
+            if dedup is not None and dedup.is_duplicate(
+                session, result[0].event, runtime_config,
+                pending=[entry.event for entry, _ in built_messages],
+            ):
                 continue
             built_messages.append(result)
 
@@ -459,6 +474,9 @@ class EventPipeline:
                 try:
                     await message_manager.session_sender.send(session, chain)
                     sent_nodes += 1
+                    if dedup is not None:
+                        for entry, _ in batch:
+                            dedup.remember(session, entry.event, runtime_config)
                     # 该节点发送成功：节点内实际加入内容的条目即为成功发出
                     sent_entry_count += len(batch)
                 except Exception as e:
@@ -527,6 +545,8 @@ class EventPipeline:
             for entry, message in built_messages:
                 try:
                     await message_manager.session_sender.send(session, message)
+                    if dedup is not None:
+                        dedup.remember(session, entry.event, runtime_config)
                 except Exception as e:
                     logger.error(
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"

@@ -175,6 +175,7 @@ class PushExecutionService:
         filter_reason_detail_stats: dict[str, int] = {}
         # 统计实际发送阶段的失败原因，避免与规则拦截混淆。
         send_failure_stats: dict[str, int] = {}
+        confirmed_sessions: set[str] = set()
 
         # 收集预筛选通过的所有会话名单与配置
         push_candidates = self._collect_push_candidates(
@@ -362,7 +363,7 @@ class PushExecutionService:
                         message_task_cache[cache_key] = task
             return await task
 
-        async def push_to_session(
+        async def push_to_session_once(
             session: str,
             runtime_config: dict[str, Any],
         ) -> tuple[bool, str, dict[str, Any] | None, str | None]:
@@ -393,6 +394,7 @@ class PushExecutionService:
                 message = await get_or_build_message(runtime_config)
                 # 调用底座 Session 发送器下发消息
                 await self.manager.session_sender.send(session, message)
+                confirmed_sessions.add(session)
                 return True, session, runtime_config.get("message_format", {}), None
             except Exception as e:
                 error_name = type(e).__name__
@@ -419,6 +421,7 @@ class PushExecutionService:
                         await self.manager.session_sender.send(
                             session, fallback_message
                         )
+                        confirmed_sessions.add(session)
                         if self._is_rich_media_transfer_failure(e):
                             logger.warning(
                                 f"[灾害预警] {session_log} 富媒体传输失败，已自动降级重发: {error_name}"
@@ -449,6 +452,18 @@ class PushExecutionService:
                     f"[灾害预警] {session_log} 富媒体发送失败，且消息中无可用纯文本可降级: {error_name}"
                 )
                 return False, session, None, f"富媒体发送失败({error_name})"
+
+        async def push_to_session(session, runtime_config):
+            dedup = getattr(self.manager, "cross_source_deduplicator", None)
+            if not commit_state or dedup is None or not dedup.enabled(runtime_config):
+                return await push_to_session_once(session, runtime_config)
+            async with dedup.lock(session):
+                if dedup.is_duplicate(session, event, runtime_config):
+                    return False, session, None, None
+                result = await push_to_session_once(session, runtime_config)
+                if result[0] and session in confirmed_sessions:
+                    dedup.remember(session, event, runtime_config)
+                return result
 
         if push_candidates:
             # 通过并发发送缩短整批会话推送耗时，但单个会话的发送前复核仍各自独立执行。

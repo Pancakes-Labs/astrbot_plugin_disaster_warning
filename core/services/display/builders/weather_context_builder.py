@@ -95,8 +95,17 @@ def build_weather_display_context(projection: dict, options: dict | None = None)
         title,
         headline,
     )
+    lifecycle = {**domain_metadata, **metadata}
+    cancelled = any(
+        value is True or str(value).strip().lower() in {"1", "true", "yes"}
+        for value in (lifecycle.get("is_cancel"), lifecycle.get("is_cancelled"),
+                      lifecycle.get("cancelled"))
+    ) or str(lifecycle.get("status", "")).strip().lower() in {"cancelled", "canceled"}
+    if cancelled:
+        title = "【预警已解除】" + title
     display_metadata = {
         **metadata,
+        "is_cancel": cancelled,
         "event_id": envelope.id,
         "source_id": resolved_source_id,
         "event_type": envelope.event_type or getattr(envelope, "event_type", "weather"),

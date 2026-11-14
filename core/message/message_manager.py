@@ -24,6 +24,7 @@ from .push import (
     SessionSender,
     evaluate_push_decision_with_components,
 )
+from .push.cross_source_dedup import CrossSourceDeduplicator
 from .render.render_cache import RenderImageCache
 from .runtime.bootstrap_service import MessageManagerBootstrapService
 from .runtime.fusion_state_store import FusionStateStore
@@ -43,6 +44,7 @@ class MessagePushManager:
         self._telemetry = telemetry
         # 会话发送器是最底层的消息下发执行入口。
         self.session_sender = SessionSender(context)
+        self.cross_source_deduplicator = CrossSourceDeduplicator()
         self.plugin_root = str(Path(__file__).resolve().parents[2])
         self.storage_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
         self.temp_dir = self.storage_dir / "temp"
