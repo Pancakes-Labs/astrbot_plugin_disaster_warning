@@ -1326,6 +1326,17 @@ class GlobalQuakeTextPresenter(BasePresenter):
             used = stations.get("used", 0)
             lines.append(f"📡触发测站：{used}/{total}")
 
+        from dataclasses import replace
+        from .global_quake_display_context import GlobalQuakeDisplayContextBuilder
+
+        local_estimation = GlobalQuakeDisplayContextBuilder.build_local_estimation(
+            data, merged_options
+        )
+        _append_local_estimation(
+            lines,
+            replace(data, local_estimation=local_estimation),
+            include_travel_time=False,
+        )
         return "\n".join(lines)
 
     @classmethod
