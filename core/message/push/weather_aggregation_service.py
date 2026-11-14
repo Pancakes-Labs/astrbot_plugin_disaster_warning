@@ -469,7 +469,8 @@ class WeatherAggregationService:
                 return
 
             # 发送成功后清空该会话的重试计数
-            self._flush_retry_counts.pop(session, None)
+            if sent_count:
+                self._flush_retry_counts.pop(session, None)
             # 有成功发送或进入失败重试路径时，重置延期滞留计数与强制发送标记
             if sent_count or failed_entries:
                 self._deferred_stall_counts.pop(session, None)

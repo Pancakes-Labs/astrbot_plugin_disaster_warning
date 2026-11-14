@@ -117,6 +117,53 @@ class WeatherPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.sender._weather_sent[SESSION]), 2)
         self.assertEqual(self.queued_ids(), set())
 
+    async def test_failed_node_then_quota_deferral_recovers_only_failed_entries(self):
+        self.settings["max_batch_size"] = 1
+        entries = self.entries(3)
+        failed, *held = entries
+        # Another weather send can consume the slot after the first node fails.
+        self.sender.send = AsyncMock(side_effect=[
+            RuntimeError("synthetic node failure"),
+            self.modules.sender.WeatherRateLimitedError(900),
+        ])
+        self.aggregation._flush_retry_counts[SESSION] = 1
+        with patch.object(self.aggregation, "_requeue_entries",
+                          wraps=self.aggregation._requeue_entries) as retry:
+            await self.aggregation._flush_via_forward(SESSION, entries, self.settings)
+        retry.assert_called_once_with(SESSION, [failed])
+        self.assertEqual(self.aggregation._flush_retry_counts[SESSION], 2)
+        self.assertEqual(self.queued_ids(), {entry.event.id for entry in entries})
+        self.assertEqual(len(self.aggregation._buffers[SESSION]), 3)
+        for entry in held:
+            self.assertIs(self.aggregation._buffers[SESSION][entry.event.id], entry)
+        self.assertEqual(self.sender.send.await_count, 2)
+        # The quota deadline prevents a second attempt or another failure charge.
+        await self.aggregation._flush_session(SESSION)
+        self.assertEqual(self.sender.send.await_count, 2)
+        self.assertEqual(self.aggregation._flush_retry_counts[SESSION], 2)
+        # Once quota recovers, every retained entry is delivered once.
+        self.aggregation._rate_limit_deadlines[SESSION] = 0
+        self.sender.send = AsyncMock(return_value=None)
+        await self.aggregation._flush_session(SESSION)
+        self.assertEqual(self.sender.send.await_count, 3)
+        self.assertEqual(self.queued_ids(), set())
+        self.assertNotIn(SESSION, self.aggregation._flush_retry_counts)
+
+    async def test_mixed_failure_budget_exhaustion_keeps_quota_held_entries(self):
+        self.settings["max_batch_size"] = 1
+        entries = self.entries(3)
+        self.sender.send = AsyncMock(side_effect=[
+            RuntimeError("synthetic node failure"),
+            self.modules.sender.WeatherRateLimitedError(900),
+        ])
+        self.aggregation._flush_retry_counts[SESSION] = self.aggregation._max_flush_retries
+        with patch.object(self.aggregation, "_requeue_entries",
+                          wraps=self.aggregation._requeue_entries) as retry:
+            await self.aggregation._flush_via_forward(SESSION, entries, self.settings)
+        retry.assert_called_once_with(SESSION, entries[:1])
+        self.assertEqual(self.queued_ids(), {entry.event.id for entry in entries[1:]})
+        self.assertNotIn(SESSION, self.aggregation._flush_retry_counts)
+
     async def test_disabled_aggregation_replays_single_messages_with_same_limit(self):
         self.settings.update(enabled=False, rate_limit_max_messages=2)
         entries = self.entries(4)

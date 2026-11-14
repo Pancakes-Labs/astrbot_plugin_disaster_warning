@@ -524,7 +524,8 @@ class EventPipeline:
             # （累计重试计数，达到上限后丢弃），避免瞬时构建错误把预警静默丢弃。
             failed_entries.extend(build_failed_entries)
 
-            if sent_nodes == 0 and failed_nodes > 0:
+            # 限额延期已单独入缓冲，不能通过整批异常把它们计为发送失败。
+            if sent_nodes == 0 and failed_nodes > 0 and not quota_deferred:
                 # 全部节点都发送失败：向上抛出，让调用方感知到平台当前不可用，
                 # 避免"假装成功"导致用户完全收不到任何预警。
                 raise RuntimeError(
