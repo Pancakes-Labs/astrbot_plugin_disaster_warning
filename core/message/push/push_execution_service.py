@@ -15,7 +15,8 @@ from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
 
 from ....utils.emoji_filter import EMOJI_FILTER_MODE_DEFAULT
-from ...domain.event_models import EventEnvelope
+from ...domain.event_models import EventEnvelope, WeatherEvent
+from .session_sender import WeatherRateLimitedError
 
 
 class PushExecutionService:
@@ -24,6 +25,23 @@ class PushExecutionService:
     def __init__(self, manager):
         # 执行服务通过主消息管理器获取会话发送、消息构建与规则评估能力。
         self.manager = manager  # 主消息管理器 MessagePushManager 实例
+
+    async def _send_event_message(self, session, message, event, runtime_config):
+        if isinstance(event.event, WeatherEvent):
+            config = runtime_config.get("push_frequency_control", {}).get(
+                "weather_aggregation", {}
+            )
+            await self.manager.session_sender.send(
+                session, message, weather_rate_limit=config
+            )
+        else:
+            await self.manager.session_sender.send(session, message)
+
+    def _defer_weather(self, session, event, runtime_config, error):
+        aggregation = self.manager.weather_aggregation_service
+        if aggregation is None:
+            raise RuntimeError("气象限频缓冲服务未初始化")
+        aggregation.defer_rate_limited(event, session, runtime_config, error.retry_after)
 
     @staticmethod
     def _collect_exception_texts(exc: BaseException) -> list[str]:
@@ -392,8 +410,11 @@ class PushExecutionService:
                 # 获取复用或动态渲染的图片/卡片消息链
                 message = await get_or_build_message(runtime_config)
                 # 调用底座 Session 发送器下发消息
-                await self.manager.session_sender.send(session, message)
+                await self._send_event_message(session, message, event, runtime_config)
                 return True, session, runtime_config.get("message_format", {}), None
+            except WeatherRateLimitedError as e:
+                self._defer_weather(session, event, runtime_config, e)
+                return False, session, None, "气象限频，已延后"
             except Exception as e:
                 error_name = type(e).__name__
 
@@ -416,8 +437,8 @@ class PushExecutionService:
                 )
                 if fallback_message is not None:
                     try:
-                        await self.manager.session_sender.send(
-                            session, fallback_message
+                        await self._send_event_message(
+                            session, fallback_message, event, runtime_config
                         )
                         if self._is_rich_media_transfer_failure(e):
                             logger.warning(
@@ -433,6 +454,9 @@ class PushExecutionService:
                             runtime_config.get("message_format", {}),
                             None,
                         )
+                    except WeatherRateLimitedError as limited:
+                        self._defer_weather(session, event, runtime_config, limited)
+                        return False, session, None, "气象限频，已延后"
                     except Exception as fallback_error:
                         fallback_error_name = type(fallback_error).__name__
                         logger.error(

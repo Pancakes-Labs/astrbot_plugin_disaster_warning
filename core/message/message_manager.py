@@ -43,6 +43,7 @@ class MessagePushManager:
         self._telemetry = telemetry
         # 会话发送器是最底层的消息下发执行入口。
         self.session_sender = SessionSender(context)
+        self.weather_aggregation_service = None
         self.plugin_root = str(Path(__file__).resolve().parents[2])
         self.storage_dir = StarTools.get_data_dir("astrbot_plugin_disaster_warning")
         self.temp_dir = self.storage_dir / "temp"

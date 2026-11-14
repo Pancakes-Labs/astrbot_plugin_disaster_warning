@@ -24,6 +24,7 @@ from ...message.presenters.weather_constants import (
     resolve_weather_emoji,
 )
 from ...message.push.weather_aggregation_service import WeatherBufferEntry
+from ...message.push.session_sender import WeatherRateLimitedError
 
 
 def _resolve_event_occurred_time(event: EventEnvelope):
@@ -99,6 +100,7 @@ class EventPipeline:
     def set_weather_aggregation_service(self, service) -> None:
         """注入气象预警聚合推送服务。"""
         self._weather_aggregation = service
+        self.service.message_manager.weather_aggregation_service = service
         if service is not None:
             service.set_flush_callback(self._flush_weather_buffer)
 
@@ -135,6 +137,20 @@ class EventPipeline:
                 runtime_config = (
                     self.service.session_config_manager.get_effective_config(session)
                 )
+                # 先按会话无状态预筛，再允许聚合服务修改缓冲区或触发红色刷新。
+                # 外地、过期、未订阅来源等预警不能提前冲刷本会话已有的预警；
+                # 预筛不提交报次状态，真正发送前仍由原有路径再次复核。
+                if not runtime_config.get("push_enabled", True):
+                    continue
+                decision = self.service.message_manager.evaluate_push_decision(
+                    event,
+                    runtime_config=runtime_config,
+                    session_id=session,
+                    emit_filter_log=False,
+                    commit_state=False,
+                )
+                if not decision.accepted:
+                    continue
                 if self._weather_aggregation.should_aggregate(
                     event, session, runtime_config
                 ):
@@ -175,7 +191,7 @@ class EventPipeline:
                 )
             elif not non_aggregated_sessions:
                 # 没有会话进入聚合缓冲、也没有非聚合会话需要推送：
-                # 说明全部会话在 should_aggregate 阶段就被放行（非 WeatherEvent 不会走到这）
+                # 所有目标会话均被无状态预筛拒绝，或没有订阅会话。
                 plugin_logger.debug(
                     f"[灾害预警] 气象预警 {envelope.id} 无会话进入聚合缓冲区，"
                     f"目标会话 {len(target_sessions)} 个",
@@ -306,6 +322,11 @@ class EventPipeline:
         message_manager = self.service.message_manager
         session_config_getter = self.service.session_config_manager.get_effective_config
         runtime_config = session_config_getter(session)
+        if (
+            session not in self.service.session_config_manager.list_target_sessions()
+            or not runtime_config.get("push_enabled", True)
+        ):
+            return 0, [], []
         # 统一会话日志字符串（私聊/群聊 ID (备注名)），与推送执行链保持一致。
         session_log = message_manager._get_session_log_str(session)
 
@@ -315,6 +336,8 @@ class EventPipeline:
         )
         if not isinstance(agg_config, dict):
             agg_config = {}
+        if not agg_config.get("enabled", True):
+            mode = "single"
         max_batch = int(agg_config.get("max_batch_size", 20) or 20)
         if max_batch < 1:
             max_batch = 20
@@ -418,7 +441,10 @@ class EventPipeline:
                 self._weather_aggregation is not None
                 and self._weather_aggregation.should_force_send_all(session)
             )
-            if fill_nodes and not is_flush_all and not force_send_all:
+            # A direct warning deferred only by quota must not wait to fill a
+            # forward node after its allowance recovers.
+            bypass_node_fill = any(entry.bypass_node_fill for entry, _ in built_messages)
+            if fill_nodes and not is_flush_all and not force_send_all and not bypass_node_fill:
                 full_batch_count = total // max_batch
             else:
                 full_batch_count = (total + max_batch - 1) // max_batch
@@ -431,6 +457,7 @@ class EventPipeline:
             # 实际成功发出（所在节点发送成功）的条目数：部分节点发送失败时，
             # 失败节点内的条目不能计入"最后转发"统计，避免高报成功数量。
             sent_entry_count = 0
+            quota_deferred = False
 
             for batch_idx in range(node_count):
                 batch = built_messages[
@@ -457,10 +484,29 @@ class EventPipeline:
 
                 chain = MessageChain([nodes])
                 try:
-                    await message_manager.session_sender.send(session, chain)
+                    current_config = session_config_getter(session)
+                    if (
+                        session not in self.service.session_config_manager.list_target_sessions()
+                        or not current_config.get("push_enabled", True)
+                    ):
+                        return sent_entry_count, [], failed_entries + build_failed_entries
+                    current_limits = current_config.get("push_frequency_control", {}).get(
+                        "weather_aggregation", {}
+                    )
+                    await message_manager.session_sender.send(
+                        session, chain, weather_rate_limit=current_limits
+                    )
                     sent_nodes += 1
                     # 该节点发送成功：节点内实际加入内容的条目即为成功发出
                     sent_entry_count += len(batch)
+                except WeatherRateLimitedError as e:
+                    self._weather_aggregation.defer_rate_limited_entries(
+                        session,
+                        [entry for entry, _ in built_messages[batch_idx * max_batch :]],
+                        e.retry_after,
+                    )
+                    quota_deferred = True
+                    break
                 except Exception as e:
                     # 单个节点发送失败不应中断整轮推送（如插件停止/网络瞬时异常时
                     # 框架可能拒绝发送，但这不代表平台不支持合并转发）。
@@ -478,7 +524,8 @@ class EventPipeline:
             # （累计重试计数，达到上限后丢弃），避免瞬时构建错误把预警静默丢弃。
             failed_entries.extend(build_failed_entries)
 
-            if sent_nodes == 0 and failed_nodes > 0:
+            # 限额延期已单独入缓冲，不能通过整批异常把它们计为发送失败。
+            if sent_nodes == 0 and failed_nodes > 0 and not quota_deferred:
                 # 全部节点都发送失败：向上抛出，让调用方感知到平台当前不可用，
                 # 避免"假装成功"导致用户完全收不到任何预警。
                 raise RuntimeError(
@@ -488,7 +535,7 @@ class EventPipeline:
 
             # 节点未满回退：完整节点之后剩余的条目
             # 本轮未发送，放回缓冲区等待下次推送窗口凑满后再发。
-            deferred_entries = [
+            deferred_entries = [] if quota_deferred else [
                 entry for entry, _ in built_messages[full_batch_count * max_batch :]
             ]
 
@@ -524,14 +571,33 @@ class EventPipeline:
             return sent_entry_count, deferred_entries, failed_entries
         else:
             # 逐条发送（降级路径）
-            for entry, message in built_messages:
+            sent_count = 0
+            failed_entries = list(build_failed_entries)
+            for index, (entry, message) in enumerate(built_messages):
                 try:
-                    await message_manager.session_sender.send(session, message)
+                    current_config = session_config_getter(session)
+                    if (
+                        session not in self.service.session_config_manager.list_target_sessions()
+                        or not current_config.get("push_enabled", True)
+                    ):
+                        return sent_count, [], failed_entries
+                    current_limits = current_config.get("push_frequency_control", {}).get(
+                        "weather_aggregation", {}
+                    )
+                    await message_manager.session_sender.send(
+                        session, message, weather_rate_limit=current_limits
+                    )
+                    sent_count += 1
+                except WeatherRateLimitedError as e:
+                    self._weather_aggregation.defer_rate_limited_entries(
+                        session, [item for item, _ in built_messages[index:]], e.retry_after
+                    )
+                    break
                 except Exception as e:
                     logger.error(
                         f"[灾害预警] 聚合推送逐条发送失败: {e}, 事件: {entry.event.id}"
                     )
-                    raise
+                    failed_entries.append(entry)
             # 返回实际成功发送的条目数（供聚合服务统计真实转发量）；
             # 构建失败条目同样并入失败重试路径，避免瞬时构建错误把预警静默丢弃。
-            return len(built_messages), [], build_failed_entries
+            return sent_count, [], failed_entries
