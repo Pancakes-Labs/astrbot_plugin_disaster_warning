@@ -14,6 +14,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 from _source_loader import SOURCE, module
@@ -26,6 +27,7 @@ REAL = SimpleNamespace(
     present=module("core.message.presenters.presenter_registry").present_message,
     card=module("core.message.builders.global_quake_card_builder").GlobalQuakeCardBuilder,
     catalog=module("core.sources.source_catalog").SOURCE_CATALOG,
+    monitor=module("core.message.runtime.local_monitor").LocalMonitor,
 )
 
 def local_config(**changes):
@@ -153,6 +155,40 @@ class GlobalQuakeLocalTests(unittest.TestCase):
         self.assertEqual(result["unit"], "烈度")
         self.assertEqual(result["place_name"], local["place_name"])
 
+    def test_missing_epicenter_coordinate_hides_local_estimation(self):
+        for latitude, longitude in ((None, 117.0), (31.0, None), (None, None)):
+            with self.subTest(latitude=latitude, longitude=longitude):
+                event = parsed_event()
+                event.event.latitude = latitude
+                event.event.longitude = longitude
+                options = {"local_monitoring": local_config()}
+                self.assertIsNone(
+                    REAL.context.build_local_estimation(event.event, options)
+                )
+                text = REAL.present(event, "global_quake", options=options)
+                self.assertNotIn("距离震中", text)
+
+    def test_cancelled_placeholder_has_no_local_estimation(self):
+        event = REAL.parser().parse_message(
+            json.dumps({
+                "source": "gq", "type": "earthquake", "action": "cancelled",
+                "payload": {"id": "synthetic-gq-cancelled"},
+            })
+        )
+        self.assertIsNotNone(event)
+        self.assertTrue(event.metadata["is_cancel"])
+        self.assertEqual((event.event.latitude, event.event.longitude), (0.0, 0.0))
+        options = {"local_monitoring": local_config()}
+        self.assertIsNone(REAL.context.build(event, options)["local_estimation"])
+        self.assertNotIn(
+            "距离震中", REAL.present(event, "global_quake", options=options)
+        )
+        self.assertIsNone(
+            REAL.context.build_local_estimation(
+                SimpleNamespace(is_cancel=True, latitude=31.0, longitude=117.0), options
+            )
+        )
+
     def test_text_shows_current_local_zero_and_distance(self):
         local = local_config(latitude=31.0, longitude=117.0)
         event = parsed_event(latitude=31.0, longitude=117.0, magnitude=0.0, depth=10.0)
@@ -196,6 +232,22 @@ class GlobalQuakeLocalTests(unittest.TestCase):
         self.assertIn("预估最大震度", text)
         self.assertIn(local["place_name"], text)
 
+    def test_card_and_text_use_same_jma_intensity_grades(self):
+        options = {"local_monitoring": local_config(intensity_system="jma")}
+        event = parsed_event()
+        for measured, label in (
+            (-0.8, "0以下"), (4.5, "5弱"), (5.0, "5强"),
+            (5.5, "6弱"), (6.0, "6强"), (6.5, "7"),
+        ):
+            with self.subTest(measured=measured), patch.object(
+                REAL.monitor, "_estimate_intensity", return_value=measured
+            ):
+                context = REAL.context.build(event, options)
+                self.assertEqual(context["local_estimation"]["intensity"], measured)
+                self.assertEqual(context["local_estimation"]["intensity_text"], label)
+                text = REAL.present(event, "global_quake", options=options)
+                self.assertIn(f"预估最大震度 {label} (", text)
+
     def test_current_session_recomputes_without_reading_or_mutating_last_session_estimate(
         self,
     ):
@@ -230,6 +282,12 @@ class GlobalQuakeCardCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_sessions_have_distinct_card_cache_keys_and_output_files(
         self,
     ):
+        clock = patch.object(
+            module("core.message.builders.global_quake_card_builder"), "datetime"
+        )
+        fixed_clock = clock.start()
+        self.addCleanup(clock.stop)
+        fixed_clock.now.return_value = datetime(2026, 11, 14, 12, 0, 0)
         event = parsed_event()
         rendered = []
         cache = {}

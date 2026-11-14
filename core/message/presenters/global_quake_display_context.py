@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ....utils.converters import ScaleConverter
 from ....utils.time_converter import TimeConverter
 from ...domain.event_models import EarthquakeEvent, EventEnvelope
 
@@ -46,6 +47,16 @@ class GlobalQuakeDisplayContextBuilder:
         local_config = (options or {}).get("local_monitoring")
         if not isinstance(local_config, dict) or not local_config.get("enabled", False):
             return None
+        metadata = getattr(earthquake, "metadata", None)
+        if getattr(earthquake, "is_cancel", False) or (
+            isinstance(metadata, dict) and metadata.get("is_cancel", False)
+        ):
+            return None
+        if (
+            getattr(earthquake, "latitude", None) is None
+            or getattr(earthquake, "longitude", None) is None
+        ):
+            return None
         from ..runtime.local_monitor import LocalMonitor
 
         result = LocalMonitor(local_config).evaluate(
@@ -67,7 +78,11 @@ class GlobalQuakeDisplayContextBuilder:
             "distance": distance,
             "system": system,
             "unit": "震度" if system == "jma" else "烈度",
-            "intensity_text": f"{intensity:.1f}",
+            "intensity_text": (
+                ScaleConverter.format_measured_intensity_display(intensity)
+                if system == "jma"
+                else f"{intensity:.1f}"
+            ),
             "distance_text": f"{distance:.1f}",
         }
 
